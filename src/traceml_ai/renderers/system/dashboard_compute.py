@@ -10,11 +10,66 @@ from __future__ import annotations
 
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
 from .common import SystemDashboardPayload, SystemMetricsDB
+
+# Whole-run charts add value only after the run outgrows the recent window.
+_RUN_VIEW_FACTOR = 1.2
+
+
+def _opt_float(value: Any) -> Optional[float]:
+    """Float or None: an unreported column stays unreported, never 0."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _median(values: List[Optional[float]]) -> Optional[float]:
+    present = [v for v in values if v is not None]
+    return float(np.percentile(present, 50)) if present else None
+
+
+def _positive(value: Any) -> Optional[float]:
+    """A capacity-like value: None unless it is a real positive number."""
+    v = _opt_float(value)
+    return v if v is not None and v > 0.0 else None
+
+
+def _gpu_reported(row: Any) -> bool:
+    """False for the sampler's exception fallback (an all-zero GPU row).
+
+    A real GPU always has a memory capacity and a board power limit; the
+    sampler writes zeros for every field when NVML fails on a device, and
+    those zeros must not render as 0 W, 0 C or 0 GB.
+    """
+    return (
+        _positive(row["mem_total_bytes"]) is not None
+        or _positive(row["power_limit_w"]) is not None
+    )
+
+
+def _empty_dashboard_series() -> Dict[str, Any]:
+    """Return the complete dashboard-series schema with no observations."""
+    return {
+        "x_time": [],
+        "cpu": [],
+        "gpu_avg": [],
+        "gpu_power": [],
+        "cpu_run": {
+            "t": [],
+            "avg": [],
+            "max": [],
+            "span_s": 0.0,
+            "window_s": 0.0,
+        },
+        "gpu_power_run": [],
+    }
 
 
 class SystemDashboardComputer:
@@ -68,6 +123,18 @@ class SystemDashboardComputer:
         if not samples:
             return self._empty_payload()
 
+        # System telemetry is per machine. When the window holds more than
+        # one host, show the leader node alone and say so, rather than a
+        # series that zig-zags between two machines and GPU rows in which
+        # both nodes' gpu0 collapse into one.
+        system_node = self._pick_node(samples)
+        if system_node["nodes_in_window"] > 1:
+            samples = self._db.fetch_recent_system_samples(
+                conn, limit=window_n, hostname=system_node["hostname"]
+            )
+            if not samples:
+                return self._empty_payload()
+
         last = samples[-1]
         gpu_available = bool(last["gpu_available"] or False)
 
@@ -101,6 +168,20 @@ class SystemDashboardComputer:
         gpu_mem_worst = np.zeros(n, dtype=np.float64)
         gpu_mem_headroom_min = np.zeros(n, dtype=np.float64)
         temp_max = np.zeros(n, dtype=np.float64)
+        gpu_mem_worst_total = 0.0
+
+        # Per-GPU history keyed by gpu_idx, one slot per tick. A tick in
+        # which a GPU has no row stays None: a gap in its trace, not a 0.
+        # Power feeds the power chart and the per-GPU rows; per-GPU util
+        # gives each row its own window median.
+        power_hist: Dict[int, List[Optional[float]]] = {}
+        util_hist: Dict[int, List[Optional[float]]] = {}
+        power_max_hist: List[Optional[float]] = [None] * n
+        latest_rows: Dict[int, Any] = {}
+        # The board limit is a constant per GPU; remember the largest one
+        # reported anywhere in the window so one unreported tick does not
+        # make the limit line flicker.
+        power_limit: Optional[float] = None
 
         for i, sample in enumerate(samples):
             key = (sample["global_rank"], sample["seq"])
@@ -116,6 +197,29 @@ class SystemDashboardComputer:
                 gpu_delta[i] = max(utils) - min(utils)
                 gpu_mem_worst[i] = max(mem_useds)
                 temp_max[i] = max(temps)
+                if i == n - 1:
+                    worst = max(range(len(rows)), key=lambda j: mem_useds[j])
+                    gpu_mem_worst_total = mem_totals[worst]
+                    latest_rows = {int(g["gpu_idx"]): g for g in rows}
+
+                powers = []
+                for g in rows:
+                    idx = int(g["gpu_idx"])
+                    reported = _gpu_reported(g)
+                    power = (
+                        _opt_float(g["power_usage_w"]) if reported else None
+                    )
+                    util = _opt_float(g["util"]) if reported else None
+                    power_hist.setdefault(idx, [None] * n)[i] = power
+                    util_hist.setdefault(idx, [None] * n)[i] = util
+                    if power is not None:
+                        powers.append(power)
+                    limit = _positive(g["power_limit_w"])
+                    if limit is not None and (
+                        power_limit is None or limit > power_limit
+                    ):
+                        power_limit = limit
+                power_max_hist[i] = max(powers) if powers else None
 
                 headrooms = [
                     max(mt - mu, 0.0)
@@ -158,6 +262,41 @@ class SystemDashboardComputer:
             "Hot" if temp_now >= 85 else "Warm" if temp_now >= 80 else "OK"
         )
 
+        host = (
+            system_node["hostname"]
+            if system_node["nodes_in_window"] > 1
+            else None
+        )
+        window_span = max(float(ts_hist[-1] - ts_hist[0]), 0.0)
+        min_run_span = window_span * _RUN_VIEW_FACTOR
+        cpu_run = self._db.fetch_cpu_run_history(
+            conn,
+            hostname=host,
+            min_span_s=min_run_span,
+        )
+        power_run = (
+            self._db.fetch_gpu_power_run_history(
+                conn,
+                hostname=host,
+                min_span_s=min_run_span,
+            )
+            if gpu_available
+            else []
+        )
+        run_power_floor = min(
+            (v for e in power_run for v in (e.get("min") or [])),
+            default=None,
+        )
+        window_power_floor = min(
+            (
+                v
+                for values in power_hist.values()
+                for v in values
+                if v is not None
+            ),
+            default=None,
+        )
+
         rollups = {
             "gpu_available": gpu_available,
             "cpu": {
@@ -184,18 +323,42 @@ class SystemDashboardComputer:
                 "now": float(gpu_mem_worst[-1]),
                 "p95": mem_p95,
                 "headroom": float(gpu_mem_headroom_min[-1]),
+                # Capacity of the GPU shown in "now" (the max-used one),
+                # so the tile can read "used / total".
+                "total": gpu_mem_worst_total,
             },
             "temp": {
                 "now": temp_now,
                 "p95": temp_p95,
                 "status": temp_status,
             },
+            # Power is a per-GPU quantity; any aggregate cell is the max
+            # GPU, never a sum. None when no GPU reported power.
+            "gpu_power": {
+                "now": power_max_hist[-1],
+                "p50": _median(power_max_hist),
+                "limit": power_limit,
+                # Lowest reported power across the whole run, or across the
+                # recent window when whole-run aggregation is skipped.
+                "floor": (
+                    run_power_floor
+                    if run_power_floor is not None
+                    else window_power_floor
+                ),
+            },
+            "gpus": (
+                self._gpu_rows(latest_rows, util_hist, power_hist)
+                if gpu_available
+                else []
+            ),
         }
 
         rollups["ctx"] = {
             "world_size": int(last["world_size"] or 0),
             "gpu_count": int(last["gpu_count"] or 0),
             "hostname": str(last["hostname"] or ""),
+            # Which node this payload's series and rows describe.
+            "system_node": system_node,
         }
 
         x_time = [self._format_time_iso(ts) for ts in ts_hist.tolist()]
@@ -210,8 +373,111 @@ class SystemDashboardComputer:
                 "gpu_avg": (
                     gpu_avg.astype(float).tolist() if gpu_available else []
                 ),
+                "gpu_power": (
+                    [
+                        {"gpu_idx": idx, "values": power_hist[idx]}
+                        for idx in sorted(power_hist)
+                    ]
+                    if gpu_available
+                    else []
+                ),
+                # Whole-run views (decimated in SQL): the window says what
+                # the host is doing now, these say what it has done.
+                "cpu_run": cpu_run,
+                "gpu_power_run": power_run if gpu_available else [],
             },
         ).to_dict()
+
+    @staticmethod
+    def _pick_node(samples: List[Any]) -> Dict[str, Any]:
+        """The node whose window this is: the lowest node_rank seen.
+
+        Hosts are told apart by hostname (node_rank breaks the tie order);
+        ``nodes_in_window`` > 1 means other machines were dropped from
+        this payload, which the block must say. Rows without a hostname
+        (pre-0.3.0 writers, malformed meta) are not a node of their own:
+        they neither count nor select, the same rule the strip's node
+        count applies.
+        """
+        nodes: Dict[str, Optional[int]] = {}
+        for row in samples:
+            host = row["hostname"]
+            if host is None or str(host) == "":
+                continue
+            host = str(host)
+            rank = row["node_rank"]
+            rank = int(rank) if rank is not None else None
+            if host not in nodes or (
+                rank is not None
+                and (nodes[host] is None or rank < nodes[host])
+            ):
+                nodes[host] = rank
+        if not nodes:
+            return {"hostname": None, "node_rank": None, "nodes_in_window": 1}
+        host = min(
+            nodes,
+            key=lambda h: (
+                nodes[h] if nodes[h] is not None else float("inf"),
+                h,
+            ),
+        )
+        return {
+            "hostname": host,
+            "node_rank": nodes[host],
+            "nodes_in_window": len(nodes),
+        }
+
+    @staticmethod
+    def _gpu_rows(
+        latest_rows: Dict[int, Any],
+        util_hist: Dict[int, List[Optional[float]]],
+        power_hist: Dict[int, List[Optional[float]]],
+    ) -> List[Dict[str, Any]]:
+        """One entry per GPU seen in the window, newest values per GPU.
+
+        A GPU absent from the newest tick keeps its slot with None values
+        rather than vanishing, so a row count never silently drops.
+        """
+        out: List[Dict[str, Any]] = []
+        for idx in sorted(set(util_hist) | set(power_hist)):
+            g = latest_rows.get(idx)
+            if g is not None and not _gpu_reported(g):
+                g = None  # the sampler's all-zero fallback: unreported
+            out.append(
+                {
+                    "gpu_idx": idx,
+                    "util_now": (
+                        _opt_float(g["util"]) if g is not None else None
+                    ),
+                    "util_p50": _median(util_hist.get(idx, [])),
+                    "mem_used": (
+                        _opt_float(g["mem_used_bytes"])
+                        if g is not None
+                        else None
+                    ),
+                    "mem_total": (
+                        _positive(g["mem_total_bytes"])
+                        if g is not None
+                        else None
+                    ),
+                    "temp": (
+                        _opt_float(g["temperature_c"])
+                        if g is not None
+                        else None
+                    ),
+                    "power": (
+                        _opt_float(g["power_usage_w"])
+                        if g is not None
+                        else None
+                    ),
+                    "power_limit": (
+                        _positive(g["power_limit_w"])
+                        if g is not None
+                        else None
+                    ),
+                }
+            )
+        return out
 
     def _format_time_iso(self, ts_s: float) -> str:
         """
@@ -249,7 +515,7 @@ class SystemDashboardComputer:
                     "rollups": rollups,
                     "series": cached.get(
                         "series",
-                        {"x_time": [], "cpu": [], "gpu_avg": []},
+                        _empty_dashboard_series(),
                     ),
                 }
 
@@ -257,7 +523,7 @@ class SystemDashboardComputer:
             "window_len": 0,
             "gpu_available": False,
             "rollups": {"status": "No fresh system data"},
-            "series": {"x_time": [], "cpu": [], "gpu_avg": []},
+            "series": _empty_dashboard_series(),
         }
 
     def _empty_payload(self) -> Dict[str, Any]:
@@ -268,5 +534,5 @@ class SystemDashboardComputer:
             window_len=0,
             gpu_available=False,
             rollups={},
-            series={"x_time": [], "cpu": [], "gpu_avg": []},
+            series=_empty_dashboard_series(),
         ).to_dict()

@@ -10,6 +10,24 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
+# Whole-run CPU history uses a duration-based rolling window before sampling.
+# The duration keeps the aggregation consistent across sampling cadences.
+_ROLL_MIN_S = 30.0
+_ROLL_MAX_S = 300.0
+_ROLL_FRACTION = 50.0  # about a fiftieth of the run
+_MAX_RUN_POINTS = 120
+
+
+def choose_window_s(span_s: float) -> float:
+    """The rolling window for a run of ``span_s`` seconds, in round steps."""
+    if span_s <= 0:
+        return _ROLL_MIN_S
+    raw = max(_ROLL_MIN_S, min(_ROLL_MAX_S, span_s / _ROLL_FRACTION))
+    for step in (30.0, 60.0, 120.0, 300.0):
+        if raw <= step:
+            return step
+    return _ROLL_MAX_S
+
 
 @dataclass(frozen=True)
 class SystemCLISnapshot:
@@ -59,7 +77,9 @@ class SystemDashboardPayload:
     window_len: int
     gpu_available: bool
     rollups: Dict[str, Any]
-    series: Dict[str, List[float]]
+    # Series includes both flat sample arrays and structured whole-run
+    # histories, so its values are intentionally heterogeneous.
+    series: Dict[str, Any]
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -137,14 +157,27 @@ class SystemMetricsDB:
         self,
         conn: sqlite3.Connection,
         limit: int,
+        hostname: Optional[str] = None,
     ) -> List[sqlite3.Row]:
         """
         Fetch the most recent system samples in ascending time order.
 
         The inner query limits the read size first, then the outer query
         restores ascending order for downstream time-series compute.
+        ``hostname`` narrows the window to one node: system telemetry is
+        per machine, and a window that interleaves two hosts is not a
+        series of anything.
         """
         where_sql, params = self.node_rank_filter()
+        bound: List[Any] = list(params)
+        if hostname is not None:
+            # IS, not =: a NULL hostname must round-trip as NULL.
+            where_sql = (
+                f"{where_sql} AND hostname IS ?"
+                if where_sql
+                else "WHERE hostname IS ?"
+            )
+            bound.append(str(hostname))
         sql = f"""
             SELECT *
             FROM (
@@ -156,7 +189,200 @@ class SystemMetricsDB:
             )
             ORDER BY id ASC;
         """
-        return conn.execute(sql, (*params, int(limit))).fetchall()
+        return conn.execute(sql, (*bound, int(limit))).fetchall()
+
+    def fetch_cpu_run_history(
+        self,
+        conn: sqlite3.Connection,
+        hostname: Optional[str] = None,
+        min_span_s: float = 0.0,
+    ) -> Dict[str, Any]:
+        """Whole-run host CPU as rolling values sampled to a bounded series.
+
+        The window series answers "what is CPU doing now"; this answers
+        "what has it done over the run". SQL computes a rolling mean and
+        maximum, then samples the result so the payload remains bounded.
+
+        Aggregation is skipped when the run does not exceed ``min_span_s``.
+        """
+        empty: Dict[str, Any] = {
+            "t": [],
+            "avg": [],
+            "max": [],
+            "span_s": 0.0,
+            "window_s": 0.0,
+        }
+        where_sql, params = self.node_rank_filter()
+        bound: List[Any] = list(params)
+        if hostname is not None:
+            where_sql = (
+                f"{where_sql} AND hostname IS ?"
+                if where_sql
+                else "WHERE hostname IS ?"
+            )
+            bound.append(str(hostname))
+        try:
+            row = conn.execute(
+                f"SELECT MIN(sample_ts_s), MAX(sample_ts_s) FROM "
+                f"system_samples {where_sql}",
+                tuple(bound),
+            ).fetchone()
+        except sqlite3.Error:
+            return empty
+        if not row or row[0] is None or row[1] is None:
+            return empty
+        first, last = float(row[0]), float(row[1])
+        span = last - first
+        # The recent window already represents short runs; avoid their
+        # rolling-history query until a whole-run view adds information.
+        if span <= max(0.0, float(min_span_s)):
+            return empty
+        window_s = choose_window_s(span)
+        count = 0
+        try:
+            row = conn.execute(
+                f"SELECT COUNT(*) FROM system_samples {where_sql}",
+                tuple(bound),
+            ).fetchone()
+            count = int(row[0]) if row else 0
+        except sqlite3.Error:
+            return empty
+        if count < 2:
+            return empty
+        cadence = span / max(count - 1, 1)
+        preceding = max(1, int(round(window_s / max(cadence, 1e-6))) - 1)
+        # The first ``preceding`` samples are valid telemetry, but they do not
+        # yet cover a complete rolling window and are excluded by the query
+        # below. Calculate the stride from only the remaining chart-eligible
+        # points: this guarantees the 120-point limit without unnecessarily
+        # discarding detail when the eligible series already fits.
+        eligible_count = max(0, count - preceding)
+        stride = max(
+            1,
+            (eligible_count + _MAX_RUN_POINTS - 1) // _MAX_RUN_POINTS,
+        )
+        try:
+            rows = conn.execute(
+                f"""
+                WITH rolled AS (
+                    SELECT
+                        sample_ts_s AS t,
+                        AVG(cpu_percent) OVER w AS a,
+                        MAX(cpu_percent) OVER w AS m,
+                        ROW_NUMBER() OVER (ORDER BY sample_ts_s) AS rn
+                    FROM system_samples
+                    {where_sql}
+                    {'AND' if where_sql else 'WHERE'} cpu_percent IS NOT NULL
+                    WINDOW w AS (
+                        ORDER BY sample_ts_s
+                        ROWS BETWEEN {preceding} PRECEDING AND CURRENT ROW
+                    )
+                )
+                SELECT t, a, m FROM rolled
+                WHERE rn % ? = 0 AND rn > {preceding}
+                ORDER BY t ASC
+                """,
+                (*bound, stride),
+            ).fetchall()
+        except sqlite3.Error:
+            # Window functions need SQLite >= 3.25; without them the whole
+            # run view is simply unavailable and the window view stands.
+            return empty
+        return {
+            "t": [float(r[0]) for r in rows],
+            "avg": [float(r[1]) for r in rows],
+            "max": [float(r[2]) for r in rows],
+            "span_s": span,
+            "window_s": window_s,
+        }
+
+    def fetch_gpu_power_run_history(
+        self,
+        conn: sqlite3.Connection,
+        hostname: Optional[str] = None,
+        min_span_s: float = 0.0,
+    ) -> List[Dict[str, Any]]:
+        """Whole-run per-GPU power grouped into fixed-duration buckets.
+
+        Each bucket carries mean, minimum and maximum power. The dashboard
+        draws the mean and minimum; the maximum remains available to callers.
+
+        Aggregation is skipped when the run does not exceed ``min_span_s``.
+        """
+        where_sql, params = self.node_rank_filter()
+        bound: List[Any] = list(params)
+        if hostname is not None:
+            where_sql = (
+                f"{where_sql} AND hostname IS ?"
+                if where_sql
+                else "WHERE hostname IS ?"
+            )
+            bound.append(str(hostname))
+        # An all-zero capacity row is the sampler's NVML failure fallback,
+        # not a real 0 W observation.
+        reported_sql = """
+            power_usage_w IS NOT NULL
+            AND (
+                COALESCE(mem_total_bytes, 0) > 0
+                OR COALESCE(power_limit_w, 0) > 0
+            )
+        """
+        try:
+            row = conn.execute(
+                f"SELECT MIN(sample_ts_s), MAX(sample_ts_s) FROM "
+                f"system_gpu_samples {where_sql} "
+                f"{'AND' if where_sql else 'WHERE'} {reported_sql}",
+                tuple(bound),
+            ).fetchone()
+        except sqlite3.Error:
+            return []
+        if not row or row[0] is None or row[1] is None:
+            return []
+        first, last = float(row[0]), float(row[1])
+        span = last - first
+        if span <= max(0.0, float(min_span_s)):
+            return []
+        width = choose_window_s(span)
+        try:
+            rows = conn.execute(
+                f"""
+                SELECT
+                    gpu_idx,
+                    MIN(sample_ts_s),
+                    AVG(power_usage_w),
+                    MIN(power_usage_w),
+                    MAX(power_usage_w)
+                FROM system_gpu_samples
+                {where_sql}
+                {'AND' if where_sql else 'WHERE'} {reported_sql}
+                GROUP BY gpu_idx, CAST((sample_ts_s - ?) / ? AS INTEGER)
+                ORDER BY gpu_idx ASC, 2 ASC
+                """,
+                (*bound, first, width),
+            ).fetchall()
+        except sqlite3.Error:
+            return []
+        by_gpu: Dict[int, Dict[str, Any]] = {}
+        for gpu_idx, ts, avg, mn, mx in rows:
+            e = by_gpu.setdefault(
+                int(gpu_idx),
+                {
+                    "gpu_idx": int(gpu_idx),
+                    "t": [],
+                    "avg": [],
+                    "min": [],
+                    "max": [],
+                },
+            )
+            e["t"].append(float(ts))
+            e["avg"].append(float(avg))
+            e["min"].append(float(mn))
+            e["max"].append(float(mx))
+        out = [by_gpu[i] for i in sorted(by_gpu)]
+        for e in out:
+            e["span_s"] = span
+            e["window_s"] = width
+        return out
 
     def fetch_gpu_rows_for_sample(
         self,
