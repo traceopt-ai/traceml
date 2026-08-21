@@ -4,7 +4,7 @@
 # you may not use this file except in compliance with the License.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Context facts in the SYSTEM payload ctx: observed ranks, nodes, clocks.
+"""Context facts for the dashboard strip: observed ranks, nodes, clocks.
 
 ``ranks_reporting`` follows the card's rule: a rank counts as reporting
 while its newest sample is within three ticks of the newest sample
@@ -16,6 +16,7 @@ start 20 s apart carry a permanent seq offset and must still read N/N.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, Dict
 
 from tests.sqlite_fixtures import (
     init_summary_schema,
@@ -24,12 +25,16 @@ from tests.sqlite_fixtures import (
     insert_training_strategy,
     sqlite_database,
 )
-from traceml_ai.renderers.system.common import SystemMetricsDB
-from traceml_ai.renderers.system.dashboard_compute import (
-    SystemDashboardComputer,
-)
+from traceml_ai.renderers.context.common import ContextDB, empty_context
+from traceml_ai.renderers.context.computer import ContextComputer
 
 WORLD = 4
+
+
+def _facts(path: Path) -> Dict[str, Any]:
+    db = ContextDB(str(path))
+    with db.connect() as conn:
+        return db.fetch_context(conn)
 
 
 def _write_run(path: Path, *, dead_rank_last_seq: int = 9) -> None:
@@ -75,10 +80,11 @@ def _write_run(path: Path, *, dead_rank_last_seq: int = 9) -> None:
 def test_dead_rank_leaves_the_numerator(tmp_path: Path) -> None:
     db = tmp_path / "t.db"
     _write_run(db)
-    with SystemMetricsDB(str(db)).connect() as conn:
-        facts = SystemMetricsDB(str(db)).fetch_context_facts(conn)
+    facts = _facts(db)
     assert facts["ranks_reporting"] == 3
+    assert facts["world_size"] == WORLD
     assert facts["node_count"] == 1
+    assert facts["hostname"] == "node-a"
     assert facts["training_strategy"] == "ddp"
     assert facts["first_data_ts"] == 100.0
     assert facts["last_data_ts"] == 140.0
@@ -87,21 +93,27 @@ def test_dead_rank_leaves_the_numerator(tmp_path: Path) -> None:
 def test_all_ranks_within_three_ticks_count(tmp_path: Path) -> None:
     db = tmp_path / "t.db"
     _write_run(db, dead_rank_last_seq=17)  # 4 s behind at a 2 s tick
-    with SystemMetricsDB(str(db)).connect() as conn:
-        facts = SystemMetricsDB(str(db)).fetch_context_facts(conn)
-    assert facts["ranks_reporting"] == WORLD
+    assert _facts(db)["ranks_reporting"] == WORLD
 
 
-def test_facts_ride_on_the_dashboard_ctx(tmp_path: Path) -> None:
+def test_computer_returns_the_flat_facts(tmp_path: Path) -> None:
     db = tmp_path / "t.db"
     _write_run(db)
-    payload = SystemDashboardComputer(db_path=str(db)).compute()
-    ctx = payload["rollups"]["ctx"]
-    assert ctx["world_size"] == WORLD
-    assert ctx["ranks_reporting"] == 3
-    assert ctx["node_count"] == 1
-    assert ctx["training_strategy"] == "ddp"
-    assert ctx["last_data_ts"] == 140.0
+    payload = ContextComputer(db_path=str(db)).compute()
+    assert set(payload) == set(empty_context())
+    assert payload["world_size"] == WORLD
+    assert payload["ranks_reporting"] == 3
+    assert payload["last_data_ts"] == 140.0
+
+
+def test_computer_degrades_to_unknowns_without_a_database(
+    tmp_path: Path,
+) -> None:
+    # A path that exists but is not a database: every fact stays unknown,
+    # nothing raises, the strip keeps rendering.
+    bogus = tmp_path / "not-a-db"
+    bogus.write_text("hello")
+    assert ContextComputer(db_path=str(bogus)).compute() == empty_context()
 
 
 def test_no_process_data_reports_zero_not_world_size(tmp_path: Path) -> None:
@@ -117,9 +129,9 @@ def test_no_process_data_reports_zero_not_world_size(tmp_path: Path) -> None:
             world_size=WORLD,
             hostname="node-a",
         )
-    with SystemMetricsDB(str(db)).connect() as conn:
-        facts = SystemMetricsDB(str(db)).fetch_context_facts(conn)
+    facts = _facts(db)
     assert facts["ranks_reporting"] == 0
+    assert facts["world_size"] == WORLD
     assert facts["training_strategy"] == ""
 
 
@@ -143,8 +155,7 @@ def test_gpus_observed_sums_over_nodes(tmp_path: Path) -> None:
                 hostname=host,
                 seq=row_id,
             )
-    with SystemMetricsDB(str(db)).connect() as conn:
-        facts = SystemMetricsDB(str(db)).fetch_context_facts(conn)
+    facts = _facts(db)
     assert facts["node_count"] == 2
     assert facts["gpus_observed"] == 2
 
@@ -173,6 +184,4 @@ def test_start_offset_between_nodes_is_not_a_dead_rank(
                     hostname=f"node-{rank}",
                     seq=first_seq + k,
                 )
-    with SystemMetricsDB(str(db)).connect() as conn:
-        facts = SystemMetricsDB(str(db)).fetch_context_facts(conn)
-    assert facts["ranks_reporting"] == 2
+    assert _facts(db)["ranks_reporting"] == 2

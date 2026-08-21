@@ -1,4 +1,5 @@
 ROOT_LAYOUT = "root"
+CONTEXT_LAYOUT = "context_section"
 SYSTEM_LAYOUT = "system_section"
 PROCESS_LAYOUT = "process_section"
 STDOUT_STDERR_LAYOUT = "stdout_stderr_section"

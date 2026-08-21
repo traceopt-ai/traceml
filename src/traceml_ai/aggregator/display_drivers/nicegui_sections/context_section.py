@@ -15,7 +15,7 @@ coverage line in which every count is observed, never configured:
 Build/update pair like every other section: ``build_context_section`` lays
 out the strip from identity that is known at page build (settings + the
 launcher's manifest); ``update_context_section`` fills the data-driven parts
-from the SYSTEM payload's ``ctx`` block on every tick.
+from the CONTEXT payload (``renderers/context``) on every tick.
 """
 
 from __future__ import annotations
@@ -28,6 +28,8 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 from nicegui import ui
+
+from traceml_ai.renderers.context.common import empty_context
 
 # Sections that only exist on a training run. A watch session has no step
 # loop, so showing them there produces permanently dead panels (#355).
@@ -45,6 +47,10 @@ RUN_SECTIONS: Tuple[str, ...] = (
     "step_memory",
     "model_diagnostics",
 )
+
+# The facts a context payload carries (renderers/context); anything else
+# handed to ``update_context_section`` is ignored rather than misread.
+_CONTEXT_KEYS = frozenset(empty_context())
 
 # Data older than this reads "stale"; same bar as the display-loop staleness
 # chip (TRA-68), so the two indicators never disagree on what fresh means.
@@ -359,10 +365,11 @@ def update_context_section(
     *,
     now: Optional[float] = None,
 ) -> None:
-    """Fill strategy, coverage, and liveness from the SYSTEM payload ctx."""
-    rollups = payload.get("rollups", {}) if isinstance(payload, dict) else {}
-    ctx = rollups.get("ctx") if isinstance(rollups, dict) else None
-    if not isinstance(ctx, dict) or not ctx:
+    """Fill strategy, coverage, and liveness from the CONTEXT payload."""
+    ctx = payload if isinstance(payload, dict) else None
+    if not ctx or not (set(ctx) & _CONTEXT_KEYS):
+        # Not a context payload (a LayoutError, an empty dict, or another
+        # layout's shape): leave the strip as it is rather than blank it.
         return
 
     strategy = strategy_token(ctx.get("training_strategy"))

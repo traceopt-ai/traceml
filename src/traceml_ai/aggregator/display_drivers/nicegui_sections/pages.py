@@ -3,6 +3,7 @@
 from nicegui import app, ui
 
 from traceml_ai.aggregator.display_drivers.layout import (
+    CONTEXT_LAYOUT,
     MODEL_COMBINED_LAYOUT,
     MODEL_DIAGNOSTICS_LAYOUT,
     MODEL_MEMORY_LAYOUT,
@@ -71,6 +72,7 @@ def define_pages(cls):
                     cls._settings, "sampler_interval_sec", None
                 ),
             )
+            cls.subscribe_layout(CONTEXT_LAYOUT, strip, update_context_section)
 
             hero_cards = None
             if "model_combined" in shown:
@@ -127,15 +129,11 @@ def define_pages(cls):
                             PROCESS_LAYOUT, cards, update_process_section
                         )
 
-            # One SYSTEM_LAYOUT subscriber drives the chart, the gauge and
-            # the context strip (two subscribers on one layout/client would
-            # evict each other).
-            def _update_system(
-                _c, d, _sc=system_cards, _gc=gauge_cards, _st=strip
-            ):
+            # One SYSTEM_LAYOUT subscriber drives the chart and the gauge
+            # (two subscribers on one layout/client would evict each other).
+            def _update_system(_c, d, _sc=system_cards, _gc=gauge_cards):
                 update_system_section(_sc, d)
                 update_gpu_gauge_section(_gc, d)
-                update_context_section(_st, d)
 
             cls.subscribe_layout(SYSTEM_LAYOUT, system_cards, _update_system)
 

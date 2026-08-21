@@ -196,9 +196,6 @@ class SystemDashboardComputer:
             "world_size": int(last["world_size"] or 0),
             "gpu_count": int(last["gpu_count"] or 0),
             "hostname": str(last["hostname"] or ""),
-            # Context-strip facts (observed coverage + data clocks). Kept on
-            # the same ctx block the header already consumes.
-            **self._db.fetch_context_facts(conn),
         }
 
         x_time = [self._format_time_iso(ts) for ts in ts_hist.tolist()]

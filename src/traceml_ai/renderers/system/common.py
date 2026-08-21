@@ -10,9 +10,6 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-# Default sampler cadence; the floor for the rank-coverage tick estimate.
-_TICK_SEC = 2.0
-
 
 @dataclass(frozen=True)
 class SystemCLISnapshot:
@@ -160,115 +157,6 @@ class SystemMetricsDB:
             ORDER BY id ASC;
         """
         return conn.execute(sql, (*params, int(limit))).fetchall()
-
-    def fetch_context_facts(
-        self,
-        conn: sqlite3.Connection,
-    ) -> Dict[str, Any]:
-        """
-        Facts for the dashboard's context strip: what is reporting, and how
-        long it has been reporting. Every value is observed, never configured.
-
-        - ranks_reporting: ranks whose newest sample is within three ticks
-          of the newest sample anywhere (tick = the fastest rank's cadence,
-          floored at the default sampler interval). Time, never seq: seq
-          counters carry each rank's start offset.
-        - node_count: distinct hostnames that produced system samples.
-        - gpus_observed: newest gpu_count per node, summed over nodes.
-        - training_strategy: newest recorded strategy, "" when none.
-        - first_data_ts / last_data_ts: oldest and newest sample clocks.
-
-        Each query degrades to None on its own, so an older database that
-        lacks a table never takes the whole strip down.
-        """
-        facts: Dict[str, Any] = {
-            "ranks_reporting": None,
-            "node_count": None,
-            "gpus_observed": None,
-            "training_strategy": "",
-            "first_data_ts": None,
-            "last_data_ts": None,
-        }
-        try:
-            # Per-rank clocks: a rank is reporting while its newest sample is
-            # within three ticks of the newest sample anywhere. Time, not
-            # seq: seq counters start when each rank starts, so two nodes
-            # that came up 20 s apart differ by 10 seq for the whole run.
-            # The tick is estimated from the fastest rank's own cadence so a
-            # slow sampler is never called dead between its own ticks.
-            rows = conn.execute(
-                """
-                SELECT MIN(sample_ts_s), MAX(sample_ts_s), COUNT(*)
-                FROM process_samples
-                WHERE sample_ts_s IS NOT NULL
-                GROUP BY COALESCE(global_rank, rank)
-                """
-            ).fetchall()
-            if rows:
-                newest = max(float(r[1]) for r in rows)
-                cadences = [
-                    (float(r[1]) - float(r[0])) / (int(r[2]) - 1)
-                    for r in rows
-                    if int(r[2]) > 1 and float(r[1]) > float(r[0])
-                ]
-                tick = max(_TICK_SEC, min(cadences)) if cadences else _TICK_SEC
-                window = 3.0 * tick
-                facts["ranks_reporting"] = sum(
-                    1 for r in rows if float(r[1]) >= newest - window
-                )
-            else:
-                facts["ranks_reporting"] = 0
-        except sqlite3.Error:
-            pass
-        try:
-            row = conn.execute(
-                "SELECT COUNT(DISTINCT hostname) FROM system_samples "
-                "WHERE hostname IS NOT NULL AND hostname != ''"
-            ).fetchone()
-            facts["node_count"] = int(row[0]) if row else None
-            # GPUs observed across the node set: each node's newest
-            # gpu_count, summed. One node's count alone under-reports a
-            # multi-node run (2 nodes x 1 GPU is 2 GPUs, not 1).
-            row = conn.execute(
-                """
-                SELECT SUM(gpu_count) FROM (
-                    SELECT gpu_count FROM system_samples s
-                    WHERE id = (
-                        SELECT MAX(id) FROM system_samples t
-                        WHERE t.hostname IS s.hostname
-                    )
-                )
-                """
-            ).fetchone()
-            if row and row[0] is not None:
-                facts["gpus_observed"] = int(row[0])
-        except sqlite3.Error:
-            pass
-        try:
-            row = conn.execute(
-                """
-                SELECT training_strategy FROM runtime_environment
-                WHERE training_strategy IS NOT NULL AND training_strategy != ''
-                ORDER BY id DESC LIMIT 1
-                """
-            ).fetchone()
-            facts["training_strategy"] = str(row[0]) if row else ""
-        except sqlite3.Error:
-            pass
-        try:
-            sys_row = conn.execute(
-                "SELECT MIN(sample_ts_s), MAX(sample_ts_s) FROM system_samples"
-            ).fetchone()
-            proc_row = conn.execute(
-                "SELECT MAX(sample_ts_s) FROM process_samples"
-            ).fetchone()
-            firsts = [v for v in (sys_row[0],) if v is not None]
-            lasts = [v for v in (sys_row[1], proc_row[0]) if v is not None]
-            facts["first_data_ts"] = float(min(firsts)) if firsts else None
-            facts["last_data_ts"] = float(max(lasts)) if lasts else None
-        except sqlite3.Error:
-            pass
-        return facts
 
     def fetch_gpu_rows_for_sample(
         self,
