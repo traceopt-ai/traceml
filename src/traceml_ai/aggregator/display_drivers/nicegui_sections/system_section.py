@@ -519,69 +519,40 @@ def _set_gpu_visible(panel: Dict[str, Any], visible: bool) -> None:
     )
 
 
-def update_system_section(panel: Dict[str, Any], data: Dict[str, Any]) -> None:
-    if not isinstance(data, dict):
-        return
-    roll = data.get("rollups", {}) or {}
-    series = data.get("series", {}) or {}
-    gpu_on = bool(data.get("gpu_available") or roll.get("gpu_available"))
-    _set_gpu_visible(panel, gpu_on)
-
-    x_time = series.get("x_time", []) or []
-    secs = _relative_seconds(x_time)
-    newest_epoch = _newest_epoch(x_time)
-    present = [s for s in secs if s is not None]
-    span = -min(present) if present else 0.0
-
-    # The UI timer runs faster than the data arrives; re-sending a full
-    # chart options dict for an unchanged window is pure websocket
-    # traffic, so the charts only update when the window moved.
-    gp = roll.get("gpu_power", {}) or {}
-    limit = gp.get("limit")
-    pseries = series.get("gpu_power", []) or []
-    sig = (
-        x_time[-1] if x_time else None,
-        data.get("window_len"),
-        len(pseries),
-        limit,
-        gpu_on,
-    )
-    changed = sig != panel.get("_sig")
-    panel["_sig"] = sig
-
-    # Host CPU: a small zero-anchored series, the window median as its
-    # one number.
+def _update_cpu_chart(
+    panel: Dict[str, Any],
+    roll: Dict[str, Any],
+    series: Dict[str, Any],
+    *,
+    changed: bool,
+    secs: List[Optional[float]],
+    span: float,
+    newest_epoch: Optional[float],
+    whole_run: bool,
+    aligned: Optional[Tuple[float, float]],
+) -> None:
+    """Update the CPU trace, axis, value and label for the selected view."""
     cpu = series.get("cpu", []) or []
     run = series.get("cpu_run") or {}
     run_t = run.get("t") or []
     run_avg = run.get("avg") or []
     run_max = run.get("max") or []
     run_span = float(run.get("span_s") or 0.0)
-    cpu_whole = len(run_t) > 2
-    prun = series.get("gpu_power_run") or []
-    prun_span = float(prun[0].get("span_s") or 0.0) if prun else 0.0
-    power_whole = bool(prun)
-    # The two whole-run charts sit one above the other, so they share one
-    # anchor and one span: a dip in power and a rise in CPU at the same x
-    # are then the same moment. Their own spans differ by a window (the
-    # rolling mean drops its first partial window), which without this
-    # would offset the pair by a minute or two.
-    aligned = (
-        shared_run_axis(run_t, prun) if cpu_whole and power_whole else None
-    )
     chart = panel["cpu_chart"]
-    if changed and cpu_whole:
+
+    if changed and whole_run:
         newest, axis_span = aligned or (run_t[-1], run_span)
         chart.options["series"][0]["data"] = [
-            [t - newest, v] for t, v in zip(run_t, run_avg)
+            [t - newest, value] for t, value in zip(run_t, run_avg)
         ]
         _apply_span_axis(chart.options, axis_span, newest)
-        # Headroom from the peaks the rolling mean smooths away, so a
-        # spike is never drawn off the top of the chart.
+        # Peaks are not drawn, but they keep a smoothed spike inside the axis.
         ymax = cpu_axis_max(run_max or run_avg)
     elif changed:
         chart.options["series"][0]["data"] = [
-            [s, v] for s, v in zip(secs, cpu) if s is not None
+            [second, value]
+            for second, value in zip(secs, cpu)
+            if second is not None
         ]
         _apply_span_axis(chart.options, span, newest_epoch)
         ymax = cpu_axis_max(cpu)
@@ -589,10 +560,34 @@ def update_system_section(panel: Dict[str, Any], data: Dict[str, Any]) -> None:
         chart.options["yAxis"]["max"] = ymax
         chart.options["yAxis"]["interval"] = ymax / 2.0
         chart.update()
+
     cpu_p50 = (roll.get("cpu", {}) or {}).get("p50")
     panel["cpu_value"].text = f"{cpu_p50:.0f}%" if cpu_p50 is not None else ""
+    span_words = format_span(span)
+    if whole_run:
+        window = format_window(float(run.get("window_s") or 0.0))
+        panel["cpu_label"].text = f"{CPU_LABEL} · whole run" + (
+            f" · rolling {window}" if window else ""
+        )
+        panel["cpu_label"].tooltip(
+            f"Whole run, {format_span(run_span)[5:]}. Each point shows "
+            f"average host CPU use over the previous {window}. 100% means "
+            "all logical CPU cores are fully used."
+        )
+    else:
+        panel["cpu_label"].text = (
+            f"{CPU_LABEL} · {span_words}" if span_words else CPU_LABEL
+        )
 
-    # Host RAM: a level against its capacity.
+
+def _update_system_tiles(
+    panel: Dict[str, Any],
+    roll: Dict[str, Any],
+    *,
+    gpu_on: bool,
+    has_data: bool,
+) -> None:
+    """Update the System header and four resource tiles."""
     ram = roll.get("ram", {}) or {}
     num, rest = format_gb_pair(ram.get("now"), ram.get("total"))
     panel["tiles"]["ram"].content = theme.kval(num, f" {rest}" if rest else "")
@@ -602,46 +597,23 @@ def update_system_section(panel: Dict[str, Any], data: Dict[str, Any]) -> None:
     node_note = node_scope_text(roll.get("ctx", {}) or {})
     if node_note:
         notes.append(node_note)
-    if not data.get("window_len"):
+    if not has_data:
         notes.append("waiting for data")
     panel["note"].text = " · ".join(notes)
-    span_words = format_span(span)
-    if cpu_whole:
-        win = format_window(float(run.get("window_s") or 0.0))
-        panel["cpu_label"].text = f"{CPU_LABEL} · whole run" + (
-            f" · rolling {win}" if win else ""
-        )
-        panel["cpu_label"].tooltip(
-            f"The whole run, {format_span(run_span)[5:]}. Each point is the "
-            f"average of the last {win} of samples, a rolling window, so a "
-            "slow drift over the run is visible instead of being hidden by "
-            "second-to-second noise. Host CPU is the mean across all "
-            "logical cores: 100% means every core busy."
-        )
-    else:
-        panel["cpu_label"].text = (
-            f"{CPU_LABEL} · {span_words}" if span_words else CPU_LABEL
-        )
+
     if not gpu_on:
-        seen = bool(data.get("window_len"))
         for key in ("util", "mem", "temp"):
             panel["tiles"][key].content = NA
-            panel["subs"][key].text = "no GPU" if seen else ""
-        panel["power_label"].text = "gpu power"
-        panel["power_placeholder"].text = (
-            "no GPU reported" if seen else "waiting for data"
-        )
-        panel["rows_placeholder"].text = (
-            "per-GPU rows · no GPU" if seen else "per-GPU rows"
-        )
+            panel["subs"][key].text = "no GPU" if has_data else ""
         return
 
     gpus = roll.get("gpus", []) or []
-    n_gpus = len(gpus) or int((roll.get("ctx", {}) or {}).get("gpu_count", 0))
-    # Every GPU unreported on the newest tick (the sampler's all-zero
-    # fallback): the level tiles say so instead of printing zeros.
+    ctx = roll.get("ctx", {}) or {}
+    n_gpus = len(gpus) or int(ctx.get("gpu_count", 0))
+    # The sampler's all-zero fallback is unreported, not a zero-valued GPU.
     unreported = bool(gpus) and all(
-        g.get("mem_total") is None and g.get("power") is None for g in gpus
+        gpu.get("mem_total") is None and gpu.get("power") is None
+        for gpu in gpus
     )
 
     util_p50 = (roll.get("gpu_util", {}) or {}).get("p50")
@@ -651,159 +623,196 @@ def update_system_section(panel: Dict[str, Any], data: Dict[str, Any]) -> None:
         "1 GPU" if one_gpu else f"avg of {n_gpus} GPUs"
     )
 
-    gm = roll.get("gpu_mem", {}) or {}
+    gpu_mem = roll.get("gpu_mem", {}) or {}
     if unreported:
         panel["tiles"]["mem"].content = NA
         panel["subs"]["mem"].text = "GPU sample unreported"
         panel["tiles"]["temp"].content = NA
         panel["subs"]["temp"].text = "GPU sample unreported"
-    else:
-        num, rest = format_gb_pair(gm.get("now"), gm.get("total"))
-        panel["tiles"]["mem"].content = theme.kval(
-            num, f" {rest}" if rest else ""
-        )
-        panel["subs"]["mem"].text = "used / total" if one_gpu else "max GPU"
-        temp_now = (roll.get("temp", {}) or {}).get("now")
-        panel["tiles"]["temp"].content = theme.kval(_num(temp_now), " °C")
-        # Never blank: an empty qualifier made this tile a line shorter
-        # than its neighbours on a single-GPU host.
-        panel["subs"]["temp"].text = "1 GPU" if one_gpu else "max GPU"
+        return
 
-    # GPU power per GPU against the board limit.
-    flat = [v for p in pseries for v in (p.get("values") or [])]
-    pchart = panel["power_chart"]
-    if not any(v is not None for v in flat):
-        pchart.style("display:none;")
+    num, rest = format_gb_pair(gpu_mem.get("now"), gpu_mem.get("total"))
+    panel["tiles"]["mem"].content = theme.kval(num, f" {rest}" if rest else "")
+    panel["subs"]["mem"].text = "used / total" if one_gpu else "max GPU"
+    temp_now = (roll.get("temp", {}) or {}).get("now")
+    panel["tiles"]["temp"].content = theme.kval(_num(temp_now), " °C")
+    # A qualifier keeps all four tile heights equal on single-GPU hosts.
+    panel["subs"]["temp"].text = "1 GPU" if one_gpu else "max GPU"
+
+
+def _update_power_chart(
+    panel: Dict[str, Any],
+    roll: Dict[str, Any],
+    series: Dict[str, Any],
+    *,
+    gpu_on: bool,
+    has_data: bool,
+    changed: bool,
+    secs: List[Optional[float]],
+    span: float,
+    newest_epoch: Optional[float],
+    whole_run: bool,
+    aligned: Optional[Tuple[float, float]],
+) -> None:
+    """Update the per-GPU power chart or its no-data presentation."""
+    if not gpu_on:
+        panel["power_label"].text = "gpu power"
+        panel["power_placeholder"].text = (
+            "no GPU reported" if has_data else "waiting for data"
+        )
+        return
+
+    gpu_power = roll.get("gpu_power", {}) or {}
+    limit = gpu_power.get("limit")
+    pseries = series.get("gpu_power", []) or []
+    flat = [value for item in pseries for value in (item.get("values") or [])]
+    chart = panel["power_chart"]
+    if not any(value is not None for value in flat):
+        chart.style("display:none;")
         panel["power_label"].text = "gpu power · not reported"
-    elif changed:
-        if power_whole:
-            # Per GPU, two traces: each bucket's MEAN solid, its FLOOR
-            # faint below. Sustained draw against the limit says whether
-            # the GPU is being fed; a floor dropping to idle says it went
-            # idle inside that window, which is what a dataloader stall
-            # looks like in watts. Peak is deliberately not drawn: it
-            # saturates on any healthy work and separates nothing.
-            newest = (
-                aligned or (max(e["t"][-1] for e in prun if e.get("t")),)
-            )[0]
-            lines = []
-            for e in prun:
-                idx = int(e.get("gpu_idx", 0))
-                xs = [t - newest for t in e["t"]]
-                floor_line = theme.line_series(
-                    f"gpu{idx} floor",
-                    gpu_color(idx),
-                    [[x, v] for x, v in zip(xs, e.get("min") or [])],
-                    width=0.9,
-                )
-                floor_line["lineStyle"]["opacity"] = 0.35
-                floor_line["tooltip"] = {"show": False}
-                lines.append(floor_line)
-                lines.append(
-                    theme.line_series(
-                        f"gpu{idx}",
-                        gpu_color(idx),
-                        [[x, v] for x, v in zip(xs, e["avg"])],
-                    )
-                )
-        else:
-            lines = [
-                theme.line_series(
-                    f"gpu{int(p.get('gpu_idx', 0))}",
-                    gpu_color(int(p.get("gpu_idx", 0))),
-                    [
-                        [s, v]
-                        for s, v in zip(secs, p.get("values") or [])
-                        if s is not None
-                    ],
-                )
-                for p in pseries
-            ]
-        if lines:
-            # Two reference lines: the board limit above, and the lowest
-            # draw seen in this run below (idle, on any run whose sampler
-            # was up before the first step). Between them is the band the
-            # GPU actually works in. An explicit empty markLine clears a
-            # previous one, since ECharts merges options.
-            refs = []
-            if limit is not None:
-                refs.append(
-                    (
-                        float(limit),
-                        f"{float(limit):.0f} W limit",
-                        _LIMIT_RED,
-                        "insideEndTop",
-                    )
-                )
-            floor_w = gp.get("floor")
-            if floor_w is not None and (
-                limit is None or float(floor_w) < float(limit) * 0.9
-            ):
-                # Opposite corner from the limit, and below its own line,
-                # where the chart is empty: the two labels would otherwise
-                # stack at the right edge and the longer one be cut off.
-                refs.append(
-                    (
-                        float(floor_w),
-                        f"{float(floor_w):.0f} W lowest seen",
-                        _FLOOR_GREY,
-                        "insideStartBottom",
-                    )
-                )
-            lines[0]["markLine"] = (
-                theme.mark_lines(refs) if refs else {"data": []}
-            )
-        pchart.options["series"] = lines
-        bounds_src = (
-            [v for e in prun for v in e["avg"] + (e.get("min") or [])]
-            if power_whole
-            else flat
-        )
-        lo, hi, tick = power_axis_bounds(bounds_src, limit)
-        pchart.options["yAxis"]["min"] = lo
-        pchart.options["yAxis"]["max"] = hi
-        pchart.options["yAxis"]["interval"] = tick
-        if power_whole:
-            anchor, axis_span = aligned or (
-                max(e["t"][-1] for e in prun if e.get("t")),
-                prun_span,
-            )
-            _apply_span_axis(pchart.options, axis_span, anchor)
-        else:
-            _apply_span_axis(pchart.options, span, newest_epoch)
-        pchart.style("display:block;")
-        pchart.update()
-        head = (
-            f"gpu power · per GPU vs {float(limit):.0f} W limit"
-            if limit is not None
-            else "gpu power · per GPU"
-        )
-        if power_whole:
-            win = format_window(float(prun[0].get("window_s") or 0.0))
-            panel["power_label"].text = f"{head} · whole run" + (
-                f" · mean and floor of every {win}" if win else ""
-            )
-            panel["power_label"].tooltip(
-                f"The whole run, {format_span(prun_span)[5:]}. Per GPU, the "
-                f"solid line is the average watts over each {win} and the "
-                "faint line below it is the lowest reading in that same "
-                "window. Read them together: a mean far under the board "
-                "limit means the GPU is not being kept fed, and a floor "
-                "that drops toward idle means it went idle inside that "
-                "window, which is what a stalled input pipeline looks like "
-                "in watts."
-            )
-        else:
-            panel["power_label"].text = (
-                f"{head} · {span_words}" if span_words else head
-            )
-            panel["power_label"].tooltip(
-                "The most recent samples, one point each, per GPU, against "
-                "the board's power limit."
-            )
+        return
+    if not changed:
+        return
 
-    # Per-GPU rows, opened by the spread on its rising edge; the hint
-    # follows the rows' real state, which a click may have changed.
+    run = series.get("gpu_power_run") or []
+    run_span = float(run[0].get("span_s") or 0.0) if run else 0.0
+    if whole_run:
+        # Whole-run mean shows sustained draw; its faint floor exposes idle
+        # intervals without adding a third peak trace that usually saturates.
+        newest = (
+            aligned or (max(item["t"][-1] for item in run if item.get("t")),)
+        )[0]
+        lines = []
+        for item in run:
+            index = int(item.get("gpu_idx", 0))
+            xs = [timestamp - newest for timestamp in item["t"]]
+            floor_line = theme.line_series(
+                f"gpu{index} floor",
+                gpu_color(index),
+                [[x, value] for x, value in zip(xs, item.get("min") or [])],
+                width=0.9,
+            )
+            floor_line["lineStyle"]["opacity"] = 0.35
+            floor_line["tooltip"] = {"show": False}
+            lines.append(floor_line)
+            lines.append(
+                theme.line_series(
+                    f"gpu{index}",
+                    gpu_color(index),
+                    [[x, value] for x, value in zip(xs, item["avg"])],
+                )
+            )
+    else:
+        lines = [
+            theme.line_series(
+                f"gpu{int(item.get('gpu_idx', 0))}",
+                gpu_color(int(item.get("gpu_idx", 0))),
+                [
+                    [second, value]
+                    for second, value in zip(secs, item.get("values") or [])
+                    if second is not None
+                ],
+            )
+            for item in pseries
+        ]
+
+    if lines:
+        refs = []
+        if limit is not None:
+            refs.append(
+                (
+                    float(limit),
+                    f"{float(limit):.0f} W limit",
+                    _LIMIT_RED,
+                    "insideEndTop",
+                )
+            )
+        floor_w = gpu_power.get("floor")
+        if floor_w is not None and (
+            limit is None or float(floor_w) < float(limit) * 0.9
+        ):
+            # Opposite label corners prevent the two reference lines from
+            # colliding or being clipped at the card edge.
+            refs.append(
+                (
+                    float(floor_w),
+                    f"{float(floor_w):.0f} W lowest seen",
+                    _FLOOR_GREY,
+                    "insideStartBottom",
+                )
+            )
+        # ECharts merges options, so an explicit empty markLine clears old
+        # reference lines when a later payload no longer reports them.
+        lines[0]["markLine"] = theme.mark_lines(refs) if refs else {"data": []}
+
+    chart.options["series"] = lines
+    bounds_source = (
+        [
+            value
+            for item in run
+            for value in item["avg"] + (item.get("min") or [])
+        ]
+        if whole_run
+        else flat
+    )
+    low, high, tick = power_axis_bounds(bounds_source, limit)
+    chart.options["yAxis"]["min"] = low
+    chart.options["yAxis"]["max"] = high
+    chart.options["yAxis"]["interval"] = tick
+    if whole_run:
+        anchor, axis_span = aligned or (
+            max(item["t"][-1] for item in run if item.get("t")),
+            run_span,
+        )
+        _apply_span_axis(chart.options, axis_span, anchor)
+    else:
+        _apply_span_axis(chart.options, span, newest_epoch)
+    chart.style("display:block;")
+    chart.update()
+
+    head = (
+        f"gpu power · per GPU vs {float(limit):.0f} W limit"
+        if limit is not None
+        else "gpu power · per GPU"
+    )
+    if whole_run:
+        window = format_window(float(run[0].get("window_s") or 0.0))
+        panel["power_label"].text = f"{head} · whole run" + (
+            f" · average and lowest every {window}" if window else ""
+        )
+        panel["power_label"].tooltip(
+            f"Whole run, {format_span(run_span)[5:]}. Solid lines show each "
+            f"GPU's average power every {window}; faint lines show the "
+            "lowest reading during the same interval."
+        )
+    else:
+        span_words = format_span(span)
+        panel["power_label"].text = (
+            f"{head} · {span_words}" if span_words else head
+        )
+        panel["power_label"].tooltip(
+            "Recent power readings for each GPU, compared with its power "
+            "limit."
+        )
+
+
+def _update_gpu_rows(
+    panel: Dict[str, Any],
+    roll: Dict[str, Any],
+    series: Dict[str, Any],
+    *,
+    gpu_on: bool,
+    has_data: bool,
+) -> None:
+    """Update per-GPU disclosure state, summary text and row contents."""
+    if not gpu_on:
+        panel["rows_placeholder"].text = (
+            "per-GPU rows · no GPU" if has_data else "per-GPU rows"
+        )
+        return
+
+    gpus = roll.get("gpus", []) or []
+    pseries = series.get("gpu_power", []) or []
     spread = (roll.get("gpu_delta", {}) or {}).get("p95")
     over = spread is not None and float(spread) > SPREAD_EXPAND_PTS
     if should_auto_open(prev_over=panel["_over"], over=over):
@@ -813,3 +822,83 @@ def update_system_section(panel: Dict[str, Any], data: Dict[str, Any]) -> None:
         gpus, is_open=bool(panel["rows"].value)
     )
     panel["rows_html"].content = rows_html(gpus, pseries, spread=spread)
+
+
+def update_system_section(panel: Dict[str, Any], data: Dict[str, Any]) -> None:
+    """Coordinate System presentation updates from one computed payload."""
+    if not isinstance(data, dict):
+        return
+    roll = data.get("rollups", {}) or {}
+    series = data.get("series", {}) or {}
+    gpu_on = bool(data.get("gpu_available") or roll.get("gpu_available"))
+    has_data = bool(data.get("window_len"))
+    _set_gpu_visible(panel, gpu_on)
+
+    x_time = series.get("x_time", []) or []
+    secs = _relative_seconds(x_time)
+    newest_epoch = _newest_epoch(x_time)
+    present = [second for second in secs if second is not None]
+    span = -min(present) if present else 0.0
+
+    # The UI timer is faster than sampling; avoid resending unchanged charts.
+    gpu_power = roll.get("gpu_power", {}) or {}
+    pseries = series.get("gpu_power", []) or []
+    signature = (
+        x_time[-1] if x_time else None,
+        data.get("window_len"),
+        len(pseries),
+        gpu_power.get("limit"),
+        gpu_on,
+    )
+    changed = signature != panel.get("_sig")
+    panel["_sig"] = signature
+
+    cpu_run = series.get("cpu_run") or {}
+    cpu_run_t = cpu_run.get("t") or []
+    power_run = series.get("gpu_power_run") or []
+    cpu_whole = len(cpu_run_t) > 2
+    power_whole = bool(power_run)
+    # Whole-run charts share one clock so vertical comparisons align.
+    aligned = (
+        shared_run_axis(cpu_run_t, power_run)
+        if cpu_whole and power_whole
+        else None
+    )
+
+    _update_cpu_chart(
+        panel,
+        roll,
+        series,
+        changed=changed,
+        secs=secs,
+        span=span,
+        newest_epoch=newest_epoch,
+        whole_run=cpu_whole,
+        aligned=aligned,
+    )
+    _update_system_tiles(
+        panel,
+        roll,
+        gpu_on=gpu_on,
+        has_data=has_data,
+    )
+    _update_power_chart(
+        panel,
+        roll,
+        series,
+        gpu_on=gpu_on,
+        has_data=has_data,
+        changed=changed,
+        secs=secs,
+        span=span,
+        newest_epoch=newest_epoch,
+        whole_run=power_whole,
+        aligned=aligned,
+    )
+    _update_gpu_rows(
+        panel,
+        roll,
+        series,
+        gpu_on=gpu_on,
+        has_data=has_data,
+    )

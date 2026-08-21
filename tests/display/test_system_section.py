@@ -322,7 +322,7 @@ def test_whole_run_charts_share_one_clock_axis() -> None:
     )
     assert panel["power_label"].text == (
         "gpu power · per GPU vs 70 W limit · whole run · "
-        "mean and floor of every 2 min"
+        "average and lowest every 2 min"
     )
     assert "min," not in panel["cpu_label"].text
 
