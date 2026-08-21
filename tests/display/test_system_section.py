@@ -340,6 +340,8 @@ def test_power_chart_draws_limit_and_floor_reference_lines() -> None:
         update_system_section,
     )
 
+    _last_refs: dict = {}
+
     def refs_for(power: dict) -> list:
         with ui.element("div"):
             panel = build_system_section()
@@ -369,11 +371,19 @@ def test_power_chart_draws_limit_and_floor_reference_lines() -> None:
             },
         }
         update_system_section(panel, payload)
-        data = panel["power_chart"].options["series"][0]["markLine"]["data"]
-        return [(r["yAxis"], r["label"]["formatter"]) for r in data]
+        mark = panel["power_chart"].options["series"][0]["markLine"]
+        _last_refs.clear()
+        _last_refs.update(mark)
+        return [(r["yAxis"], r["label"]["formatter"]) for r in mark["data"]]
 
     both = refs_for({"now": 68.0, "p50": 67.0, "limit": 70.0, "floor": 33.0})
     assert both == [(70.0, "70 W limit"), (33.0, "33 W lowest seen")]
+    # Opposite corners, so neither label lands on the other.
+    data = _last_refs["data"]
+    assert [r["label"]["position"] for r in data] == [
+        "insideEndTop",
+        "insideStartBottom",
+    ]
     # The two lines carry different colours: the limit keeps the red.
     # A floor that sits at the limit would draw two lines on top of each
     # other and say nothing, so it is dropped.

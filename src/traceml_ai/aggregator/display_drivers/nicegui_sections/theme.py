@@ -425,8 +425,11 @@ def line_series(
 def mark_lines(entries: List[Any]) -> Dict[str, Any]:
     """Several horizontal reference lines on one series.
 
-    Each entry is (y, label, colour); ECharts takes them as markLine data
-    with per-item style, so one series can carry a limit and a floor.
+    Each entry is (y, label, colour, position); ECharts takes them as
+    markLine data with per-item style, so one series can carry a limit and
+    a floor. Give two lines different positions: a label anchored at the
+    same end as its neighbour collides with it, and a long one anchored at
+    the right end is cut off by the card edge.
     """
     return {
         "silent": True,
@@ -438,14 +441,14 @@ def mark_lines(entries: List[Any]) -> Dict[str, Any]:
                 "lineStyle": {"color": col, "type": "dashed", "width": 1},
                 "label": {
                     "show": True,
-                    "position": "insideEndTop",
+                    "position": pos,
                     "formatter": label,
                     "color": col,
                     "fontFamily": "Geist Mono",
                     "fontSize": 10,
                 },
             }
-            for y, label, col in entries
+            for y, label, col, pos in entries
         ],
     }
 

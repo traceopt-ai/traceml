@@ -733,17 +733,26 @@ def update_system_section(panel: Dict[str, Any], data: Dict[str, Any]) -> None:
             refs = []
             if limit is not None:
                 refs.append(
-                    (float(limit), f"{float(limit):.0f} W limit", _LIMIT_RED)
+                    (
+                        float(limit),
+                        f"{float(limit):.0f} W limit",
+                        _LIMIT_RED,
+                        "insideEndTop",
+                    )
                 )
             floor_w = gp.get("floor")
             if floor_w is not None and (
                 limit is None or float(floor_w) < float(limit) * 0.9
             ):
+                # Opposite corner from the limit, and below its own line,
+                # where the chart is empty: the two labels would otherwise
+                # stack at the right edge and the longer one be cut off.
                 refs.append(
                     (
                         float(floor_w),
                         f"{float(floor_w):.0f} W lowest seen",
                         _FLOOR_GREY,
+                        "insideStartBottom",
                     )
                 )
             lines[0]["markLine"] = (
