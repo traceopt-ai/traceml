@@ -81,6 +81,7 @@ jobs:
           # Keep this matrix torch-free; torch-dependent paths run in the
           # integration job, which installs the torch extra explicitly.
           pytest \
+            tests/arch \
             tests/config \
             tests/core \
             tests/step_time \
