@@ -102,3 +102,35 @@ Use Trainer runtime as the primary end-to-end measurement. TraceML phase
 timing explains where the step time was spent, but it is not kernel-level
 root-cause attribution. Because gradient checkpointing is enabled, the
 backward region includes activation recomputation.
+
+## Validate runtime without TraceML
+
+`train_no_traceml.py` uses the same dataset preparation, model, LoRA and
+`SFTConfig` as `train.py`, but it does not import or initialize TraceML. It
+records every optimizer step with non-blocking CUDA events and synchronizes
+only at the boundaries of the complete training loop.
+
+Run the two endpoint configurations in reverse order from the TraceML matrix:
+
+```bash
+bash examples/advanced/qwen3_8b_lora_ga/run_no_traceml_endpoints.sh \
+  --steps 500
+```
+
+Each run writes:
+
+- `trainer_metrics.json`: Hugging Face Trainer runtime and throughput.
+- `optimizer_step_times.csv`: GPU and host interval for every optimizer step.
+- `baseline_timing.json`: timing method and aggregate statistics.
+- A terminal log under the experiment's `terminal` directory.
+
+The baseline deliberately keeps BF16, SDPA, packing and gradient checkpointing
+because the TraceML runs used them. It does not enable `torch.compile`, Liger,
+FlashAttention, quantization or another optimization. The script uses a
+single-process `torchrun` launch to match the distributed environment created
+by `traceml run` as closely as possible.
+
+The workload follows the documented TRL paths for
+[Qwen3 assistant-only loss](https://huggingface.co/docs/trl/main/sft_trainer#train-on-assistant-messages-only),
+[packing](https://huggingface.co/docs/trl/main/sft_trainer#packing) and
+[PEFT adapters](https://huggingface.co/docs/trl/main/sft_trainer#train-adapters-with-peft).

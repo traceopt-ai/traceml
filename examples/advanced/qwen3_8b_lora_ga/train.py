@@ -6,16 +6,15 @@ import argparse
 import importlib.metadata as metadata
 import json
 import platform
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 
 import torch
 from datasets import load_dataset
 from peft import LoraConfig
-from transformers import set_seed
+from transformers import TrainerCallback, set_seed
 from trl import SFTConfig, SFTTrainer
-
-from traceml_ai.integrations import huggingface as traceml_hf
 
 
 MODEL_ID = "Qwen/Qwen3-8B"
@@ -105,7 +104,11 @@ def environment_record() -> dict[str, object]:
     return record
 
 
-def main() -> None:
+def main(
+    *,
+    enable_traceml: bool = True,
+    extra_callbacks: Sequence[TrainerCallback] = (),
+) -> None:
     args = parse_args()
     if not torch.cuda.is_available():
         raise RuntimeError("This workload requires one CUDA GPU.")
@@ -128,7 +131,22 @@ def main() -> None:
     output_dir = args.output_root / run_name
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    environment = environment_record()
+    instrumentation = "traceml" if enable_traceml else "none"
+    environment = {
+        **environment_record(),
+        "instrumentation": instrumentation,
+        "training_configuration": {
+            "attention": "sdpa",
+            "bf16": True,
+            "fp16": False,
+            "gradient_checkpointing": True,
+            "packing": True,
+            "packing_strategy": "bfd",
+            "assistant_only_loss": True,
+            "torch_compile": False,
+            "liger_kernel": False,
+        },
+    }
     (output_dir / "environment.json").write_text(
         json.dumps(environment, indent=2, sort_keys=True), encoding="utf-8"
     )
@@ -138,6 +156,7 @@ def main() -> None:
     print(f"  GPU:                     {environment['gpu']}")
     print(f"  Model:                   {MODEL_ID}")
     print(f"  Dataset:                 {DATASET_ID}/{DATASET_SPLIT}")
+    print(f"  Instrumentation:         {instrumentation}")
     print(f"  Physical batch:          {args.batch_size}")
     print(f"  Accumulation steps:      {accumulation}")
     print(f"  Effective batch:         {args.effective_batch}")
@@ -205,19 +224,27 @@ def main() -> None:
         disable_tqdm=True,
         bf16=True,
         fp16=False,
+        torch_compile=False,
+        use_liger_kernel=False,
         dataloader_num_workers=args.dataloader_num_workers,
         dataset_num_proc=args.dataset_num_proc,
         seed=SEED,
         data_seed=SEED,
     )
 
-    traceml_hf.init()
+    callbacks = list(extra_callbacks)
+    if enable_traceml:
+        from traceml_ai.integrations import huggingface as traceml_hf
+
+        traceml_hf.init()
+        callbacks.append(traceml_hf.TraceMLTrainerCallback())
+
     trainer = SFTTrainer(
         model=MODEL_ID,
         args=training_args,
         train_dataset=dataset,
         peft_config=lora_config,
-        callbacks=[traceml_hf.TraceMLTrainerCallback()],
+        callbacks=callbacks,
     )
 
     torch.cuda.reset_peak_memory_stats()
@@ -243,6 +270,7 @@ def main() -> None:
         "source_conversations": args.dataset_samples,
         "peak_reserved_gib": torch.cuda.max_memory_reserved() / 1024**3,
         "gpu_name": torch.cuda.get_device_name(0),
+        "instrumentation": instrumentation,
     }
     metrics_path = output_dir / "trainer_metrics.json"
     metrics_path.write_text(
