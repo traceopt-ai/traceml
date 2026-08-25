@@ -94,6 +94,7 @@ first-run examples.
 | Example | What it demonstrates | Works on | Notes |
 |---|---|---|---|
 | `advanced/bert_single_gpu_compare.py` | Run the same fixed BERT workload on different single-GPU machines, then compare TraceML summaries | CUDA | Use the same batch size, sequence length, precision, and step count on each machine |
+| [`advanced/qwen3_8b_lora_ga`](advanced/qwen3_8b_lora_ga/) | Measure physical batch size and gradient accumulation with Qwen3-8B TRL LoRA while holding effective batch and packed-token capacity constant | CUDA | Production-shaped single-L40S workload; includes a 500-step matrix runner |
 
 Example hardware comparison run:
 
