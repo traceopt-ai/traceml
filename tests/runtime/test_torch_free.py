@@ -236,7 +236,7 @@ def test_multi_process_is_rejected_before_anything_starts(
         f"nnodes={nnodes}, nproc_per_node={nproc_per_node}, node_rank=0, "
         "master_addr='127.0.0.1', master_port=29500, run_name='r', "
         "session_id='', mode=None, no_history=False, html_report=False, "
-        "summary_window_rows=10000, finalize_timeout_sec=300.0, "
+        "history_retention_s=1800.0, finalize_timeout_sec=300.0, "
         "trace_max_steps=None, interval=2.0, disable_traceml=False, "
         "aggregator_host=None, aggregator_bind_host=None, "
         "aggregator_port=29765)\n"

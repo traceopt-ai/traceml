@@ -9,10 +9,6 @@
 from dataclasses import dataclass
 from typing import Optional
 
-from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
-
-MAX_SUMMARY_ROWS = DEFAULT_SUMMARY_WINDOW_ROWS
-
 PROCESS_METRIC_NAMES = [
     "cpu_percent",
     "cpu_capacity_percent",
@@ -171,7 +167,6 @@ def build_process_stats_line(
 
 
 __all__ = [
-    "MAX_SUMMARY_ROWS",
     "PROCESS_METRIC_NAMES",
     "PerRankProcessSummary",
     "ProcessSummaryAgg",

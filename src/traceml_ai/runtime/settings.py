@@ -18,7 +18,7 @@ This module defines the shared configuration dataclasses used by:
 from dataclasses import dataclass
 from typing import Optional
 
-from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
+from traceml_ai.telemetry.retention import DEFAULT_HISTORY_RETENTION_S
 
 DEFAULT_FINALIZE_TIMEOUT_SEC = 300.0
 # The public ``interval`` setting uses this value unless explicitly overridden
@@ -81,8 +81,8 @@ class TraceMLSettings:
     aggregator: AggregatorTransportSettings = AggregatorTransportSettings()
     session_id: str = ""
     history_enabled: bool = True
+    history_retention_s: float = DEFAULT_HISTORY_RETENTION_S
     db_path: str = ""
-    summary_window_rows: int = DEFAULT_SUMMARY_WINDOW_ROWS
     trace_max_steps: Optional[int] = None
     html_report: bool = False
     finalize_timeout_sec: float = DEFAULT_FINALIZE_TIMEOUT_SEC

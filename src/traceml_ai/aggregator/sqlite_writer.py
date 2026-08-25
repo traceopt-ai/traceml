@@ -29,13 +29,13 @@ from traceml_ai.aggregator.sqlite_writers import (
 )
 from traceml_ai.aggregator.sqlite_writers import system as system_sql_writer
 from traceml_ai.loggers.error_log import get_error_logger
-from traceml_ai.reporting.config import (
-    DEFAULT_SUMMARY_WINDOW_ROWS,
-    summary_retention_rows_for_window,
-)
 from traceml_ai.telemetry.envelope import (
     TelemetryEnvelope,
     normalize_telemetry_envelope,
+)
+from traceml_ai.telemetry.retention import (
+    DEFAULT_HISTORY_RETENTION_S,
+    HistoryRetentionPolicy,
 )
 
 _PROJECTION_WRITERS = [
@@ -46,18 +46,17 @@ _PROJECTION_WRITERS = [
     step_memory_sql_writer,
     stdout_stderr_sql_writer,
 ]
-_RETENTION_TABLES = frozenset(
-    str(table)
-    for writer in _PROJECTION_WRITERS
-    for table in getattr(writer, "RETENTION_TABLES", ())
+
+_HISTORY_TABLES = (
+    "system_samples",
+    "system_gpu_samples",
+    "process_samples",
+    "step_time_samples",
+    "step_memory_samples",
+    "stdout_stderr_samples",
 )
-_RETENTION_PARTITION_SQL = {
-    "system_samples": "COALESCE(node_rank, global_rank, 0)",
-    "process_samples": "COALESCE(global_rank, rank, 0)",
-    "step_time_samples": "COALESCE(global_rank, rank, 0)",
-    "step_memory_samples": "COALESCE(global_rank, rank, 0)",
-}
-_RETENTION_PRUNE_INTERVAL_BATCHES = 10
+_STEP_HISTORY_TABLES = frozenset({"step_time_samples", "step_memory_samples"})
+_RETENTION_PRUNE_INTERVAL_S = 60.0
 
 
 @dataclass(frozen=True)
@@ -76,7 +75,7 @@ class SQLiteWriterConfig:
     max_queue: int = 50_000
     flush_interval_sec: float = 0.5
     max_flush_items: int = 20_000
-    summary_window_rows: int = DEFAULT_SUMMARY_WINDOW_ROWS
+    history_retention_s: float = DEFAULT_HISTORY_RETENTION_S
     synchronous: str = "NORMAL"
 
 
@@ -138,7 +137,7 @@ class SQLiteWriterSimple:
         self._enqueued = 0
         self._dropped = 0
         self._written = 0
-        self._batches_since_prune = 0
+        self._last_prune_monotonic: Optional[float] = None
         self._last_error: Optional[str] = None
         self._finalize_result: Optional[SQLiteFinalizeResult] = None
 
@@ -406,111 +405,158 @@ class SQLiteWriterSimple:
         for writer in _PROJECTION_WRITERS:
             writer.insert_rows(conn, projection_rows[writer])
 
-        self._batches_since_prune += 1
-        if (
-            prune
-            and self._batches_since_prune >= _RETENTION_PRUNE_INTERVAL_BATCHES
-        ):
-            self._prune_retained_rows(conn, projection_rows)
-            self._batches_since_prune = 0
+        if prune and self._retention_prune_due():
+            self._prune_all_retained_rows(conn)
 
         conn.execute("COMMIT;")
         self._written += row_count
 
-    def _prune_retained_rows(
-        self,
-        conn: sqlite3.Connection,
-        projection_rows: dict[Any, dict[str, list[tuple]]],
-    ) -> None:
-        """
-        Keep bounded history for the high-frequency summary tables.
-
-        The final report reads a fixed summary window. We retain a larger
-        buffer in SQLite so long jobs stay bounded while still having enough
-        recent rows for aligned multi-rank summaries.
-        """
-        retention_rows = summary_retention_rows_for_window(
-            self._cfg.summary_window_rows
-        )
-
-        for writer, rows_by_table in projection_rows.items():
-            if not any(rows_by_table.values()):
-                continue
-
-            for table in getattr(writer, "RETENTION_TABLES", ()):
-                self._prune_table_by_identity(
-                    conn,
-                    table=str(table),
-                    retention_rows=retention_rows,
-                )
-
-            if writer is system_sql_writer:
-                self._prune_system_gpu_samples_to_retained_system_samples(conn)
-
     def _prune_all_retained_rows(self, conn: sqlite3.Connection) -> None:
-        """Run one final retention pass before checkpointing and closing SQLite."""
-        retention_rows = summary_retention_rows_for_window(
-            self._cfg.summary_window_rows
+        """Delete raw rows older than the receive-time storage horizon."""
+        owns_transaction = not conn.in_transaction
+        if owns_transaction:
+            conn.execute("BEGIN;")
+        try:
+            watermark = self._history_watermark_recv_ts_ns(conn)
+            if watermark is not None:
+                policy = HistoryRetentionPolicy(
+                    retention_s=self._cfg.history_retention_s,
+                )
+                cutoff = policy.cutoff_recv_ts_ns(watermark)
+                for table in _HISTORY_TABLES:
+                    self._prune_history_table(
+                        conn,
+                        table=table,
+                        cutoff_recv_ts_ns=cutoff,
+                        watermark_recv_ts_ns=watermark,
+                    )
+            if owns_transaction:
+                conn.execute("COMMIT;")
+        except Exception:
+            if owns_transaction and conn.in_transaction:
+                conn.execute("ROLLBACK;")
+            raise
+        finally:
+            self._last_prune_monotonic = time.monotonic()
+
+    def _retention_prune_due(self) -> bool:
+        """Return whether the low-frequency retention pass is due."""
+        if self._last_prune_monotonic is None:
+            return True
+        return (
+            time.monotonic() - self._last_prune_monotonic
+            >= _RETENTION_PRUNE_INTERVAL_S
         )
-        for table in _RETENTION_TABLES:
-            self._prune_table_by_identity(
-                conn,
-                table=str(table),
-                retention_rows=retention_rows,
-            )
-        self._prune_system_gpu_samples_to_retained_system_samples(conn)
-        self._batches_since_prune = 0
 
     @staticmethod
-    def _prune_table_by_identity(
+    def _history_watermark_recv_ts_ns(
+        conn: sqlite3.Connection,
+    ) -> Optional[int]:
+        selects = " UNION ALL ".join(
+            f"SELECT MAX(recv_ts_ns) AS value FROM {table}"
+            for table in _HISTORY_TABLES
+        )
+        row = conn.execute(f"SELECT MAX(value) FROM ({selects});").fetchone()
+        return int(row[0]) if row and row[0] is not None else None
+
+    @staticmethod
+    def _prune_history_table(
         conn: sqlite3.Connection,
         *,
         table: str,
-        retention_rows: int,
+        cutoff_recv_ts_ns: int,
+        watermark_recv_ts_ns: int,
     ) -> None:
-        """Delete rows outside the retained window for each table identity."""
-        if table not in _RETENTION_TABLES:
-            raise ValueError(f"Unknown retained SQLite table: {table}")
-        partition_sql = _RETENTION_PARTITION_SQL.get(table)
-        if partition_sql is None:
-            raise ValueError(f"Missing retention identity for table: {table}")
+        """Prune one table and record state used for coverage checks."""
+        if table not in _HISTORY_TABLES:
+            raise ValueError(f"Unknown telemetry history table: {table}")
+        step_expr = "MAX(step)" if table in _STEP_HISTORY_TABLES else "NULL"
+        deleted = conn.execute(
+            f"""
+            SELECT MAX(sample_ts_s), {step_expr}, COUNT(*)
+            FROM {table}
+            WHERE recv_ts_ns < ?;
+            """,
+            (int(cutoff_recv_ts_ns),),
+        ).fetchone()
+        max_sample_ts = deleted[0] if deleted else None
+        max_step = deleted[1] if deleted else None
+        deleted_rows = int(deleted[2] or 0) if deleted else 0
 
         conn.execute(
-            f"""
-            DELETE FROM {table}
-            WHERE id IN (
-                SELECT id FROM (
-                    SELECT
-                        id,
-                        ROW_NUMBER() OVER (
-                            PARTITION BY {partition_sql}
-                            ORDER BY id DESC
-                        ) AS row_num
-                    FROM {table}
-                )
-                WHERE row_num > ?
-            );
+            f"DELETE FROM {table} WHERE recv_ts_ns < ?;",
+            (int(cutoff_recv_ts_ns),),
+        )
+        conn.execute(
+            """
+            INSERT INTO history_retention_state(
+                table_name,
+                watermark_recv_ts_ns,
+                cutoff_recv_ts_ns,
+                max_deleted_sample_ts_s,
+                max_deleted_step,
+                deleted_rows
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(table_name) DO UPDATE SET
+                watermark_recv_ts_ns = excluded.watermark_recv_ts_ns,
+                cutoff_recv_ts_ns = excluded.cutoff_recv_ts_ns,
+                max_deleted_sample_ts_s = MAX(
+                    COALESCE(
+                        history_retention_state.max_deleted_sample_ts_s,
+                        excluded.max_deleted_sample_ts_s
+                    ),
+                    COALESCE(
+                        excluded.max_deleted_sample_ts_s,
+                        history_retention_state.max_deleted_sample_ts_s
+                    )
+                ),
+                max_deleted_step = MAX(
+                    COALESCE(
+                        history_retention_state.max_deleted_step,
+                        excluded.max_deleted_step
+                    ),
+                    COALESCE(
+                        excluded.max_deleted_step,
+                        history_retention_state.max_deleted_step
+                    )
+                ),
+                deleted_rows = history_retention_state.deleted_rows
+                    + excluded.deleted_rows;
             """,
-            (int(retention_rows),),
+            (
+                table,
+                int(watermark_recv_ts_ns),
+                int(cutoff_recv_ts_ns),
+                max_sample_ts,
+                max_step,
+                deleted_rows,
+            ),
         )
 
     @staticmethod
-    def _prune_system_gpu_samples_to_retained_system_samples(
-        conn: sqlite3.Connection,
-    ) -> None:
-        """Keep GPU rows only for retained system snapshots."""
+    def _init_retention_schema(conn: sqlite3.Connection) -> None:
+        """Create retention indexes and the small internal coverage ledger."""
         conn.execute(
             """
-            DELETE FROM system_gpu_samples AS gpu
-            WHERE NOT EXISTS (
-                SELECT 1
-                FROM system_samples AS sample
-                WHERE sample.global_rank IS gpu.global_rank
-                  AND sample.node_rank IS gpu.node_rank
-                  AND sample.seq IS gpu.seq
+            CREATE TABLE IF NOT EXISTS history_retention_state (
+                table_name                 TEXT PRIMARY KEY,
+                watermark_recv_ts_ns       INTEGER NOT NULL,
+                cutoff_recv_ts_ns          INTEGER NOT NULL,
+                max_deleted_sample_ts_s    REAL,
+                max_deleted_step           INTEGER,
+                deleted_rows               INTEGER NOT NULL DEFAULT 0
             );
             """
         )
+        for table in _HISTORY_TABLES:
+            conn.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_{table}_recv_ts "
+                f"ON {table}(recv_ts_ns);"
+            )
+            conn.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_{table}_sample_ts_global "
+                f"ON {table}(sample_ts_s, id);"
+            )
 
     def _flush_once(self, conn: sqlite3.Connection) -> None:
         """
@@ -577,6 +623,7 @@ class SQLiteWriterSimple:
             conn = self._connect()
             for writer in _PROJECTION_WRITERS:
                 writer.init_schema(conn)
+            self._init_retention_schema(conn)
         except Exception as exc:
             fatal_error = f"SQLiteWriter init failed: {exc}"
             self._log_error(f"[TraceML] {fatal_error}")

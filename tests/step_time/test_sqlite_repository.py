@@ -40,10 +40,10 @@ def _create_minimal_table(conn: sqlite3.Connection) -> None:
     )
 
 
-def test_deduplication_happens_before_distinct_step_limit(
+def test_summary_deduplicates_before_analysis_windowing(
     tmp_path: Path,
 ) -> None:
-    """Repeated latest-step rows cannot crowd older distinct steps out."""
+    """Repeated latest-step rows are deduplicated before step analysis."""
     db_path = tmp_path / "duplicates.db"
     create_step_time_database(
         db_path,
@@ -75,7 +75,7 @@ def test_deduplication_happens_before_distinct_step_limit(
         )
 
         snapshot = SQLiteStepTimeRepository(conn).load_summary(
-            StepTimeLoadRequest(window_size=4)
+            StepTimeLoadRequest()
         )
         window = StepTimeAnalyzer().analyze(snapshot, window_size=4)
 
@@ -85,7 +85,7 @@ def test_deduplication_happens_before_distinct_step_limit(
         )
         for rank in snapshot.global_ranks
     }
-    assert by_rank == {0: [2, 3, 4, 5], 1: [2, 3, 4, 5]}
+    assert by_rank == {0: [1, 2, 3, 4, 5], 1: [1, 2, 3, 4, 5]}
     assert window.steps == [2, 3, 4, 5]
     assert rank_average(window, 0).forward_ms == pytest.approx(47.25)
 
@@ -235,7 +235,7 @@ def test_live_and_summary_profiles_feed_the_same_analysis(
             StepTimeLoadRequest(window_size=4, lookback_factor=1)
         )
         summary_source = SQLiteStepTimeRepository(conn).load_summary(
-            StepTimeLoadRequest(window_size=4)
+            StepTimeLoadRequest()
         )
         analyzer = StepTimeAnalyzer()
         live = analyzer.analyze(live_source, window_size=4)
@@ -245,7 +245,7 @@ def test_live_and_summary_profiles_feed_the_same_analysis(
     summary_rows = {
         (row.global_rank, row.step): row for row in summary_source.rows
     }
-    assert live_rows == summary_rows
+    assert all(summary_rows[key] == value for key, value in live_rows.items())
     assert live_source.global_ranks == summary_source.global_ranks
     assert live_source.training_strategy == summary_source.training_strategy
     assert live == summary
@@ -356,11 +356,11 @@ def test_repository_returns_filtered_progress_identity_and_context(
             """
         )
         snapshot = SQLiteStepTimeRepository(conn).load_summary(
-            StepTimeLoadRequest(window_size=2, rank_filter=(1,))
+            StepTimeLoadRequest(rank_filter=(1,))
         )
 
     assert snapshot.global_ranks == (1,)
-    assert [row.step for row in snapshot.rows] == [4, 5]
+    assert [row.step for row in snapshot.rows] == [3, 4, 5]
     assert snapshot.cursor.latest_step == 99
     assert snapshot.cursor.last_row_id == 7
     assert snapshot.training_strategy == "fsdp"

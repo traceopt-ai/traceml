@@ -11,7 +11,7 @@ def _launch_args(**overrides) -> argparse.Namespace:
     base = dict(
         mode="summary",
         no_history=False,
-        summary_window_rows=10000,
+        history_retention=None,
         trace_max_steps=None,
         html_report=True,
         nnodes=1,

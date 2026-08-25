@@ -12,7 +12,6 @@ from typing import Any, Dict, Optional
 
 from traceml_ai.reporting.sections.output import persist_section_summary
 from traceml_ai.reporting.sections.system import SystemSummarySection
-from traceml_ai.reporting.sections.system.model import MAX_SUMMARY_ROWS
 
 
 def generate_system_summary_card(
@@ -20,12 +19,10 @@ def generate_system_summary_card(
     *,
     node_rank: Optional[int] = None,
     print_to_stdout: bool = True,
-    max_system_rows: int = MAX_SUMMARY_ROWS,
 ) -> Dict[str, Any]:
     """Generate and persist the end-of-run system summary."""
     result = SystemSummarySection(
         node_rank=node_rank,
-        max_system_rows=max_system_rows,
     ).build(db_path)
     summary = result.payload
 
@@ -44,6 +41,5 @@ def generate_system_summary_card(
 
 
 __all__ = [
-    "MAX_SUMMARY_ROWS",
     "generate_system_summary_card",
 ]

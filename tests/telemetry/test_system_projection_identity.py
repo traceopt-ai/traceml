@@ -8,12 +8,84 @@ from __future__ import annotations
 
 import sqlite3
 
+import pytest
+
 from traceml_ai.aggregator.sqlite_writer import (
     SQLiteWriterConfig,
     SQLiteWriterSimple,
 )
+from traceml_ai.aggregator.sqlite_writers import process as process_projection
+from traceml_ai.aggregator.sqlite_writers import runtime_environment
+from traceml_ai.aggregator.sqlite_writers import step_memory, step_time
+from traceml_ai.aggregator.sqlite_writers import stdout_stderr
 from traceml_ai.aggregator.sqlite_writers import system as system_projection
 from traceml_ai.telemetry.envelope import normalize_telemetry_envelope
+
+
+@pytest.mark.parametrize(
+    ("table", "extra_columns", "extra_values"),
+    [
+        ("system_samples", "", ()),
+        ("system_gpu_samples", ", gpu_idx", (0,)),
+        ("process_samples", "", ()),
+        ("step_time_samples", ", step, events_json", (7, "{}")),
+        ("step_memory_samples", ", step", (7,)),
+        ("stdout_stderr_samples", ", line", ("output",)),
+    ],
+)
+def test_time_retention_prunes_raw_history_after_fixed_grace(
+    table,
+    extra_columns,
+    extra_values,
+) -> None:
+    conn = sqlite3.connect(":memory:")
+    for projection in (
+        runtime_environment,
+        system_projection,
+        process_projection,
+        step_time,
+        step_memory,
+        stdout_stderr,
+    ):
+        projection.init_schema(conn)
+    SQLiteWriterSimple._init_retention_schema(conn)
+
+    policy_watermark = 10_000_000_000_000
+    cutoff = policy_watermark - int((30 + 5) * 60 * 1e9)
+    sql = (
+        f"INSERT INTO {table}(recv_ts_ns, sample_ts_s{extra_columns}) "
+        f"VALUES (?, ?{', ?' * len(extra_values)});"
+    )
+    for recv_ts_ns in (cutoff - 1, cutoff, policy_watermark):
+        conn.execute(
+            sql,
+            (recv_ts_ns, recv_ts_ns / 1e9, *extra_values),
+        )
+    conn.execute(
+        "INSERT INTO runtime_environment(recv_ts_ns) VALUES (?);",
+        (cutoff - 1,),
+    )
+
+    writer = SQLiteWriterSimple(
+        SQLiteWriterConfig(path=":memory:", history_retention_s=1800.0)
+    )
+    writer._prune_all_retained_rows(conn)
+
+    retained = conn.execute(
+        f"SELECT recv_ts_ns FROM {table} ORDER BY recv_ts_ns;"
+    ).fetchall()
+    state = conn.execute(
+        "SELECT deleted_rows FROM history_retention_state "
+        "WHERE table_name = ?;",
+        (table,),
+    ).fetchone()
+    runtime_rows = conn.execute(
+        "SELECT COUNT(*) FROM runtime_environment;"
+    ).fetchone()
+
+    assert retained == [(cutoff,), (policy_watermark,)]
+    assert state == (1,)
+    assert runtime_rows == (1,)
 
 
 def _system_payload() -> dict:

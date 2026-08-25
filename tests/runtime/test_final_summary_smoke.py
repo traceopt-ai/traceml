@@ -11,6 +11,7 @@ import os
 import socket
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -143,3 +144,12 @@ def test_final_summary_json_smoke(tmp_path):
     )
     for key in required:
         assert key in payload, f"final_summary.json missing key: {key!r}"
+
+    manifest = json.loads(
+        (session_root / "manifest.json").read_text(encoding="utf-8")
+    )
+    training_ended_at = manifest["lifecycle"]["training_ended_at"]
+    assert payload["duration_s"] > 0.0
+    assert datetime.fromisoformat(payload["generated_at"]) >= (
+        datetime.fromisoformat(training_ended_at)
+    )

@@ -10,10 +10,6 @@ import sqlite3
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, Optional
 
-from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
-
-MAX_SUMMARY_ROWS = DEFAULT_SUMMARY_WINDOW_ROWS
-
 SYSTEM_METRIC_NAMES = [
     "cpu_percent",
     "ram_bytes",
@@ -213,7 +209,6 @@ def min_timestamp(values: Iterable[Optional[float]]) -> Optional[float]:
 
 
 __all__ = [
-    "MAX_SUMMARY_ROWS",
     "SYSTEM_METRIC_NAMES",
     "PerGPUSummary",
     "SystemClusterSummary",

@@ -102,6 +102,17 @@ traceml watch <script>                # zero-code system/process summary
 traceml serve                         # standalone aggregator
 ```
 
+`run`, `watch`, and `serve` accept `--history-retention DURATION`. The default
+is `30m`; bare values are seconds, and `s`, `m`, `h`, and `d` suffixes are
+accepted. This is the logical final-report history. TraceML physically keeps
+an additional fixed 5-minute late-arrival grace, so the default raw SQLite
+horizon is 35 minutes. Older raw rows are discarded without a rollup. Use
+`--no-history` on `run` or `watch` when history should be disabled entirely.
+
+The same setting is available as `history_retention` in `traceml.yaml` and as
+`TRACEML_HISTORY_RETENTION`. Precedence remains CLI, environment, YAML, then
+the 30-minute built-in default.
+
 Summary mode is the default for every topology. Live `cli` and `dashboard`
 modes are intended for single-node runs. Use PyTorch Profiler or Nsight for
 operator- or kernel-level profiling.
@@ -149,6 +160,7 @@ non-aggregator node needs the reachable node-0 address above.
 | `--mode` | `summary` (default), `cli`, or `dashboard`. |
 | `--logs-dir` | Directory for session logs. |
 | `--run-name` / `--session-id` | Shared run identity for worker artifacts. |
+| `--history-retention` | Logical analysis history; default `30m` plus an internal 5-minute raw-storage grace. |
 
 ### Missing-aggregator behavior
 

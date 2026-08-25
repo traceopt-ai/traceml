@@ -425,11 +425,7 @@ def test_cli_dashboard_summary_diagnosis_parity(
         item for item in dashboard["items"] if item["source"] == "step_time"
     )
 
-    summary = (
-        StepTimeSummarySection(max_rows=len(scenario.steps))
-        .build(str(db_path))
-        .payload
-    )
+    summary = StepTimeSummarySection().build(str(db_path)).payload
     summary_diagnosis = summary["diagnosis"]
 
     assert dashboard_diagnosis["kind"] == cli_diagnosis.kind
@@ -457,11 +453,7 @@ def test_final_summary_projection_matches_golden(
 ) -> None:
     """Freeze public summary projection, especially absence versus zero."""
     scenario, db_path = scenario_db
-    payload = (
-        StepTimeSummarySection(max_rows=len(scenario.steps))
-        .build(str(db_path))
-        .payload
-    )
+    payload = StepTimeSummarySection().build(str(db_path)).payload
 
     window = payload["global"]["window"]
     assert window["alignment"] == "common_steps"
@@ -469,7 +461,7 @@ def test_final_summary_projection_matches_golden(
     assert window["start_step"] == scenario.steps[0]
     assert window["end_step"] == scenario.steps[-1]
     assert window["completed_step"] == scenario.steps[-1]
-    assert window["window_size"] == len(scenario.steps)
+    assert "window_size" not in window
     assert window["diagnosis_clock"] == scenario.clock
 
     metadata = payload["metadata"]
@@ -501,11 +493,7 @@ def test_canonical_surface_values_share_one_step_time_contract(
     )
     live = LiveStepTimeSession(str(db_path), request=request).refresh()
     window = live.analysis.window
-    summary = (
-        StepTimeSummarySection(max_rows=len(scenario.steps))
-        .build(str(db_path))
-        .payload
-    )
+    summary = StepTimeSummarySection().build(str(db_path)).payload
     average = summary["global"]["average"]
 
     def rank_average(field: str) -> float | None:

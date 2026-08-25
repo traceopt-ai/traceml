@@ -1,10 +1,12 @@
 # Final Summary JSON
 
-TraceML writes one end-of-run JSON file. The current schema version is `1.7`.
+TraceML writes one end-of-run JSON file. The current schema version is `1.8`.
 Each section has the same outer shape so the output is easy to store, diff, and
 consume from tooling.
 
-Schema `1.7` publishes canonical Step Time vocabulary. Every public timing
+Schema `1.8` adds one shared time-bounded analysis window and explicit
+retention coverage. It retains the canonical Step Time vocabulary introduced
+in schema `1.7`. Every public timing
 metric is nullable: `null` means the
 underlying timing signal was never measured in the analyzed window (missing
 instrumentation), while a measured zero stays `0.0`. Null metrics are
@@ -27,9 +29,27 @@ Sections:
 
 ```json
 {
-  "schema_version": 1.7,
+  "schema_version": 1.8,
   "generated_at": "...",
   "duration_s": null,
+  "analysis_window": {
+    "anchor": "step_time | periodic_telemetry | null",
+    "retention_s": 1800.0,
+    "storage_grace_s": 300.0,
+    "start_ts_s": null,
+    "end_ts_s": null,
+    "duration_s": null,
+    "start_step": null,
+    "end_step": null,
+    "sections": {
+      "system": {
+        "samples": 0,
+        "observed_start_ts_s": null,
+        "observed_end_ts_s": null,
+        "coverage": "complete | partial | no_data | unknown"
+      }
+    }
+  },
   "meta": {
     "run_name": null,
     "mode": "single_node | multi_node | no_data",
@@ -45,6 +65,23 @@ Sections:
   "text": ""
 }
 ```
+
+`analysis_window` is resolved once for the complete report. When Step Time is
+available, its latest optimizer step completed on every observed rank is the
+anchor; all common completed steps from the preceding retention duration set
+the snapped timestamp and step bounds. System and Process use those inclusive
+timestamp bounds, and Step Memory uses the same inclusive step bounds. Without
+Step Time, the latest System/Process timestamp anchors a time-only window and
+the step bounds remain `null`.
+
+Each section reports its sample count, observed timestamp bounds, and history
+coverage. `partial` means retention deleted data that overlaps the requested
+interval; `unknown` means the database predates the coverage ledger. The same
+analysis bounds also appear in every section's `metadata`.
+
+Top-level `duration_s` is full training lifecycle duration when genuine
+launcher start/end timestamps are available. Otherwise it is `null`; section
+or analysis-window durations are never substituted for the full run.
 
 `meta` contains run-level identity and observed topology. Section-level
 `metadata` remains section-specific coverage and metric-contract information.
@@ -120,10 +157,10 @@ Selection policy:
   diagnosis evidence lists `missing_signals` plus per-signal
   `signal_coverage`.
 - Step Time may emit warning-only bottleneck diagnoses before its confident
-  threshold; critical Step Time diagnoses require the confident window size.
+  threshold; critical Step Time diagnoses require enough aligned steps.
   Live and summary use the same global-rank Step Time SQLite window loader;
-  summary uses a larger selected-clock window, but not a separate Step Time
-  diagnosis gate.
+  the summary is bounded by `analysis_window`, not by a row count, and does
+  not use a separate Step Time diagnosis gate.
 - Step Time diagnosis may consume advisory runtime training strategy context
   when available. This does not add a public summary metric; missing or
   unrecognized strategy metadata defaults to `ddp`. FSDP Step Time diagnosis
@@ -206,7 +243,12 @@ Fallback evidence types are:
     "global_ranks_used": null,
     "training_total_steps": null,
     "training_latest_step": null,
-    "section_metric_names": []
+    "section_metric_names": [],
+    "analysis_start_ts_s": null,
+    "analysis_end_ts_s": null,
+    "analysis_start_step": null,
+    "analysis_end_step": null,
+    "history_coverage": "complete | partial | no_data | unknown"
   },
   "diagnosis": {
     "kind": "...",
@@ -247,8 +289,7 @@ Fallback evidence types are:
       "steps_analyzed": null,
       "start_step": null,
       "end_step": null,
-      "completed_step": null,
-      "window_size": null
+      "completed_step": null
     },
     "average": {"<metric_name>": null},
     "median": {"<metric_name>": {"value": null, "idx": null}},
@@ -320,8 +361,8 @@ All displayed values remain averages of per-step peaks over the aligned
 window. These are presentation selection rules; they do not add aggregates to
 the schema.
 
-`system` and `process` use their own sample observation windows. Their averages
-are not aligned to the `step_time` or `step_memory` common-step window.
+`system` and `process` may contain different sample counts from Step Time, but
+their inclusive timestamp bounds come from the same `analysis_window`.
 The Process table reads RSS and CUDA-reserved byte/percentage pairs from one
 grouped rank row, anchored by the stored percentage point with the byte point
 as a null-percentage fallback. These are presentation selection rules and do
@@ -439,7 +480,7 @@ step_time_ms = complete selected-clock step duration
 diagnosis_clock = "cpu" | "gpu"
 ```
 
-Schema `1.7` does not publish historical timing aliases. Readers that support
+Schema `1.8` does not publish historical timing aliases. Readers that support
 older summary files must use an explicit schema-versioned compatibility adapter
 at their input boundary; new output remains canonical.
 

@@ -157,8 +157,8 @@ def _apply_settings_env(
     os.environ["TRACEML_HISTORY_ENABLED"] = (
         "1" if settings.history_enabled else "0"
     )
-    os.environ["TRACEML_SUMMARY_WINDOW_ROWS"] = str(
-        settings.summary_window_rows
+    os.environ["TRACEML_HISTORY_RETENTION"] = str(
+        float(settings.history_retention_s)
     )
     os.environ["TRACEML_FINALIZE_TIMEOUT_SEC"] = str(
         settings.finalize_timeout_sec

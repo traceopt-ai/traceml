@@ -735,7 +735,7 @@ def test_sqlite_window_has_one_share_across_live_and_summary_consumers(
     assert rank_average(window, 0).residual_ms == pytest.approx(10.0)
     assert window.residual_share == pytest.approx(0.05)
 
-    summary = StepTimeSummarySection(max_rows=30).build(str(db_path)).payload
+    summary = StepTimeSummarySection().build(str(db_path)).payload
     summary_metrics = summary["groups"]["rows"]["0"]["metrics"]
     assert summary_metrics["residual_ms"] == pytest.approx(10.0)
     assert summary_metrics["h2d_ms"] is None

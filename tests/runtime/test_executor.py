@@ -178,7 +178,7 @@ def test_build_runtime_settings_carries_trace_max_steps():
             "enable_logging": False,
             "logs_dir": "./logs",
             "session_id": "test",
-            "summary_window_rows": 200,
+            "history_retention_s": 1800.0,
             "trace_max_steps": 5,
             "aggregator_host": "127.0.0.1",
             "aggregator_bind_host": "127.0.0.1",

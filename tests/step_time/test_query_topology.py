@@ -48,9 +48,7 @@ def test_step_time_surface_uses_exactly_two_selects(
     session = LiveStepTimeSession(str(db_path), request=request)
 
     if surface == "summary":
-        operation = lambda: StepTimeSummarySection(max_rows=4).build(
-            str(db_path)
-        )
+        operation = lambda: StepTimeSummarySection().build(str(db_path))
     elif surface == "dashboard":
         diagnostics = ModelDiagnosticsRenderer(str(db_path))
         diagnostics._step_memory.compute_dashboard = lambda: (
