@@ -113,7 +113,6 @@ run_one() {
   echo "Starting $run_name: batch=$batch_size accumulation=$accumulation steps=$optimizer_steps"
   traceml run \
     --mode summary \
-    --summary-window-rows "$optimizer_steps" \
     --logs-dir "$trace_root" \
     --run-name "$run_name" \
     "$train_script" \

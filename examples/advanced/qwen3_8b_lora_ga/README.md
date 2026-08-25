@@ -89,7 +89,6 @@ optimizer update:
 ```bash
 traceml run \
   --mode summary \
-  --summary-window-rows 500 \
   --run-name qwen3_8b_bs2_ga4 \
   examples/advanced/qwen3_8b_lora_ga/train.py \
   --args \
