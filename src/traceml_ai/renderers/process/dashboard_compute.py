@@ -14,7 +14,7 @@ rows deserve to open. The section formats what it is handed.
 
 import statistics
 import time
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from traceml_ai.diagnostics.process.policy import DEFAULT_PROCESS_POLICY
 
@@ -42,6 +42,11 @@ IMBALANCE_OPEN_PCT = float(
 # (a replay, or a reader opening the page after training ends) never
 # accumulates a streak, so its rows would stay shut however lopsided it
 # was.
+
+# A rolling mean over minutes cannot visibly change between two 2 s ticks,
+# so the whole-run reads refresh on their own slower clock. Recomputing
+# them every tick was the single largest cost in the block.
+_RUN_REFRESH_S = 15.0
 
 _CPU_CAPACITY_SQL = (
     "cpu_percent / (100.0 * NULLIF(cpu_logical_core_count, 0)) * 100.0"
@@ -110,6 +115,12 @@ class ProcessDashboardComputer:
         self._stale_ttl_s: Optional[float] = (
             float(stale_ttl_s) if stale_ttl_s is not None else None
         )
+        # Whole-run reads, refreshed on their own clock (_RUN_REFRESH_S).
+        self._run_cache: Optional[Tuple[List[Any], List[Any]]] = None
+        self._run_cache_ts: float = 0.0
+        # The observed cadence, remembered so the next tick's window read
+        # scans what it needs instead of a fixed slab of the run.
+        self._tick_hint: float = _DEFAULT_TICK_S
 
     def compute(self, window_n: Optional[int] = None) -> Dict[str, Any]:
         """Return the dashboard payload, reusing the last good one on error."""
@@ -124,7 +135,16 @@ class ProcessDashboardComputer:
 
     # --- payload ---------------------------------------------------------
     def _compute(self, conn: Any, window_n: int) -> Dict[str, Any]:
-        rows = self._db.fetch_recent_rank_window(conn, window_n=window_n)
+        # One clock read per tick, reused by every bound below: deriving
+        # them separately lets the retention pruner move between two
+        # statements.
+        newest_ts = self._db.newest_sample_ts(conn)
+        rows = self._db.fetch_recent_rank_window(
+            conn,
+            window_n=window_n,
+            newest_ts=newest_ts,
+            max_age_s=window_n * self._tick_hint * 2.0,
+        )
         if not rows:
             return self._empty_payload()
 
@@ -138,6 +158,7 @@ class ProcessDashboardComputer:
             max(float(row["recv_ts_ns"] or 0.0) for row in rows) / 1e9
         )
         tick = self._tick_seconds(by_rank)
+        self._tick_hint = tick
         ranks = [
             self._rank_facts(rank_id, rank_rows, newest_recv, tick)
             for rank_id, rank_rows in sorted(by_rank.items())
@@ -150,12 +171,8 @@ class ProcessDashboardComputer:
 
         gpu_available = any(rank["gpu_total"] is not None for rank in ranks)
         window_span = self._window_span(rows)
-        min_run_span = window_span * _RUN_VIEW_FACTOR
-        cpu_run = self._db.fetch_rank_run_history(
-            conn, _CPU_CAPACITY_SQL, min_span_s=min_run_span
-        )
-        rss_run = self._db.fetch_rank_run_history(
-            conn, _RSS_SQL, min_span_s=min_run_span
+        cpu_run, rss_run = self._run_history(
+            conn, window_span * _RUN_VIEW_FACTOR
         )
 
         imbalance = self._reserved_imbalance(source)
@@ -203,6 +220,28 @@ class ProcessDashboardComputer:
             rollups=rollups,
         ).to_dict()
 
+    def _run_history(
+        self, conn: Any, min_span_s: float
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """The whole-run views, recomputed at most every _RUN_REFRESH_S."""
+        now = time.time()
+        if (
+            self._run_cache is not None
+            and (now - self._run_cache_ts) < _RUN_REFRESH_S
+        ):
+            return self._run_cache
+        fresh = (
+            self._db.fetch_rank_run_history(
+                conn, _CPU_CAPACITY_SQL, min_span_s=min_span_s
+            ),
+            self._db.fetch_rank_run_history(
+                conn, _RSS_SQL, min_span_s=min_span_s
+            ),
+        )
+        self._run_cache = fresh
+        self._run_cache_ts = now
+        return fresh
+
     # --- per rank --------------------------------------------------------
     def _tick_seconds(self, by_rank: Dict[int, List[Any]]) -> float:
         """The fastest rank's own cadence, floored at the sampler default."""
@@ -242,22 +281,23 @@ class ProcessDashboardComputer:
         tick: float,
     ) -> Dict[str, Any]:
         newest = rank_rows[-1]
+        reported = [row for row in rank_rows if _gpu_reported(row)]
         caps = [
             value
             for value in (self._cpu_capacity_of(row) for row in rank_rows)
             if value is not None
         ]
         allocs = [
-            _opt_float(row["gpu_mem_used_bytes"])
-            for row in rank_rows
-            if _gpu_reported(row)
+            value
+            for value in (
+                _opt_float(row["gpu_mem_used_bytes"]) for row in reported
+            )
+            if value is not None
         ]
-        allocs = [value for value in allocs if value is not None]
         # The newest row is not always a reading: the last samples of a
         # run land during teardown, after torch has let the device go, so
         # anchoring the GPU tiles on it blanks them exactly when someone
         # inspects a finished run.
-        reported = [row for row in rank_rows if _gpu_reported(row)]
         newest_gpu = reported[-1] if reported else None
         age = max(0.0, newest_recv - float(newest["recv_ts_ns"] or 0.0) / 1e9)
         return {
@@ -285,8 +325,7 @@ class ProcessDashboardComputer:
                     value
                     for value in (
                         _opt_float(row["gpu_mem_reserved_bytes"])
-                        for row in rank_rows
-                        if _gpu_reported(row)
+                        for row in reported
                     )
                     if value is not None
                 ]

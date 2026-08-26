@@ -12,6 +12,11 @@ _ROLL_FRACTION = 50.0  # about a fiftieth of the run
 _MAX_RUN_POINTS = 120
 _DEFAULT_TICK_S = 2.0
 
+# How far back the recent-window read looks before it has seen a cadence
+# to size itself from. After the first tick the caller narrows it to what
+# the ranks actually sample at.
+_WINDOW_MAX_AGE_S = 20.0 * 60.0
+
 # SQLite grew numeric RANGE frame offsets in 3.28. A time frame is the
 # honest one here: unreported samples leave holes in the cadence, so a ROW
 # frame silently spans more wall clock than it claims. Older engines fall
@@ -216,10 +221,24 @@ class ProcessMetricsDB:
             return None
         return min(per_rank.values())
 
+    def newest_sample_ts(self, conn: sqlite3.Connection) -> Optional[float]:
+        """The newest sample clock, read once per tick and reused.
+
+        Every bound below derives from it. Deriving them separately would
+        let the retention pruner delete rows between two statements and
+        leave one computation reading a window the other never saw.
+        """
+        row = conn.execute(
+            "SELECT MAX(sample_ts_s) FROM process_samples"
+        ).fetchone()
+        return float(row[0]) if row and row[0] is not None else None
+
     def fetch_recent_rank_window(
         self,
         conn: sqlite3.Connection,
         window_n: int = 100,
+        newest_ts: Optional[float] = None,
+        max_age_s: float = _WINDOW_MAX_AGE_S,
     ) -> List[sqlite3.Row]:
         """
         The last ``window_n`` samples of EVERY rank, newest last.
@@ -231,23 +250,34 @@ class ProcessMetricsDB:
         aligned on a shared seq (a dead rank froze the whole block when it
         was: its last committed seq bounded every other rank).
         """
+        # Bounded by time before the partition runs: without it the
+        # ROW_NUMBER scans every row ever written to rank the last hundred,
+        # which grows with the run. The bound is generous (a slow sampler
+        # still fills the window) and always inside the retention horizon.
+        floor_ts = None
+        if newest_ts is not None:
+            floor_ts = newest_ts - max(60.0, float(max_age_s))
         return conn.execute(
             """
-            WITH ranked AS (
+            WITH recent AS (
+                SELECT * FROM process_samples
+                WHERE COALESCE(global_rank, rank) IS NOT NULL
+                  AND (? IS NULL OR sample_ts_s >= ?)
+            ),
+            ranked AS (
                 SELECT
                     *,
                     ROW_NUMBER() OVER (
                         PARTITION BY COALESCE(global_rank, rank)
                         ORDER BY seq DESC, id DESC
                     ) AS rn
-                FROM process_samples
-                WHERE COALESCE(global_rank, rank) IS NOT NULL
+                FROM recent
             )
             SELECT * FROM ranked
             WHERE rn <= ?
             ORDER BY COALESCE(global_rank, rank) ASC, seq ASC, id ASC;
             """,
-            (int(max(1, window_n)),),
+            (floor_ts, floor_ts, int(max(1, window_n))),
         ).fetchall()
 
     def fetch_rank_run_history(
