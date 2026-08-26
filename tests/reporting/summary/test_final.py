@@ -8,10 +8,13 @@ from dataclasses import dataclass
 
 from tests.sqlite_fixtures import (
     insert_process_sample,
+    insert_step_memory_sample,
+    insert_step_time_sample,
     insert_system_sample,
     summary_database,
 )
 from traceml_ai.core.summaries import SummaryResult
+from traceml_ai.reporting.analysis_window import resolve_analysis_window
 from traceml_ai.reporting.final import (
     FinalReportGenerator,
     build_summary_payload,
@@ -148,11 +151,12 @@ def test_final_summary_fixture_schema_contains_all_sections(tmp_path) -> None:
 
     payload = build_summary_payload(str(db_path))
 
-    assert payload["schema_version"] == 1.7
+    assert payload["schema_version"] == 1.8
     assert set(payload) == {
         "schema_version",
         "generated_at",
         "duration_s",
+        "analysis_window",
         "meta",
         "primary_diagnosis",
         "system",
@@ -192,6 +196,93 @@ def test_final_summary_fixture_schema_contains_all_sections(tmp_path) -> None:
     assert "Next:" in payload["text"]
 
 
+def test_final_summary_aligns_sections_to_step_derived_time_window(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "aligned.db"
+    with summary_database(db_path) as conn:
+        for step in range(1, 501):
+            ts = step * 6.0
+            insert_step_time_sample(
+                conn,
+                row_id=step,
+                rank=0,
+                step=step,
+                ts=ts,
+                traced_step_time=10.0,
+            )
+            insert_step_memory_sample(
+                conn,
+                row_id=step,
+                rank=0,
+                step=step,
+                ts=ts,
+                alloc=100.0,
+                reserved=200.0,
+            )
+
+        for index in range(500):
+            ts = 1200.0 + index * (1800.0 / 499.0)
+            insert_system_sample(
+                conn,
+                row_id=index + 1,
+                rank=0,
+                ts=ts,
+                gpu_available=False,
+                gpu_count=0,
+            )
+        for index in range(400):
+            ts = 1200.0 + index * (1800.0 / 399.0)
+            insert_process_sample(
+                conn,
+                row_id=index + 1,
+                rank=0,
+                ts=ts,
+                gpu_available=False,
+                gpu_count=0,
+            )
+
+    payload = build_summary_payload(str(db_path), history_retention_s=1800.0)
+    window = payload["analysis_window"]
+
+    assert window["start_step"] == 200
+    assert window["end_step"] == 500
+    assert window["start_ts_s"] == 1200.0
+    assert window["end_ts_s"] == 3000.0
+    assert window["sections"]["step_time"]["samples"] == 301
+    assert window["sections"]["step_memory"]["samples"] == 301
+    assert window["sections"]["system"]["samples"] == 500
+    assert window["sections"]["process"]["samples"] == 400
+    assert payload["duration_s"] is None
+    for section in ("system", "process", "step_time", "step_memory"):
+        metadata = payload[section]["metadata"]
+        assert metadata["analysis_start_ts_s"] == 1200.0
+        assert metadata["analysis_end_ts_s"] == 3000.0
+
+
+def test_analysis_window_keeps_declared_rank_universe_after_pruning(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "missing-rank.db"
+    with summary_database(db_path) as conn:
+        for step in range(11, 21):
+            insert_step_time_sample(
+                conn,
+                row_id=step,
+                rank=0,
+                world_size=2,
+                step=step,
+                ts=float(step),
+                traced_step_time=10.0,
+            )
+
+    window = resolve_analysis_window(str(db_path), retention_s=1800.0)
+
+    assert window.anchor is None
+    assert window.start_step is None
+    assert window.end_step is None
+
+
 def test_final_report_generator_preserves_summary_schema_and_order():
     payload = build_summary_payload(
         "fake.db",
@@ -203,12 +294,13 @@ def test_final_report_generator_preserves_summary_schema_and_order():
         ),
     )
 
-    assert payload["schema_version"] == 1.7
-    assert payload["duration_s"] == 10.0
+    assert payload["schema_version"] == 1.8
+    assert payload["duration_s"] is None
     assert list(payload.keys()) == [
         "schema_version",
         "generated_at",
         "duration_s",
+        "analysis_window",
         "meta",
         "primary_diagnosis",
         "system",
@@ -229,7 +321,7 @@ def test_final_report_generator_preserves_summary_schema_and_order():
     )
     text = payload["text"]
     assert "TraceML Run Summary" in text
-    assert "10.0s" in text
+    assert "10.0s" not in text
     assert "Verdict: INSUFFICIENT STEP-TIME DATA" in text
     # The verdict card replaced the old section-status and evidence tables.
     assert "Section Status" not in text

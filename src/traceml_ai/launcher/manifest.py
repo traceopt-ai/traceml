@@ -109,7 +109,7 @@ def write_run_manifest(
     master_port: int,
     nproc_per_node: int,
     history_enabled: bool,
-    summary_window_rows: int,
+    history_retention_s: float,
     finalize_timeout_sec: float,
     status: str,
     launch_cwd: str,
@@ -136,6 +136,10 @@ def write_run_manifest(
         "run": run_block,
         "status": str(status),
         "created_at": utc_now_iso(),
+        "lifecycle": {
+            "training_started_at": None,
+            "training_ended_at": None,
+        },
         "host": {"hostname": socket.gethostname()},
         "launch": {
             "script_path": str(Path(script_path).resolve()),
@@ -151,7 +155,7 @@ def write_run_manifest(
             "master_addr": str(master_addr),
             "master_port": int(master_port),
             "history_enabled": bool(history_enabled),
-            "summary_window_rows": int(summary_window_rows),
+            "history_retention_s": float(history_retention_s),
             "finalize_timeout_sec": float(finalize_timeout_sec),
             "launch_cwd": str(Path(launch_cwd).resolve()),
         },
@@ -197,7 +201,11 @@ def update_run_manifest(
         manifest.setdefault("artifacts", {}).update(artifacts)
 
     if extra:
-        manifest.update(extra)
+        for key, value in extra.items():
+            if key == "lifecycle" and isinstance(value, dict):
+                manifest.setdefault("lifecycle", {}).update(value)
+            else:
+                manifest[key] = value
 
     write_json_atomic(manifest_path, manifest)
     return manifest_path

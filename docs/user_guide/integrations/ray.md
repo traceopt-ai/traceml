@@ -204,6 +204,7 @@ TraceMLRayConfig(
     logs_dir="./logs",
     session_id="",
     sampler_interval_sec=2.0,
+    history_retention="30m",
     bind_host="0.0.0.0",
     port=0,
 )
@@ -216,6 +217,11 @@ rendering from the aggregator actor.
 ``sampler_interval_sec`` defaults to ``2.0`` seconds. It controls worker sampling
 and the aggregator actor's live UI refresh; incoming TCP telemetry is drained as
 soon as it arrives.
+
+``history_retention`` accepts positive seconds or durations such as ``"30m"``,
+``"2h"``, or ``"1d"``. It defaults to 30 minutes of final-report analysis
+history. TraceML keeps five additional raw minutes internally for delayed
+telemetry, then discards older raw rows without creating a rollup.
 
 ``init_mode`` is passed to ``traceml.init(mode="auto")`` inside each Ray
 worker. The Ray Data ``wrap_dataloader_fetch(...)`` pattern above works with

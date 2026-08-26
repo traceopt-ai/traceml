@@ -34,8 +34,8 @@ from traceml_ai.launcher.manifest import (
     update_run_manifest,
     write_run_manifest,
 )
-from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 from traceml_ai.runtime.settings import DEFAULT_FINALIZE_TIMEOUT_SEC
+from traceml_ai.telemetry.retention import DEFAULT_HISTORY_RETENTION_S
 
 
 def test_serve_is_a_public_command() -> None:
@@ -273,7 +273,7 @@ def test_build_parser_preserves_launch_commands() -> None:
     assert args.master_addr == "127.0.0.1"
     assert args.run_name == ""
     assert args.session_id == ""
-    assert args.summary_window_rows == DEFAULT_SUMMARY_WINDOW_ROWS
+    assert args.history_retention is None
     assert args.finalize_timeout_sec is None
     assert args.trace_max_steps is None
     assert not args.capture_stderr
@@ -345,8 +345,8 @@ def test_build_parser_accepts_multinode_launch_args() -> None:
             "0.0.0.0",
             "--aggregator-port",
             "29888",
-            "--summary-window-rows",
-            "2048",
+            "--history-retention",
+            "2h",
             "--finalize-timeout-sec",
             "120",
             "--run-name",
@@ -362,7 +362,7 @@ def test_build_parser_accepts_multinode_launch_args() -> None:
     assert args.aggregator_host == "10.0.0.10"
     assert args.aggregator_bind_host == "0.0.0.0"
     assert args.aggregator_port == 29888
-    assert args.summary_window_rows == 2048
+    assert args.history_retention == 7200.0
     assert args.finalize_timeout_sec == 120.0
     assert args.run_name == "multi_node_run"
 
@@ -381,7 +381,7 @@ def test_summary_mode_requires_history() -> None:
         aggregator_port=29765,
         run_name="",
         session_id="test-session",
-        summary_window_rows=DEFAULT_SUMMARY_WINDOW_ROWS,
+        history_retention=None,
     )
 
     with pytest.raises(SystemExit):
@@ -428,7 +428,7 @@ def test_disabled_launch_validation_skips_traceml_only_checks(
         aggregator_port=0,
         run_name="",
         session_id="",
-        summary_window_rows=0,
+        history_retention=None,
         finalize_timeout_sec=-1.0,
         trace_max_steps=0,
         disable_traceml=True,
@@ -458,7 +458,7 @@ def test_disabled_launch_validation_honors_env_kill_switch(
         aggregator_port=0,
         run_name="",
         session_id="",
-        summary_window_rows=0,
+        history_retention=None,
         finalize_timeout_sec=-1.0,
         trace_max_steps=0,
         disable_traceml=None,
@@ -572,25 +572,11 @@ def test_disabled_launch_runs_script_directly_and_skips_traceml_setup(
     assert not (tmp_path / "logs").exists()
 
 
-def test_summary_window_rows_must_be_positive() -> None:
-    args = argparse.Namespace(
-        mode="cli",
-        no_history=False,
-        nnodes=1,
-        nproc_per_node=1,
-        node_rank=0,
-        master_addr="127.0.0.1",
-        master_port=29500,
-        aggregator_host=None,
-        aggregator_bind_host=None,
-        aggregator_port=29765,
-        run_name="",
-        session_id="",
-        summary_window_rows=0,
-    )
-
+@pytest.mark.parametrize("value", ["0", "-1m", "bad", "nan", "inf"])
+def test_history_retention_rejects_invalid_duration(value: str) -> None:
+    parser = build_parser()
     with pytest.raises(SystemExit):
-        validate_launch_args(args)
+        parser.parse_args(["run", "train.py", "--history-retention", value])
 
 
 def test_trace_max_steps_must_be_positive() -> None:
@@ -607,7 +593,7 @@ def test_trace_max_steps_must_be_positive() -> None:
         aggregator_port=29765,
         run_name="",
         session_id="",
-        summary_window_rows=DEFAULT_SUMMARY_WINDOW_ROWS,
+        history_retention=None,
         trace_max_steps=0,
     )
 
@@ -629,7 +615,7 @@ def test_dashboard_mode_requires_dashboard_dependencies(monkeypatch) -> None:
         aggregator_port=29765,
         run_name="",
         session_id="",
-        summary_window_rows=DEFAULT_SUMMARY_WINDOW_ROWS,
+        history_retention=None,
     )
 
     monkeypatch.setattr(
@@ -668,7 +654,7 @@ def test_implicit_mode_defers_dashboard_dependency_check_until_config_resolution
         aggregator_port=29765,
         run_name="",
         session_id="",
-        summary_window_rows=DEFAULT_SUMMARY_WINDOW_ROWS,
+        history_retention=None,
     )
 
     monkeypatch.setattr(
@@ -703,7 +689,7 @@ def test_multinode_launch_requires_run_name_or_session_id() -> None:
         aggregator_port=29765,
         run_name="",
         session_id="",
-        summary_window_rows=DEFAULT_SUMMARY_WINDOW_ROWS,
+        history_retention=None,
     )
 
     with pytest.raises(SystemExit, match="--run-name is required"):
@@ -724,7 +710,7 @@ def test_multinode_launch_accepts_run_name() -> None:
         aggregator_port=29765,
         run_name="multi_node_run",
         session_id="",
-        summary_window_rows=DEFAULT_SUMMARY_WINDOW_ROWS,
+        history_retention=None,
     )
 
     validate_launch_args(args)
@@ -744,7 +730,7 @@ def test_launch_args_reject_conflicting_run_name_and_session_id() -> None:
         aggregator_port=29765,
         run_name="run_a",
         session_id="run_b",
-        summary_window_rows=DEFAULT_SUMMARY_WINDOW_ROWS,
+        history_retention=None,
     )
 
     with pytest.raises(SystemExit, match="must match"):
@@ -781,7 +767,7 @@ def test_run_manifest_write_and_update_merge_correctly(tmp_path) -> None:
         master_port=29500,
         nproc_per_node=1,
         history_enabled=True,
-        summary_window_rows=DEFAULT_SUMMARY_WINDOW_ROWS,
+        history_retention_s=DEFAULT_HISTORY_RETENTION_S,
         finalize_timeout_sec=DEFAULT_FINALIZE_TIMEOUT_SEC,
         status="starting",
         launch_cwd=str(tmp_path),
@@ -801,9 +787,7 @@ def test_run_manifest_write_and_update_merge_correctly(tmp_path) -> None:
     assert payload["launch"]["aggregator_host"] == "127.0.0.1"
     assert payload["launch"]["aggregator_port"] == 29765
     assert payload["launch"]["nnodes"] == 1
-    assert (
-        payload["launch"]["summary_window_rows"] == DEFAULT_SUMMARY_WINDOW_ROWS
-    )
+    assert payload["launch"]["history_retention_s"] == 1800.0
     assert (
         payload["launch"]["finalize_timeout_sec"]
         == DEFAULT_FINALIZE_TIMEOUT_SEC

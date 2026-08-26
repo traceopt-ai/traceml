@@ -10,11 +10,10 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from typing import Dict
+from typing import Dict, Optional
 
-from traceml_ai.reporting.config import normalize_summary_window_rows
+from traceml_ai.reporting.analysis_window import AnalysisWindow
 from traceml_ai.reporting.sections.process.model import (
-    MAX_SUMMARY_ROWS,
     PerRankProcessSummary,
     ProcessSummaryAgg,
 )
@@ -28,39 +27,44 @@ class ProcessSectionData:
     per_global_rank: Dict[int, PerRankProcessSummary]
 
 
-def _recent_process_samples_cte() -> str:
+def _process_samples_cte(
+    analysis_window: Optional[AnalysisWindow],
+) -> tuple[str, tuple[float, ...]]:
     """
-    Return the CTE used for the process summary window.
-
-    Process summaries keep the latest N samples per global rank. Rows without a
-    resolved global rank are ignored so aggregate and per-rank views agree.
+    Return the CTE used for process history with resolved global ranks.
     """
-    return """
-        WITH recent_process_samples AS (
-            SELECT *
-            FROM (
-                SELECT
-                    p.*,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY p.global_rank
-                        ORDER BY p.id DESC
-                    ) AS row_num
-                FROM process_samples AS p
-                WHERE p.global_rank IS NOT NULL
-            )
-            WHERE row_num <= ?
+    params: tuple[float, ...] = ()
+    time_filter = ""
+    if (
+        analysis_window is not None
+        and analysis_window.start_ts_s is not None
+        and analysis_window.end_ts_s is not None
+    ):
+        time_filter = "AND sample_ts_s BETWEEN ? AND ?"
+        params = (
+            analysis_window.start_ts_s,
+            analysis_window.end_ts_s,
         )
-    """
+    return (
+        f"""
+        WITH selected_process_samples AS (
+            SELECT p.*
+            FROM process_samples AS p
+            WHERE p.global_rank IS NOT NULL
+              {time_filter}
+        )
+    """,
+        params,
+    )
 
 
 def load_process_summary_aggregate(
     conn: sqlite3.Connection,
     *,
-    max_process_rows: int = MAX_SUMMARY_ROWS,
+    analysis_window: Optional[AnalysisWindow] = None,
 ) -> ProcessSummaryAgg:
     """Load aggregate process metrics from `process_samples`."""
-    sample_cte = _recent_process_samples_cte()
-    params = (int(max_process_rows),)
+    sample_cte, params = _process_samples_cte(analysis_window)
 
     # Read window size, time bounds, and how many ranks are represented.
     count_row = conn.execute(
@@ -71,7 +75,7 @@ def load_process_summary_aggregate(
             MIN(sample_ts_s),
             MAX(sample_ts_s),
             COUNT(DISTINCT global_rank)
-        FROM recent_process_samples;
+        FROM selected_process_samples;
         """,
         params,
     ).fetchone()
@@ -103,7 +107,7 @@ def load_process_summary_aggregate(
             AVG(gpu_mem_reserved_bytes),
             MAX(gpu_mem_reserved_bytes),
             MAX(gpu_mem_total_bytes)
-        FROM recent_process_samples;
+        FROM selected_process_samples;
         """,
         params,
     ).fetchone()
@@ -139,11 +143,10 @@ def load_process_summary_aggregate(
 def load_per_global_rank_process_summary(
     conn: sqlite3.Connection,
     *,
-    max_process_rows: int = MAX_SUMMARY_ROWS,
+    analysis_window: Optional[AnalysisWindow] = None,
 ) -> Dict[int, PerRankProcessSummary]:
     """Load per-global-rank process metrics from `process_samples`."""
-    sample_cte = _recent_process_samples_cte()
-    params = (int(max_process_rows),)
+    sample_cte, params = _process_samples_cte(analysis_window)
     sql = (
         sample_cte
         + """
@@ -181,7 +184,7 @@ def load_per_global_rank_process_summary(
                 END
             )
 
-        FROM recent_process_samples
+        FROM selected_process_samples
         GROUP BY global_rank
         ORDER BY global_rank ASC;
     """
@@ -233,21 +236,20 @@ def load_per_global_rank_process_summary(
 def load_process_section_data(
     db_path: str,
     *,
-    max_process_rows: int = MAX_SUMMARY_ROWS,
+    analysis_window: Optional[AnalysisWindow] = None,
 ) -> ProcessSectionData:
     """
     Load bounded process-section data from the SQLite history database.
     """
-    row_limit = normalize_summary_window_rows(max_process_rows)
     conn = sqlite3.connect(db_path)
     try:
         aggregate = load_process_summary_aggregate(
             conn,
-            max_process_rows=row_limit,
+            analysis_window=analysis_window,
         )
         per_global_rank = load_per_global_rank_process_summary(
             conn,
-            max_process_rows=row_limit,
+            analysis_window=analysis_window,
         )
     finally:
         conn.close()

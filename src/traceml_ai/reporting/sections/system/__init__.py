@@ -21,6 +21,7 @@ from traceml_ai.diagnostics.system.context import (
     SystemGpuDiagnosisInput,
     SystemNodeDiagnosisInput,
 )
+from traceml_ai.reporting.analysis_window import AnalysisWindow
 from traceml_ai.reporting.sections.base import BaseSummarySection
 from traceml_ai.reporting.sections.system.builder import build_system_payload
 from traceml_ai.reporting.sections.system.formatter import (
@@ -31,7 +32,6 @@ from traceml_ai.reporting.sections.system.loader import (
     load_system_section_data,
 )
 from traceml_ai.reporting.sections.system.model import (
-    MAX_SUMMARY_ROWS,
     PerGPUSummary,
     SystemNodeSummary,
 )
@@ -102,14 +102,14 @@ class SystemSummarySection(
 
     name: ClassVar[str] = "system"
     node_rank: Optional[int] = None
-    max_system_rows: int = MAX_SUMMARY_ROWS
+    analysis_window: AnalysisWindow | None = None
 
     def load(self, db_path: str) -> SystemSectionData:
-        """Load the bounded system telemetry window."""
+        """Load system telemetry for the final report."""
         return load_system_section_data(
             db_path,
             node_rank=self.node_rank,
-            max_system_rows=self.max_system_rows,
+            analysis_window=self.analysis_window,
         )
 
     def to_diagnosis_input(
@@ -158,6 +158,8 @@ class SystemSummarySection(
     ) -> SummaryResult:
         """Assemble the System summary payload and display text."""
         payload = build_system_payload(data, diagnosis_result)
+        if self.analysis_window is not None:
+            payload["metadata"].update(self.analysis_window.metadata())
         return SummaryResult(
             section=self.name,
             payload=payload,

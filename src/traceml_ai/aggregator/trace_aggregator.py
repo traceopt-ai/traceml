@@ -22,7 +22,11 @@ from traceml_ai.aggregator.sqlite_writer import (
 from traceml_ai.aggregator.summary_service import FinalSummaryService
 from traceml_ai.reporting.final import generate_summary
 from traceml_ai.runtime.settings import AggregatorEndpoint, TraceMLSettings
-from traceml_ai.sdk.protocol import get_final_summary_json_path, utc_now_iso
+from traceml_ai.sdk.protocol import (
+    get_final_summary_json_path,
+    load_json_or_none,
+    utc_now_iso,
+)
 from traceml_ai.telemetry.control import (
     RankFinishedControl,
     parse_rank_finished,
@@ -136,7 +140,7 @@ class TraceMLAggregator:
                 max_queue=50_000,
                 flush_interval_sec=0.5,
                 max_flush_items=20_000,
-                summary_window_rows=int(settings.summary_window_rows),
+                history_retention_s=float(settings.history_retention_s),
                 synchronous="NORMAL",
             ),
         )
@@ -151,9 +155,9 @@ class TraceMLAggregator:
             db_path=str(db_path),
             flush_history=self._sqlite_writer.force_flush,
             settle_telemetry=self._settle_telemetry,
-            summary_window_rows=int(settings.summary_window_rows),
             write_html=bool(settings.html_report),
             profile=str(settings.profile),
+            history_retention_s=float(settings.history_retention_s),
         )
 
         # Display driver owns renderer selection and layout mapping.
@@ -273,28 +277,40 @@ class TraceMLAggregator:
                 self._started
                 and self._settings.history_enabled
                 and self._settings.db_path
-                and not get_final_summary_json_path(session_root).is_file()
             ):
+                summary_path = get_final_summary_json_path(session_root)
+                previous_generation = self._summary_generation_id(summary_path)
+                summary_error: Optional[Exception] = None
                 try:
                     generate_summary(
                         str(self._settings.db_path),
                         session_root=str(session_root),
                         print_to_stdout=True,
-                        summary_window_rows=int(
-                            self._settings.summary_window_rows
+                        history_retention_s=float(
+                            self._settings.history_retention_s
                         ),
                         write_html=bool(self._settings.html_report),
                         profile=str(self._settings.profile),
                     )
                 except Exception as summary_exc:
-                    # A summary-generation error is only fatal if it left no
-                    # artifact: the missing-file gate below makes that call.
-                    # A post-write render/print error (final_summary.json is
-                    # already on disk) is downgraded to a warning so it does
-                    # not fail an otherwise-successful run.
                     self._logger.exception("[TraceML] generate_summary raised")
+                    summary_error = summary_exc
+
+                if self._summary_generation_id(summary_path) in (
+                    None,
+                    previous_generation,
+                ):
+                    refresh_error = TraceMLFinalizationError(
+                        "Final summary was not refreshed at end of run."
+                    )
+                    if summary_error is not None:
+                        raise refresh_error from summary_error
+                    raise refresh_error
+
+                if summary_error is not None:
                     warning_payload = self._add_generate_summary_warning(
-                        warning_payload, summary_exc
+                        warning_payload,
+                        summary_error,
                     )
 
             if (
@@ -433,10 +449,9 @@ class TraceMLAggregator:
     ) -> Optional[dict[str, Any]]:
         """Record a nonfatal post-write summary-generation error.
 
-        Reached only when ``final_summary.json`` already exists (the
-        missing-file gate handles the fatal, no-artifact case), so a
-        render/print error after the write did not cost the artifact and must
-        not fail the run.
+        Reached only after verifying that ``final_summary.json`` has a new
+        generation marker, so a later render/print error did not cost the
+        artifact and must not fail the run.
         """
         if warning_payload is None:
             warning_payload = {
@@ -450,6 +465,17 @@ class TraceMLAggregator:
             }
         warning_payload["generate_summary_error"] = str(exc)
         return warning_payload
+
+    @staticmethod
+    def _summary_generation_id(path: Path) -> Optional[str]:
+        """Return the generation marker from a valid summary artifact."""
+        payload = load_json_or_none(path)
+        if not isinstance(payload, dict):
+            return None
+        generated_at = payload.get("generated_at")
+        if not isinstance(generated_at, str) or not generated_at.strip():
+            return None
+        return generated_at
 
     def _finished_ranks_snapshot(self) -> List[int]:
         """Return a sorted snapshot of finished global ranks (lock-safe).

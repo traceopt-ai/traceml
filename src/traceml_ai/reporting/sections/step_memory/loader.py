@@ -14,9 +14,7 @@ from typing import Dict, Optional
 
 from traceml_ai.renderers.step_memory.common import load_gpu_total_bytes
 from traceml_ai.renderers.step_memory.schema import StepMemoryCombinedMetric
-from traceml_ai.reporting.config import normalize_summary_window_rows
 from traceml_ai.reporting.sections.step_memory.model import (
-    MAX_SUMMARY_WINDOW_ROWS,
     StepMemoryAlignedWindow,
     StepMemoryGlobalRankIdentity,
     StepMemoryGlobalRankSummary,
@@ -95,14 +93,34 @@ def _load_global_ranks_seen(conn: sqlite3.Connection) -> int:
     return int(row[0] or 0) if row else 0
 
 
-def _load_recent_candidate_rows(
+def _load_candidate_rows(
     conn: sqlite3.Connection,
     *,
-    max_candidate_steps_per_rank: int,
+    start_step: Optional[int] = None,
+    end_step: Optional[int] = None,
+    start_ts_s: Optional[float] = None,
+    end_ts_s: Optional[float] = None,
 ) -> Dict[int, Dict[int, _StepMemoryCandidateRow]]:
-    """Load recent complete memory rows, deduped by `(global_rank, step)`."""
+    """Load complete memory rows, deduped by `(global_rank, step)`."""
+    predicates = []
+    params: list[float | int] = []
+    if start_step is not None:
+        predicates.append("step >= ?")
+        params.append(int(start_step))
+    if end_step is not None:
+        predicates.append("step <= ?")
+        params.append(int(end_step))
+    if start_step is None and start_ts_s is not None:
+        predicates.append("sample_ts_s >= ?")
+        params.append(float(start_ts_s))
+    if end_step is None and end_ts_s is not None:
+        predicates.append("sample_ts_s <= ?")
+        params.append(float(end_ts_s))
+    step_filter = (
+        "\n              AND " + " AND ".join(predicates) if predicates else ""
+    )
     rows = conn.execute(
-        """
+        f"""
         WITH latest_per_step AS (
             SELECT
                 global_rank,
@@ -125,16 +143,7 @@ def _load_recent_candidate_rows(
               AND step IS NOT NULL
               AND peak_alloc_bytes IS NOT NULL
               AND peak_reserved_bytes IS NOT NULL
-        ),
-        recent_per_rank AS (
-            SELECT
-                *,
-                ROW_NUMBER() OVER (
-                    PARTITION BY global_rank
-                    ORDER BY step DESC, id DESC
-                ) AS recent_row
-            FROM latest_per_step
-            WHERE duplicate_row = 1
+              {step_filter}
         )
         SELECT
             global_rank,
@@ -147,11 +156,11 @@ def _load_recent_candidate_rows(
             device,
             peak_alloc_bytes,
             peak_reserved_bytes
-        FROM recent_per_rank
-        WHERE recent_row <= ?
+        FROM latest_per_step
+        WHERE duplicate_row = 1
         ORDER BY global_rank ASC, step ASC;
         """,
-        (int(max_candidate_steps_per_rank),),
+        params,
     ).fetchall()
 
     candidates: Dict[int, Dict[int, _StepMemoryCandidateRow]] = {}
@@ -187,24 +196,28 @@ def _load_recent_candidate_rows(
 def _build_aligned_window(
     conn: sqlite3.Connection,
     *,
-    window_size: int,
+    start_step: Optional[int] = None,
+    end_step: Optional[int] = None,
+    start_ts_s: Optional[float] = None,
+    end_ts_s: Optional[float] = None,
 ) -> StepMemoryAlignedWindow:
-    """Build the latest common step-memory window across global ranks."""
+    """Build the complete common step-memory history across global ranks."""
     global_ranks_seen = _load_global_ranks_seen(conn)
-    candidate_limit = max(int(window_size) * 20, int(window_size) + 1)
-    candidates = _load_recent_candidate_rows(
+    candidates = _load_candidate_rows(
         conn,
-        max_candidate_steps_per_rank=candidate_limit,
+        start_step=start_step,
+        end_step=end_step,
+        start_ts_s=start_ts_s,
+        end_ts_s=end_ts_s,
     )
-    common_steps = common_suffix_steps(candidates, max_rows=window_size)
+    common_steps = common_suffix_steps(candidates)
     if not common_steps:
         return StepMemoryAlignedWindow(
             steps=(),
             per_global_rank={},
-            window_size=int(window_size),
+            window_size=0,
             global_ranks_seen=global_ranks_seen,
         )
-
     per_global_rank: Dict[int, StepMemoryRankWindow] = {}
     for global_rank, step_rows in sorted(candidates.items()):
         aligned_rows = {
@@ -228,7 +241,7 @@ def _build_aligned_window(
     return StepMemoryAlignedWindow(
         steps=tuple(int(step) for step in common_steps),
         per_global_rank=per_global_rank,
-        window_size=int(window_size),
+        window_size=len(common_steps),
         global_ranks_seen=global_ranks_seen,
     )
 
@@ -236,12 +249,14 @@ def _build_aligned_window(
 def load_step_memory_section_data(
     db_path: str,
     *,
-    window_size: int = MAX_SUMMARY_WINDOW_ROWS,
+    start_step: Optional[int] = None,
+    end_step: Optional[int] = None,
+    start_ts_s: Optional[float] = None,
+    end_ts_s: Optional[float] = None,
 ) -> StepMemorySectionData:
     """
     Load bounded step-memory section data from the SQLite history database.
     """
-    bounded_window = normalize_summary_window_rows(window_size)
     conn = sqlite3.connect(db_path)
 
     try:
@@ -255,7 +270,10 @@ def load_step_memory_section_data(
 
         aligned_window = _build_aligned_window(
             conn,
-            window_size=bounded_window,
+            start_step=start_step,
+            end_step=end_step,
+            start_ts_s=start_ts_s,
+            end_ts_s=end_ts_s,
         )
         metrics = sorted(
             build_combined_metrics_from_window(aligned_window),

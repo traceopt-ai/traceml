@@ -28,6 +28,7 @@ from traceml_ai.launcher.launch_config import (
 from traceml_ai.launcher.manifest import (
     collect_existing_artifacts,
     update_run_manifest,
+    utc_now_iso,
     write_code_manifest,
     write_run_manifest,
 )
@@ -42,7 +43,6 @@ from traceml_ai.launcher.process import (
     terminate_process_group,
     wait_for_tcp_listen,
 )
-from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 from traceml_ai.runtime.launch_context import LaunchContext
 from traceml_ai.runtime.session import get_session_id
 from traceml_ai.runtime.settings import (
@@ -289,10 +289,6 @@ def validate_launch_args(args: argparse.Namespace) -> None:
             "[TraceML] ERROR: --html-report requires history. "
             "Remove --no-history to enable HTML report generation."
         )
-    if int(getattr(args, "summary_window_rows", 1)) <= 0:
-        raise SystemExit(
-            "[TraceML] ERROR: --summary-window-rows must be greater than 0."
-        )
     finalize_timeout_sec = getattr(args, "finalize_timeout_sec", None)
     if finalize_timeout_sec is not None and float(finalize_timeout_sec) <= 0.0:
         raise SystemExit(
@@ -362,6 +358,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         "enable_logging": args.enable_logging,
         "logs_dir": args.logs_dir,
         "history_enabled": (False if args.no_history else None),
+        "history_retention": getattr(args, "history_retention", None),
         "finalize_timeout_sec": args.finalize_timeout_sec,
         "dashboard_port": args.dashboard_port,
         "dashboard_auto_open": (
@@ -422,9 +419,6 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     env["TRACEML_DASHBOARD_AUTO_OPEN"] = (
         "1" if cfg["dashboard_auto_open"] else "0"
     )
-    env["TRACEML_SUMMARY_WINDOW_ROWS"] = str(
-        int(getattr(args, "summary_window_rows", DEFAULT_SUMMARY_WINDOW_ROWS))
-    )
     env["TRACEML_FINALIZE_TIMEOUT_SEC"] = str(
         float(cfg["finalize_timeout_sec"])
     )
@@ -441,6 +435,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     env["TRACEML_MASTER_ADDR"] = torchrun_cfg.master_addr
     env["TRACEML_MASTER_PORT"] = str(torchrun_cfg.master_port)
     env["TRACEML_HISTORY_ENABLED"] = "1" if cfg["history_enabled"] else "0"
+    env["TRACEML_HISTORY_RETENTION"] = str(float(cfg["history_retention"]))
     env["TRACEML_HTML_REPORT"] = (
         "1" if getattr(args, "html_report", False) else "0"
     )
@@ -476,7 +471,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         master_port=torchrun_cfg.master_port,
         nproc_per_node=torchrun_cfg.nproc_per_node,
         history_enabled=cfg["history_enabled"],
-        summary_window_rows=int(env["TRACEML_SUMMARY_WINDOW_ROWS"]),
+        history_retention_s=float(cfg["history_retention"]),
         finalize_timeout_sec=float(env["TRACEML_FINALIZE_TIMEOUT_SEC"]),
         status="starting",
         launch_cwd=execution_cwd,
@@ -564,6 +559,11 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         cwd=execution_cwd,
         capture_stderr=capture_stderr,
     )
+    if owns_aggregator:
+        update_run_manifest(
+            manifest_path,
+            extra={"lifecycle": {"training_started_at": utc_now_iso()}},
+        )
     stderr_capture = (
         start_stderr_tail_capture(train_proc) if capture_stderr else None
     )
@@ -573,6 +573,11 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     while True:
         train_rc = train_proc.poll()
         if train_rc is not None:
+            if owns_aggregator:
+                update_run_manifest(
+                    manifest_path,
+                    extra={"lifecycle": {"training_ended_at": utc_now_iso()}},
+                )
             _finish_stderr_capture(stderr_capture, session_root)
             if agg_proc is not None:
                 print(
@@ -677,6 +682,7 @@ def _resolve_serve_settings(args: argparse.Namespace):
         "interval": args.interval,
         "enable_logging": args.enable_logging,
         "logs_dir": args.logs_dir,
+        "history_retention": getattr(args, "history_retention", None),
     }
     cfg = resolve_config(
         cli_overrides=cli_overrides,
@@ -719,6 +725,7 @@ def _resolve_serve_settings(args: argparse.Namespace):
         enable_logging=bool(cfg["enable_logging"]),
         logs_dir=str(cfg["logs_dir"]),
         history_enabled=bool(cfg["history_enabled"]),
+        history_retention_s=float(cfg["history_retention"]),
         dashboard_port=int(cfg["dashboard_port"]),
         dashboard_auto_open=bool(cfg["dashboard_auto_open"]),
         finalize_timeout_sec=float(cfg["finalize_timeout_sec"]),

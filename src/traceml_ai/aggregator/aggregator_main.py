@@ -36,7 +36,6 @@ from pathlib import Path
 from typing import Any, Optional
 
 from traceml_ai.loggers.error_log import get_error_logger, setup_error_logger
-from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 from traceml_ai.runtime.lifecycle import start_aggregator
 from traceml_ai.runtime.settings import (
     DEFAULT_FINALIZE_TIMEOUT_SEC,
@@ -44,6 +43,10 @@ from traceml_ai.runtime.settings import (
     DEFAULT_UI_MODE,
     AggregatorTransportSettings,
     TraceMLSettings,
+)
+from traceml_ai.telemetry.retention import (
+    DEFAULT_HISTORY_RETENTION_S,
+    parse_history_retention,
 )
 
 AGGREGATOR_ERROR_LOG_NAME = "aggregator_error.log"
@@ -138,6 +141,12 @@ def read_traceml_env() -> dict[str, Any]:
         "session_id": os.environ.get("TRACEML_SESSION_ID", ""),
         "history_enabled": os.environ.get("TRACEML_HISTORY_ENABLED", "1")
         == "1",
+        "history_retention_s": parse_history_retention(
+            os.environ.get(
+                "TRACEML_HISTORY_RETENTION",
+                str(DEFAULT_HISTORY_RETENTION_S),
+            )
+        ),
         "finalize_timeout_sec": float(
             os.environ.get(
                 "TRACEML_FINALIZE_TIMEOUT_SEC",
@@ -146,12 +155,6 @@ def read_traceml_env() -> dict[str, Any]:
         ),
         "expected_world_size": int(
             os.environ.get("TRACEML_EXPECTED_WORLD_SIZE", "1")
-        ),
-        "summary_window_rows": int(
-            os.environ.get(
-                "TRACEML_SUMMARY_WINDOW_ROWS",
-                str(DEFAULT_SUMMARY_WINDOW_ROWS),
-            )
         ),
         "html_report": os.environ.get("TRACEML_HTML_REPORT", "0") == "1",
     }
@@ -308,7 +311,7 @@ def main() -> None:
         dashboard_auto_open=bool(cfg["dashboard_auto_open"]),
         session_id=str(cfg["session_id"] or "default"),
         history_enabled=bool(cfg["history_enabled"]),
-        summary_window_rows=int(cfg["summary_window_rows"]),
+        history_retention_s=float(cfg["history_retention_s"]),
         html_report=bool(cfg["html_report"]),
         finalize_timeout_sec=float(cfg["finalize_timeout_sec"]),
         expected_world_size=int(cfg["expected_world_size"]),

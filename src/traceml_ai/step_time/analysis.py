@@ -104,7 +104,7 @@ class StepTimeAnalyzer:
         self,
         snapshot: StepTimeRepositorySnapshot,
         *,
-        window_size: int,
+        window_size: Optional[int],
     ) -> StepTimeWindow:
         """Analyze a bounded source snapshot without mutating source facts."""
         declared_ranks = {int(rank) for rank in snapshot.global_ranks}
@@ -114,10 +114,18 @@ class StepTimeAnalyzer:
                 or {int(row.global_rank) for row in snapshot.rows}
             )
         )
-        limit = max(1, int(window_size))
-
         # Phase 1: index references to flat rows and align one common suffix.
         row_index, steps_by_rank = _index_source_rows(snapshot.rows)
+        common_count = (
+            len(set.intersection(*steps_by_rank.values()))
+            if steps_by_rank
+            else 0
+        )
+        limit = (
+            max(1, int(window_size))
+            if window_size is not None
+            else max(1, common_count)
+        )
         steps = _common_suffix(steps_by_rank, limit)
         if not steps:
             return StepTimeWindow(
