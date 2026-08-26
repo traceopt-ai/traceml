@@ -6,10 +6,12 @@ from traceml_ai.telemetry_export.records import (
     ExportRecord,
     RecordKind,
 )
+from traceml_ai.telemetry_export.window import WindowProcessor
 
 __all__ = [
     "SCHEMA_VERSION",
     "ExportRecord",
     "ExportRecordMapper",
     "RecordKind",
+    "WindowProcessor",
 ]

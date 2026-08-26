@@ -45,16 +45,21 @@ def test_otlp_adapter_uses_sdk_batch_processor_and_both_timestamps(
     )
 
     from traceml_ai.telemetry_export.otlp import OtlpLogPipeline
+    from traceml_ai.telemetry_export.window import WindowProcessor
 
     pipeline = OtlpLogPipeline(
         protocol="http/protobuf",
         shutdown_timeout_sec=1.0,
+        window_processor=WindowProcessor(
+            step_window=1,
+            time_window_sec=1,
+        ),
     )
     pipeline.start()
     pipeline.enqueue(
         [
             ExportRecord(
-                kind=RecordKind.STEP_MEMORY,
+                kind=RecordKind.STEP_MEMORY_WINDOW,
                 timestamp_unix_ns=10,
                 observed_timestamp_unix_ns=20,
                 resource={
@@ -64,6 +69,7 @@ def test_otlp_adapter_uses_sdk_batch_processor_and_both_timestamps(
                 },
                 data={
                     "step_number": 3,
+                    "device": "cuda:0",
                     "peak_allocated_bytes": 100,
                 },
             )
@@ -75,10 +81,24 @@ def test_otlp_adapter_uses_sdk_batch_processor_and_both_timestamps(
     readable = exporter.batches[0][0]
     assert readable.log_record.timestamp == 10
     assert readable.log_record.observed_timestamp == 20
-    assert readable.log_record.event_name == "traceml.step_memory.v1"
+    assert readable.log_record.event_name == "traceml.step_memory_window.v1"
     assert readable.log_record.body == {
-        "step_number": 3,
-        "peak_allocated_bytes": 100,
+        "start_step": 3,
+        "end_step": 3,
+        "step_count": 1,
+        "start_time_unix_ns": 10,
+        "end_time_unix_ns": 10,
+        "devices": [
+            {
+                "device": "cuda:0",
+                "peak_allocated_bytes": {
+                    "count": 1,
+                    "sum": 100.0,
+                    "min": 100.0,
+                    "max": 100.0,
+                },
+            }
+        ],
     }
     assert readable.log_record.attributes == {"traceml.schema.version": 1}
     assert readable.resource.attributes["service.name"] == "trainer"

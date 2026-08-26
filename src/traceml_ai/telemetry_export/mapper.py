@@ -21,10 +21,10 @@ from traceml_ai.telemetry.envelope import (
 from traceml_ai.telemetry_export.records import ExportRecord, RecordKind
 
 _SAMPLER_KINDS = {
-    "StepTimeSampler": RecordKind.STEP_TIMING,
-    "StepMemorySampler": RecordKind.STEP_MEMORY,
-    "ProcessSampler": RecordKind.PROCESS_SAMPLE,
-    "SystemSampler": RecordKind.SYSTEM_SAMPLE,
+    "StepTimeSampler": RecordKind.STEP_TIMING_WINDOW,
+    "StepMemorySampler": RecordKind.STEP_MEMORY_WINDOW,
+    "ProcessSampler": RecordKind.PROCESS_WINDOW,
+    "SystemSampler": RecordKind.SYSTEM_WINDOW,
     "RuntimeEnvironmentSampler": RecordKind.RUNTIME_CONTEXT,
 }
 
@@ -165,7 +165,7 @@ class ExportRecordMapper:
     def _row_timestamp(
         kind: RecordKind, row: Mapping[str, Any]
     ) -> Optional[int]:
-        key = "timestamp" if kind is RecordKind.STEP_TIMING else "ts"
+        key = "timestamp" if kind is RecordKind.STEP_TIMING_WINDOW else "ts"
         return _seconds_to_unix_ns(row.get(key))
 
     def _map_row(
@@ -173,13 +173,13 @@ class ExportRecordMapper:
         kind: RecordKind,
         row: Mapping[str, Any],
     ) -> Optional[dict[str, Any]]:
-        if kind is RecordKind.STEP_TIMING:
+        if kind is RecordKind.STEP_TIMING_WINDOW:
             return self._step_timing(row)
-        if kind is RecordKind.STEP_MEMORY:
+        if kind is RecordKind.STEP_MEMORY_WINDOW:
             return self._step_memory(row)
-        if kind is RecordKind.PROCESS_SAMPLE:
+        if kind is RecordKind.PROCESS_WINDOW:
             return self._process_sample(row)
-        if kind is RecordKind.SYSTEM_SAMPLE:
+        if kind is RecordKind.SYSTEM_WINDOW:
             return self._system_sample(row)
         if kind is RecordKind.RUNTIME_CONTEXT:
             return self._runtime_context(row)

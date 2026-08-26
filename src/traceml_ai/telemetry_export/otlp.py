@@ -19,6 +19,7 @@ from typing import Any, Optional, Sequence
 
 from traceml_ai import __version__
 from traceml_ai.telemetry_export.records import ExportRecord
+from traceml_ai.telemetry_export.window import WindowProcessor
 
 _HTTP_PROTOCOLS = frozenset({"http/protobuf", "http"})
 _GRPC_PROTOCOLS = frozenset({"grpc"})
@@ -53,13 +54,15 @@ def _configured_protocol() -> str:
 
 
 class OtlpLogPipeline:
-    """Adapt normalized TraceML records to the official OTLP batch processor."""
+    """Aggregate records and adapt them to the official OTLP processor."""
 
     def __init__(
         self,
         *,
         protocol: Optional[str] = None,
         shutdown_timeout_sec: Optional[float] = None,
+        window_processor: Optional[WindowProcessor] = None,
+        logger: Optional[Any] = None,
     ) -> None:
         # Imports stay local so the default TraceML installation has no
         # OpenTelemetry import or dependency requirement.
@@ -98,6 +101,9 @@ class OtlpLogPipeline:
         self._processor: Optional[Any] = None
         self._lock = threading.Lock()
         self._stopped = False
+        self._windows = window_processor or WindowProcessor.from_env(
+            logger=logger
+        )
         configured_timeout = (
             _env_float(
                 "TRACEML_OTLP_SHUTDOWN_TIMEOUT_SEC",
@@ -123,16 +129,15 @@ class OtlpLogPipeline:
             self._processor = self._processor_type(self._exporter)
 
     def enqueue(self, records: Sequence[ExportRecord]) -> None:
-        """Hand records to the SDK's non-blocking bounded queue."""
+        """Aggregate source records and queue newly completed windows."""
         if not records:
             return
         with self._lock:
             processor = self._processor
-            stopped = self._stopped
-        if processor is None or stopped:
-            return
-        for record in records:
-            processor.on_emit(self._to_read_write(record))
+            if processor is None or self._stopped:
+                return
+            for record in self._windows.process(records):
+                processor.on_emit(self._to_read_write(record))
 
     def stop(self, timeout_sec: Optional[float] = None) -> None:
         """Shut down the SDK processor within the aggregator's drain budget."""
@@ -144,8 +149,13 @@ class OtlpLogPipeline:
         with self._lock:
             if self._stopped:
                 return
-            self._stopped = True
             processor = self._processor
+            if processor is not None:
+                for record in self._windows.flush():
+                    processor.on_emit(self._to_read_write(record))
+            else:
+                self._windows.flush()
+            self._stopped = True
 
         # BatchLogRecordProcessor owns all draining and exporter shutdown, but
         # its public shutdown method has no timeout argument. Run that official
@@ -196,7 +206,7 @@ def build_otlp_pipeline(
         return None
 
     try:
-        return OtlpLogPipeline()
+        return OtlpLogPipeline(logger=logger)
     except ModuleNotFoundError as exc:
         log = getattr(logger, "warning", None)
         if callable(log):

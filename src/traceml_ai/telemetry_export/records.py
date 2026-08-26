@@ -18,20 +18,21 @@ SCHEMA_VERSION = 1
 class RecordKind(str, Enum):
     """Stable record kinds in the version-one export contract."""
 
-    STEP_TIMING = "step_timing"
-    STEP_MEMORY = "step_memory"
-    PROCESS_SAMPLE = "process_sample"
-    SYSTEM_SAMPLE = "system_sample"
+    STEP_TIMING_WINDOW = "step_timing_window"
+    STEP_MEMORY_WINDOW = "step_memory_window"
+    PROCESS_WINDOW = "process_window"
+    SYSTEM_WINDOW = "system_window"
     RUNTIME_CONTEXT = "runtime_context"
 
 
 @dataclass(frozen=True)
 class ExportRecord:
-    """One source measurement ready for JSONL or OTLP serialization.
+    """One normalized record moving through the external export path.
 
     ``timestamp_unix_ns`` is the time the source measurement occurred.
     ``observed_timestamp_unix_ns`` is when the aggregator observed it. Neither
-    value describes exporter send time.
+    value describes exporter send time. The window processor combines source
+    measurements before records reach OTLP serialization.
     """
 
     kind: RecordKind

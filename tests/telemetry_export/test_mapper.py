@@ -70,7 +70,7 @@ def test_step_timing_preserves_source_clocks_devices_and_custom_events() -> (
 
     assert len(records) == 1
     record = records[0]
-    assert record.kind is RecordKind.STEP_TIMING
+    assert record.kind is RecordKind.STEP_TIMING_WINDOW
     assert record.timestamp_unix_ns == 123_250_000_000
     assert record.observed_timestamp_unix_ns == 999
     assert record.resource == {
@@ -126,7 +126,7 @@ def test_step_memory_uses_source_timestamp_and_does_not_invent_values() -> (
         observed_timestamp_unix_ns=11,
     )[0]
 
-    assert record.kind is RecordKind.STEP_MEMORY
+    assert record.kind is RecordKind.STEP_MEMORY_WINDOW
     assert record.timestamp_unix_ns == 10_500_000_000
     assert record.data == {"step_number": 9, "device": "cpu"}
 
@@ -167,8 +167,8 @@ def test_process_and_system_samples_keep_independent_timestamps() -> None:
     )
 
     assert [record.kind for record in records] == [
-        RecordKind.PROCESS_SAMPLE,
-        RecordKind.SYSTEM_SAMPLE,
+        RecordKind.PROCESS_WINDOW,
+        RecordKind.SYSTEM_WINDOW,
     ]
     assert [record.timestamp_unix_ns for record in records] == [
         20_000_000_000,
