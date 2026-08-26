@@ -393,6 +393,10 @@ def _update_cpu_chart(
     panel["cpu_value"].text = f"{cpu_p50:.0f}%" if cpu_p50 is not None else ""
     span_words = format_span(span)
     if whole_run:
+        # The pair shares one axis (see shared_run_axis), so the label
+        # quotes the shared span; each series' own extent differs by up to
+        # a window and would read as two different runs.
+        run_span = (aligned or (0.0, run_span))[1]
         window = format_window(float(run.get("window_s") or 0.0))
         # The span, never "whole run": history retention (30 min by
         # default since #393) prunes older telemetry on a live run, so a
@@ -609,6 +613,7 @@ def _update_power_chart(
         else "gpu power · per GPU"
     )
     if whole_run:
+        run_span = (aligned or (0.0, run_span))[1]
         window = format_window(float(run[0].get("window_s") or 0.0))
         panel["power_label"].text = f"{head} · {format_span(run_span)}" + (
             f" · average and lowest every {window}" if window else ""
