@@ -345,6 +345,17 @@ class ProcessDashboardComputer:
                 ]
             ),
             "ram_used": _opt_float(newest["ram_used_bytes"]),
+            # Which rank is worst is judged on the window median; the
+            # value shown is still the newest one that rank sent.
+            "ram_used_p50": _median(
+                [
+                    value
+                    for value in (
+                        _opt_float(row["ram_used_bytes"]) for row in rank_rows
+                    )
+                    if value is not None
+                ]
+            ),
             "ram_total": _opt_float(newest["ram_total_bytes"]),
             "gpu_alloc": _median(allocs) if allocs else None,
             "gpu_reserved": (
@@ -378,10 +389,13 @@ class ProcessDashboardComputer:
         }
 
     def _rss_rollup(self, ranks: List[Dict[str, Any]]) -> Dict[str, Any]:
-        values = [rank for rank in ranks if rank["ram_used"] is not None]
+        values = [rank for rank in ranks if rank["ram_used_p50"] is not None]
         if not values:
             return {"used": None, "total": None, "rank": None}
-        worst = max(values, key=lambda rank: rank["ram_used"])
+        # Worst by window MEDIAN, then reported at its newest value: which
+        # rank is worst must not be decided by one sample of a noisy
+        # level, the same reason the allocator's bytes are a median.
+        worst = max(values, key=lambda rank: rank["ram_used_p50"])
         return {
             "used": worst["ram_used"],
             "total": worst["ram_total"],

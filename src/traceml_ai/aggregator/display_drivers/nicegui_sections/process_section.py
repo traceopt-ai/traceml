@@ -399,12 +399,17 @@ def update_process_section(
     cuda = roll.get("cuda", {}) or {}
     has_gpu = bool(data.get("gpu_available") or roll.get("gpu_available"))
 
-    p50 = cpu.get("p50")
+    worst_cpu = cpu.get("worst")
+    worst_cpu_rank = cpu.get("worst_rank")
     panel["tiles"]["cpu"].content = theme.kval(
-        _num(p50, "{:.1f}") if p50 is not None else NA,
-        "%" if p50 is not None else "",
+        _num(worst_cpu, "{:.1f}") if worst_cpu is not None else NA,
+        "%" if worst_cpu is not None else "",
     )
-    panel["subs"]["cpu"].text = "median rank · of host capacity"
+    panel["subs"]["cpu"].text = (
+        f"worst rank · R{int(worst_cpu_rank)} · of host capacity"
+        if worst_cpu_rank is not None
+        else "of host capacity"
+    )
 
     used, rest = format_gb_pair(rss.get("used"), rss.get("total"))
     panel["tiles"]["rss"].content = theme.kval(
@@ -484,7 +489,9 @@ def update_process_section(
                 "necessarily the whole run."
             ),
         )
-    panel["cpu_value"].text = f"{float(p50):.1f}%" if p50 is not None else ""
+    panel["cpu_value"].text = (
+        f"{float(worst_cpu):.1f}%" if worst_cpu is not None else ""
+    )
     worst_used, worst_rest = format_gb_pair(rss.get("used"), None)
     panel["rss_value"].text = (
         f"{worst_used} {worst_rest}".strip() if rss.get("used") else ""

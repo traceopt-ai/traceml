@@ -297,9 +297,10 @@ def test_section_builds_and_updates_without_a_browser() -> None:
     ranks = [_rank(0), _rank(1), _rank(2), _rank(3)]
     update_process_section(panel, _payload(ranks))
 
-    # Levels carry their denominator; the rate carries its estimator.
-    assert "2.1" in panel["tiles"]["cpu"].content
-    assert panel["subs"]["cpu"].text == "median rank · of host capacity"
+    # Levels carry their denominator; the rate leads with the rank that
+    # is worst, which is the one a bottleneck hunt is looking for.
+    assert "2.4" in panel["tiles"]["cpu"].content
+    assert panel["subs"]["cpu"].text == "worst rank · R0 · of host capacity"
     assert "215 GB" in panel["tiles"]["rss"].content
     assert "17.2 GB" in panel["tiles"]["reserved"].content
     assert panel["subs"]["reserved"].text == "least-headroom rank · R0"
@@ -362,7 +363,7 @@ def test_a_cpu_only_host_keeps_every_slot(tmp_path: Any = None) -> None:
     assert panel["tiles"]["alloc"].content == "n/a"
     assert panel["subs"]["reserved"].text == "no GPU"
     # The host-side half of the block still works.
-    assert "2.1" in panel["tiles"]["cpu"].content
+    assert "2.4" in panel["tiles"]["cpu"].content
     assert "215 GB" in panel["tiles"]["rss"].content
     assert len(panel["cpu_chart"].options["series"]) == 2
     # The per-rank rows are about ranks, not GPUs: they stay.
