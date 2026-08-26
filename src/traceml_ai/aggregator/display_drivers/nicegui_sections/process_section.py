@@ -33,9 +33,9 @@ from .theme import (
     format_gb_pair,
     format_span,
     format_window,
-    num as _num,
-    sparkline_svg,
 )
+from .theme import num as _num
+from .theme import sparkline_svg
 
 # One colour per rank, shared by the charts and the rows' chips so a line
 # and a row are recognisably the same rank. Red is not among them: it reads

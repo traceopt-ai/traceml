@@ -23,18 +23,16 @@ from typing import Any, Dict, List, Optional, Tuple
 from nicegui import ui
 
 from . import theme
-from .theme import (  # helpers shared with the Process block
+from .theme import (
     apply_span_axis,
     cpu_axis_max,
     format_gb_pair,
     format_span,
     format_window,
     newest_epoch,
-    num as _num,
-    relative_seconds,
-    shared_run_axis,
-    sparkline_svg,
 )
+from .theme import num as _num
+from .theme import relative_seconds, shared_run_axis, sparkline_svg
 
 # Window-p95 GPU utilisation spread (max - min, percentage points) that
 # automatically opens the per-GPU rows.

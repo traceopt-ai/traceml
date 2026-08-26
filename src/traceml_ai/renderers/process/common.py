@@ -136,13 +136,15 @@ class ProcessMetricsDB:
         Optional[int]
             Latest seq, or None if the table has no seq-bearing rows.
         """
-        row = conn.execute("""
+        row = conn.execute(
+            """
             SELECT seq
             FROM process_samples
             WHERE seq IS NOT NULL
             ORDER BY id DESC
             LIMIT 1;
-            """).fetchone()
+            """
+        ).fetchone()
         if row is None or row["seq"] is None:
             return None
         return int(row["seq"])
@@ -158,14 +160,16 @@ class ProcessMetricsDB:
         dict[int, int]
             Mapping rank -> latest seq for that rank.
         """
-        rows = conn.execute("""
+        rows = conn.execute(
+            """
             SELECT rank, MAX(seq) AS max_seq
             FROM process_samples
             WHERE rank IS NOT NULL
               AND seq IS NOT NULL
             GROUP BY rank
             ORDER BY rank ASC;
-            """).fetchall()
+            """
+        ).fetchall()
 
         out: Dict[int, int] = {}
         for row in rows:
@@ -290,7 +294,8 @@ class ProcessMetricsDB:
         matter. This read is one row per rank and answers "who has ever
         reported, and when did each last speak".
         """
-        return conn.execute("""
+        return conn.execute(
+            """
             SELECT * FROM process_samples
             WHERE id IN (
                 SELECT MAX(id) FROM process_samples
@@ -298,7 +303,8 @@ class ProcessMetricsDB:
                 GROUP BY COALESCE(global_rank, rank)
             )
             ORDER BY COALESCE(global_rank, rank) ASC;
-            """).fetchall()
+            """
+        ).fetchall()
 
     def fetch_rank_run_history(
         self,

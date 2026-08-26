@@ -8,7 +8,7 @@
 
 The behaviours pinned here are the ones real captures broke: a dead rank
 that used to freeze the whole block, teardown rows that blanked the GPU
-tiles on a finished run, and a sawtooth whose newest sample is a trough.
+tiles on a finished run, and a sawtooth caught at its low point.
 """
 
 from __future__ import annotations
@@ -214,7 +214,7 @@ def test_allocated_is_the_window_median_not_the_newest_sample(
     """
 
     def per_tick(rank: int, seq: int) -> Dict[str, Any]:
-        # A steady working set with a peak every fifth step, and a trough
+        # A steady working set with a peak every fifth step, and a dip
         # on the newest sample.
         if seq == 39:
             return {"alloc": 0.02 * GB}
