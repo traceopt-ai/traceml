@@ -476,3 +476,80 @@ def test_the_payload_feeds_the_section_unchanged(tmp_path: Path) -> None:
     assert "R3" in panel["rows_html"].content
     assert len(panel["cpu_chart"].options["series"]) == 4
     assert panel["cpu_label"].text.startswith("process cpu")
+
+
+def test_the_nullable_columns_from_400_read_as_absent(
+    tmp_path: Path,
+) -> None:
+    """#400 lets the sampler write NULL where it once wrote a number.
+
+    `cpu_percent`, `ram_used_bytes`, `ram_total_bytes` and `gpu_available`
+    became nullable on the wire when collection fails, and that PR left
+    the display side deliberately out of scope. Absent must read as
+    absent here: never 0 %, never 0.0 GB, and never a crash.
+    """
+    db = tmp_path / "nulls.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(_SCHEMA)
+    for seq in range(20):
+        for rank in range(2):
+            conn.execute(
+                """
+                INSERT INTO process_samples (
+                    recv_ts_ns, rank, global_rank, node_rank, hostname,
+                    sample_ts_s, seq, cpu_percent, cpu_logical_core_count,
+                    ram_used_bytes, ram_total_bytes, gpu_available,
+                    gpu_device_index, gpu_mem_used_bytes,
+                    gpu_mem_reserved_bytes, gpu_mem_total_bytes
+                ) VALUES (?,?,?,?,?,?,?,NULL,NULL,NULL,NULL,NULL,?,NULL,
+                          NULL,NULL)
+                """,
+                (
+                    int((BASE_TS + seq * 2.0 + 0.2) * 1e9),
+                    rank,
+                    rank,
+                    0,
+                    "host-a",
+                    BASE_TS + seq * 2.0,
+                    seq,
+                    rank,
+                ),
+            )
+    conn.commit()
+    conn.close()
+
+    out = _payload(db)
+    roll = out["rollups"]
+    # The ranks are still there, and every number they could not measure
+    # is None rather than a zero.
+    assert roll["ranks_total"] == 2
+    assert roll["cpu_capacity"] == {
+        "p50": None,
+        "worst": None,
+        "worst_rank": None,
+    }
+    assert roll["rss"] == {"used": None, "total": None, "rank": None}
+    assert roll["cuda"]["reserved"] is None
+    assert roll["reserved_imbalance_pct"] is None
+    assert roll["rows_over"] is False
+    assert out["gpu_available"] is False
+    for rank in roll["ranks"]:
+        assert rank["cpu_capacity"] is None
+        assert rank["ram_used"] is None
+        assert rank["gpu_total"] is None
+
+    # And the section renders it as absence, not as zero.
+    from nicegui import ui
+
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.process_section import (  # noqa: E501
+        build_process_section,
+        update_process_section,
+    )
+
+    with ui.element("div"):
+        panel = build_process_section()
+    update_process_section(panel, out)
+    assert panel["tiles"]["cpu"].content == "n/a"
+    assert panel["tiles"]["rss"].content == "n/a"
+    assert "0.0" not in panel["rows_html"].content
+    assert "n/a" in panel["rows_html"].content
