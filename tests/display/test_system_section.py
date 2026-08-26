@@ -47,7 +47,9 @@ def test_levels_carry_their_denominator() -> None:
     assert format_gb_pair(6.31 * GB, 16.1 * GB) == ("6.3", "/ 16.1 GB")
     assert format_gb_pair(9.0 * GB, 200.0 * GB) == ("9.0", "/ 200 GB")
     assert format_gb_pair(None, 16.1 * GB) == ("n/a", "")
-    assert format_gb_pair(0.47 * GB, None) == ("0.5", "GB")
+    # Sub-gigabyte levels keep two decimals: a real 0.5 GB and a real
+    # 27 MB must not both print as "0.0"/"0.5".
+    assert format_gb_pair(0.47 * GB, None) == ("0.47", "GB")
 
 
 def test_disclosure_text_states_the_range_and_no_verdict() -> None:

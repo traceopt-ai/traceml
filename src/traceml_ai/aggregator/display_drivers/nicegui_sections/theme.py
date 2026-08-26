@@ -711,11 +711,17 @@ def format_span(seconds: Optional[float]) -> str:
 
 
 def format_gb_pair(used_bytes: Any, total_bytes: Any) -> Tuple[str, str]:
-    """A level against its capacity: ('6.3', '/ 16.1 GB')."""
+    """A level against its capacity: ('6.3', '/ 16.1 GB').
+
+    A measured value never renders as "0.0": a trainer process holding
+    27 MB is a real reading, and printing it with one decimal makes it
+    indistinguishable from the marker this module uses for absence.
+    Sub-gigabyte levels keep two decimals instead.
+    """
     used = gb(used_bytes) if used_bytes is not None else None
     if used is None:
         return (NA, "")
-    num = f"{used:.1f}"
+    num = f"{used:.2f}" if 0 < used < 1 else f"{used:.1f}"
     total = gb(total_bytes) if total_bytes is not None else None
     if total is None or total <= 0:
         return (num, "GB")

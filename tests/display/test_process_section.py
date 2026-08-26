@@ -123,6 +123,26 @@ def test_rows_show_absence_never_zero() -> None:
     assert "0.0 GB" not in html
 
 
+def test_a_small_measured_level_never_renders_as_zero() -> None:
+    """27 MB is a reading; "0.0 GB" reads as the absence marker.
+
+    Caught on a live CPU-only capture, where the trainer process held
+    25 to 404 MiB and the tile printed 0.0.
+    """
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.theme import (
+        format_gb_pair,
+    )
+
+    used, rest = format_gb_pair(27 * 1024**2, 17.2 * 10**9)
+    assert used == "0.03"
+    assert used != "0.0"
+    assert rest == "/ 17.2 GB"
+    # Absence still reads as absence.
+    assert format_gb_pair(None, None)[0] == "n/a"
+    # Whole gigabytes keep one decimal, as every other tile shows them.
+    assert format_gb_pair(6.3 * 10**9, 16.1 * 10**9) == ("6.3", "/ 16.1 GB")
+
+
 def test_rows_carry_a_trend_per_rank() -> None:
     series = [
         {"global_rank": 0, "t": [1.0, 2.0, 3.0], "avg": [2.0, 2.4, 2.1]},
