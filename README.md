@@ -55,7 +55,7 @@ At the end of a run, it gives you:
 |                         avg                                   ||                       avg                                                               |
 |  CPU                    18%                                   ||  CPU capacity         14%                                                               |
 |  RAM used               6.2 GB (19%)                          ||  RSS used             3.1 GB (10%)                                                      |
-|  GPU util               24%                                   ||  CUDA used            2.9 GB                                                            |
+|  GPU util               24%                                   ||  CUDA allocated       2.9 GB                                                            |
 |  GPU memory/device      3.3 GB (21%)                          ||  CUDA reserved        3.2 GB (20%)                                                      |
 |  GPU temperature        42C                                   ||                                                                                         |
 |  GPU power              58W                                   ||                                                                                         |
@@ -143,7 +143,7 @@ No training script ready? [Try the Colab example](https://colab.research.google.
 |                         avg                                   ||                       avg                                                               |
 |  CPU                    18%                                   ||  CPU capacity         14%                                                               |
 |  RAM used               6.2 GB (19%)                          ||  RSS used             3.1 GB (10%)                                                      |
-|  GPU util               24%                                   ||  CUDA used            2.9 GB                                                            |
+|  GPU util               24%                                   ||  CUDA allocated       2.9 GB                                                            |
 |  GPU memory/device      3.3 GB (21%)                          ||  CUDA reserved        3.2 GB (20%)                                                      |
 |  GPU temperature        42C                                   ||                                                                                         |
 |  GPU power              58W                                   ||                                                                                         |
@@ -186,7 +186,7 @@ No training script ready? [Try the Colab example](https://colab.research.google.
 |                         median node avg   worst node avg      ||                       median rank avg   worst rank avg                                  |
 |  CPU                    18%               26%, N1             ||  CPU capacity         12%               81%, R2/N1                                      |
 |  RAM used               16.0 GB (27%)     20.8 GB (35%), N1   ||  RSS used             3.1 GB (10%)      5.4 GB (17%), R1/N0                             |
-|  GPU util               9%                9%, N1              ||  CUDA used            2.9 GB            4.6 GB, R3/N1                                   |
+|  GPU util               9%                9%, N1              ||  CUDA allocated       2.9 GB            4.6 GB, R3/N1                                   |
 |  GPU memory/device      5.0 GB (31%)      7.0 GB (44%), N1    ||  CUDA reserved        3.2 GB (20%)      6.8 GB (43%), R3/N1                             |
 |  GPU temperature        58C               70C, N1             ||                                                                                         |
 |  GPU power              220W              280W, N1            ||                                                                                         |
