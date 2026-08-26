@@ -8,8 +8,8 @@ already-resolved TRACEML_* env vars and never read this file.
 
 Scope: this loader governs the UI/telemetry settings that have no dedicated
 launch-config owner. Distributed and run-identity settings (nproc/nnodes,
-node rank, master + aggregator addresses, run name/session id, summary window,
-trace step cap) are configured through CLI flags and the typed launch configs
+node rank, master + aggregator addresses, run name/session id, and trace step
+cap) are configured through CLI flags and the typed launch configs
 in ``traceml_ai.launcher.launch_config``.
 """
 
@@ -24,6 +24,10 @@ from traceml_ai.runtime.settings import (
     DEFAULT_FINALIZE_TIMEOUT_SEC,
     DEFAULT_INTERVAL_SEC,
     DEFAULT_UI_MODE,
+)
+from traceml_ai.telemetry.retention import (
+    DEFAULT_HISTORY_RETENTION_S,
+    parse_history_retention,
 )
 
 _log = logging.getLogger(__name__)
@@ -43,6 +47,7 @@ YAML_KEY_SCHEMA: dict[str, tuple[str, type]] = {
     "enable_logging": ("TRACEML_ENABLE_LOGGING", bool),
     "logs_dir": ("TRACEML_LOGS_DIR", str),
     "history_enabled": ("TRACEML_HISTORY_ENABLED", bool),
+    "history_retention": ("TRACEML_HISTORY_RETENTION", float),
     "finalize_timeout_sec": ("TRACEML_FINALIZE_TIMEOUT_SEC", float),
     "dashboard_port": ("TRACEML_DASHBOARD_PORT", int),
     "dashboard_auto_open": ("TRACEML_DASHBOARD_AUTO_OPEN", bool),
@@ -55,6 +60,7 @@ BUILT_IN_DEFAULTS: dict[str, Any] = {
     "enable_logging": False,
     "logs_dir": "./logs",
     "history_enabled": True,
+    "history_retention": DEFAULT_HISTORY_RETENTION_S,
     "finalize_timeout_sec": DEFAULT_FINALIZE_TIMEOUT_SEC,
     "dashboard_port": 8765,
     "dashboard_auto_open": True,
@@ -130,6 +136,12 @@ def _validate_and_coerce(
     key: str, value: Any, expected_type: type, path: Path
 ) -> Any:
     """Coerce value to the expected type or raise ValueError."""
+    if key == "history_retention":
+        try:
+            return parse_history_retention(value)
+        except ValueError as exc:
+            raise ValueError(f"[TraceML] {path}: {exc}") from None
+
     if expected_type is bool:
         if isinstance(value, bool):
             return value
@@ -177,6 +189,13 @@ def _validate_and_coerce(
 def _coerce_env(key: str, raw_env: str) -> Any:
     """Convert a TRACEML_* env var string to the correct Python type."""
     env_var, expected_type = YAML_KEY_SCHEMA[key]
+    if key == "history_retention":
+        try:
+            return parse_history_retention(raw_env)
+        except ValueError as exc:
+            raise ValueError(
+                f"[TraceML] env var {env_var}={raw_env!r}: {exc}"
+            ) from None
     if expected_type is bool:
         return raw_env.strip().lower() in _BOOL_ENV_TRUE
     if expected_type is int:

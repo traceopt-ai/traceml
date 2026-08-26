@@ -18,11 +18,11 @@ from traceml_ai.launcher.commands import (
     run_with_tracing,
     validate_launch_args,
 )
-from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 from traceml_ai.runtime.settings import (
     DEFAULT_FINALIZE_TIMEOUT_SEC,
     DEFAULT_INTERVAL_SEC,
 )
+from traceml_ai.telemetry.retention import parse_history_retention
 
 
 def _add_launch_args(parser: argparse.ArgumentParser) -> None:
@@ -108,13 +108,14 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
-        "--summary-window-rows",
-        type=int,
-        default=DEFAULT_SUMMARY_WINDOW_ROWS,
+        "--history-retention",
+        type=parse_history_retention,
+        default=None,
+        metavar="DURATION",
         help=(
-            "Rows used per node/rank for final summaries. SQLite retains "
-            "1.5x this value for alignment. Default: "
-            f"{DEFAULT_SUMMARY_WINDOW_ROWS}."
+            "Raw telemetry history available to analysis (for example 30m, "
+            "2h, or 1d). Step Time and Step Memory are pruned through one "
+            "shared aligned step boundary. Default: 30m."
         ),
     )
     parser.add_argument(
@@ -319,6 +320,13 @@ def build_parser() -> argparse.ArgumentParser:
         const=True,
         default=None,
         help="Enable TraceML logging output.",
+    )
+    serve_parser.add_argument(
+        "--history-retention",
+        type=parse_history_retention,
+        default=None,
+        metavar="DURATION",
+        help="Raw telemetry analysis history. Default: 30m.",
     )
     serve_parser.add_argument(
         "--aggregator-host",

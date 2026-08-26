@@ -98,7 +98,7 @@ first-run examples.
 Example hardware comparison run:
 
 ```bash
-traceml run examples/advanced/bert_single_gpu_compare.py --mode=summary --summary-window-rows 300 --run-name bert_l40s_bs32_seq256 --args --model-name bert-large-uncased --batch-size 32 --max-length 256 --max-steps 350 --warmup-steps 50 --num-workers 4 --precision fp16
+traceml run examples/advanced/bert_single_gpu_compare.py --mode=summary --run-name bert_l40s_bs32_seq256 --args --model-name bert-large-uncased --batch-size 32 --max-length 256 --max-steps 350 --warmup-steps 50 --num-workers 4 --precision fp16
 ```
 
 ---

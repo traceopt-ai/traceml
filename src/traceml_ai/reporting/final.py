@@ -11,14 +11,16 @@ from __future__ import annotations
 import json
 import sys
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from traceml_ai.core.summaries import SummaryResult
 from traceml_ai.loggers.error_log import get_error_logger
-from traceml_ai.reporting.config import (
-    DEFAULT_SUMMARY_WINDOW_ROWS,
-    normalize_summary_window_rows,
+from traceml_ai.reporting.analysis_window import (
+    AnalysisWindow,
+    build_analysis_window_payload,
+    resolve_analysis_window,
 )
 from traceml_ai.reporting.primary_diagnosis import build_primary_diagnosis
 from traceml_ai.reporting.schema import empty_section_payload
@@ -40,12 +42,12 @@ from traceml_ai.sdk.protocol import (
     get_final_summary_txt_path,
     utc_now_iso,
 )
+from traceml_ai.telemetry.retention import DEFAULT_HISTORY_RETENTION_S
 from traceml_ai.utils.atomic_io import write_json_atomic, write_text_atomic
 
-# Version of the final_summary.json contract. 1.7 publishes canonical Step
-# Time and Traced Step Time values, including both explicit clock aggregates.
-# A timing signal that was never measured remains null; a measured zero is 0.0.
-SCHEMA_VERSION = 1.7
+# Version 1.8 adds one shared, time-bounded analysis window and per-section
+# observations.
+SCHEMA_VERSION = 1.8
 
 DEFAULT_PROFILE = "run"
 
@@ -73,23 +75,6 @@ class FunctionSummarySection:
             payload=dict(payload or {}),
             text=str((payload or {}).get("card", "")),
         )
-
-
-def _summary_duration_s(*sections: Dict[str, Any]) -> Optional[float]:
-    """Pick the first valid duration from the available sections."""
-    for section in sections:
-        if not isinstance(section, dict):
-            continue
-        value = section.get("duration_s")
-        if value is None:
-            value = section.get("metadata", {}).get("duration_s")
-        if value is None:
-            continue
-        try:
-            return float(value)
-        except Exception:
-            continue
-    return None
 
 
 def _safe_int(value: Any, *, allow_zero: bool = True) -> Optional[int]:
@@ -148,6 +133,30 @@ def _run_name_from_manifest(session_root: Optional[str]) -> Optional[str]:
         if text:
             return text
     return None
+
+
+def _lifecycle_duration_s(session_root: Optional[str]) -> Optional[float]:
+    """Return genuine training duration from launcher lifecycle timestamps."""
+    if not session_root:
+        return None
+    try:
+        with open(
+            Path(session_root).resolve() / "manifest.json",
+            "r",
+            encoding="utf-8",
+        ) as handle:
+            manifest = json.load(handle)
+        if not isinstance(manifest, dict):
+            return None
+        lifecycle = manifest.get("lifecycle")
+        if not isinstance(lifecycle, dict):
+            return None
+        started = datetime.fromisoformat(str(lifecycle["training_started_at"]))
+        ended = datetime.fromisoformat(str(lifecycle["training_ended_at"]))
+        duration = (ended - started).total_seconds()
+        return duration if duration >= 0.0 else None
+    except (KeyError, TypeError, ValueError, OSError, json.JSONDecodeError):
+        return None
 
 
 def _final_meta_mode(sections: Sequence[Dict[str, Any]]) -> str:
@@ -345,6 +354,7 @@ class FinalReportGenerator:
     """
 
     sections: Sequence[SummarySection]
+    analysis_window: Optional[AnalysisWindow] = None
 
     def generate(
         self,
@@ -390,6 +400,12 @@ class FinalReportGenerator:
             results.get("step_memory", SummaryResult("step_memory")).payload
         )
 
+        analysis_window_payload = (
+            build_analysis_window_payload(db_path, self.analysis_window)
+            if self.analysis_window is not None
+            else None
+        )
+
         primary_diagnosis = build_primary_diagnosis(
             system_summary=system_summary,
             process_summary=process_summary,
@@ -400,11 +416,9 @@ class FinalReportGenerator:
         payload: Dict[str, Any] = {
             "schema_version": SCHEMA_VERSION,
             "generated_at": utc_now_iso(),
-            "duration_s": _summary_duration_s(
-                step_time_summary,
-                process_summary,
-                system_summary,
-            ),
+            # Never promote a bounded telemetry interval to full-run duration.
+            "duration_s": _lifecycle_duration_s(session_root),
+            "analysis_window": analysis_window_payload,
             "meta": _build_final_meta(
                 session_root=session_root,
                 system_summary=system_summary,
@@ -430,17 +444,17 @@ class FinalReportGenerator:
 
 def build_final_report_generator(
     *,
-    summary_window_rows: int = DEFAULT_SUMMARY_WINDOW_ROWS,
+    analysis_window: Optional[AnalysisWindow] = None,
 ) -> FinalReportGenerator:
-    """Build a final-report generator with one shared summary window."""
-    row_limit = normalize_summary_window_rows(summary_window_rows)
+    """Build the standard final-report generator."""
     return FinalReportGenerator(
         sections=(
-            SystemSummarySection(max_system_rows=row_limit),
-            ProcessSummarySection(max_process_rows=row_limit),
-            StepTimeSummarySection(max_rows=row_limit),
-            StepMemorySummarySection(window_size=row_limit),
-        )
+            SystemSummarySection(analysis_window=analysis_window),
+            ProcessSummarySection(analysis_window=analysis_window),
+            StepTimeSummarySection(analysis_window=analysis_window),
+            StepMemorySummarySection(analysis_window=analysis_window),
+        ),
+        analysis_window=analysis_window,
     )
 
 
@@ -452,16 +466,22 @@ def build_summary_payload(
     *,
     generator: Optional[FinalReportGenerator] = None,
     session_root: Optional[str] = None,
-    summary_window_rows: int = DEFAULT_SUMMARY_WINDOW_ROWS,
+    history_retention_s: float = DEFAULT_HISTORY_RETENTION_S,
     profile: str = DEFAULT_PROFILE,
     write_html: bool = False,
 ) -> Dict[str, Any]:
     """
     Build the structured final summary payload for one session database.
     """
-    active_generator = generator or build_final_report_generator(
-        summary_window_rows=summary_window_rows,
-    )
+    active_generator = generator
+    if active_generator is None:
+        analysis_window = resolve_analysis_window(
+            db_path,
+            retention_s=history_retention_s,
+        )
+        active_generator = build_final_report_generator(
+            analysis_window=analysis_window,
+        )
     return active_generator.generate(
         db_path,
         session_root=session_root,
@@ -535,7 +555,7 @@ def generate_summary(
     *,
     session_root: Optional[str] = None,
     print_to_stdout: bool = True,
-    summary_window_rows: int = DEFAULT_SUMMARY_WINDOW_ROWS,
+    history_retention_s: float = DEFAULT_HISTORY_RETENTION_S,
     write_html: bool = False,
     profile: str = DEFAULT_PROFILE,
 ) -> Dict[str, Any]:
@@ -548,7 +568,7 @@ def generate_summary(
     payload = build_summary_payload(
         db_path,
         session_root=session_root,
-        summary_window_rows=summary_window_rows,
+        history_retention_s=history_retention_s,
         profile=profile,
         write_html=write_html,
     )

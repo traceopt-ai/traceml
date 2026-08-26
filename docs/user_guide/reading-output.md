@@ -84,8 +84,10 @@ The text summary is intentionally verdict-first:
 For a distributed run, the median rank is the observed rank whose per-rank
 window-average Step Time is closest to the cross-rank median. Every displayed
 phase comes from that selected rank row; TraceML does not combine unrelated
-per-metric medians. System and Process averages cover each section's own
-telemetry observation window; they are not aligned to the Step Time window.
+per-metric medians. The final report resolves one interval from the latest
+optimizer step completed across all observed ranks. System and Process query
+that same timestamp interval, while Step Memory uses the same step bounds.
+Their sample counts can differ because their sampling rates differ.
 Run and Watch share the same 156-column System/Process layout. Run also shows
 Step Timing, Step Memory, and a diagnostic `Verdict`/`Why`/`Next`. Watch omits
 those performance sections and instead points to `trace_step(model)` and
@@ -821,8 +823,8 @@ utilization says the GPU was not fully busy, but it does not prove why.
 
 The end-of-run summary always includes the System status and available core
 CPU, RAM, GPU utilization, GPU memory, temperature, and power measurements.
-These are averages over the System telemetry observation window, not the
-aligned Step Time window. One observed node uses an `avg` column. Multiple
+These are averages over the shared final-report timestamp interval. One
+observed node uses an `avg` column. Multiple
 observed nodes use `median node avg` and `worst node avg` columns, with the
 stored worst node shown per metric. This is a comparison of node averages, not
 peak values over time.
@@ -869,8 +871,9 @@ The end-of-run summary includes the Process status and available CPU capacity,
 RSS, CUDA used, and CUDA reserved measurements. One observed rank uses an
 `avg` column. Multiple observed ranks use `median rank avg` and
 `worst rank avg` columns, with stored worst-rank and node identities shown
-when available. These values cover the Process telemetry observation window;
-they are not step-aligned or temporal peaks.
+when available. These values cover the shared final-report timestamp interval;
+they may have a different sample count from Step Time and are not temporal
+peaks.
 
 For a non-normal status, `Evidence` shows the stored diagnostic trigger—for
 example, peak RSS pressure, CUDA memory pressure, allocator overhang, or

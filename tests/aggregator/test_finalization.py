@@ -113,7 +113,12 @@ def _write_fake_summary(tmp_path: Path):
     path = get_final_summary_json_path(tmp_path / "run")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        json.dumps({"schema_version": "test"}),
+        json.dumps(
+            {
+                "schema_version": "test",
+                "generated_at": str(time.time_ns()),
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -423,6 +428,45 @@ def test_stop_downgrades_post_write_summary_error_to_warning(
         (agg_dir / "finalization_warning.json").read_text(encoding="utf-8")
     )
     assert "post-write render boom" in warning["generate_summary_error"]
+
+
+def test_stop_rejects_stale_summary_when_refresh_fails(
+    monkeypatch,
+    tmp_path,
+):
+    agg = _make_aggregator(
+        tmp_path,
+        writer=_Writer(_ok_result()),
+        tcp=_TCP(),
+    )
+    _write_fake_summary(tmp_path)
+    stale_payload = json.loads(
+        get_final_summary_json_path(tmp_path / "run").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    def _raise_before_write(*args, **kwargs):
+        raise RuntimeError("generation boom")
+
+    monkeypatch.setattr(
+        trace_aggregator,
+        "generate_summary",
+        _raise_before_write,
+    )
+
+    with pytest.raises(
+        TraceMLFinalizationError,
+        match="not refreshed",
+    ):
+        agg.stop(timeout_sec=0.5)
+
+    current_payload = json.loads(
+        get_final_summary_json_path(tmp_path / "run").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert current_payload == stale_payload
 
 
 def test_stop_generates_summary_through_real_writer(tmp_path):

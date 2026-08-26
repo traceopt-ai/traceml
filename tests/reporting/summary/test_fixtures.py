@@ -56,7 +56,6 @@ GLOBAL_WINDOW_KEYS = {
     "start_step",
     "end_step",
     "completed_step",
-    "window_size",
 }
 OPTIONAL_GLOBAL_WINDOW_KEYS = {"diagnosis_clock"}
 
@@ -207,8 +206,8 @@ def test_summary_sections_handle_empty_tables_with_stable_schema(
     sections = (
         SystemSummarySection(),
         ProcessSummarySection(),
-        StepTimeSummarySection(max_rows=4),
-        StepMemorySummarySection(window_size=4),
+        StepTimeSummarySection(),
+        StepMemorySummarySection(),
     )
 
     results = {
@@ -283,10 +282,8 @@ def test_summary_sections_cover_single_rank_gpu_run(tmp_path: Path) -> None:
 
     system = SystemSummarySection().build(str(db_path)).payload
     process = ProcessSummarySection().build(str(db_path)).payload
-    step_time = StepTimeSummarySection(max_rows=4).build(str(db_path)).payload
-    step_memory = (
-        StepMemorySummarySection(window_size=4).build(str(db_path)).payload
-    )
+    step_time = StepTimeSummarySection().build(str(db_path)).payload
+    step_memory = StepMemorySummarySection().build(str(db_path)).payload
 
     assert system["metadata"]["nodes_coverage"] == "1/1"
     assert system["metadata"]["gpus_observed"] == 1
@@ -366,10 +363,8 @@ def test_summary_sections_cover_multi_rank_aligned_run(tmp_path: Path) -> None:
                     local_world_size=1,
                 )
 
-    step_time = StepTimeSummarySection(max_rows=5).build(str(db_path)).payload
-    step_memory = (
-        StepMemorySummarySection(window_size=5).build(str(db_path)).payload
-    )
+    step_time = StepTimeSummarySection().build(str(db_path)).payload
+    step_memory = StepMemorySummarySection().build(str(db_path)).payload
     process = ProcessSummarySection().build(str(db_path)).payload
 
     system = SystemSummarySection().build(str(db_path)).payload
@@ -378,7 +373,7 @@ def test_summary_sections_cover_multi_rank_aligned_run(tmp_path: Path) -> None:
     assert step_time["metadata"]["mode"] == "multi_node"
     assert step_time["metadata"]["global_ranks_seen"] == 2
     assert step_time["global"]["window"]["steps_analyzed"] == 5
-    assert step_time["global"]["window"]["window_size"] == 5
+    assert "window_size" not in step_time["global"]["window"]
     assert "aligned_steps_analyzed" not in step_time["metadata"]
     assert set(step_time["groups"]["rows"]) == {"0", "1"}
     assert step_memory["metadata"]["global_ranks_seen"] == 2
@@ -431,9 +426,7 @@ def test_step_memory_section_reports_no_gpu_without_throwing(
             device=None,
         )
 
-    payload = (
-        StepMemorySummarySection(window_size=4).build(str(db_path)).payload
-    )
+    payload = StepMemorySummarySection().build(str(db_path)).payload
 
     assert payload["metadata"]["training_total_steps"] == 2
     assert payload["diagnosis"]["status"] == "NO GPU"

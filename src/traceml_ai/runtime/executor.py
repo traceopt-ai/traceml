@@ -14,7 +14,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
-from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 from traceml_ai.runtime.launch_context import (
     LaunchContext,
     script_execution_context,
@@ -28,6 +27,10 @@ from traceml_ai.runtime.settings import (
     DEFAULT_UI_MODE,
     AggregatorTransportSettings,
     TraceMLSettings,
+)
+from traceml_ai.telemetry.retention import (
+    DEFAULT_HISTORY_RETENTION_S,
+    parse_history_retention,
 )
 
 INTERRUPTED_EXIT_CODE = 130
@@ -199,16 +202,16 @@ def read_traceml_env() -> Dict[str, Any]:
             )
         ),
         "session_id": os.environ.get("TRACEML_SESSION_ID", ""),
-        "summary_window_rows": int(
-            os.environ.get(
-                "TRACEML_SUMMARY_WINDOW_ROWS",
-                str(DEFAULT_SUMMARY_WINDOW_ROWS),
-            )
-        ),
         "finalize_timeout_sec": float(
             os.environ.get(
                 "TRACEML_FINALIZE_TIMEOUT_SEC",
                 str(DEFAULT_FINALIZE_TIMEOUT_SEC),
+            )
+        ),
+        "history_retention_s": parse_history_retention(
+            os.environ.get(
+                "TRACEML_HISTORY_RETENTION",
+                str(DEFAULT_HISTORY_RETENTION_S),
             )
         ),
         "expected_world_size": int(
@@ -253,9 +256,11 @@ def build_runtime_settings(cfg: Dict[str, Any]) -> TraceMLSettings:
         enable_logging=bool(cfg["enable_logging"]),
         logs_dir=str(cfg["logs_dir"]),
         session_id=str(cfg["session_id"]),
-        summary_window_rows=int(cfg["summary_window_rows"]),
         finalize_timeout_sec=float(
             cfg.get("finalize_timeout_sec", DEFAULT_FINALIZE_TIMEOUT_SEC)
+        ),
+        history_retention_s=float(
+            cfg.get("history_retention_s", DEFAULT_HISTORY_RETENTION_S)
         ),
         expected_world_size=int(cfg.get("expected_world_size", 1)),
         trace_max_steps=cfg.get("trace_max_steps"),

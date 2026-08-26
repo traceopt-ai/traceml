@@ -102,8 +102,8 @@ Read this as:
 The median-rank timing tree is one real rank, not a combination of per-metric
 medians. The `Evidence` lines use stored diagnosis summaries and structured
 scopes; the top-level `Why` line reads the diagnosed culprit and victim values
-from their stored rank rows. System and Process averages cover their own telemetry
-observation windows and are not aligned to these steps.
+from their stored rank rows. System and Process averages use the same final-report
+timestamp interval as these steps, although their periodic sample counts differ.
 
 If the diagnosis is `INPUT-BOUND`, inspect the whole input path. If the
 diagnosis is `INPUT STRAGGLER`, inspect the called-out rank first.

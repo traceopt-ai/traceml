@@ -9,7 +9,6 @@ and publishes a small response file for the requesting process to read.
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 from traceml_ai.reporting.final import generate_summary
 from traceml_ai.sdk.protocol import (
     FinalSummaryResponse,
@@ -21,6 +20,7 @@ from traceml_ai.sdk.protocol import (
     response_to_json,
     utc_now_iso,
 )
+from traceml_ai.telemetry.retention import DEFAULT_HISTORY_RETENTION_S
 from traceml_ai.utils.atomic_io import write_json_atomic
 
 
@@ -36,7 +36,7 @@ class FinalSummaryService:
         db_path: str,
         flush_history: Callable[[float], bool],
         settle_telemetry: Optional[Callable[[float], bool]] = None,
-        summary_window_rows: int = DEFAULT_SUMMARY_WINDOW_ROWS,
+        history_retention_s: float = DEFAULT_HISTORY_RETENTION_S,
         write_html: bool = False,
         profile: str = "run",
     ) -> None:
@@ -45,7 +45,7 @@ class FinalSummaryService:
         self._db_path = str(db_path)
         self._flush_history = flush_history
         self._settle_telemetry = settle_telemetry
-        self._summary_window_rows = int(summary_window_rows)
+        self._history_retention_s = float(history_retention_s)
         self._write_html = bool(write_html)
         self._profile = str(profile)
         self._last_request_id: Optional[str] = None
@@ -87,7 +87,7 @@ class FinalSummaryService:
                 self._db_path,
                 session_root=str(self._session_root),
                 print_to_stdout=False,
-                summary_window_rows=self._summary_window_rows,
+                history_retention_s=self._history_retention_s,
                 write_html=self._write_html,
                 profile=self._profile,
             )

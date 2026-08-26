@@ -180,7 +180,7 @@ class LiveStepTimeSession:
         )
         self.db_path = str(db_path)
         self.request = StepTimeLoadRequest(
-            window_size=max(1, int(selected.window_size)),
+            window_size=max(1, int(selected.window_size or 1)),
             lookback_factor=max(1, int(selected.lookback_factor)),
             rank_filter=(
                 tuple(int(rank) for rank in selected.rank_filter)

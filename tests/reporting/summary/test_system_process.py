@@ -10,6 +10,7 @@ from tests.sqlite_fixtures import (
     summary_database,
 )
 from traceml_ai.reporting.sections.process import ProcessSummarySection
+from traceml_ai.reporting.analysis_window import AnalysisWindow
 from traceml_ai.reporting.sections.process.loader import (
     load_process_section_data,
 )
@@ -169,7 +170,7 @@ def test_system_section_reports_scoped_multinode_primary_issue(tmp_path):
     assert payload["global"]["worst"]["gpu_temp_c"]["idx"] == "1"
 
 
-def test_system_loader_uses_latest_bounded_window(tmp_path):
+def test_system_loader_uses_selected_time_window(tmp_path):
     db_path = tmp_path / "system_latest.db"
     with summary_database(db_path) as conn:
         _seed_system_samples(conn)
@@ -195,7 +196,10 @@ def test_system_loader_uses_latest_bounded_window(tmp_path):
             ),
         )
 
-    data = load_system_section_data(str(db_path), max_system_rows=1)
+    data = load_system_section_data(
+        str(db_path),
+        analysis_window=AnalysisWindow(30.0, start_ts_s=20.0, end_ts_s=20.0),
+    )
 
     assert data.cluster.aggregate.system_samples == 1
     assert data.cluster.aggregate.cpu_avg_percent == 90.0
@@ -203,7 +207,7 @@ def test_system_loader_uses_latest_bounded_window(tmp_path):
     assert data.cluster.nodes["0"].per_gpu[0].util_peak_percent == 80.0
 
 
-def test_system_loader_uses_latest_bounded_window_per_node(tmp_path):
+def test_system_loader_uses_selected_time_window_per_node(tmp_path):
     db_path = tmp_path / "system_latest_per_node.db"
     with summary_database(db_path) as conn:
         _seed_system_samples(conn)
@@ -239,7 +243,10 @@ def test_system_loader_uses_latest_bounded_window_per_node(tmp_path):
                 )
                 row_id += 1
 
-    data = load_system_section_data(str(db_path), max_system_rows=1)
+    data = load_system_section_data(
+        str(db_path),
+        analysis_window=AnalysisWindow(30.0, start_ts_s=12.0, end_ts_s=12.0),
+    )
 
     assert data.cluster.aggregate.system_samples == 2
     assert set(data.cluster.nodes) == {"0", "1"}
@@ -300,12 +307,15 @@ def test_process_section_loader_and_builder_use_sqlite_fixture(tmp_path):
     assert "takeaway" not in result.payload["global"]
 
 
-def test_process_loader_uses_latest_bounded_window(tmp_path):
+def test_process_loader_uses_selected_time_window(tmp_path):
     db_path = tmp_path / "process_latest.db"
     with summary_database(db_path) as conn:
         _seed_process_samples(conn)
 
-    data = load_process_section_data(str(db_path), max_process_rows=1)
+    data = load_process_section_data(
+        str(db_path),
+        analysis_window=AnalysisWindow(30.0, start_ts_s=11.0, end_ts_s=11.0),
+    )
 
     assert data.aggregate.process_samples == 1
     assert data.aggregate.cpu_avg_percent == 40.0

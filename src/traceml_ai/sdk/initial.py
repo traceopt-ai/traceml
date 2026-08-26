@@ -281,7 +281,6 @@ def _resolve_runtime_settings(
         load_yaml_config,
         resolve_config,
     )
-    from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
     from traceml_ai.runtime.session import get_session_id
     from traceml_ai.runtime.settings import (
         AggregatorTransportSettings,
@@ -302,6 +301,7 @@ def _resolve_runtime_settings(
         "interval": interval,
         "enable_logging": enable_logging,
         "logs_dir": logs_dir,
+        "history_retention": None,
     }
     cfg = resolve_config(
         cli_overrides=cli_overrides,
@@ -333,13 +333,8 @@ def _resolve_runtime_settings(
         enable_logging=bool(cfg["enable_logging"]),
         logs_dir=str(cfg["logs_dir"]),
         history_enabled=bool(cfg["history_enabled"]),
+        history_retention_s=float(cfg["history_retention"]),
         session_id=resolved_session,
-        summary_window_rows=int(
-            _env_str(
-                "TRACEML_SUMMARY_WINDOW_ROWS",
-                str(DEFAULT_SUMMARY_WINDOW_ROWS),
-            )
-        ),
         trace_max_steps=trace_max_steps,
         aggregator=AggregatorTransportSettings(
             connect_host=host, bind_host=host, port=port

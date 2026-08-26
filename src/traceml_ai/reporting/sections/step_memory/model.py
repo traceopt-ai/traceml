@@ -17,11 +17,8 @@ from traceml_ai.renderers.step_memory.schema import (
     StepMemoryCombinedSeries,
     StepMemoryCombinedSummary,
 )
-from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 from traceml_ai.reporting.schema import BaseGlobal, GlobalWindow
 from traceml_ai.reporting.topology import topology_mode_from_identities
-
-MAX_SUMMARY_WINDOW_ROWS = DEFAULT_SUMMARY_WINDOW_ROWS
 
 STEP_MEMORY_METRIC_NAMES = [
     "peak_allocated_bytes",
@@ -413,7 +410,6 @@ def build_global_rollup(
             steps_analyzed=primary.summary.steps_used,
             end_step=primary.coverage.completed_step,
             completed_step=primary.coverage.completed_step,
-            window_size=primary.summary.window_size,
         ).to_json(),
         average=_average_memory_by_metric(per_global_rank),
         median=median or _empty_rank_points(),
@@ -444,7 +440,6 @@ def topology_mode(
 
 
 __all__ = [
-    "MAX_SUMMARY_WINDOW_ROWS",
     "STEP_MEMORY_METRIC_NAMES",
     "StepMemoryAlignedWindow",
     "StepMemoryGlobalRankIdentity",
