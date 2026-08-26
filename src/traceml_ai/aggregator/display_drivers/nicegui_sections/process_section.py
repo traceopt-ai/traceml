@@ -156,6 +156,26 @@ def rows_html(
     return f'<table class="tml-gpus">{head}{body}</table>'
 
 
+def drift_axis_bounds(values: List[Any]) -> Tuple[float, float, float]:
+    """A y range that fits the data, for a series whose signal is DRIFT.
+
+    RSS is a level a few GB high that moves by tens of MB across a run.
+    Zero-anchoring it (right for a share of capacity, like CPU) puts that
+    whole movement inside one pixel: measured on the 3-hour capture, the
+    ranks sit at 1.48-1.50 GB on an axis that would run to 5. The leak
+    this chart exists to show would be invisible.
+    """
+    numbers = [float(value) for value in values if value is not None]
+    if not numbers:
+        return (0.0, 1.0, 0.5)
+    low, high = min(numbers), max(numbers)
+    if high <= low:
+        high = low + max(abs(low) * 0.01, 0.01)
+    pad = (high - low) * 0.25
+    low, high = max(0.0, low - pad), high + pad
+    return (low, high, (high - low) / 2.0)
+
+
 def _series_axis(
     *groups: List[Dict[str, Any]],
 ) -> Optional[Tuple[float, float]]:
@@ -318,7 +338,14 @@ def _update_chart(
         for entry in entries
         for value in (entry.get("max") or entry.get(values_key) or [])
     ]
-    chart.options["yAxis"]["max"] = ymax_of(flat)
+    bounds = ymax_of(flat)
+    if isinstance(bounds, tuple):
+        low, high, tick = bounds
+        chart.options["yAxis"]["min"] = low
+        chart.options["yAxis"]["max"] = high
+        chart.options["yAxis"]["interval"] = tick
+    else:
+        chart.options["yAxis"]["max"] = bounds
     chart.update()
     window_s = float((run[0].get("window_s") if run else 0.0) or 0.0)
     words = format_window(window_s)
@@ -435,7 +462,7 @@ def update_process_section(
             window=series.get("rss") or [],
             aligned=aligned,
             scale=float(1024**3),
-            ymax_of=lambda values: theme.nice_ymax(values, floor=1.0),
+            ymax_of=drift_axis_bounds,
             tooltip=(
                 "Host memory held by each rank's trainer process. The "
                 "shape is the point: steady growth across the run is the "

@@ -132,6 +132,29 @@ def test_no_rank_colour_is_a_verdict_red() -> None:
         assert not (hue < 15 or hue > 345), (idx, colour)
 
 
+def test_the_rss_axis_fits_its_drift_instead_of_anchoring_at_zero() -> None:
+    """The chart exists for the drift, so the drift must be visible.
+
+    Real ranks sit around 1.5 GB and move by tens of MB across hours. On a
+    zero-anchored axis that movement is under one pixel of a 92 px chart.
+    """
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.process_section import (  # noqa: E501
+        drift_axis_bounds,
+    )
+
+    low, high, tick = drift_axis_bounds([1.48, 1.49, 1.50, 1.52])
+    assert low > 1.4 and high < 1.6
+    # The 40 MB of drift occupies a real share of the axis, not a sliver.
+    assert (1.52 - 1.48) / (high - low) > 0.4
+    assert tick > 0
+
+    # A flat series still gets a usable range rather than a zero-height one.
+    flat_low, flat_high, _tick = drift_axis_bounds([2.0, 2.0])
+    assert flat_high > flat_low
+    # No data at all is not a crash.
+    assert drift_axis_bounds([]) == (0.0, 1.0, 0.5)
+
+
 def test_age_reads_in_words() -> None:
     assert format_age(1.0) == "1 s"
     assert format_age(89.0) == "89 s"
