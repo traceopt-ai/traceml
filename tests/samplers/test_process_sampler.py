@@ -26,3 +26,11 @@ def test_collection_failure_is_unavailable_not_zero() -> None:
 
     assert sampler._sample_cpu() is None
     assert sampler._sample_ram() is None
+
+
+def test_missing_process_handle_is_unavailable_not_zero() -> None:
+    sampler = ProcessSampler.__new__(ProcessSampler)
+    sampler.process = None
+
+    assert sampler._sample_cpu() is None
+    assert sampler._sample_ram() is None

@@ -140,12 +140,10 @@ class ProcessSampler(BaseSampler):
         """
         Return process CPU utilization as a percentage.
         """
+        if self.process is None:
+            return None
         try:
-            return (
-                float(self.process.cpu_percent(interval=None))
-                if self.process
-                else 0.0
-            )
+            return float(self.process.cpu_percent(interval=None))
         except Exception as e:
             self.logger.error(f"[TraceML] WARNING: CPU sample failed: {e}")
             return None
@@ -154,10 +152,10 @@ class ProcessSampler(BaseSampler):
         """
         Return process resident memory (RSS) in bytes.
         """
+        if self.process is None:
+            return None
         try:
-            return (
-                float(self.process.memory_info().rss) if self.process else 0.0
-            )
+            return float(self.process.memory_info().rss)
         except Exception as e:
             self.logger.error(f"[TraceML] WARNING: RAM sample failed: {e}")
             return None

@@ -83,6 +83,7 @@ jobs:
           pytest \
             tests/arch \
             tests/config \
+            tests/samplers \
             tests/core \
             tests/step_time \
             tests/diagnostics \
