@@ -318,13 +318,15 @@ def test_whole_run_charts_share_one_clock_axis() -> None:
     # The duration is the strip's fact; the labels say the view, not the
     # length.
     assert panel["cpu_label"].text == (
-        "host cpu util · avg across cores · whole run · rolling 2 min"
+        "host cpu util · avg across cores · last 39 min · rolling 2 min"
     )
     assert panel["power_label"].text == (
-        "gpu power · per GPU vs 70 W limit · whole run · "
+        "gpu power · per GPU vs 70 W limit · last 39 min · "
         "average and lowest every 2 min"
     )
-    assert "min," not in panel["cpu_label"].text
+    # The label never claims the whole run: retention can prune it.
+    assert "whole run" not in panel["cpu_label"].text
+    assert "whole run" not in panel["power_label"].text
 
 
 def test_power_chart_draws_limit_and_floor_reference_lines() -> None:

@@ -18,12 +18,23 @@ This section presents measurements and leaves verdicts to diagnostics.
 from __future__ import annotations
 
 import math
-from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from nicegui import ui
 
 from . import theme
+from .theme import (  # helpers shared with the Process block
+    apply_span_axis,
+    cpu_axis_max,
+    format_gb_pair,
+    format_span,
+    format_window,
+    newest_epoch,
+    num as _num,
+    relative_seconds,
+    shared_run_axis,
+    sparkline_svg,
+)
 
 # Window-p95 GPU utilisation spread (max - min, percentage points) that
 # automatically opens the per-GPU rows.
@@ -48,41 +59,6 @@ _MONO = "font-family:var(--mono);"
 # --- pure display rules ----------------------------------------------------
 def gpu_color(index: int) -> str:
     return _GPU_COLORS[int(index) % len(_GPU_COLORS)]
-
-
-def format_window(window_s: float) -> str:
-    """The rolling window in words: '30 s', '2 min'.
-
-    The payload picks round windows (see ``choose_window_s``) so this reads
-    as a duration a person recognises.
-    """
-    if not window_s or window_s <= 0:
-        return ""
-    if window_s < 60:
-        return f"{window_s:.0f} s"
-    return f"{window_s / 60.0:.0f} min"
-
-
-def format_span(seconds: Optional[float]) -> str:
-    """The window a chart covers, as one phrase in its label: 'last 3 min'."""
-    if not seconds or seconds <= 0:
-        return ""
-    if seconds < 90:
-        return f"last {seconds:.0f} s"
-    return f"last {seconds / 60.0:.0f} min"
-
-
-def format_gb_pair(used_bytes: Any, total_bytes: Any) -> Tuple[str, str]:
-    """A level against its capacity: ('6.3', '/ 16.1 GB')."""
-    used = theme.gb(used_bytes) if used_bytes is not None else None
-    if used is None:
-        return (NA, "")
-    num = f"{used:.1f}"
-    total = theme.gb(total_bytes) if total_bytes is not None else None
-    if total is None or total <= 0:
-        return (num, "GB")
-    total_s = f"{total:.0f}" if total >= 100 else f"{total:.1f}"
-    return (num, f"/ {total_s} GB")
 
 
 def disclosure_text(gpus: List[Dict[str, Any]], *, is_open: bool) -> str:
@@ -157,44 +133,6 @@ def power_axis_bounds(
     return (lo, hi, tick)
 
 
-def cpu_axis_max(values: List[Any]) -> float:
-    """Zero-anchored ceiling whose half is a whole percent (0 / 5 / 10)."""
-    vals = [float(v) for v in values if v is not None]
-    peak = (max(vals) * 1.2) if vals else 0.0
-    for top in (4.0, 10.0, 20.0, 30.0, 40.0, 60.0, 80.0, 100.0):
-        if peak <= top:
-            return top
-    return 100.0
-
-
-def sparkline_svg(
-    values: List[Optional[float]],
-    color: str,
-    *,
-    width: int = 64,
-    height: int = 14,
-) -> str:
-    """Inline SVG polyline; gaps are dropped, an empty trace is no SVG."""
-    points = [(i, float(v)) for i, v in enumerate(values) if v is not None]
-    if not points:
-        return ""
-    lo = min(v for _, v in points)
-    hi = max(v for _, v in points)
-    span = (hi - lo) or 1.0
-    step = width / max(len(values) - 1, 1)
-    inner = height - 4
-    coords = " ".join(
-        f"{i * step:.1f},{1 + inner - (v - lo) / span * inner:.1f}"
-        for i, v in points
-    )
-    return (
-        f'<svg viewBox="0 0 {width} {height}" '
-        f'style="width:{width}px;height:{height}px;vertical-align:middle">'
-        f'<polyline points="{coords}" fill="none" stroke="{color}" '
-        'stroke-width="1.4"/></svg>'
-    )
-
-
 def odd_ones_out(gpus: List[Dict[str, Any]]) -> set:
     """GPU indices on the smaller side of the utilisation split.
 
@@ -228,10 +166,6 @@ CPU_LABEL = "host cpu util · avg across cores"
 # same page already reads "N/A", and one page should not spell absence two
 # ways.
 NA = "n/a"
-
-
-def _num(value: Any, fmt: str = "{:.0f}") -> str:
-    return fmt.format(float(value)) if value is not None else NA
 
 
 def rows_html(
@@ -288,82 +222,6 @@ def rows_html(
 
 
 # --- relative time axis ----------------------------------------------------
-def shared_run_axis(
-    run_t: List[float], prun: List[Dict[str, Any]]
-) -> Optional[Tuple[float, float]]:
-    """One (anchor, span) covering both whole-run series.
-
-    Returns the newest clock across the two and the reach back to the
-    oldest, so both charts can be pinned to the same interval.
-    """
-    starts = [run_t[0]] + [e["t"][0] for e in prun if e.get("t")]
-    ends = [run_t[-1]] + [e["t"][-1] for e in prun if e.get("t")]
-    if not starts or not ends:
-        return None
-    newest = max(ends)
-    return (newest, max(newest - min(starts), 1.0))
-
-
-def _newest_epoch(x_time: List[str]) -> Optional[float]:
-    """Epoch seconds of the newest parseable stamp, for the clock axis."""
-    for value in reversed(x_time):
-        try:
-            return datetime.fromisoformat(value).timestamp()
-        except Exception:
-            continue
-    return None
-
-
-def _relative_seconds(x_time: List[str]) -> List[Optional[float]]:
-    """Seconds before the newest sample (<= 0), aligned with ``x_time``."""
-    stamps: List[Optional[float]] = []
-    for s in x_time:
-        try:
-            stamps.append(datetime.fromisoformat(s).timestamp())
-        except Exception:
-            stamps.append(None)
-    present = [t for t in stamps if t is not None]
-    if not present:
-        return []
-    last = max(present)
-    return [t - last if t is not None else None for t in stamps]
-
-
-def _apply_span_axis(
-    options: Dict[str, Any], span: float, newest_epoch: Optional[float] = None
-) -> None:
-    """Pin a chart to its span and label it in wall-clock time.
-
-    The x values are seconds before the newest sample, which keeps the
-    series arithmetic simple, but a reader debugging a slowdown needs the
-    clock: it is what their logs and every other dashboard are keyed on,
-    and it is what the Process block beside this one already shows. The
-    formatters convert on the fly from the newest sample's epoch, and the
-    hover label carries both readings ("19:10 · 45 min ago") so the axis
-    and the tooltip never speak two different vocabularies.
-    """
-    span = max(float(span), 1.0)
-    axis = options["xAxis"]
-    axis["min"] = -span
-    axis["max"] = 0
-    axis["interval"] = span / 3.0
-    if newest_epoch is None:
-        axis["axisLabel"]["show"] = False
-        return
-    axis["axisLabel"]["show"] = True
-    clock = (
-        "const d=new Date((%f+%%s)*1000);const q=n=>('0'+n).slice(-2);"
-        "const c=q(d.getHours())+':'+q(d.getMinutes())%s;"
-        % (float(newest_epoch), "+':'+q(d.getSeconds())" if span < 600 else "")
-    )
-    axis["axisLabel"][":formatter"] = "v=>{%s return c;}" % (clock % "v")
-    pointer = options.get("tooltip", {}).get("axisPointer", {}).get("label")
-    if pointer is not None:
-        pointer[":formatter"] = (
-            "p=>{%s const s=Math.round(-p.value);"
-            "return c+(s<1?' · now':(s<120?' · '+s+' s ago':"
-            "' · '+Math.floor(s/60)+' min ago'));}" % (clock % "p.value")
-        )
 
 
 # --- build / update --------------------------------------------------------
@@ -515,7 +373,7 @@ def _update_cpu_chart(
         chart.options["series"][0]["data"] = [
             [t - newest, value] for t, value in zip(run_t, run_avg)
         ]
-        _apply_span_axis(chart.options, axis_span, newest)
+        apply_span_axis(chart.options, axis_span, newest)
         # Peaks are not drawn, but they keep a smoothed spike inside the axis.
         ymax = cpu_axis_max(run_max or run_avg)
     elif changed:
@@ -524,7 +382,7 @@ def _update_cpu_chart(
             for second, value in zip(secs, cpu)
             if second is not None
         ]
-        _apply_span_axis(chart.options, span, newest_epoch)
+        apply_span_axis(chart.options, span, newest_epoch)
         ymax = cpu_axis_max(cpu)
     if changed:
         chart.options["yAxis"]["max"] = ymax
@@ -536,11 +394,17 @@ def _update_cpu_chart(
     span_words = format_span(span)
     if whole_run:
         window = format_window(float(run.get("window_s") or 0.0))
-        panel["cpu_label"].text = f"{CPU_LABEL} · whole run" + (
+        # The span, never "whole run": history retention (30 min by
+        # default since #393) prunes older telemetry on a live run, so a
+        # whole-run claim would be false exactly when it mattered. The
+        # rolling suffix is what tells the reader this is the decimated
+        # view rather than the raw sample window.
+        panel["cpu_label"].text = f"{CPU_LABEL} · {format_span(run_span)}" + (
             f" · rolling {window}" if window else ""
         )
         panel["cpu_label"].tooltip(
-            f"Whole run, {format_span(run_span)[5:]}. Each point shows "
+            f"The {format_span(run_span)[5:]} of history held for this run. "
+            f"Each point shows "
             f"average host CPU use over the previous {window}. 100% means "
             "all logical CPU cores are fully used."
         )
@@ -733,9 +597,9 @@ def _update_power_chart(
             max(item["t"][-1] for item in run if item.get("t")),
             run_span,
         )
-        _apply_span_axis(chart.options, axis_span, anchor)
+        apply_span_axis(chart.options, axis_span, anchor)
     else:
-        _apply_span_axis(chart.options, span, newest_epoch)
+        apply_span_axis(chart.options, span, newest_epoch)
     chart.style("display:block;")
     chart.update()
 
@@ -746,11 +610,12 @@ def _update_power_chart(
     )
     if whole_run:
         window = format_window(float(run[0].get("window_s") or 0.0))
-        panel["power_label"].text = f"{head} · whole run" + (
+        panel["power_label"].text = f"{head} · {format_span(run_span)}" + (
             f" · average and lowest every {window}" if window else ""
         )
         panel["power_label"].tooltip(
-            f"Whole run, {format_span(run_span)[5:]}. Solid lines show each "
+            f"The {format_span(run_span)[5:]} of history held for this run. "
+            f"Solid lines show each "
             f"GPU's average power every {window}; faint lines show the "
             "lowest reading during the same interval."
         )
@@ -804,8 +669,8 @@ def update_system_section(panel: Dict[str, Any], data: Dict[str, Any]) -> None:
     _set_gpu_visible(panel, gpu_on)
 
     x_time = series.get("x_time", []) or []
-    secs = _relative_seconds(x_time)
-    newest_epoch = _newest_epoch(x_time)
+    secs = relative_seconds(x_time)
+    window_epoch = newest_epoch(x_time)
     present = [second for second in secs if second is not None]
     span = -min(present) if present else 0.0
 
@@ -841,7 +706,7 @@ def update_system_section(panel: Dict[str, Any], data: Dict[str, Any]) -> None:
         changed=changed,
         secs=secs,
         span=span,
-        newest_epoch=newest_epoch,
+        newest_epoch=window_epoch,
         whole_run=cpu_whole,
         aligned=aligned,
     )
@@ -860,7 +725,7 @@ def update_system_section(panel: Dict[str, Any], data: Dict[str, Any]) -> None:
         changed=changed,
         secs=secs,
         span=span,
-        newest_epoch=newest_epoch,
+        newest_epoch=window_epoch,
         whole_run=power_whole,
         aligned=aligned,
     )
