@@ -1,8 +1,41 @@
 """Shared models and SQLite helpers for process telemetry."""
 
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+
+# Rolling window for the whole-run charts, scaled to the run so the line
+# stays readable at any length (mirrors the System block's ladder).
+_ROLL_MIN_S = 30.0
+_ROLL_MAX_S = 300.0
+_ROLL_FRACTION = 50.0  # about a fiftieth of the run
+_MAX_RUN_POINTS = 120
+_DEFAULT_TICK_S = 2.0
+
+# SQLite grew numeric RANGE frame offsets in 3.28. A time frame is the
+# honest one here: unreported samples leave holes in the cadence, so a ROW
+# frame silently spans more wall clock than it claims. Older engines fall
+# back to the row frame the System block already ships.
+_HAS_RANGE_FRAME = sqlite3.sqlite_version_info >= (3, 28, 0)
+
+
+def choose_window_s(span_s: float) -> float:
+    """The rolling window for a run of ``span_s`` seconds, in round steps."""
+    if span_s <= 0:
+        return _ROLL_MIN_S
+    raw = max(_ROLL_MIN_S, min(_ROLL_MAX_S, span_s / _ROLL_FRACTION))
+    for step in (30.0, 60.0, 120.0, 300.0):
+        if raw <= step:
+            return step
+    return _ROLL_MAX_S
+
+
+def frame_clause(window_s: float, cadence_s: float) -> str:
+    """The window frame for a rolling aggregate over ``window_s`` seconds."""
+    if _HAS_RANGE_FRAME:
+        return f"RANGE BETWEEN {float(window_s):.6f} PRECEDING AND CURRENT ROW"
+    preceding = max(1, int(round(window_s / max(cadence_s, 1e-6))) - 1)
+    return f"ROWS BETWEEN {preceding} PRECEDING AND CURRENT ROW"
 
 
 @dataclass(frozen=True)
@@ -48,13 +81,21 @@ class ProcessDashboardPayload:
 
     history: List[Dict[str, Any]]
     gpu_used_imbalance: Optional[float]
-    series: Dict[str, List[float]]
+    # Series carries per-rank sample arrays and whole-run histories, so its
+    # values are intentionally heterogeneous.
+    series: Dict[str, Any]
+    window_len: int = 0
+    gpu_available: bool = False
+    rollups: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "history": self.history,
             "gpu_used_imbalance": self.gpu_used_imbalance,
             "series": self.series,
+            "window_len": self.window_len,
+            "gpu_available": self.gpu_available,
+            "rollups": self.rollups,
         }
 
 
@@ -90,15 +131,13 @@ class ProcessMetricsDB:
         Optional[int]
             Latest seq, or None if the table has no seq-bearing rows.
         """
-        row = conn.execute(
-            """
+        row = conn.execute("""
             SELECT seq
             FROM process_samples
             WHERE seq IS NOT NULL
             ORDER BY id DESC
             LIMIT 1;
-            """
-        ).fetchone()
+            """).fetchone()
         if row is None or row["seq"] is None:
             return None
         return int(row["seq"])
@@ -114,16 +153,14 @@ class ProcessMetricsDB:
         dict[int, int]
             Mapping rank -> latest seq for that rank.
         """
-        rows = conn.execute(
-            """
+        rows = conn.execute("""
             SELECT rank, MAX(seq) AS max_seq
             FROM process_samples
             WHERE rank IS NOT NULL
               AND seq IS NOT NULL
             GROUP BY rank
             ORDER BY rank ASC;
-            """
-        ).fetchall()
+            """).fetchall()
 
         out: Dict[int, int] = {}
         for row in rows:
@@ -178,6 +215,145 @@ class ProcessMetricsDB:
         if not per_rank:
             return None
         return min(per_rank.values())
+
+    def fetch_recent_rank_window(
+        self,
+        conn: sqlite3.Connection,
+        window_n: int = 100,
+    ) -> List[sqlite3.Row]:
+        """
+        The last ``window_n`` samples of EVERY rank, newest last.
+
+        Per rank, not globally: a rank that stopped reporting must keep its
+        own history instead of being squeezed out by livelier peers, and a
+        rank that never reports must not shrink everyone else's window.
+        The dashboard reads ranks on their own clocks, so nothing here is
+        aligned on a shared seq (a dead rank froze the whole block when it
+        was: its last committed seq bounded every other rank).
+        """
+        return conn.execute(
+            """
+            WITH ranked AS (
+                SELECT
+                    *,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY COALESCE(global_rank, rank)
+                        ORDER BY seq DESC, id DESC
+                    ) AS rn
+                FROM process_samples
+                WHERE COALESCE(global_rank, rank) IS NOT NULL
+            )
+            SELECT * FROM ranked
+            WHERE rn <= ?
+            ORDER BY COALESCE(global_rank, rank) ASC, seq ASC, id ASC;
+            """,
+            (int(max(1, window_n)),),
+        ).fetchall()
+
+    def fetch_rank_run_history(
+        self,
+        conn: sqlite3.Connection,
+        value_sql: str,
+        *,
+        min_span_s: float = 0.0,
+    ) -> List[Dict[str, Any]]:
+        """
+        Whole-run per-rank history of ``value_sql``, rolling and decimated.
+
+        One row per kept point, at most ``_MAX_RUN_POINTS`` per rank, so the
+        payload holds its size however long the run runs. Points whose
+        rolling window is still partial are excluded rather than drawn
+        short, and the stride is computed over the points that survive that
+        exclusion (a stride over the raw count both overshoots the budget
+        and throws away detail).
+
+        Returns [] when the run has not yet outlived ``min_span_s``: the
+        recent window already tells that story, so the query is skipped
+        entirely rather than computed and discarded by the view.
+        """
+        try:
+            row = conn.execute(
+                f"SELECT MIN(sample_ts_s), MAX(sample_ts_s), COUNT(*), "
+                f"COUNT(DISTINCT COALESCE(global_rank, rank)) "
+                f"FROM process_samples WHERE sample_ts_s IS NOT NULL "
+                f"AND ({value_sql}) IS NOT NULL"
+            ).fetchone()
+        except sqlite3.Error:
+            return []
+        if row is None or row[0] is None or row[1] is None:
+            return []
+        first, last, count, ranks = (
+            float(row[0]),
+            float(row[1]),
+            int(row[2] or 0),
+            max(1, int(row[3] or 1)),
+        )
+        span = last - first
+        if span <= max(0.0, float(min_span_s)) or count <= 2:
+            return []
+        window_s = choose_window_s(span)
+        per_rank = max(1, count // ranks)
+        cadence = span / max(per_rank - 1, 1)
+        preceding = max(1, int(round(window_s / max(cadence, 1e-6))) - 1)
+        eligible = max(0, per_rank - preceding)
+        stride = max(1, (eligible + _MAX_RUN_POINTS - 1) // _MAX_RUN_POINTS)
+        frame = frame_clause(window_s, cadence)
+        try:
+            rows = conn.execute(
+                f"""
+                WITH base AS (
+                    SELECT
+                        COALESCE(global_rank, rank) AS rank_id,
+                        sample_ts_s AS ts,
+                        ({value_sql}) AS v,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY COALESCE(global_rank, rank)
+                            ORDER BY sample_ts_s ASC, id ASC
+                        ) AS rn
+                    FROM process_samples
+                    WHERE sample_ts_s IS NOT NULL
+                      AND ({value_sql}) IS NOT NULL
+                      AND COALESCE(global_rank, rank) IS NOT NULL
+                ),
+                rolled AS (
+                    SELECT
+                        rank_id,
+                        ts,
+                        rn,
+                        AVG(v) OVER (
+                            PARTITION BY rank_id ORDER BY ts {frame}
+                        ) AS roll_avg,
+                        MAX(v) OVER (
+                            PARTITION BY rank_id ORDER BY ts {frame}
+                        ) AS roll_max
+                    FROM base
+                )
+                SELECT rank_id, ts, roll_avg, roll_max
+                FROM rolled
+                WHERE rn % ? = 0 AND rn > ?
+                ORDER BY rank_id ASC, ts ASC;
+                """,
+                (int(stride), int(preceding)),
+            ).fetchall()
+        except sqlite3.Error:
+            return []
+        by_rank: Dict[int, Dict[str, Any]] = {}
+        for rank_id, ts, roll_avg, roll_max in rows:
+            entry = by_rank.setdefault(
+                int(rank_id),
+                {
+                    "global_rank": int(rank_id),
+                    "t": [],
+                    "avg": [],
+                    "max": [],
+                    "span_s": span,
+                    "window_s": window_s,
+                },
+            )
+            entry["t"].append(float(ts))
+            entry["avg"].append(float(roll_avg))
+            entry["max"].append(float(roll_max))
+        return [by_rank[key] for key in sorted(by_rank)]
 
     def fetch_seq_range_aggregates(
         self,

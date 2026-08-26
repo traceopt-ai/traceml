@@ -36,7 +36,7 @@ class ProcessMetricsComputer:
         self,
         db_path: str,
         stale_ttl_s: Optional[float] = 30.0,
-        dashboard_max_rows: int = 200,
+        dashboard_max_rows: int = 100,
     ) -> None:
         self._cli = ProcessCLIComputer(
             db_path=db_path,
