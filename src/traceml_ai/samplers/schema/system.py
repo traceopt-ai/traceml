@@ -15,7 +15,7 @@ Design principles
 """
 
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 # ---------------------------------------------------------------------------
 # GPU metrics
@@ -39,14 +39,14 @@ class GPUMetrics:
     power_limit : watts
     """
 
-    util: float
-    mem_used: float
-    mem_total: float
-    temperature: float
-    power_usage: float
-    power_limit: float
+    util: Optional[float]
+    mem_used: Optional[float]
+    mem_total: Optional[float]
+    temperature: Optional[float]
+    power_usage: Optional[float]
+    power_limit: Optional[float]
 
-    def to_wire(self) -> List[float]:
+    def to_wire(self) -> List[Optional[float]]:
         """
         Convert this GPU metric to a compact wire representation.
 
@@ -76,7 +76,7 @@ class GPUMetrics:
         ]
 
     @staticmethod
-    def from_wire(data: List[float]) -> "GPUMetrics":
+    def from_wire(data: List[Optional[float]]) -> "GPUMetrics":
         """
         Reconstruct GPUMetrics from its wire representation.
 
@@ -123,9 +123,9 @@ class SystemSample:
 
     sample_idx: int
     timestamp: float
-    cpu_percent: float
-    ram_used: float
-    ram_total: float
+    cpu_percent: Optional[float]
+    ram_used: Optional[float]
+    ram_total: Optional[float]
     gpu_available: bool
     gpu_count: int
     gpus: List[GPUMetrics]

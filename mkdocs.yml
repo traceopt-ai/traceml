@@ -99,7 +99,10 @@ nav:
           - W&B / MLflow: user_guide/integrations/wandb-mlflow.md
       - FAQ: user_guide/faq.md
       - Compare Runs: user_guide/compare.md
+      - OTLP Export: user_guide/otlp-export.md
       - Public API: user_guide/public-api.md
+  - Reference:
+      - Telemetry Records: reference/telemetry-records.md
   - Developer Guide:
       - Architecture: developer_guide/architecture.md
       - Step Time Pipeline Contract: developer_guide/step-time-pipeline-contract.md

@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "tools/integration_support_matrix.py"
 MANIFEST = ROOT / "docs/data/integration_support.json"
@@ -40,11 +39,11 @@ def test_support_matrix_rejects_a_ci_claim_when_its_extra_is_removed(tmp_path):
     manifest = module.load_manifest(MANIFEST)
     workflow = tmp_path / "ci.yml"
     original = WORKFLOW.read_text(encoding="utf-8")
-    expected_install = 'pip install -e ".[torch,dashboard,hf]"'
+    expected_install = 'pip install -e ".[torch,dashboard,hf,otlp]"'
     assert expected_install in original
     workflow.write_text(
         original.replace(
-            expected_install, 'pip install -e ".[torch,dashboard]"'
+            expected_install, 'pip install -e ".[torch,dashboard,otlp]"'
         ),
         encoding="utf-8",
     )

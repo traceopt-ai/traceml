@@ -55,6 +55,11 @@ dependencies = [
 
 [project.optional-dependencies]
 
+otlp = [
+    "opentelemetry-sdk>=1.39,<2",
+    "opentelemetry-exporter-otlp>=1.39,<2",
+]
+
 dashboard = [
     "nicegui>=1.4.23",
 ]

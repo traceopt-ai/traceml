@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 from dataclasses import dataclass
 from queue import Full, Queue
 from typing import Dict, Optional
@@ -29,6 +30,7 @@ class StepMemoryEvent:
     device: str
     peak_allocated: Optional[float]
     peak_reserved: Optional[float]
+    timestamp: Optional[float] = None
 
 
 class StepMemoryTracker:
@@ -90,6 +92,10 @@ class StepMemoryTracker:
                 float(peak_reserved) if peak_reserved is not None else None
             ),
             step=-1,  # filled during flush
+            # Capture occurrence time at the end of the traced step. The
+            # sampler can drain this event later, so drain time is not the
+            # measurement timestamp.
+            timestamp=time.time(),
         )
         _temp_step_memory_buffer[self.model_id] = evt
 

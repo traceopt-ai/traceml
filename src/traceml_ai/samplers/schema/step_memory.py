@@ -31,7 +31,7 @@ class StepMemorySample:
     """
 
     sample_idx: int
-    timestamp: float
+    timestamp: Optional[float]
     model_id: Optional[int]
     device: Optional[str]
     step: Optional[int]
@@ -74,7 +74,9 @@ class StepMemorySample:
         """
         return StepMemorySample(
             sample_idx=data["seq"],
-            timestamp=float(data.get("ts", 0.0)),
+            timestamp=(
+                float(data["ts"]) if data.get("ts") is not None else None
+            ),
             model_id=data.get("model_id"),
             device=data.get("device"),
             step=data.get("step"),

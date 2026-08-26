@@ -124,7 +124,9 @@ jobs:
           # hf pulls transformers+accelerate so tests/integrations
           # actually RUNS the HuggingFace suite (incl. the #276 H2D
           # coverage-window regression tests) instead of skipping it.
-          pip install -e ".[torch,dashboard,hf]"
+          # otlp keeps the optional exporter adapter on a real SDK-backed CI
+          # path instead of allowing its tests to be silently skipped.
+          pip install -e ".[torch,dashboard,hf,otlp]"
           pip install pytest
       - name: Run integration tests
         run: |
@@ -139,6 +141,7 @@ jobs:
             tests/reporting/summary \
             tests/renderers \
             tests/display \
+            tests/telemetry_export \
             tests/test_h2d_timing.py \
             -q
 

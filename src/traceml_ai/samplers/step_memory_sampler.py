@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from typing import Any, Optional
 
 from traceml_ai.samplers.base_sampler import BaseSampler
@@ -35,18 +34,17 @@ class StepMemorySampler(BaseSampler):
         """
         Convert a raw queue event to a StepMemorySample.
         """
-        ts = time.time()
-
         model_id = getattr(event, "model_id", None)
         device = getattr(event, "device", None)
         step = getattr(event, "step", None)
+        timestamp = getattr(event, "timestamp", None)
 
         peak_alloc = getattr(event, "peak_allocated", None)
         peak_resv = getattr(event, "peak_reserved", None)
 
         return StepMemorySample(
             sample_idx=self.sample_idx,
-            timestamp=ts,
+            timestamp=(float(timestamp) if timestamp is not None else None),
             model_id=model_id,
             device=device,
             step=step,

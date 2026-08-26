@@ -27,6 +27,8 @@ from traceml_ai.telemetry.control import (
     RankFinishedControl,
     parse_rank_finished,
 )
+from traceml_ai.telemetry_export.mapper import ExportRecordMapper
+from traceml_ai.telemetry_export.otlp import build_otlp_pipeline
 from traceml_ai.transport.tcp_transport import TCPConfig, TCPServer
 from traceml_ai.utils.atomic_io import write_json_atomic
 
@@ -105,6 +107,16 @@ class TraceMLAggregator:
         self._started = False
         self._drain_lock = threading.Lock()
 
+        # External export is an optional, independent fan-out from the live
+        # ingestion stream. SQLite remains the source for TraceML's current
+        # dashboard, terminal, diagnosis, and summaries.
+        self._export_pipeline = build_otlp_pipeline(logger=self._logger)
+        self._export_mapper = (
+            ExportRecordMapper(run_name=str(settings.session_id or "default"))
+            if self._export_pipeline is not None
+            else None
+        )
+
         # TCP server: aggregator listens for rank-local agents.
         self._tcp_server = TCPServer(
             TCPConfig(
@@ -165,14 +177,17 @@ class TraceMLAggregator:
         Start order matters:
         1. TCP server must start first so workers can connect.
         2. SQLite writer starts before ingestion begins.
-        3. Display driver starts before periodic ticks.
-        4. Aggregator loop thread starts last.
+        3. Optional OTLP batching starts before live fan-out begins.
+        4. Display driver starts before periodic ticks.
+        5. Aggregator loop thread starts last.
 
         Startup failures should propagate so the launcher can fail fast rather
         than running in a partially initialized state.
         """
         self._tcp_server.start()
         self._sqlite_writer.start()
+        if self._export_pipeline is not None:
+            self._export_pipeline.start()
         self._display_driver.start()
 
         try:
@@ -239,6 +254,7 @@ class TraceMLAggregator:
                 "TCPServer.stop failed",
                 self._tcp_server.stop,
             )
+            self._stop_export_pipeline(remaining())
             finalize_result = self._sqlite_writer.finalize(
                 max(sqlite_finalize_budget, remaining())
             )
@@ -332,6 +348,36 @@ class TraceMLAggregator:
                         self._logger.exception(
                             "[TraceML] SQLiteWriter.ingest failed"
                         )
+                    self._enqueue_external_export(payload)
+
+    def _enqueue_external_export(self, payload: Any) -> None:
+        """Best-effort live fan-out; never read SQLite or block ingestion."""
+        pipeline = getattr(self, "_export_pipeline", None)
+        mapper = getattr(self, "_export_mapper", None)
+        if pipeline is None or mapper is None:
+            return
+        try:
+            records = mapper.map_payload(
+                payload,
+                observed_timestamp_unix_ns=time.time_ns(),
+            )
+            pipeline.enqueue(records)
+        except Exception:
+            self._logger.exception(
+                "[TraceML] External telemetry mapping failed"
+            )
+
+    def _stop_export_pipeline(self, remaining_sec: float) -> None:
+        """Stop optional export within its own configured and global budget."""
+        pipeline = getattr(self, "_export_pipeline", None)
+        if pipeline is None:
+            return
+        pipeline.stop(
+            timeout_sec=min(
+                max(0.0, float(remaining_sec)),
+                pipeline.shutdown_timeout_sec,
+            )
+        )
 
     @staticmethod
     def _sqlite_finalize_budget(timeout_sec: float) -> float:
