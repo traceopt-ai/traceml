@@ -250,7 +250,7 @@ def build_process_pane(
     stages.uses_scope |= _append_scalar_metric(
         stages.table,
         process_summary,
-        label="CUDA used",
+        label="CUDA allocated",
         metric="gpu_mem_used_bytes",
         value_kind="capacity",
         multi_rank=multi_rank,

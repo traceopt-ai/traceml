@@ -155,7 +155,7 @@ def _process_evidence(
         value = _pct(evidence.get(peak_metric))
         return _scope_text(
             (
-                f"CUDA {'reserved' if reserved else 'used'} peak {value}"
+                f"CUDA {'reserved' if reserved else 'allocated'} peak {value}"
                 if value
                 else None
             ),
@@ -173,7 +173,7 @@ def _process_evidence(
         )
     if kind == "RANK_GPU_MEMORY_IMBALANCE":
         value = _pct(evidence.get(metric))
-        family = "reserved" if "reserved" in metric else "used"
+        family = "reserved" if "reserved" in metric else "allocated"
         return _scope_text(
             f"CUDA {family} imbalance {value}" if value else None,
             scope,

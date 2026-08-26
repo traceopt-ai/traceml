@@ -868,7 +868,7 @@ the likely reason.
 The process panel shows what the training processes themselves are consuming.
 
 The end-of-run summary includes the Process status and available CPU capacity,
-RSS, CUDA used, and CUDA reserved measurements. One observed rank uses an
+RSS, CUDA allocated, and CUDA reserved measurements. One observed rank uses an
 `avg` column. Multiple observed ranks use `median rank avg` and
 `worst rank avg` columns, with stored worst-rank and node identities shown
 when available. These values cover the shared final-report timestamp interval;
@@ -890,7 +890,7 @@ Common fields:
 
 - CPU capacity
 - RSS used
-- CUDA used
+- CUDA allocated
 - CUDA reserved, including device-capacity percentage when available
 
 Use this panel when:
