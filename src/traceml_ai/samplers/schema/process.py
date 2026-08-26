@@ -112,14 +112,14 @@ class ProcessSample:
     timestamp: float
     pid: int
 
-    cpu_percent: float
+    cpu_percent: Optional[float]
     cpu_logical_core_count: int
 
-    ram_used: float
-    ram_total: float
+    ram_used: Optional[float]
+    ram_total: Optional[float]
 
-    gpu_available: bool
-    gpu_count: int
+    gpu_available: Optional[bool]
+    gpu_count: Optional[int]
     gpu: Optional[ProcessGPUMetrics]
 
     def to_wire(self) -> Dict[str, Any]:

@@ -88,7 +88,7 @@ class ProcessSampler(BaseSampler):
         """
         Read total system RAM.
         """
-        self.ram_total = 0.0
+        self.ram_total: Optional[float] = None
         try:
             self.ram_total = float(psutil.virtual_memory().total)
         except Exception as e:
@@ -136,31 +136,29 @@ class ProcessSampler(BaseSampler):
         self.gpu_count: int = 0
         self.device_index: Optional[int] = None
 
-    def _sample_cpu(self) -> float:
+    def _sample_cpu(self) -> Optional[float]:
         """
         Return process CPU utilization as a percentage.
         """
+        if self.process is None:
+            return None
         try:
-            return (
-                float(self.process.cpu_percent(interval=None))
-                if self.process
-                else 0.0
-            )
+            return float(self.process.cpu_percent(interval=None))
         except Exception as e:
             self.logger.error(f"[TraceML] WARNING: CPU sample failed: {e}")
-            return 0.0
+            return None
 
-    def _sample_ram(self) -> float:
+    def _sample_ram(self) -> Optional[float]:
         """
         Return process resident memory (RSS) in bytes.
         """
+        if self.process is None:
+            return None
         try:
-            return (
-                float(self.process.memory_info().rss) if self.process else 0.0
-            )
+            return float(self.process.memory_info().rss)
         except Exception as e:
             self.logger.error(f"[TraceML] WARNING: RAM sample failed: {e}")
-            return 0.0
+            return None
 
     def _cuda_safe_to_touch(self) -> bool:
         """
@@ -235,12 +233,12 @@ class ProcessSampler(BaseSampler):
         try:
             gpu_metrics = self._sample_gpu()
 
-            gpu_available = (
-                bool(self.gpu_available)
-                if self.gpu_available is not None
-                else False
+            # ``None`` means CUDA has not been safely probed yet. Preserve
+            # that distinction instead of reporting a fabricated ``False``.
+            gpu_available = self.gpu_available
+            gpu_count = (
+                int(self.gpu_count) if self.gpu_available is not None else None
             )
-            gpu_count = int(self.gpu_count) if self.gpu_available else 0
 
             sample = ProcessSample(
                 sample_idx=self.sample_idx,
