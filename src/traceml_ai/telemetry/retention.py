@@ -10,16 +10,12 @@ from __future__ import annotations
 
 import math
 import re
-from dataclasses import dataclass
 from typing import Union
 
 DurationValue = Union[str, int, float]
 
 DEFAULT_HISTORY_RETENTION_S = 30.0 * 60.0
 """Logical history made available to final-report analysis."""
-
-HISTORY_RETENTION_GRACE_S = 5.0 * 60.0
-"""Extra raw history retained internally for delayed telemetry arrival."""
 
 _DURATION = re.compile(
     r"^\s*(?P<value>(?:\d+(?:\.\d*)?|\.\d+))\s*(?P<unit>[smhdSMHD]?)\s*$"
@@ -53,39 +49,19 @@ def parse_history_retention(value: DurationValue) -> float:
     return seconds
 
 
-@dataclass(frozen=True, slots=True)
-class HistoryRetentionPolicy:
-    """Logical analysis horizon plus a fixed late-arrival storage grace."""
-
-    retention_s: float = DEFAULT_HISTORY_RETENTION_S
-    grace_s: float = HISTORY_RETENTION_GRACE_S
-
-    def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "retention_s",
-            parse_history_retention(self.retention_s),
-        )
-        object.__setattr__(
-            self,
-            "grace_s",
-            parse_history_retention(self.grace_s),
-        )
-
-    @property
-    def storage_horizon_s(self) -> float:
-        """Return the physical raw-history horizon."""
-        return self.retention_s + self.grace_s
-
-    def cutoff_recv_ts_ns(self, watermark_recv_ts_ns: int) -> int:
-        """Return the exclusive receive-time deletion cutoff."""
-        return int(watermark_recv_ts_ns) - int(self.storage_horizon_s * 1e9)
+def retention_cutoff_recv_ts_ns(
+    watermark_recv_ts_ns: int,
+    retention_s: DurationValue,
+) -> int:
+    """Return the exclusive receive-time cutoff for one retention horizon."""
+    return int(watermark_recv_ts_ns) - int(
+        parse_history_retention(retention_s) * 1e9
+    )
 
 
 __all__ = [
     "DEFAULT_HISTORY_RETENTION_S",
-    "HISTORY_RETENTION_GRACE_S",
     "DurationValue",
-    "HistoryRetentionPolicy",
     "parse_history_retention",
+    "retention_cutoff_recv_ts_ns",
 ]

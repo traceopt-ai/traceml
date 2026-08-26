@@ -8,36 +8,22 @@ from __future__ import annotations
 
 import sqlite3
 
-import pytest
-
 from traceml_ai.aggregator.sqlite_writer import (
     SQLiteWriterConfig,
     SQLiteWriterSimple,
 )
 from traceml_ai.aggregator.sqlite_writers import process as process_projection
-from traceml_ai.aggregator.sqlite_writers import runtime_environment
-from traceml_ai.aggregator.sqlite_writers import step_memory, step_time
-from traceml_ai.aggregator.sqlite_writers import stdout_stderr
+from traceml_ai.aggregator.sqlite_writers import (
+    runtime_environment,
+    stdout_stderr,
+    step_memory,
+    step_time,
+)
 from traceml_ai.aggregator.sqlite_writers import system as system_projection
 from traceml_ai.telemetry.envelope import normalize_telemetry_envelope
 
 
-@pytest.mark.parametrize(
-    ("table", "extra_columns", "extra_values"),
-    [
-        ("system_samples", "", ()),
-        ("system_gpu_samples", ", gpu_idx", (0,)),
-        ("process_samples", "", ()),
-        ("step_time_samples", ", step, events_json", (7, "{}")),
-        ("step_memory_samples", ", step", (7,)),
-        ("stdout_stderr_samples", ", line", ("output",)),
-    ],
-)
-def test_time_retention_prunes_raw_history_after_fixed_grace(
-    table,
-    extra_columns,
-    extra_values,
-) -> None:
+def _retention_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(":memory:")
     for projection in (
         runtime_environment,
@@ -48,19 +34,87 @@ def test_time_retention_prunes_raw_history_after_fixed_grace(
         stdout_stderr,
     ):
         projection.init_schema(conn)
-    SQLiteWriterSimple._init_retention_schema(conn)
+    SQLiteWriterSimple._init_retention_indexes(conn)
+    return conn
+
+
+def _insert_aligned_step(
+    conn: sqlite3.Connection,
+    *,
+    table: str,
+    step: int,
+    recv_ts_ns: int,
+    ranks: tuple[int, ...] = (0, 1),
+) -> None:
+    for rank in ranks:
+        if table == "step_time_samples":
+            conn.execute(
+                """
+                INSERT INTO step_time_samples(
+                    recv_ts_ns, rank, global_rank, world_size,
+                    sample_ts_s, step, events_json
+                ) VALUES (?, ?, ?, 2, ?, ?, '{}');
+                """,
+                (recv_ts_ns, rank, rank, float(step * 100), step),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO step_memory_samples(
+                    recv_ts_ns, rank, global_rank, world_size,
+                    sample_ts_s, step
+                ) VALUES (?, ?, ?, 2, ?, ?);
+                """,
+                (recv_ts_ns, rank, rank, float(step * 100), step),
+            )
+
+
+def test_retention_prunes_through_minimum_aligned_aged_step() -> None:
+    conn = _retention_connection()
 
     policy_watermark = 10_000_000_000_000
-    cutoff = policy_watermark - int((30 + 5) * 60 * 1e9)
-    sql = (
-        f"INSERT INTO {table}(recv_ts_ns, sample_ts_s{extra_columns}) "
-        f"VALUES (?, ?{', ?' * len(extra_values)});"
-    )
-    for recv_ts_ns in (cutoff - 1, cutoff, policy_watermark):
-        conn.execute(
-            sql,
-            (recv_ts_ns, recv_ts_ns / 1e9, *extra_values),
+    cutoff = policy_watermark - int(30 * 60 * 1e9)
+    for step, recv_ts_ns in (
+        (1, cutoff - 20),
+        (2, cutoff - 10),
+        (3, cutoff + 10),
+        (4, cutoff + 20),
+    ):
+        _insert_aligned_step(
+            conn,
+            table="step_time_samples",
+            step=step,
+            recv_ts_ns=recv_ts_ns,
         )
+    for step, recv_ts_ns in (
+        (1, cutoff - 20),
+        (2, cutoff - 10),
+        (3, cutoff + 10),
+    ):
+        _insert_aligned_step(
+            conn,
+            table="step_memory_samples",
+            step=step,
+            recv_ts_ns=recv_ts_ns,
+        )
+
+    for table, extra_columns, extra_values in (
+        ("system_samples", "", ()),
+        ("system_gpu_samples", ", gpu_idx", (0,)),
+        ("process_samples", "", ()),
+        ("stdout_stderr_samples", ", line", ("output",)),
+    ):
+        sql = (
+            f"INSERT INTO {table}(recv_ts_ns, sample_ts_s{extra_columns}) "
+            f"VALUES (?, ?{', ?' * len(extra_values)});"
+        )
+        for step in (1, 2, 3):
+            recv_ts_ns = policy_watermark if step == 3 else cutoff - step
+            conn.execute(
+                sql,
+                (recv_ts_ns, float(step * 100), *extra_values),
+            )
+
     conn.execute(
         "INSERT INTO runtime_environment(recv_ts_ns) VALUES (?);",
         (cutoff - 1,),
@@ -69,23 +123,123 @@ def test_time_retention_prunes_raw_history_after_fixed_grace(
     writer = SQLiteWriterSimple(
         SQLiteWriterConfig(path=":memory:", history_retention_s=1800.0)
     )
+    conn.commit()
     writer._prune_all_retained_rows(conn)
 
-    retained = conn.execute(
-        f"SELECT recv_ts_ns FROM {table} ORDER BY recv_ts_ns;"
-    ).fetchall()
-    state = conn.execute(
-        "SELECT deleted_rows FROM history_retention_state "
-        "WHERE table_name = ?;",
-        (table,),
-    ).fetchone()
-    runtime_rows = conn.execute(
+    assert conn.execute(
+        "SELECT DISTINCT step FROM step_time_samples ORDER BY step;"
+    ).fetchall() == [(3,), (4,)]
+    assert conn.execute(
+        "SELECT DISTINCT step FROM step_memory_samples ORDER BY step;"
+    ).fetchall() == [(3,)]
+    for table in (
+        "system_samples",
+        "system_gpu_samples",
+        "process_samples",
+        "stdout_stderr_samples",
+    ):
+        assert conn.execute(
+            f"SELECT sample_ts_s FROM {table} ORDER BY sample_ts_s;"
+        ).fetchall() == [(300.0,)]
+    assert conn.execute(
         "SELECT COUNT(*) FROM runtime_environment;"
-    ).fetchone()
+    ).fetchone() == (1,)
+    late_recv_ts_ns = policy_watermark + 100
+    late_system_row = [None] * 14
+    late_system_row[0] = late_recv_ts_ns
+    late_system_row[7] = 100.0
+    late_step_row = [None] * 12
+    late_step_row[0] = late_recv_ts_ns
+    late_step_row[8] = 100.0
+    late_step_row[10] = 1
+    late_step_row[11] = "{}"
+    fresh_system_row = list(late_system_row)
+    fresh_system_row[7] = 500.0
+    fresh_step_row = list(late_step_row)
+    fresh_step_row[8] = 500.0
+    fresh_step_row[10] = 5
+    projection_rows = {
+        system_projection: {
+            "system_samples": [
+                tuple(late_system_row),
+                tuple(fresh_system_row),
+            ]
+        },
+        step_time: {
+            "step_time_samples": [tuple(late_step_row), tuple(fresh_step_row)]
+        },
+    }
+    writer._write_projection_rows(conn, projection_rows, prune=False)
 
-    assert retained == [(cutoff,), (policy_watermark,)]
-    assert state == (1,)
-    assert runtime_rows == (1,)
+    assert conn.execute(
+        "SELECT DISTINCT step FROM step_time_samples ORDER BY step;"
+    ).fetchall() == [(3,), (4,), (5,)]
+    assert conn.execute(
+        "SELECT sample_ts_s FROM system_samples ORDER BY sample_ts_s;"
+    ).fetchall() == [(300.0,), (500.0,)]
+
+
+def test_retention_waits_until_step_memory_is_aligned() -> None:
+    conn = _retention_connection()
+    policy_watermark = 10_000_000_000_000
+    cutoff = policy_watermark - int(30 * 60 * 1e9)
+    for step in (1, 2):
+        _insert_aligned_step(
+            conn,
+            table="step_time_samples",
+            step=step,
+            recv_ts_ns=cutoff - step,
+        )
+    _insert_aligned_step(
+        conn,
+        table="step_memory_samples",
+        step=1,
+        recv_ts_ns=cutoff - 1,
+        ranks=(0,),
+    )
+    conn.execute(
+        "INSERT INTO system_samples(recv_ts_ns, sample_ts_s) VALUES (?, ?);",
+        (policy_watermark, 200.0),
+    )
+
+    writer = SQLiteWriterSimple(
+        SQLiteWriterConfig(path=":memory:", history_retention_s=1800.0)
+    )
+    conn.commit()
+    writer._prune_all_retained_rows(conn)
+
+    assert conn.execute(
+        "SELECT COUNT(*) FROM step_time_samples;"
+    ).fetchone() == (4,)
+    assert conn.execute(
+        "SELECT COUNT(*) FROM step_memory_samples;"
+    ).fetchone() == (1,)
+    assert conn.execute("SELECT COUNT(*) FROM system_samples;").fetchone() == (
+        1,
+    )
+
+
+def test_retention_uses_time_cutoff_when_no_step_history_exists() -> None:
+    conn = _retention_connection()
+    policy_watermark = 10_000_000_000_000
+    cutoff = policy_watermark - int(30 * 60 * 1e9)
+    conn.executemany(
+        "INSERT INTO system_samples(recv_ts_ns, sample_ts_s) VALUES (?, ?);",
+        [
+            (cutoff - 1, (cutoff - 1) / 1e9),
+            (policy_watermark, policy_watermark / 1e9),
+        ],
+    )
+
+    writer = SQLiteWriterSimple(
+        SQLiteWriterConfig(path=":memory:", history_retention_s=1800.0)
+    )
+    conn.commit()
+    writer._prune_all_retained_rows(conn)
+
+    assert conn.execute(
+        "SELECT recv_ts_ns FROM system_samples;"
+    ).fetchall() == [(policy_watermark,)]
 
 
 def _system_payload() -> dict:

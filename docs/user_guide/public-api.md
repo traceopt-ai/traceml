@@ -104,10 +104,12 @@ traceml serve                         # standalone aggregator
 
 `run`, `watch`, and `serve` accept `--history-retention DURATION`. The default
 is `30m`; bare values are seconds, and `s`, `m`, `h`, and `d` suffixes are
-accepted. This is the logical final-report history. TraceML physically keeps
-an additional fixed 5-minute late-arrival grace, so the default raw SQLite
-horizon is 35 minutes. Older raw rows are discarded without a rollup. Use
-`--no-history` on `run` or `watch` when history should be disabled entirely.
+accepted. Step Time and Step Memory are pruned through the minimum step that is
+aligned across every expected rank in both streams and older than the selected
+duration. System, Process, GPU, and stdout/stderr history use that same step's
+timestamp. Later arrivals at or before a deleted step or timestamp are dropped
+before insertion. Use `--no-history` on `run` or `watch` when history should be
+disabled entirely.
 
 The same setting is available as `history_retention` in `traceml.yaml` and as
 `TRACEML_HISTORY_RETENTION`. Precedence remains CLI, environment, YAML, then
@@ -160,7 +162,7 @@ non-aggregator node needs the reachable node-0 address above.
 | `--mode` | `summary` (default), `cli`, or `dashboard`. |
 | `--logs-dir` | Directory for session logs. |
 | `--run-name` / `--session-id` | Shared run identity for worker artifacts. |
-| `--history-retention` | Logical analysis history; default `30m` plus an internal 5-minute raw-storage grace. |
+| `--history-retention` | Aligned raw-history duration; default `30m`. |
 
 ### Missing-aggregator behavior
 

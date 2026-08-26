@@ -788,7 +788,6 @@ def test_run_manifest_write_and_update_merge_correctly(tmp_path) -> None:
     assert payload["launch"]["aggregator_port"] == 29765
     assert payload["launch"]["nnodes"] == 1
     assert payload["launch"]["history_retention_s"] == 1800.0
-    assert payload["launch"]["history_retention_grace_s"] == 300.0
     assert (
         payload["launch"]["finalize_timeout_sec"]
         == DEFAULT_FINALIZE_TIMEOUT_SEC

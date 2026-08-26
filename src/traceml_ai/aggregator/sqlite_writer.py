@@ -35,7 +35,7 @@ from traceml_ai.telemetry.envelope import (
 )
 from traceml_ai.telemetry.retention import (
     DEFAULT_HISTORY_RETENTION_S,
-    HistoryRetentionPolicy,
+    retention_cutoff_recv_ts_ns,
 )
 
 _PROJECTION_WRITERS = [
@@ -55,7 +55,18 @@ _HISTORY_TABLES = (
     "step_memory_samples",
     "stdout_stderr_samples",
 )
-_STEP_HISTORY_TABLES = frozenset({"step_time_samples", "step_memory_samples"})
+_STEP_HISTORY_TABLES = ("step_time_samples", "step_memory_samples")
+_TIME_HISTORY_TABLES = tuple(
+    table for table in _HISTORY_TABLES if table not in _STEP_HISTORY_TABLES
+)
+_HISTORY_ROW_POSITIONS = {
+    "system_samples": (7, None),
+    "system_gpu_samples": (7, None),
+    "process_samples": (8, None),
+    "step_time_samples": (8, 10),
+    "step_memory_samples": (8, 11),
+    "stdout_stderr_samples": (2, None),
+}
 _RETENTION_PRUNE_INTERVAL_S = 60.0
 
 
@@ -138,6 +149,8 @@ class SQLiteWriterSimple:
         self._dropped = 0
         self._written = 0
         self._last_prune_monotonic: Optional[float] = None
+        self._deleted_through_step: Optional[int] = None
+        self._deleted_through_ts_s: Optional[float] = None
         self._last_error: Optional[str] = None
         self._finalize_result: Optional[SQLiteFinalizeResult] = None
 
@@ -377,6 +390,35 @@ class SQLiteWriterSimple:
 
         return projection_rows
 
+    def _drop_expired_projection_rows(
+        self,
+        projection_rows: dict[Any, dict[str, list[tuple]]],
+    ) -> None:
+        """Drop known-old history rows before they reach SQLite."""
+        for rows_by_table in projection_rows.values():
+            for table, rows in rows_by_table.items():
+                positions = _HISTORY_ROW_POSITIONS.get(table)
+                if positions is None:
+                    continue
+                sample_position, step_position = positions
+
+                def keep(row: tuple) -> bool:
+                    if step_position is not None:
+                        step = row[step_position]
+                        if (
+                            step is not None
+                            and self._deleted_through_step is not None
+                        ):
+                            return int(step) > self._deleted_through_step
+                    sample_ts_s = row[sample_position]
+                    return (
+                        sample_ts_s is None
+                        or self._deleted_through_ts_s is None
+                        or float(sample_ts_s) > self._deleted_through_ts_s
+                    )
+
+                rows_by_table[table] = [row for row in rows if keep(row)]
+
     @staticmethod
     def _projection_row_count(
         projection_rows: dict[Any, dict[str, list[tuple]]],
@@ -396,6 +438,7 @@ class SQLiteWriterSimple:
         prune: bool = True,
     ) -> None:
         """Write prepared projection rows in one SQLite transaction."""
+        self._drop_expired_projection_rows(projection_rows)
         row_count = self._projection_row_count(projection_rows)
         if row_count <= 0:
             return
@@ -403,41 +446,92 @@ class SQLiteWriterSimple:
         conn.execute("BEGIN;")
 
         for writer in _PROJECTION_WRITERS:
-            writer.insert_rows(conn, projection_rows[writer])
+            writer.insert_rows(conn, projection_rows.get(writer, {}))
 
+        pruned_through = None
         if prune and self._retention_prune_due():
-            self._prune_all_retained_rows(conn)
+            pruned_through = self._prune_all_retained_rows(conn)
 
         conn.execute("COMMIT;")
+        if pruned_through is not None:
+            self._advance_retention_floor(pruned_through)
         self._written += row_count
 
-    def _prune_all_retained_rows(self, conn: sqlite3.Connection) -> None:
-        """Delete raw rows older than the receive-time storage horizon."""
+    def _advance_retention_floor(
+        self,
+        frontier: tuple[Optional[int], Optional[float]],
+    ) -> None:
+        """Remember committed deletion boundaries for future inserts."""
+        step, sample_ts_s = frontier
+        if step is not None:
+            self._deleted_through_step = max(
+                step, self._deleted_through_step or step
+            )
+        if sample_ts_s is not None:
+            self._deleted_through_ts_s = max(
+                sample_ts_s, self._deleted_through_ts_s or sample_ts_s
+            )
+
+    def _prune_all_retained_rows(
+        self,
+        conn: sqlite3.Connection,
+    ) -> Optional[tuple[Optional[int], Optional[float]]]:
+        """Prune history through one Step Time/Step Memory aligned frontier."""
         owns_transaction = not conn.in_transaction
+        pruned_through = None
         if owns_transaction:
             conn.execute("BEGIN;")
         try:
             watermark = self._history_watermark_recv_ts_ns(conn)
             if watermark is not None:
-                policy = HistoryRetentionPolicy(
-                    retention_s=self._cfg.history_retention_s,
+                cutoff = retention_cutoff_recv_ts_ns(
+                    watermark,
+                    self._cfg.history_retention_s,
                 )
-                cutoff = policy.cutoff_recv_ts_ns(watermark)
-                for table in _HISTORY_TABLES:
-                    self._prune_history_table(
-                        conn,
-                        table=table,
-                        cutoff_recv_ts_ns=cutoff,
-                        watermark_recv_ts_ns=watermark,
-                    )
+                frontier = self._retention_frontier(
+                    conn,
+                    cutoff_recv_ts_ns=cutoff,
+                )
+                if frontier is not None:
+                    pruned_through = frontier
+                    step, boundary_ts_s = frontier
+                    if step is not None:
+                        for table in _STEP_HISTORY_TABLES:
+                            self._prune_history_table(
+                                conn,
+                                table=table,
+                                where_sql="step <= ?",
+                                where_params=(step,),
+                            )
+                    for table in _TIME_HISTORY_TABLES:
+                        if boundary_ts_s is None:
+                            where_sql = "recv_ts_ns < ?"
+                            where_params: tuple[Any, ...] = (cutoff,)
+                        else:
+                            # Periodic history follows the shared step timestamp.
+                            # Malformed rows still age out by receive time.
+                            where_sql = (
+                                "sample_ts_s <= ? OR "
+                                "(sample_ts_s IS NULL AND recv_ts_ns < ?)"
+                            )
+                            where_params = (boundary_ts_s, cutoff)
+                        self._prune_history_table(
+                            conn,
+                            table=table,
+                            where_sql=where_sql,
+                            where_params=where_params,
+                        )
             if owns_transaction:
                 conn.execute("COMMIT;")
+                if pruned_through is not None:
+                    self._advance_retention_floor(pruned_through)
         except Exception:
             if owns_transaction and conn.in_transaction:
                 conn.execute("ROLLBACK;")
             raise
         finally:
             self._last_prune_monotonic = time.monotonic()
+        return pruned_through
 
     def _retention_prune_due(self) -> bool:
         """Return whether the low-frequency retention pass is due."""
@@ -460,136 +554,162 @@ class SQLiteWriterSimple:
         return int(row[0]) if row and row[0] is not None else None
 
     @staticmethod
+    def _expected_step_ranks(conn: sqlite3.Connection) -> Optional[int]:
+        """Return the stable world size carried by step telemetry."""
+        row = conn.execute(
+            """
+            SELECT MAX(value)
+            FROM (
+                SELECT MAX(world_size) AS value FROM step_time_samples
+                UNION ALL
+                SELECT MAX(world_size) AS value FROM step_memory_samples
+            );
+            """
+        ).fetchone()
+        if row and row[0] is not None and int(row[0]) > 0:
+            return int(row[0])
+
+        row = conn.execute(
+            """
+            SELECT COUNT(DISTINCT rank_id)
+            FROM (
+                SELECT COALESCE(global_rank, rank) AS rank_id
+                FROM step_time_samples
+                UNION ALL
+                SELECT COALESCE(global_rank, rank) AS rank_id
+                FROM step_memory_samples
+            )
+            WHERE rank_id IS NOT NULL;
+            """
+        ).fetchone()
+        observed = int(row[0] or 0) if row else 0
+        return observed or None
+
+    @staticmethod
+    def _highest_aligned_step(
+        conn: sqlite3.Connection,
+        *,
+        table: str,
+        expected_ranks: int,
+    ) -> Optional[int]:
+        """Return the highest step reported by every expected rank."""
+        if table not in _STEP_HISTORY_TABLES:
+            raise ValueError(f"Unknown step history table: {table}")
+        complete_row = (
+            "AND events_json IS NOT NULL AND events_json != ''"
+            if table == "step_time_samples"
+            else ""
+        )
+        row = conn.execute(
+            f"""
+            SELECT MAX(step)
+            FROM (
+                SELECT step
+                FROM {table}
+                WHERE COALESCE(global_rank, rank) IS NOT NULL
+                  AND step IS NOT NULL
+                  {complete_row}
+                GROUP BY step
+                HAVING COUNT(DISTINCT COALESCE(global_rank, rank)) = ?
+            );
+            """,
+            (int(expected_ranks),),
+        ).fetchone()
+        return int(row[0]) if row and row[0] is not None else None
+
+    @staticmethod
+    def _highest_aged_step(
+        conn: sqlite3.Connection,
+        *,
+        cutoff_recv_ts_ns: int,
+    ) -> Optional[int]:
+        """Return the highest step whose Step Time and Memory rows are old."""
+        row = conn.execute(
+            """
+            SELECT MAX(step)
+            FROM (
+                SELECT step
+                FROM (
+                    SELECT step, recv_ts_ns FROM step_time_samples
+                    UNION ALL
+                    SELECT step, recv_ts_ns FROM step_memory_samples
+                )
+                WHERE step IS NOT NULL
+                GROUP BY step
+                HAVING MAX(recv_ts_ns) < ?
+            );
+            """,
+            (int(cutoff_recv_ts_ns),),
+        ).fetchone()
+        return int(row[0]) if row and row[0] is not None else None
+
+    @classmethod
+    def _retention_frontier(
+        cls,
+        conn: sqlite3.Connection,
+        *,
+        cutoff_recv_ts_ns: int,
+    ) -> Optional[tuple[Optional[int], Optional[float]]]:
+        """Return the shared step/timestamp frontier, or a time-only fallback."""
+        expected_ranks = cls._expected_step_ranks(conn)
+        if expected_ranks is None:
+            return None, None
+
+        highest_step_time = cls._highest_aligned_step(
+            conn,
+            table="step_time_samples",
+            expected_ranks=expected_ranks,
+        )
+        highest_step_memory = cls._highest_aligned_step(
+            conn,
+            table="step_memory_samples",
+            expected_ranks=expected_ranks,
+        )
+        highest_aged_step = cls._highest_aged_step(
+            conn,
+            cutoff_recv_ts_ns=cutoff_recv_ts_ns,
+        )
+        candidates = (
+            highest_step_time,
+            highest_step_memory,
+            highest_aged_step,
+        )
+        if any(step is None for step in candidates):
+            return None
+        frontier_step = min(
+            int(step) for step in candidates if step is not None
+        )
+        row = conn.execute(
+            """
+            SELECT MAX(sample_ts_s)
+            FROM step_time_samples
+            WHERE step = ?;
+            """,
+            (frontier_step,),
+        ).fetchone()
+        if not row or row[0] is None:
+            return None
+        return frontier_step, float(row[0])
+
+    @staticmethod
     def _prune_history_table(
         conn: sqlite3.Connection,
         *,
         table: str,
-        cutoff_recv_ts_ns: int,
-        watermark_recv_ts_ns: int,
+        where_sql: str,
+        where_params: tuple[Any, ...],
     ) -> None:
-        """Prune one table and record state used for coverage checks."""
+        """Prune one history table through the shared frontier."""
         if table not in _HISTORY_TABLES:
             raise ValueError(f"Unknown telemetry history table: {table}")
-        # Deletion is a prefix in receive time, but coverage is asked about
-        # step / sample-time bounds. Late arrivals mean those orders differ,
-        # so record the full deleted interval: a maximum alone cannot tell
-        # "deleted only above the window" from "deleted across and above it".
-        min_step_expr = (
-            "MIN(step)" if table in _STEP_HISTORY_TABLES else "NULL"
-        )
-        max_step_expr = (
-            "MAX(step)" if table in _STEP_HISTORY_TABLES else "NULL"
-        )
-        deleted = conn.execute(
-            f"""
-            SELECT
-                MIN(sample_ts_s),
-                MAX(sample_ts_s),
-                {min_step_expr},
-                {max_step_expr},
-                COUNT(*)
-            FROM {table}
-            WHERE recv_ts_ns < ?;
-            """,
-            (int(cutoff_recv_ts_ns),),
-        ).fetchone()
-        min_sample_ts = deleted[0] if deleted else None
-        max_sample_ts = deleted[1] if deleted else None
-        min_step = deleted[2] if deleted else None
-        max_step = deleted[3] if deleted else None
-        deleted_rows = int(deleted[4] or 0) if deleted else 0
-
         conn.execute(
-            f"DELETE FROM {table} WHERE recv_ts_ns < ?;",
-            (int(cutoff_recv_ts_ns),),
-        )
-        conn.execute(
-            """
-            INSERT INTO history_retention_state(
-                table_name,
-                watermark_recv_ts_ns,
-                cutoff_recv_ts_ns,
-                min_deleted_sample_ts_s,
-                max_deleted_sample_ts_s,
-                min_deleted_step,
-                max_deleted_step,
-                deleted_rows
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(table_name) DO UPDATE SET
-                watermark_recv_ts_ns = excluded.watermark_recv_ts_ns,
-                cutoff_recv_ts_ns = excluded.cutoff_recv_ts_ns,
-                min_deleted_sample_ts_s = MIN(
-                    COALESCE(
-                        history_retention_state.min_deleted_sample_ts_s,
-                        excluded.min_deleted_sample_ts_s
-                    ),
-                    COALESCE(
-                        excluded.min_deleted_sample_ts_s,
-                        history_retention_state.min_deleted_sample_ts_s
-                    )
-                ),
-                min_deleted_step = MIN(
-                    COALESCE(
-                        history_retention_state.min_deleted_step,
-                        excluded.min_deleted_step
-                    ),
-                    COALESCE(
-                        excluded.min_deleted_step,
-                        history_retention_state.min_deleted_step
-                    )
-                ),
-                max_deleted_sample_ts_s = MAX(
-                    COALESCE(
-                        history_retention_state.max_deleted_sample_ts_s,
-                        excluded.max_deleted_sample_ts_s
-                    ),
-                    COALESCE(
-                        excluded.max_deleted_sample_ts_s,
-                        history_retention_state.max_deleted_sample_ts_s
-                    )
-                ),
-                max_deleted_step = MAX(
-                    COALESCE(
-                        history_retention_state.max_deleted_step,
-                        excluded.max_deleted_step
-                    ),
-                    COALESCE(
-                        excluded.max_deleted_step,
-                        history_retention_state.max_deleted_step
-                    )
-                ),
-                deleted_rows = history_retention_state.deleted_rows
-                    + excluded.deleted_rows;
-            """,
-            (
-                table,
-                int(watermark_recv_ts_ns),
-                int(cutoff_recv_ts_ns),
-                min_sample_ts,
-                max_sample_ts,
-                min_step,
-                max_step,
-                deleted_rows,
-            ),
+            f"DELETE FROM {table} WHERE {where_sql};",
+            where_params,
         )
 
     @staticmethod
-    def _init_retention_schema(conn: sqlite3.Connection) -> None:
-        """Create retention indexes and the small internal coverage ledger."""
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS history_retention_state (
-                table_name                 TEXT PRIMARY KEY,
-                watermark_recv_ts_ns       INTEGER NOT NULL,
-                cutoff_recv_ts_ns          INTEGER NOT NULL,
-                min_deleted_sample_ts_s    REAL,
-                max_deleted_sample_ts_s    REAL,
-                min_deleted_step           INTEGER,
-                max_deleted_step           INTEGER,
-                deleted_rows               INTEGER NOT NULL DEFAULT 0
-            );
-            """
-        )
+    def _init_retention_indexes(conn: sqlite3.Connection) -> None:
+        """Create indexes used by periodic retention queries."""
         for table in _HISTORY_TABLES:
             conn.execute(
                 f"CREATE INDEX IF NOT EXISTS idx_{table}_recv_ts "
@@ -665,7 +785,7 @@ class SQLiteWriterSimple:
             conn = self._connect()
             for writer in _PROJECTION_WRITERS:
                 writer.init_schema(conn)
-            self._init_retention_schema(conn)
+            self._init_retention_indexes(conn)
         except Exception as exc:
             fatal_error = f"SQLiteWriter init failed: {exc}"
             self._log_error(f"[TraceML] {fatal_error}")

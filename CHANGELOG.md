@@ -7,6 +7,10 @@ which carry the full historical notes for versions predating this file.
 
 ## [Unreleased]
 
+- **Breaking:** `--summary-window-rows` and
+  `TRACEML_SUMMARY_WINDOW_ROWS` were removed. Use
+  `--history-retention`, `history_retention`, or
+  `TRACEML_HISTORY_RETENTION`; row counts are not converted to durations.
 - Step Time now has one typed `load -> analyze -> diagnose -> present`
   pipeline. CLI and dashboard share the live profile, the dashboard fans one
   analysis to both views, and final summary runs the summary profile once

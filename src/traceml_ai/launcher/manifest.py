@@ -15,7 +15,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from traceml_ai.telemetry.retention import HISTORY_RETENTION_GRACE_S
 from traceml_ai.utils.ast_analysis import analyze_script, build_code_manifest
 from traceml_ai.utils.atomic_io import write_json_atomic
 
@@ -157,7 +156,6 @@ def write_run_manifest(
             "master_port": int(master_port),
             "history_enabled": bool(history_enabled),
             "history_retention_s": float(history_retention_s),
-            "history_retention_grace_s": HISTORY_RETENTION_GRACE_S,
             "finalize_timeout_sec": float(finalize_timeout_sec),
             "launch_cwd": str(Path(launch_cwd).resolve()),
         },

@@ -15,7 +15,6 @@ from typing import Any, Optional
 
 from traceml_ai.telemetry.retention import (
     DEFAULT_HISTORY_RETENTION_S,
-    HISTORY_RETENTION_GRACE_S,
     parse_history_retention,
 )
 
@@ -99,6 +98,7 @@ def _common_completed_steps(
             WITH deduplicated AS (
                 SELECT
                     COALESCE(global_rank, rank) AS rank_id,
+                    world_size,
                     step,
                     sample_ts_s,
                     ROW_NUMBER() OVER (
@@ -113,7 +113,10 @@ def _common_completed_steps(
                   AND events_json != ''
             ),
             rank_count AS (
-                SELECT COUNT(DISTINCT rank_id) AS value
+                SELECT COALESCE(
+                    MAX(CASE WHEN world_size > 0 THEN world_size END),
+                    COUNT(DISTINCT rank_id)
+                ) AS value
                 FROM deduplicated
                 WHERE duplicate_row = 1
             )
@@ -156,7 +159,7 @@ def build_analysis_window_payload(
     db_path: str,
     window: AnalysisWindow,
 ) -> dict[str, Any]:
-    """Build public window metadata and per-section retention coverage."""
+    """Build public window metadata and per-section observations."""
     with closing(sqlite3.connect(db_path)) as conn:
         sections = {
             section: _section_observation(conn, section, table, window)
@@ -165,7 +168,6 @@ def build_analysis_window_payload(
     return {
         "anchor": window.anchor,
         "retention_s": window.retention_s,
-        "storage_grace_s": HISTORY_RETENTION_GRACE_S,
         "start_ts_s": window.start_ts_s,
         "end_ts_s": window.end_ts_s,
         "duration_s": window.duration_s,
@@ -182,7 +184,7 @@ def _section_observation(
     window: AnalysisWindow,
 ) -> dict[str, Any]:
     if window.start_ts_s is None or window.end_ts_s is None:
-        return _empty_observation("no_data")
+        return _empty_observation()
 
     if section in _STEP_SECTIONS and window.start_step is not None:
         where = "step BETWEEN ? AND ?"
@@ -201,10 +203,9 @@ def _section_observation(
             params,
         ).fetchone()
     except sqlite3.Error:
-        return _empty_observation("unknown")
+        return _empty_observation()
 
     samples = int(row[0] or 0) if row else 0
-    coverage = _coverage_status(conn, section, table, window, samples)
     return {
         "samples": samples,
         "observed_start_ts_s": (
@@ -213,82 +214,14 @@ def _section_observation(
         "observed_end_ts_s": (
             float(row[2]) if row and row[2] is not None else None
         ),
-        "coverage": coverage,
     }
 
 
-def _intervals_overlap(
-    deleted_start: Optional[float],
-    deleted_end: Optional[float],
-    window_start: Optional[float],
-    window_end: Optional[float],
-) -> bool:
-    """Return True when a deleted interval intersects the analysed window.
-
-    Nothing deleted means no overlap. Anything else that cannot be bounded
-    is treated as overlapping, so a missing bound degrades to `partial`
-    rather than claiming coverage the ledger cannot support.
-    """
-    if deleted_end is None and deleted_start is None:
-        return False
-    if window_start is None:
-        return True
-    if deleted_end is not None and float(deleted_end) < float(window_start):
-        return False
-    if window_end is not None and deleted_start is not None:
-        return float(deleted_start) <= float(window_end)
-    return True
-
-
-def _coverage_status(
-    conn: sqlite3.Connection,
-    section: str,
-    table: str,
-    window: AnalysisWindow,
-    samples: int,
-) -> str:
-    try:
-        row = conn.execute(
-            """
-            SELECT
-                min_deleted_sample_ts_s,
-                max_deleted_sample_ts_s,
-                min_deleted_step,
-                max_deleted_step
-            FROM history_retention_state
-            WHERE table_name = ?;
-            """,
-            (table,),
-        ).fetchone()
-    except sqlite3.Error:
-        return "unknown"
-    if row is None:
-        return "unknown"
-
-    # `partial` means retention removed data that overlaps the analysed
-    # interval, so test the deleted interval against both window bounds.
-    # A one-sided test would flag rows deleted entirely above the window,
-    # which happens whenever a rank stops early and the surviving rank's
-    # later solo rows age out.
-    if section in _STEP_SECTIONS and window.start_step is not None:
-        overlap = _intervals_overlap(
-            row[2], row[3], window.start_step, window.end_step
-        )
-    else:
-        overlap = _intervals_overlap(
-            row[0], row[1], window.start_ts_s, window.end_ts_s
-        )
-    if overlap:
-        return "partial"
-    return "complete" if samples > 0 else "no_data"
-
-
-def _empty_observation(coverage: str) -> dict[str, Any]:
+def _empty_observation() -> dict[str, Any]:
     return {
         "samples": 0,
         "observed_start_ts_s": None,
         "observed_end_ts_s": None,
-        "coverage": coverage,
     }
 
 

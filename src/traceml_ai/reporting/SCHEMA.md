@@ -4,8 +4,8 @@ TraceML writes one end-of-run JSON file. The current schema version is `1.8`.
 Each section has the same outer shape so the output is easy to store, diff, and
 consume from tooling.
 
-Schema `1.8` adds one shared time-bounded analysis window and explicit
-retention coverage. It retains the canonical Step Time vocabulary introduced
+Schema `1.8` adds one shared time-bounded analysis window and per-section
+observations. It retains the canonical Step Time vocabulary introduced
 in schema `1.7`. Every public timing
 metric is nullable: `null` means the
 underlying timing signal was never measured in the analyzed window (missing
@@ -35,7 +35,6 @@ Sections:
   "analysis_window": {
     "anchor": "step_time | periodic_telemetry | null",
     "retention_s": 1800.0,
-    "storage_grace_s": 300.0,
     "start_ts_s": null,
     "end_ts_s": null,
     "duration_s": null,
@@ -45,8 +44,7 @@ Sections:
       "system": {
         "samples": 0,
         "observed_start_ts_s": null,
-        "observed_end_ts_s": null,
-        "coverage": "complete | partial | no_data | unknown"
+        "observed_end_ts_s": null
       }
     }
   },
@@ -74,10 +72,13 @@ timestamp bounds, and Step Memory uses the same inclusive step bounds. Without
 Step Time, the latest System/Process timestamp anchors a time-only window and
 the step bounds remain `null`.
 
-Each section reports its sample count, observed timestamp bounds, and history
-coverage. `partial` means retention deleted data that overlaps the requested
-interval; `unknown` means the database predates the coverage ledger. The same
+Each section reports its sample count and observed timestamp bounds. The same
 analysis bounds also appear in every section's `metadata`.
+
+Retention advances through one shared frontier: the minimum of the latest
+rank-aligned Step Time step, latest rank-aligned Step Memory step, and the
+latest aligned step older than `retention_s`. Periodic telemetry is pruned
+through that step's completion timestamp.
 
 Top-level `duration_s` is full training lifecycle duration when genuine
 launcher start/end timestamps are available. Otherwise it is `null`; section
@@ -247,8 +248,7 @@ Fallback evidence types are:
     "analysis_start_ts_s": null,
     "analysis_end_ts_s": null,
     "analysis_start_step": null,
-    "analysis_end_step": null,
-    "history_coverage": "complete | partial | no_data | unknown"
+    "analysis_end_step": null
   },
   "diagnosis": {
     "kind": "...",

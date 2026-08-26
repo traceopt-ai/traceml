@@ -114,8 +114,8 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         metavar="DURATION",
         help=(
             "Raw telemetry history available to analysis (for example 30m, "
-            "2h, or 1d). TraceML keeps an additional internal 5-minute "
-            "late-arrival grace. Default: 30m."
+            "2h, or 1d). Step Time and Step Memory are pruned through one "
+            "shared aligned step boundary. Default: 30m."
         ),
     )
     parser.add_argument(

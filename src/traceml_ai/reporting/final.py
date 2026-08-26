@@ -45,8 +45,8 @@ from traceml_ai.sdk.protocol import (
 from traceml_ai.telemetry.retention import DEFAULT_HISTORY_RETENTION_S
 from traceml_ai.utils.atomic_io import write_json_atomic, write_text_atomic
 
-# Version 1.8 adds one shared, time-bounded analysis window and explicit
-# per-section retention coverage.
+# Version 1.8 adds one shared, time-bounded analysis window and per-section
+# observations.
 SCHEMA_VERSION = 1.8
 
 DEFAULT_PROFILE = "run"
@@ -405,20 +405,6 @@ class FinalReportGenerator:
             if self.analysis_window is not None
             else None
         )
-        if isinstance(analysis_window_payload, dict):
-            observations = analysis_window_payload.get("sections", {})
-            for name, section in (
-                ("system", system_summary),
-                ("process", process_summary),
-                ("step_time", step_time_summary),
-                ("step_memory", step_memory_summary),
-            ):
-                metadata = section.get("metadata")
-                observation = observations.get(name)
-                if isinstance(metadata, dict) and isinstance(
-                    observation, dict
-                ):
-                    metadata["history_coverage"] = observation.get("coverage")
 
         primary_diagnosis = build_primary_diagnosis(
             system_summary=system_summary,
