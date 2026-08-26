@@ -470,18 +470,34 @@ class SQLiteWriterSimple:
         """Prune one table and record state used for coverage checks."""
         if table not in _HISTORY_TABLES:
             raise ValueError(f"Unknown telemetry history table: {table}")
-        step_expr = "MAX(step)" if table in _STEP_HISTORY_TABLES else "NULL"
+        # Deletion is a prefix in receive time, but coverage is asked about
+        # step / sample-time bounds. Late arrivals mean those orders differ,
+        # so record the full deleted interval: a maximum alone cannot tell
+        # "deleted only above the window" from "deleted across and above it".
+        min_step_expr = (
+            "MIN(step)" if table in _STEP_HISTORY_TABLES else "NULL"
+        )
+        max_step_expr = (
+            "MAX(step)" if table in _STEP_HISTORY_TABLES else "NULL"
+        )
         deleted = conn.execute(
             f"""
-            SELECT MAX(sample_ts_s), {step_expr}, COUNT(*)
+            SELECT
+                MIN(sample_ts_s),
+                MAX(sample_ts_s),
+                {min_step_expr},
+                {max_step_expr},
+                COUNT(*)
             FROM {table}
             WHERE recv_ts_ns < ?;
             """,
             (int(cutoff_recv_ts_ns),),
         ).fetchone()
-        max_sample_ts = deleted[0] if deleted else None
-        max_step = deleted[1] if deleted else None
-        deleted_rows = int(deleted[2] or 0) if deleted else 0
+        min_sample_ts = deleted[0] if deleted else None
+        max_sample_ts = deleted[1] if deleted else None
+        min_step = deleted[2] if deleted else None
+        max_step = deleted[3] if deleted else None
+        deleted_rows = int(deleted[4] or 0) if deleted else 0
 
         conn.execute(
             f"DELETE FROM {table} WHERE recv_ts_ns < ?;",
@@ -493,13 +509,35 @@ class SQLiteWriterSimple:
                 table_name,
                 watermark_recv_ts_ns,
                 cutoff_recv_ts_ns,
+                min_deleted_sample_ts_s,
                 max_deleted_sample_ts_s,
+                min_deleted_step,
                 max_deleted_step,
                 deleted_rows
-            ) VALUES (?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(table_name) DO UPDATE SET
                 watermark_recv_ts_ns = excluded.watermark_recv_ts_ns,
                 cutoff_recv_ts_ns = excluded.cutoff_recv_ts_ns,
+                min_deleted_sample_ts_s = MIN(
+                    COALESCE(
+                        history_retention_state.min_deleted_sample_ts_s,
+                        excluded.min_deleted_sample_ts_s
+                    ),
+                    COALESCE(
+                        excluded.min_deleted_sample_ts_s,
+                        history_retention_state.min_deleted_sample_ts_s
+                    )
+                ),
+                min_deleted_step = MIN(
+                    COALESCE(
+                        history_retention_state.min_deleted_step,
+                        excluded.min_deleted_step
+                    ),
+                    COALESCE(
+                        excluded.min_deleted_step,
+                        history_retention_state.min_deleted_step
+                    )
+                ),
                 max_deleted_sample_ts_s = MAX(
                     COALESCE(
                         history_retention_state.max_deleted_sample_ts_s,
@@ -527,7 +565,9 @@ class SQLiteWriterSimple:
                 table,
                 int(watermark_recv_ts_ns),
                 int(cutoff_recv_ts_ns),
+                min_sample_ts,
                 max_sample_ts,
+                min_step,
                 max_step,
                 deleted_rows,
             ),
@@ -542,7 +582,9 @@ class SQLiteWriterSimple:
                 table_name                 TEXT PRIMARY KEY,
                 watermark_recv_ts_ns       INTEGER NOT NULL,
                 cutoff_recv_ts_ns          INTEGER NOT NULL,
+                min_deleted_sample_ts_s    REAL,
                 max_deleted_sample_ts_s    REAL,
+                min_deleted_step           INTEGER,
                 max_deleted_step           INTEGER,
                 deleted_rows               INTEGER NOT NULL DEFAULT 0
             );

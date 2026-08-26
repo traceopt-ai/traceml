@@ -245,7 +245,9 @@ def test_final_summary_aligns_sections_to_step_derived_time_window(
             """
             CREATE TABLE history_retention_state (
                 table_name TEXT PRIMARY KEY,
+                min_deleted_sample_ts_s REAL,
                 max_deleted_sample_ts_s REAL,
+                min_deleted_step INTEGER,
                 max_deleted_step INTEGER
             );
             """
@@ -253,14 +255,18 @@ def test_final_summary_aligns_sections_to_step_derived_time_window(
         conn.executemany(
             """
             INSERT INTO history_retention_state(
-                table_name, max_deleted_sample_ts_s, max_deleted_step
-            ) VALUES (?, ?, ?);
+                table_name,
+                min_deleted_sample_ts_s,
+                max_deleted_sample_ts_s,
+                min_deleted_step,
+                max_deleted_step
+            ) VALUES (?, ?, ?, ?, ?);
             """,
             [
-                ("system_samples", 1199.0, None),
-                ("process_samples", 1300.0, None),
-                ("step_time_samples", 1199.0, 199),
-                ("step_memory_samples", 1199.0, 199),
+                ("system_samples", 0.0, 1199.0, None, None),
+                ("process_samples", 0.0, 1300.0, None, None),
+                ("step_time_samples", 0.0, 1199.0, 0, 199),
+                ("step_memory_samples", 0.0, 1199.0, 0, 199),
             ],
         )
 
@@ -281,6 +287,98 @@ def test_final_summary_aligns_sections_to_step_derived_time_window(
         metadata = payload[section]["metadata"]
         assert metadata["analysis_start_ts_s"] == 1200.0
         assert metadata["analysis_end_ts_s"] == 3000.0
+
+
+def _coverage_for_deleted_interval(
+    *,
+    min_step,
+    max_step,
+    window_start_step,
+    window_end_step,
+):
+    """Return the coverage label for one deleted step interval."""
+    import sqlite3
+
+    from traceml_ai.reporting.analysis_window import (
+        AnalysisWindow,
+        _coverage_status,
+    )
+
+    conn = sqlite3.connect(":memory:")
+    conn.execute(
+        """
+        CREATE TABLE history_retention_state (
+            table_name TEXT PRIMARY KEY,
+            min_deleted_sample_ts_s REAL,
+            max_deleted_sample_ts_s REAL,
+            min_deleted_step INTEGER,
+            max_deleted_step INTEGER
+        );
+        """
+    )
+    conn.execute(
+        "INSERT INTO history_retention_state VALUES(?, ?, ?, ?, ?);",
+        ("step_time_samples", None, None, min_step, max_step),
+    )
+    window = AnalysisWindow(
+        retention_s=1800.0,
+        anchor="step_time",
+        start_ts_s=None,
+        end_ts_s=None,
+        start_step=window_start_step,
+        end_step=window_end_step,
+    )
+    return _coverage_status(conn, "step_time", "step_time_samples", window, 42)
+
+
+def test_coverage_ignores_rows_deleted_outside_the_analysis_window():
+    """Deletions that do not overlap the window must not report partial.
+
+    A rank that stops early leaves the surviving rank producing steps that
+    are never common, so the window stays behind them. When those solo rows
+    later age out, the deleted interval sits entirely above the window and
+    nothing inside it was lost.
+    """
+    assert (
+        _coverage_for_deleted_interval(
+            min_step=20,
+            max_step=20,
+            window_start_step=13,
+            window_end_step=19,
+        )
+        == "complete"
+    )
+    assert (
+        _coverage_for_deleted_interval(
+            min_step=1,
+            max_step=5,
+            window_start_step=13,
+            window_end_step=19,
+        )
+        == "complete"
+    )
+
+
+def test_coverage_reports_partial_when_a_deletion_reaches_the_window():
+    """A deleted interval spanning the window must never read as complete."""
+    assert (
+        _coverage_for_deleted_interval(
+            min_step=15,
+            max_step=20,
+            window_start_step=13,
+            window_end_step=19,
+        )
+        == "partial"
+    )
+    assert (
+        _coverage_for_deleted_interval(
+            min_step=14,
+            max_step=16,
+            window_start_step=13,
+            window_end_step=19,
+        )
+        == "partial"
+    )
 
 
 def test_final_report_generator_preserves_summary_schema_and_order():

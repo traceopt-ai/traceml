@@ -217,6 +217,29 @@ def _section_observation(
     }
 
 
+def _intervals_overlap(
+    deleted_start: Optional[float],
+    deleted_end: Optional[float],
+    window_start: Optional[float],
+    window_end: Optional[float],
+) -> bool:
+    """Return True when a deleted interval intersects the analysed window.
+
+    Nothing deleted means no overlap. Anything else that cannot be bounded
+    is treated as overlapping, so a missing bound degrades to `partial`
+    rather than claiming coverage the ledger cannot support.
+    """
+    if deleted_end is None and deleted_start is None:
+        return False
+    if window_start is None:
+        return True
+    if deleted_end is not None and float(deleted_end) < float(window_start):
+        return False
+    if window_end is not None and deleted_start is not None:
+        return float(deleted_start) <= float(window_end)
+    return True
+
+
 def _coverage_status(
     conn: sqlite3.Connection,
     section: str,
@@ -227,7 +250,11 @@ def _coverage_status(
     try:
         row = conn.execute(
             """
-            SELECT max_deleted_sample_ts_s, max_deleted_step
+            SELECT
+                min_deleted_sample_ts_s,
+                max_deleted_sample_ts_s,
+                min_deleted_step,
+                max_deleted_step
             FROM history_retention_state
             WHERE table_name = ?;
             """,
@@ -238,13 +265,18 @@ def _coverage_status(
     if row is None:
         return "unknown"
 
+    # `partial` means retention removed data that overlaps the analysed
+    # interval, so test the deleted interval against both window bounds.
+    # A one-sided test would flag rows deleted entirely above the window,
+    # which happens whenever a rank stops early and the surviving rank's
+    # later solo rows age out.
     if section in _STEP_SECTIONS and window.start_step is not None:
-        overlap = row[1] is not None and int(row[1]) >= window.start_step
+        overlap = _intervals_overlap(
+            row[2], row[3], window.start_step, window.end_step
+        )
     else:
-        overlap = (
-            row[0] is not None
-            and window.start_ts_s is not None
-            and float(row[0]) >= window.start_ts_s
+        overlap = _intervals_overlap(
+            row[0], row[1], window.start_ts_s, window.end_ts_s
         )
     if overlap:
         return "partial"
