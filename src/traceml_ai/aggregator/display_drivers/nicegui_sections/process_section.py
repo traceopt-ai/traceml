@@ -1,176 +1,462 @@
-"""Process metrics — RAM% / GPU-mem% time-series + KPIs (PR2 revamp).
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
 
-Reuses the original client-side rollup math; renders with glass + ECharts.
-Renderer payload (history rows + series + gpu_used_imbalance) is unchanged.
+"""
+Process block: the trainer process on every rank, as four tiles, two charts
+and per-rank rows.
+
+Scope, stated on the block because it is the block's most useful fact: one
+process per rank, its own PID only. DataLoader workers are separate
+processes, so their CPU lands in the System block and never here. Reading
+the two blocks together is what the page is for: host CPU high while every
+rank's process CPU is low means the work is outside the trainer.
+
+Tiles are levels with their denominator; charts carry the two quantities
+whose information is their shape over time (CPU capacity, RSS); memory is a
+step function and stays a number. No verdict words: the diagnosis engine
+owns those.
 """
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from nicegui import ui
 
 from . import theme
+from .theme import (
+    apply_span_axis,
+    cpu_axis_max,
+    format_gb_pair,
+    format_span,
+    format_window,
+    num as _num,
+    sparkline_svg,
+)
+
+# One colour per rank, shared by the charts and the rows' chips so a line
+# and a row are recognisably the same rank. Red is not among them: it reads
+# as a verdict.
+_RANK_COLORS = (
+    "#f97316",
+    "#3b82f6",
+    "#0d9488",
+    "#a855f7",
+    "#0ea5e9",
+    "#eab308",
+    "#ec4899",
+    "#10b981",
+)
+
+NA = "n/a"
+_MONO = "font-family:var(--mono);"
+
+# The block's scope, on screen rather than in a tooltip: without it the
+# CPU numbers read as the whole box's, and the pairing that makes them
+# diagnostic is invisible.
+SCOPE_NOTE = "one process per rank · DataLoader workers not included"
 
 
-def _to_ms(s: str) -> Optional[int]:
-    try:
-        return int(datetime.fromisoformat(s).timestamp() * 1000)
-    except Exception:
-        return None
+def rank_color(rank: int) -> str:
+    return _RANK_COLORS[int(rank) % len(_RANK_COLORS)]
 
 
-def _percentile(vals: List[float], p: float) -> float:
-    vals = sorted(v for v in vals if v is not None)
-    if not vals:
-        return 0.0
-    k = (len(vals) - 1) * p / 100.0
-    f = int(k)
-    c = min(int(k) + 1, len(vals) - 1)
-    return vals[f] if f == c else vals[f] * (c - k) + vals[c] * (k - f)
+def should_auto_open(*, prev_over: bool, over: bool) -> bool:
+    """Open on the rising edge only.
+
+    Twin of the System block's rule: a reader who closes the rows must not
+    be fought every tick while the condition persists.
+    """
+    return bool(over and not prev_over)
 
 
-def _compute_rollups(window: List[Dict[str, Any]]) -> Dict[str, Any]:
-    last = window[-1]
-    cpu_hist = [float(r.get("cpu_max", 0.0) or 0.0) for r in window]
-    ram_hist = [float(r.get("ram_used_max", 0.0) or 0.0) for r in window]
-    gpu_hist = [
-        float(r.get("gpu_used", 0.0) or 0.0)
-        for r in window
-        if r.get("gpu_used") is not None
-    ]
-    return {
-        "gpu_available": last.get("gpu_used") is not None,
-        "cpu": {
-            "now": cpu_hist[-1],
-            "p50": _percentile(cpu_hist, 50),
-            "p95": _percentile(cpu_hist, 95),
-        },
-        "ram": {
-            "now": ram_hist[-1],
-            "p95": _percentile(ram_hist, 95),
-            "total": float(last.get("ram_total", 0.0) or 0.0),
-        },
-        "gpu": {
-            "now": gpu_hist[-1] if gpu_hist else 0.0,
-            "p95": _percentile(gpu_hist, 95) if gpu_hist else 0.0,
-        },
+def rows_hint(roll: Dict[str, Any], *, is_open: bool) -> str:
+    """Header of the per-rank rows: coverage, imbalance, and nothing else.
+
+    It states what was observed. Whether that is bad is the engine's call,
+    so no word here classifies it.
+    """
+    total = int(roll.get("ranks_total") or 0)
+    if not total:
+        return ""
+    stale = int(roll.get("ranks_stale") or 0)
+    parts = [f"{total} rank{'s' if total != 1 else ''}"]
+    if stale:
+        parts.append(f"{stale} stale, excluded")
+    imbalance = roll.get("reserved_imbalance_pct")
+    if imbalance is not None:
+        parts.append(f"reserved imbalance {float(imbalance):.0f}%")
+    parts.append("click to close" if is_open else "click to open")
+    return " · ".join(parts)
+
+
+def format_age(seconds: Any) -> str:
+    """A per-rank age in the same words the strip uses."""
+    if seconds is None:
+        return NA
+    value = float(seconds)
+    if value < 90:
+        return f"{value:.0f} s"
+    return f"{value / 60.0:.0f} min"
+
+
+def rows_html(
+    ranks: List[Dict[str, Any]], series: List[Dict[str, Any]]
+) -> str:
+    """Per-rank table: identity, capacity, memory, and how fresh it is.
+
+    A stale rank is dimmed and kept. Dropping it would hide the one fact
+    worth having when a job stalls, which is WHICH rank stopped.
+    """
+    trend = {
+        int(entry.get("global_rank", -1)): (
+            entry.get("avg") or entry.get("v") or []
+        )
+        for entry in series or []
     }
+    head = (
+        "<tr><th>rank</th><th>gpu</th><th>node</th><th>cpu cap</th>"
+        "<th>rss</th><th>cpu trend</th><th>cuda allocated</th>"
+        "<th>cuda reserved</th><th>age</th></tr>"
+    )
+    body = ""
+    for rank in ranks:
+        idx = int(rank.get("global_rank", 0))
+        colour = rank_color(idx)
+        used, rest = format_gb_pair(
+            rank.get("ram_used"), rank.get("ram_total")
+        )
+        reserved, reserved_rest = format_gb_pair(
+            rank.get("gpu_reserved"), rank.get("gpu_total")
+        )
+        alloc, alloc_rest = format_gb_pair(rank.get("gpu_alloc"), None)
+        cap = rank.get("cpu_capacity")
+        stale = bool(rank.get("stale"))
+        row_open = '<tr class="tml-stale">' if stale else "<tr>"
+        gpu_index = rank.get("gpu_index")
+        node_rank = rank.get("node_rank")
+        gpu_cell = f"G{int(gpu_index)}" if gpu_index is not None else NA
+        node_cell = f"N{int(node_rank)}" if node_rank is not None else NA
+        cap_cell = f"{_num(cap, '{:.1f}')} %" if cap is not None else NA
+        body += (
+            row_open + f'<td><span style="color:{colour}">■</span> R{idx}</td>'
+            f"<td>{gpu_cell}</td>"
+            f"<td>{node_cell}</td>"
+            f"<td>{cap_cell}</td>"
+            f"<td>{used} {rest}</td>"
+            f"<td>{sparkline_svg(trend.get(idx, []), colour)}</td>"
+            f"<td>{alloc} {alloc_rest}</td>"
+            f"<td>{reserved} {reserved_rest}</td>"
+            f"<td>{format_age(rank.get('age_s'))}</td>"
+            "</tr>"
+        )
+    return f'<table class="tml-gpus">{head}{body}</table>'
+
+
+def _series_axis(
+    *groups: List[Dict[str, Any]],
+) -> Optional[Tuple[float, float]]:
+    """One anchor and span covering every series on the block.
+
+    Both charts are pinned to it so a vertical read across the pair, and
+    across to the System block's charts above, lands on the same moment.
+    """
+    starts, ends = [], []
+    for group in groups:
+        for entry in group or []:
+            stamps = entry.get("t") or []
+            if stamps:
+                starts.append(stamps[0])
+                ends.append(stamps[-1])
+    if not ends:
+        return None
+    newest = max(ends)
+    return (newest, max(newest - min(starts), 1.0))
 
 
 def build_process_section() -> Dict[str, Any]:
-    kpis: Dict[str, Any] = {}
+    """Build the block once; ``update_process_section`` fills it per tick."""
+    panel: Dict[str, Any] = {"tiles": {}, "subs": {}}
     card = ui.element("div").classes("glass reveal")
     card.style(
-        "padding:18px 20px; width:100%; height:100%; "
-        "display:flex; flex-direction:column; overflow:hidden;"
+        "padding:18px 20px; width:100%; display:flex; "
+        "flex-direction:column; overflow:hidden;"
     )
     with card:
         with (
             ui.row()
             .classes("w-full items-center")
-            .style("margin-bottom:8px; gap:12px;")
+            .style("margin-bottom:10px; gap:12px;")
         ):
             ui.label("Process").classes("ctitle")
-            for nm, col in [("RAM", theme.C_CPU), ("GPU mem", theme.C_GPU)]:
-                with ui.element("div").classes("legchip"):
-                    ui.element("div").classes("legdot").style(
-                        f"background:{col};"
-                    )
-                    ui.label(nm)
             ui.element("div").style("flex:1;")
-            win = ui.label("waiting for data").classes("cmeta")
-        chart = ui.echart(theme.dual_line_options("RAM", "GPU mem")).style(
-            "height:200px; width:100%; flex:1; min-height:160px;"
-        )
-        with (
-            ui.row()
-            .classes("w-full")
-            .style("gap:8px; margin-top:12px; flex-wrap:nowrap;")
-        ):
-            for key, lab, acc, qual in [
-                ("cpu", "CPU", theme.C_CPU, "max · rank"),
-                ("ram", "RAM", theme.C_CPU, "max · rank"),
-                ("gmem", "GPU MEM", theme.C_GPU, "worst rank"),
-                ("gimb", "GPU IMBAL", theme.C_GPU, "spread"),
-            ]:
+            panel["note"] = ui.label(SCOPE_NOTE).classes("cmeta")
+
+        with ui.element("div").classes("tilerow").style("margin-bottom:10px;"):
+            for key, label, accent in (
+                ("cpu", "cpu capacity", theme.C_CPU),
+                ("rss", "rss", theme.C_CPU),
+                ("reserved", "cuda reserved", theme.C_GPU),
+                ("alloc", "cuda allocated", theme.C_GPU),
+            ):
                 with (
                     ui.element("div")
                     .classes("kpi")
-                    .style(f"--acc:{acc}; flex:1 1 0; min-width:0;")
+                    .style(f"--acc:{accent}; min-width:0;")
                 ):
-                    ui.html(
-                        f"{lab} <span class='kq'>{qual}</span>",
-                        sanitize=False,
-                    ).classes("klab")
-                    kpis[key] = ui.html("—", sanitize=False).classes("kval")
-    return {"chart": chart, "win": win, "kpis": kpis}
+                    ui.label(label).classes("klab")
+                    panel["tiles"][key] = ui.html(NA, sanitize=False).classes(
+                        "kval"
+                    )
+                    panel["subs"][key] = ui.label("").classes("ksub")
+
+        with (
+            ui.row()
+            .classes("w-full items-baseline")
+            .style("gap:8px; margin:2px 0 2px;")
+        ):
+            panel["cpu_label"] = ui.label("process cpu").classes("estlabel")
+            ui.element("div").style("flex:1;")
+            panel["cpu_value"] = ui.label("").style(
+                f"{_MONO} font-size:14px; font-weight:600;"
+            )
+        panel["cpu_chart"] = ui.echart(theme.multi_line_options("%")).style(
+            "height:92px; width:100%;"
+        )
+
+        with (
+            ui.row()
+            .classes("w-full items-baseline")
+            .style("gap:8px; margin:8px 0 2px;")
+        ):
+            panel["rss_label"] = ui.label("rss").classes("estlabel")
+            ui.element("div").style("flex:1;")
+            panel["rss_value"] = ui.label("").style(
+                f"{_MONO} font-size:14px; font-weight:600;"
+            )
+        panel["rss_chart"] = ui.echart(theme.multi_line_options(" GB")).style(
+            "height:92px; width:100%;"
+        )
+
+        exp = (
+            ui.expansion()
+            .classes("w-full tml-exp")
+            .props("dense dense-toggle expand-icon-toggle")
+            .style("margin-top:6px;")
+        )
+        with exp.add_slot("header"):
+            with (
+                ui.row()
+                .classes("w-full items-center")
+                .style("gap:10px; min-width:0;")
+            ):
+                ui.label("per-rank rows").style(
+                    f"{_MONO} font-size:12px; font-weight:700;"
+                )
+                panel["rows_hint"] = ui.label("").classes("cmeta")
+        with exp:
+            panel["rows_html"] = ui.html("", sanitize=False).classes("w-full")
+        panel["rows"] = exp
+        panel["_over"] = False
+        panel["_sig"] = None
+    panel["card"] = card
+    return panel
+
+
+def _chart_series(
+    entries: List[Dict[str, Any]], anchor: float, key: str, scale: float
+) -> List[Dict[str, Any]]:
+    """One line per rank, x in seconds before the shared anchor."""
+    lines = []
+    for entry in entries or []:
+        idx = int(entry.get("global_rank", 0))
+        stamps = entry.get("t") or []
+        values = entry.get(key) or []
+        lines.append(
+            theme.line_series(
+                f"R{idx}",
+                rank_color(idx),
+                [
+                    [stamp - anchor, value / scale]
+                    for stamp, value in zip(stamps, values)
+                ],
+            )
+        )
+    return lines
+
+
+def _update_chart(
+    panel: Dict[str, Any],
+    *,
+    chart_key: str,
+    label_key: str,
+    head: str,
+    run: List[Dict[str, Any]],
+    window: List[Dict[str, Any]],
+    aligned: Optional[Tuple[float, float]],
+    scale: float,
+    ymax_of: Any,
+    tooltip: str,
+) -> None:
+    """Draw whichever view the payload carried, and name it."""
+    chart = panel[chart_key]
+    entries = run or window
+    if not entries or aligned is None:
+        chart.options["series"] = []
+        chart.update()
+        panel[label_key].text = head
+        return
+    anchor, span = aligned
+    values_key = "avg" if run else "v"
+    chart.options["series"] = _chart_series(entries, anchor, values_key, scale)
+    apply_span_axis(chart.options, span, anchor)
+    flat = [
+        value / scale
+        for entry in entries
+        for value in (entry.get("max") or entry.get(values_key) or [])
+    ]
+    chart.options["yAxis"]["max"] = ymax_of(flat)
+    chart.update()
+    window_s = float((run[0].get("window_s") if run else 0.0) or 0.0)
+    words = format_window(window_s)
+    panel[label_key].text = f"{head} · {format_span(span)}" + (
+        f" · rolling {words}" if run and words else ""
+    )
+    panel[label_key].tooltip(tooltip)
 
 
 def update_process_section(
     panel: Dict[str, Any], data: Dict[str, Any]
 ) -> None:
+    """Fill the block from one PROCESS payload."""
     if not isinstance(data, dict):
         return
-    history = data.get("history", []) or []
-    if not history:
-        return
-    window = history[-100:]
+    roll = data.get("rollups", {}) or {}
     series = data.get("series", {}) or {}
-    x_time = series.get("x_time", []) or []
+    ranks = roll.get("ranks", []) or []
 
-    ram_total = max(float(window[-1].get("ram_total", 1.0) or 1.0), 1.0)
-    ram_pct = [
-        (float(r.get("ram_used_max", 0.0) or 0.0) / ram_total) * 100.0
-        for r in window
-    ]
-    if x_time and len(x_time) >= len(window):
-        xms = [_to_ms(s) for s in x_time[-len(window) :]]
-    else:
-        xms = [None] * len(window)
+    # The charts are re-sent only when the newest point moved: the UI timer
+    # ticks faster than telemetry arrives, and a full options dict per tick
+    # is pure websocket traffic.
+    signature = (
+        data.get("window_len"),
+        len(ranks),
+        roll.get("ranks_stale"),
+        tuple(
+            (entry.get("t") or [None])[-1]
+            for entry in series.get("cpu_capacity_run")
+            or series.get("cpu_capacity")
+            or []
+        ),
+    )
+    changed = signature != panel.get("_sig")
+    panel["_sig"] = signature
 
-    chart = panel["chart"]
-    chart.options["series"][0]["data"] = [
-        [t, v] for t, v in zip(xms, ram_pct) if t is not None
-    ]
+    cpu = roll.get("cpu_capacity", {}) or {}
+    rss = roll.get("rss", {}) or {}
+    cuda = roll.get("cuda", {}) or {}
+    has_gpu = bool(data.get("gpu_available") or roll.get("gpu_available"))
 
-    gpu_window = [
-        (i, r) for i, r in enumerate(window) if r.get("gpu_used") is not None
-    ]
-    if gpu_window and window[-1].get("gpu_total") is not None:
-        gtot = max(float(window[-1].get("gpu_total", 1.0) or 1.0), 1.0)
-        gdata = [
-            [xms[i], (float(r.get("gpu_used", 0.0) or 0.0) / gtot) * 100.0]
-            for i, r in gpu_window
-            if i < len(xms) and xms[i] is not None
-        ]
-        chart.options["series"][1]["data"] = gdata
-    else:
-        gdata = []
-        chart.options["series"][1]["data"] = []
-    ymax = theme.nice_ymax(ram_pct + [v for _, v in gdata])
-    chart.options["yAxis"][0]["max"] = ymax
-    chart.options["yAxis"][1]["max"] = ymax
-    chart.update()
+    p50 = cpu.get("p50")
+    panel["tiles"]["cpu"].content = theme.kval(
+        _num(p50, "{:.1f}") if p50 is not None else NA,
+        "%" if p50 is not None else "",
+    )
+    panel["subs"]["cpu"].text = "median rank · of host capacity"
 
-    roll = _compute_rollups(window)
-    panel["win"].text = f"last {len(window)} samples"
-    k = panel["kpis"]
-    k["cpu"].content = theme.kval(f"{roll['cpu']['now']:.0f}", "%")
-    rn = theme.gb(roll["ram"]["now"])
-    k["ram"].content = theme.kval(f"{rn:.2f}" if rn is not None else "—", "GB")
-    if roll["gpu_available"]:
-        gm = theme.gb(roll["gpu"]["now"])
-        k["gmem"].content = theme.kval(
-            f"{gm:.2f}" if gm is not None else "—", "GB"
+    used, rest = format_gb_pair(rss.get("used"), rss.get("total"))
+    panel["tiles"]["rss"].content = theme.kval(
+        used, f" {rest}" if rest else ""
+    )
+    worst_rank = rss.get("rank")
+    panel["subs"]["rss"].text = (
+        f"worst rank · R{int(worst_rank)}"
+        if worst_rank is not None
+        else "used / total"
+    )
+
+    if has_gpu:
+        reserved, reserved_rest = format_gb_pair(
+            cuda.get("reserved"), cuda.get("reserved_total")
         )
-        imb = data.get("gpu_used_imbalance")
-        gi = theme.gb(imb) if imb is not None else None
-        k["gimb"].content = theme.kval(
-            f"{gi:.2f}" if gi is not None else "—",
-            "GB" if gi is not None else "",
+        panel["tiles"]["reserved"].content = theme.kval(
+            reserved, f" {reserved_rest}" if reserved_rest else ""
         )
+        tight = cuda.get("reserved_rank")
+        panel["subs"]["reserved"].text = (
+            f"least-headroom rank · R{int(tight)}"
+            if tight is not None
+            else "reserved / total"
+        )
+        alloc, alloc_rest = format_gb_pair(cuda.get("alloc_p50"), None)
+        panel["tiles"]["alloc"].content = theme.kval(
+            alloc, f" {alloc_rest}" if alloc_rest else ""
+        )
+        panel["subs"]["alloc"].text = "median rank · live tensors"
     else:
-        k["gmem"].content = "N/A"
-        k["gimb"].content = "—"
+        seen = bool(data.get("window_len"))
+        for key in ("reserved", "alloc"):
+            panel["tiles"][key].content = NA
+            panel["subs"][key].text = "no GPU" if seen else ""
+
+    aligned = _series_axis(
+        series.get("cpu_capacity_run") or series.get("cpu_capacity"),
+        series.get("rss_run") or series.get("rss"),
+    )
+    if changed:
+        _update_chart(
+            panel,
+            chart_key="cpu_chart",
+            label_key="cpu_label",
+            head="process cpu · capacity per rank",
+            run=series.get("cpu_capacity_run") or [],
+            window=series.get("cpu_capacity") or [],
+            aligned=aligned,
+            scale=1.0,
+            ymax_of=cpu_axis_max,
+            tooltip=(
+                "Each rank's trainer process, as a share of the host's "
+                "total CPU capacity: 100% means every logical core busy. "
+                "DataLoader workers are separate processes and are not "
+                "included, so host CPU high with these low means the work "
+                "is outside the trainer. On a hyperthreaded host, logical "
+                "capacity is reached before the cores saturate."
+            ),
+        )
+        _update_chart(
+            panel,
+            chart_key="rss_chart",
+            label_key="rss_label",
+            head="rss · per rank",
+            run=series.get("rss_run") or [],
+            window=series.get("rss") or [],
+            aligned=aligned,
+            scale=float(1024**3),
+            ymax_of=lambda values: theme.nice_ymax(values, floor=1.0),
+            tooltip=(
+                "Host memory held by each rank's trainer process. The "
+                "shape is the point: steady growth across the run is the "
+                "signature of a leak, which ends with the OS killing one "
+                "rank. It covers the history retained for this run, not "
+                "necessarily the whole run."
+            ),
+        )
+    panel["cpu_value"].text = f"{float(p50):.1f}%" if p50 is not None else ""
+    worst_used, worst_rest = format_gb_pair(rss.get("used"), None)
+    panel["rss_value"].text = (
+        f"{worst_used} {worst_rest}".strip() if rss.get("used") else ""
+    )
+
+    over = bool(roll.get("rows_over"))
+    if should_auto_open(prev_over=bool(panel.get("_over")), over=over):
+        panel["rows"].value = True
+    panel["_over"] = over
+    panel["rows_hint"].text = rows_hint(
+        roll, is_open=bool(panel["rows"].value)
+    )
+    panel["rows_html"].content = rows_html(
+        ranks, series.get("cpu_capacity_run") or series.get("cpu_capacity")
+    )
