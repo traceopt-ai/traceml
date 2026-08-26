@@ -71,10 +71,24 @@ def test_rows_hint_states_coverage_and_never_a_verdict() -> None:
 
     # A stale rank is named in the header, because the tiles no longer
     # speak for it.
-    roll_stale = dict(roll, ranks_stale=1, reserved_imbalance_pct=16.0)
+    roll_stale = dict(
+        roll,
+        ranks_stale=1,
+        excluding_stale=True,
+        reserved_imbalance_pct=16.0,
+    )
     assert rows_hint(roll_stale, is_open=False) == (
         "4 ranks · 1 stale, excluded · reserved imbalance 16% · "
         "click to open"
+    )
+    # With nothing reporting the numbers come FROM the stale ranks, so the
+    # header must not claim they were excluded.
+    roll_quiet = dict(roll_stale, ranks_stale=4, excluding_stale=False)
+    assert "none reporting" in rows_hint(roll_quiet, is_open=False)
+    assert "excluded" not in rows_hint(roll_quiet, is_open=False)
+    # A spread under a percent is not an exact zero.
+    assert "reserved imbalance <1%" in rows_hint(
+        dict(roll, reserved_imbalance_pct=0.4), is_open=False
     )
     # One rank has no imbalance to speak of.
     assert rows_hint(
@@ -286,6 +300,16 @@ def test_section_builds_and_updates_without_a_browser() -> None:
         "process cpu · capacity per rank · last 20 min · rolling 30 s"
     )
     assert "whole run" not in panel["rss_label"].text
+
+    # Moving data redraws the charts: a signature that never changed
+    # would freeze them forever and every other assertion still passes.
+    first = panel["cpu_chart"].options["series"][0]["data"][-1]
+    moved = _payload(ranks)
+    for entry in moved["series"]["cpu_capacity_run"]:
+        entry["t"] = [stamp + 30.0 for stamp in entry["t"]]
+        entry["avg"] = [value + 1.0 for value in entry["avg"]]
+    update_process_section(panel, moved)
+    assert panel["cpu_chart"].options["series"][0]["data"][-1] != first
 
     # The rows open by themselves only on a rising edge ...
     assert panel["rows"].value is False

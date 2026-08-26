@@ -280,6 +280,26 @@ class ProcessMetricsDB:
             (floor_ts, floor_ts, int(max(1, window_n))),
         ).fetchall()
 
+    def fetch_rank_latest(self, conn: sqlite3.Connection) -> List[sqlite3.Row]:
+        """The newest row of EVERY rank, however long ago it arrived.
+
+        The windowed read above is bounded by cadence, so a rank silent
+        for longer than that bound has no rows in it and would drop out of
+        the block entirely: the surface would forget the dead rank a few
+        minutes after it died, which is exactly when its death starts to
+        matter. This read is one row per rank and answers "who has ever
+        reported, and when did each last speak".
+        """
+        return conn.execute("""
+            SELECT * FROM process_samples
+            WHERE id IN (
+                SELECT MAX(id) FROM process_samples
+                WHERE COALESCE(global_rank, rank) IS NOT NULL
+                GROUP BY COALESCE(global_rank, rank)
+            )
+            ORDER BY COALESCE(global_rank, rank) ASC;
+            """).fetchall()
+
     def fetch_rank_run_history(
         self,
         conn: sqlite3.Connection,

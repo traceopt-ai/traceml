@@ -379,3 +379,100 @@ def test_a_cpu_only_host_reports_no_gpu(tmp_path: Path) -> None:
     # The host-side numbers still work.
     assert roll["cpu_capacity"]["p50"] is not None
     assert roll["rss"]["used"] is not None
+
+
+def test_a_rank_dead_longer_than_the_window_keeps_its_row(
+    tmp_path: Path,
+) -> None:
+    """Forgetting the dead rank later is still forgetting it.
+
+    The windowed read is bounded by the observed cadence, so a rank silent
+    for longer than that bound has no rows in it. Without a second read it
+    dropped out of the block entirely: ranks_total fell, the stale count
+    went to zero, and the header read "3 ranks" as though rank 3 had never
+    existed. That is the failure this block was rebuilt to end, deferred
+    by a few minutes.
+    """
+    rows = [
+        row
+        for row in _rows(ranks=4, ticks=600, cadence=2.0)
+        # rank 3 stops 20 minutes before the others, far outside the
+        # window the recent read looks back over
+        if not (row["rank"] == 3 and row["seq"] >= 100)
+    ]
+    db = tmp_path / "long-dead.db"
+    _write(db, rows)
+
+    roll = _payload(db)["rollups"]
+    assert roll["ranks_total"] == 4
+    assert roll["ranks_stale"] == 1
+    by_rank = {rank["global_rank"]: rank for rank in roll["ranks"]}
+    assert by_rank[3]["stale"] is True
+    assert by_rank[3]["age_s"] > 900
+    # It keeps the values it last reported, so the row still says
+    # something about why it died.
+    assert by_rank[3]["ram_used"] is not None
+
+
+def test_nothing_reporting_does_not_claim_an_exclusion(
+    tmp_path: Path,
+) -> None:
+    """With every rank stale there is nobody to exclude them in favour of.
+
+    The aggregates then come from stale ranks by necessity, and the header
+    must not say "excluded" over numbers those very ranks produced.
+    """
+    # Two ranks stop together; a third goes on alone and then also stops,
+    # so by the newest arrival every rank is older than the stale bound.
+    rows = _rows(ranks=3, ticks=40)
+    rows = [row for row in rows if not (row["rank"] < 2 and row["seq"] >= 20)]
+    db = tmp_path / "all-stale.db"
+    _write(db, rows)
+    roll = _payload(db)["rollups"]
+    # Rank 2 is the only live one, so the other two ARE excluded.
+    assert roll["ranks_stale"] == 2
+    assert roll["excluding_stale"] is True
+
+    # Now nobody is live: the newest arrival belongs to a rank that is
+    # itself past the bound, which cannot happen by construction, so the
+    # honest case is a database whose every rank stopped at once.
+    quiet = tmp_path / "quiet.db"
+    _write(quiet, _rows(ranks=3, ticks=40))
+    quiet_roll = _payload(quiet)["rollups"]
+    assert quiet_roll["ranks_stale"] == 0
+    assert quiet_roll["excluding_stale"] is False
+    # The claim is only ever made when it is true.
+    assert quiet_roll["excluding_stale"] == (
+        quiet_roll["ranks_stale"] > 0 and quiet_roll["ranks_reporting"] > 0
+    )
+
+
+def test_the_payload_feeds_the_section_unchanged(tmp_path: Path) -> None:
+    """The contract this PR introduces, exercised end to end.
+
+    Both suites otherwise build their own inputs, so a key renamed on one
+    side of the payload would pass every test and blank the block.
+    """
+    from nicegui import ui
+
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.process_section import (  # noqa: E501
+        build_process_section,
+        update_process_section,
+    )
+
+    db = tmp_path / "end-to-end.db"
+    _write(db, _rows(ranks=4, ticks=40))
+    payload = _payload(db)
+
+    with ui.element("div"):
+        panel = build_process_section()
+    update_process_section(panel, payload)
+
+    assert "%" in panel["tiles"]["cpu"].content
+    assert "GB" in panel["tiles"]["rss"].content
+    assert "GB" in panel["tiles"]["reserved"].content
+    assert panel["subs"]["reserved"].text.startswith("least-headroom rank")
+    assert "4 ranks" in panel["rows_hint"].text
+    assert "R3" in panel["rows_html"].content
+    assert len(panel["cpu_chart"].options["series"]) == 4
+    assert panel["cpu_label"].text.startswith("process cpu")

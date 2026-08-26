@@ -84,11 +84,17 @@ def rows_hint(roll: Dict[str, Any], *, is_open: bool) -> str:
         return ""
     stale = int(roll.get("ranks_stale") or 0)
     parts = [f"{total} rank{'s' if total != 1 else ''}"]
-    if stale:
+    if stale and roll.get("excluding_stale"):
         parts.append(f"{stale} stale, excluded")
+    elif stale:
+        # Nothing is reporting, so nothing was excluded: the numbers above
+        # are the last ones these ranks sent.
+        parts.append("none reporting")
     imbalance = roll.get("reserved_imbalance_pct")
     if imbalance is not None:
-        parts.append(f"reserved imbalance {float(imbalance):.0f}%")
+        value = float(imbalance)
+        shown = "<1" if 0 < value < 1 else f"{value:.0f}"
+        parts.append(f"reserved imbalance {shown}%")
     parts.append("click to close" if is_open else "click to open")
     return " · ".join(parts)
 
@@ -100,7 +106,9 @@ def format_age(seconds: Any) -> str:
     value = float(seconds)
     if value < 90:
         return f"{value:.0f} s"
-    return f"{value / 60.0:.0f} min"
+    if value < 90 * 60:
+        return f"{value / 60.0:.0f} min"
+    return f"{value / 3600.0:.1f} h"
 
 
 def rows_html(

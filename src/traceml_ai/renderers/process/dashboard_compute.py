@@ -153,6 +153,14 @@ class ProcessDashboardComputer:
             key = row["global_rank"]
             key = int(key if key is not None else row["rank"])
             by_rank.setdefault(key, []).append(row)
+        # A rank silent for longer than the windowed read looks back has
+        # no rows above. It must still hold its row: forgetting a dead
+        # rank a few minutes after it died is the failure this block was
+        # rebuilt to end, only deferred.
+        for row in self._db.fetch_rank_latest(conn):
+            key = row["global_rank"]
+            key = int(key if key is not None else row["rank"])
+            by_rank.setdefault(key, [row])
 
         newest_recv = (
             max(float(row["recv_ts_ns"] or 0.0) for row in rows) / 1e9
@@ -166,7 +174,10 @@ class ProcessDashboardComputer:
         live = [rank for rank in ranks if not rank["stale"]]
         # Aggregates speak for the ranks that are still reporting: a rank
         # that died mid-step would otherwise pin a tile or the trigger to
-        # whatever it happened to be doing when it stopped.
+        # whatever it happened to be doing when it stopped. With NOTHING
+        # reporting there is nobody to speak for, so the last known values
+        # stand and the header says so rather than claiming an exclusion
+        # that did not happen.
         source = live or ranks
 
         gpu_available = any(rank["gpu_total"] is not None for rank in ranks)
@@ -181,6 +192,9 @@ class ProcessDashboardComputer:
             "ranks_reporting": len(live),
             "ranks_total": len(ranks),
             "ranks_stale": len(ranks) - len(live),
+            # False once no rank reports: the aggregates then come from
+            # stale ranks and must not be described as excluding them.
+            "excluding_stale": bool(live) and len(live) != len(ranks),
             "gpu_available": gpu_available,
             "cpu_capacity": self._cpu_rollup(source),
             "rss": self._rss_rollup(source),
