@@ -320,6 +320,7 @@ def _update_chart(
     scale: float,
     ymax_of: Any,
     tooltip: str,
+    unit: str = "",
 ) -> None:
     """Draw whichever view the payload carried, and name it."""
     chart = panel[chart_key]
@@ -344,6 +345,9 @@ def _update_chart(
         chart.options["yAxis"]["min"] = low
         chart.options["yAxis"]["max"] = high
         chart.options["yAxis"]["interval"] = tick
+        chart.options["yAxis"]["axisLabel"][":formatter"] = (
+            theme.value_axis_formatter(high - low, unit)
+        )
     else:
         chart.options["yAxis"]["max"] = bounds
     chart.update()
@@ -463,6 +467,7 @@ def update_process_section(
             aligned=aligned,
             scale=float(1024**3),
             ymax_of=drift_axis_bounds,
+            unit=" GB",
             tooltip=(
                 "Host memory held by each rank's trainer process. The "
                 "shape is the point: steady growth across the run is the "

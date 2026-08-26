@@ -357,6 +357,23 @@ def _span_axis() -> Dict[str, Any]:
     }
 
 
+def value_axis_formatter(span: float, unit: str) -> str:
+    """Tick formatter whose precision comes from the axis RANGE.
+
+    Magnitude alone is not enough: an axis fitted to a 20 MB drift around
+    1.4 GB would label every tick "1.4 GB" and say nothing.
+    """
+    if span >= 20:
+        decimals = 0
+    elif span >= 2:
+        decimals = 1
+    elif span >= 0.2:
+        decimals = 2
+    else:
+        decimals = 3
+    return f"v=>v.toFixed({decimals})+'{unit}'"
+
+
 def _value_axis(unit: str, *, zero: bool) -> Dict[str, Any]:
     ax: Dict[str, Any] = {
         "type": "value",
@@ -365,7 +382,17 @@ def _value_axis(unit: str, *, zero: bool) -> Dict[str, Any]:
             "color": _TXT,
             "fontFamily": "Geist Mono",
             "fontSize": 10,
-            ":formatter": f"v=>v+'{unit}'",
+            # Round, never print the raw float: an axis fitted to a
+            # 20 MB drift otherwise labels a tick
+            # "1.402237892150879 GB". A chart whose ticks need more
+            # precision than this replaces the formatter with
+            # ``value_axis_formatter`` for its own range.
+            ":formatter": (
+                "v=>(Number.isInteger(v)?v"
+                ":Math.abs(v)>=100?v.toFixed(0)"
+                ":Math.abs(v)>=1?v.toFixed(1):v.toFixed(2))"
+                f"+'{unit}'"
+            ),
         },
         "axisLine": {"show": False},
         "axisTick": {"show": False},

@@ -155,6 +155,16 @@ def test_the_rss_axis_fits_its_drift_instead_of_anchoring_at_zero() -> None:
     assert drift_axis_bounds([]) == (0.0, 1.0, 0.5)
 
 
+def test_axis_ticks_get_their_precision_from_the_range() -> None:
+    """Three ticks that all read "1.4 GB" tell the reader nothing."""
+    from traceml_ai.aggregator.display_drivers.nicegui_sections import theme
+
+    drift = theme.value_axis_formatter(0.03, " GB")
+    assert "toFixed(3)" in drift
+    assert "toFixed(1)" in theme.value_axis_formatter(5.0, " GB")
+    assert "toFixed(0)" in theme.value_axis_formatter(200.0, " GB")
+
+
 def test_age_reads_in_words() -> None:
     assert format_age(1.0) == "1 s"
     assert format_age(89.0) == "89 s"
