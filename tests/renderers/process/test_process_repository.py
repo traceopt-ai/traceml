@@ -19,12 +19,12 @@ import sqlite3
 import pytest
 
 from tests.renderers.process.conftest import GB
-from traceml_ai.renderers.process.common import ProcessMetricsDB
+from traceml_ai.renderers.process.repository import ProcessRepository
 
 
 @pytest.fixture
 def repo(process_db):
-    return ProcessMetricsDB(db_path=process_db.path), process_db
+    return ProcessRepository(db_path=process_db.path), process_db
 
 
 def test_latest_seq_is_the_newest_row_carrying_one(repo):
