@@ -67,10 +67,16 @@ def format_gb_pair(used_bytes: Any, total_bytes: Any) -> Tuple[str, str]:
 
 
 def format_span(seconds: Optional[float]) -> str:
-    """The window a chart covers, as one phrase: ``'last 3 min'``."""
+    """The window a chart covers, as one phrase: ``'last 3 min'``.
+
+    Seconds until a full two minutes. Switching at ninety and rounding to
+    whole minutes announced a 105 second window as "last 2 min", which
+    overstates what the chart shows by 14% in the label a reader uses to
+    place it in time.
+    """
     if not seconds or seconds <= 0:
         return ""
-    if seconds < 90:
+    if seconds < 120:
         return f"last {seconds:.0f} s"
     return f"last {seconds / 60.0:.0f} min"
 

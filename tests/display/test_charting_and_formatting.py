@@ -57,7 +57,14 @@ def test_an_age_is_written_in_the_unit_that_fits_it(seconds, expected):
 
 @pytest.mark.parametrize(
     "seconds,expected",
-    [(0.0, ""), (None, ""), (45.0, "last 45 s"), (600.0, "last 10 min")],
+    [
+        (0.0, ""),
+        (None, ""),
+        (45.0, "last 45 s"),
+        # 105 s used to read "last 2 min", overstating the window by 14%.
+        (105.0, "last 105 s"),
+        (600.0, "last 10 min"),
+    ],
 )
 def test_a_span_is_one_phrase_or_nothing(seconds, expected):
     assert formatting.format_span(seconds) == expected
