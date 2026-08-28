@@ -225,6 +225,7 @@ class ProcessDashboardPayload:
     reserved_imbalance_percent: Optional[float] = None
     cpu_capacity_chart: Optional[RankChart] = None
     rss_chart: Optional[RankChart] = None
+    rows_open: bool = False
 
     @property
     def has_data(self) -> bool:

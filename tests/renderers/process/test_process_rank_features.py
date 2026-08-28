@@ -280,3 +280,74 @@ def test_the_fields_the_card_already_reads_are_unchanged(process_db):
     assert out.window_len > 0
     assert out.gpu_available is True
     assert out.chart is not None and out.chart.ram_percent.values
+
+
+# --- the rows auto-open trigger -----------------------------------------
+def test_the_trigger_stays_armed_off_until_every_rank_has_allocated(
+    process_db,
+):
+    """Ranks reach their first CUDA allocation seconds to minutes apart.
+
+    An unarmed trigger reads that ordinary ramp as total imbalance, so the
+    rows would fly open on the first ticks of a healthy run.
+    """
+    computer = ProcessDashboardComputer(
+        db_path=process_db.path, sampler_interval_s=2.0
+    )
+    ramping = (
+        RankSnapshot(global_rank=0, gpu_reserved_p50_bytes=8.0 * GB),
+        RankSnapshot(global_rank=1, gpu_reserved_p50_bytes=None),
+    )
+    assert computer._rows_trigger(ramping, 99.0) is False
+
+
+def test_the_trigger_fires_once_a_held_spread_is_large(process_db):
+    computer = ProcessDashboardComputer(
+        db_path=process_db.path, sampler_interval_s=2.0
+    )
+    held = (
+        RankSnapshot(global_rank=0, gpu_reserved_p50_bytes=8.0 * GB),
+        RankSnapshot(global_rank=1, gpu_reserved_p50_bytes=4.0 * GB),
+    )
+    assert computer._rows_trigger(held, 50.0) is True
+    assert computer._rows_trigger(held, 1.0) is False
+    assert computer._rows_trigger(held, None) is False
+
+
+def test_a_spread_run_ships_the_trigger_on(process_db):
+    """End to end. The shared fixture is deliberately uneven.
+
+    Its ranks reserve 6, 8, 10 and 12 GB, a 50% spread, which is the case
+    the rows exist to answer.
+    """
+    _run(process_db, ranks=4, samples=30)
+    out = payload(process_db, sampler_interval_s=2.0)
+    assert out.reserved_imbalance_percent == pytest.approx(50.0)
+    assert out.rows_open is True
+
+
+def test_an_even_run_leaves_the_rows_shut(process_db):
+    """Every rank holding the same reserved bytes has nothing to show."""
+    for seq in range(1, 31):
+        for rank in range(4):
+            process_db.insert(
+                recv_ts_ns=int((1_700_000_000 + seq * 2) * 1e9),
+                rank=rank,
+                global_rank=rank,
+                node_rank=0,
+                seq=seq,
+                sample_ts_s=1_700_000_000.0 + seq * 2,
+                cpu_percent=200.0,
+                cpu_logical_core_count=8,
+                ram_used_bytes=2.0 * GB,
+                ram_total_bytes=64.0 * GB,
+                gpu_available=1,
+                gpu_device_index=rank,
+                gpu_mem_used_bytes=4.0 * GB,
+                gpu_mem_reserved_bytes=6.0 * GB,
+                gpu_mem_total_bytes=40.0 * GB,
+            )
+
+    out = payload(process_db, sampler_interval_s=2.0)
+    assert out.reserved_imbalance_percent == pytest.approx(0.0)
+    assert out.rows_open is False

@@ -161,6 +161,8 @@ body{{
 .tml-gpus td{{padding:4px 8px; border-top:1px solid rgba(17,24,39,0.07); white-space:nowrap;}}
 .tml-gpus td.tml-util{{font-weight:700;}}
 .tml-gpus tr.tml-mark td{{background:rgba(255,140,0,0.08);}}
+/* A rank that stopped reporting: kept in the table, dimmed, never coloured as a verdict. */
+.tml-gpus tr.tml-stale td{{color:var(--muted); opacity:.72;}}
 .tml-exp .q-item{{padding:4px 2px; min-height:0;}}
 .tml-exp .q-expansion-item__content{{padding:0 0 4px;}}
 </style>

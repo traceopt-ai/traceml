@@ -67,6 +67,11 @@ RANK_WINDOW_N = 100
 # the demonstrated need this cache exists for.
 RUN_REFRESH_S = 15.0
 
+# Reserved-memory spread at which the per-rank rows have earned opening
+# themselves. Below this the rows are a detail; at or above it, WHICH rank
+# is holding more is the question the reader now has.
+IMBALANCE_OPEN_PCT = 15.0
+
 
 def percentile(values: Sequence[Optional[float]], p: float) -> float:
     """Linear-interpolated percentile over the values that exist.
@@ -402,6 +407,7 @@ class ProcessDashboardComputer:
         )
 
         imbalance = self._reserved_imbalance(aggregate_over)
+        rows_open = self._rows_trigger(aggregate_over, imbalance)
 
         history = tuple(self._dashboard_rollup)
         if not history:
@@ -412,6 +418,7 @@ class ProcessDashboardComputer:
                 rss_worst=self._rss_rollup(aggregate_over),
                 gpu_reserved=self._cuda_rollup(aggregate_over),
                 reserved_imbalance_percent=imbalance,
+                rows_open=rows_open,
             )
 
         window = history[-DASHBOARD_WINDOW:]
@@ -456,6 +463,7 @@ class ProcessDashboardComputer:
             ranks=ranks,
             coverage=coverage,
             reserved_imbalance_percent=imbalance,
+            rows_open=rows_open,
             cpu_capacity=self._cpu_rollup(aggregate_over),
             rss_worst=self._rss_rollup(aggregate_over),
             gpu_reserved=self._cuda_rollup(aggregate_over),
@@ -562,6 +570,33 @@ class ProcessDashboardComputer:
         if high <= 0:
             return None
         return float((high - low) / high * 100.0)
+
+    def _rows_trigger(
+        self,
+        ranks: Sequence[RankSnapshot],
+        imbalance: Optional[float],
+    ) -> bool:
+        """Whether the per-rank rows have earned opening themselves.
+
+        Armed only once every reporting rank has HELD an allocation across
+        its window. Ranks reach their first CUDA allocation seconds to
+        minutes apart, and an unarmed trigger reads that ordinary ramp as
+        total imbalance on every run's first ticks, so the rows would fly
+        open on a healthy start.
+
+        This is a judgement about the telemetry, which is why it is decided
+        here and shipped as a fact. A view that compared the imbalance to a
+        number of its own would be making a severity call in the layer that
+        is only allowed to draw one.
+        """
+        armed = bool(ranks) and all(
+            rank.gpu_reserved_p50_bytes is not None
+            and rank.gpu_reserved_p50_bytes > 0
+            for rank in ranks
+        )
+        if not armed or imbalance is None:
+            return False
+        return float(imbalance) >= IMBALANCE_OPEN_PCT
 
     # --- whole-run series ------------------------------------------------
     def _rank_charts(
