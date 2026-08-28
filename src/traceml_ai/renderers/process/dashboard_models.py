@@ -222,6 +222,7 @@ class ProcessDashboardPayload:
     cpu_capacity: Optional[MetricRollup] = None
     rss_worst: Optional[MetricRollup] = None
     gpu_reserved: Optional[MetricRollup] = None
+    gpu_allocated: Optional[MetricRollup] = None
     reserved_imbalance_percent: Optional[float] = None
     cpu_capacity_chart: Optional[RankChart] = None
     rss_chart: Optional[RankChart] = None

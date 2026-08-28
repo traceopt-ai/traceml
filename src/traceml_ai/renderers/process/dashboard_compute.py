@@ -417,6 +417,7 @@ class ProcessDashboardComputer:
                 cpu_capacity=self._cpu_rollup(aggregate_over),
                 rss_worst=self._rss_rollup(aggregate_over),
                 gpu_reserved=self._cuda_rollup(aggregate_over),
+                gpu_allocated=self._alloc_rollup(aggregate_over),
                 reserved_imbalance_percent=imbalance,
                 rows_open=rows_open,
             )
@@ -467,6 +468,7 @@ class ProcessDashboardComputer:
             cpu_capacity=self._cpu_rollup(aggregate_over),
             rss_worst=self._rss_rollup(aggregate_over),
             gpu_reserved=self._cuda_rollup(aggregate_over),
+            gpu_allocated=self._alloc_rollup(aggregate_over),
         )
 
     # --- rollups ---------------------------------------------------------
@@ -547,6 +549,30 @@ class ProcessDashboardComputer:
             total=worst.gpu_total_bytes,
             worst_rank=worst.global_rank,
         )
+
+    def _alloc_rollup(
+        self, ranks: Sequence[RankSnapshot]
+    ) -> Optional[MetricRollup]:
+        """Live tensors on the median rank.
+
+        The median rather than the worst, because allocated bytes are the
+        model's shape rather than a risk: on a healthy synchronous run
+        every rank holds much the same, and the median says what that is
+        while the reserved tile beside it names the rank at risk.
+
+        Read from the ranks, not from the aggregated step history. The
+        history's newest step carries no GPU snapshot once a run tears
+        down, which left this tile reading "n/a" directly above rows that
+        listed each rank's allocated bytes.
+        """
+        values = [
+            r.gpu_allocated_p50_bytes
+            for r in ranks
+            if r.gpu_allocated_p50_bytes is not None
+        ]
+        if not values:
+            return None
+        return MetricRollup(now=float(_median(values) or 0.0))
 
     def _reserved_imbalance(
         self, ranks: Sequence[RankSnapshot]

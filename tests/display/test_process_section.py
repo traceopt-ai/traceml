@@ -196,6 +196,7 @@ def _payload(
             else None
         ),
         gpu=(MetricRollup(now=6.0 * GIB, p95=6.0 * GIB) if gpu else None),
+        gpu_allocated=(MetricRollup(now=6.0 * GIB) if gpu else None),
         reserved_imbalance_percent=imbalance,
         rows_open=rows_open,
         cpu_capacity_chart=_chart(*ranks),
@@ -229,6 +230,10 @@ def test_allocated_and_reserved_are_two_tiles_not_one():
     process_section.update_process_section(panel, _payload())
     assert "7.0" in panel["tiles"]["reserved"].content
     assert "6.0" in panel["tiles"]["alloc"].content
+    # Read from the per-rank rollup, not the aggregated step history: the
+    # history's newest step has no GPU snapshot once a run tears down,
+    # which left this tile "n/a" above rows listing each rank's bytes.
+    assert panel["tiles"]["alloc"].content != "n/a"
     assert panel["subs"]["reserved"].text == "least-headroom rank · R1"
     assert panel["subs"]["alloc"].text == "median rank · live tensors"
 
@@ -566,3 +571,38 @@ def test_a_single_sample_is_visible_rather_than_an_empty_plot():
     series = panel["cpu_chart"].options["series"][0]
     assert series["data"], "the point must reach the chart"
     assert series["showSymbol"] is True, "one point needs a marker"
+
+
+def test_the_allocated_tile_survives_a_teardown_step():
+    """It reads the ranks, so it does not blank when history loses the GPU.
+
+    The tile said "median rank · live tensors" while being fed the newest
+    committed step's aggregate, which is None after teardown. It read
+    "n/a" directly above rows listing each rank's allocated bytes.
+    """
+    from traceml_ai.renderers.process.dashboard_models import (
+        ProcessHistoryEntry,
+    )
+
+    payload = ProcessDashboardPayload(
+        history=(
+            ProcessHistoryEntry(
+                seq=1,
+                ts=1_700_000_001.0,
+                cpu_percent_max=10.0,
+                ram_used_bytes_max=1.0 * GIB,
+                ram_total_bytes=64.0 * GIB,
+                gpu=None,
+            ),
+        ),
+        ranks=(_rank(0), _rank(1)),
+        coverage=RankCoverage(total=2, live=2),
+        gpu=None,
+        gpu_allocated=MetricRollup(now=4.0 * GIB),
+        gpu_reserved=MetricRollup(now=6.0 * GIB, worst_rank=0),
+        cpu_capacity_chart=_chart(0, 1),
+        rss_chart=_chart(0, 1),
+    )
+    panel = _panel()
+    process_section.update_process_section(panel, payload)
+    assert "4.0" in panel["tiles"]["alloc"].content

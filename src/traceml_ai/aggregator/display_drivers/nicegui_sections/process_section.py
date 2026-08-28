@@ -379,7 +379,12 @@ def update_process_section(panel: Dict[str, Any], data: Any) -> None:
                 else "reserved / total"
             ),
         )
-        _tile_gb(panel, "alloc", data.gpu, "median rank · live tensors")
+        _tile_gb(
+            panel,
+            "alloc",
+            data.gpu_allocated,
+            "median rank · live tensors",
+        )
     else:
         seen = bool(data.window_len or data.ranks)
         for key in ("reserved", "alloc"):
