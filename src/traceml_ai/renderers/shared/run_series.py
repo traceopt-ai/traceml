@@ -77,6 +77,14 @@ class RunSeriesPolicy:
     # flip back and forth every tick.
     retained_factor: float = 1.2
 
+    def __post_init__(self) -> None:
+        if self.roll_fraction <= 0:
+            raise ValueError("roll_fraction must be positive")
+        if self.max_points <= 0:
+            raise ValueError("max_points must be positive")
+        if self.roll_min_s <= 0 or self.roll_max_s < self.roll_min_s:
+            raise ValueError("rolling-window bounds are invalid")
+
     def window_for(self, span_s: float) -> float:
         """The rolling window for a run of ``span_s`` seconds, in round steps.
 
