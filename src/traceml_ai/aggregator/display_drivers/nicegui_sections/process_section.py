@@ -13,6 +13,7 @@ inferred from which keys happen to be present.
 
 from __future__ import annotations
 
+from math import isfinite
 from typing import Any, Dict, List, Optional
 
 from nicegui import ui
@@ -85,7 +86,7 @@ def to_ms(seconds: Optional[float]) -> Optional[int]:
         value = float(seconds)
     except (TypeError, ValueError):
         return None
-    if value <= 0.0:
+    if not isfinite(value) or value <= 0.0:
         return None
     return int(value * 1000.0)
 
