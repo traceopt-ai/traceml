@@ -19,9 +19,29 @@ caller reads.
 
 from __future__ import annotations
 
+import math
 import sqlite3
 from dataclasses import dataclass
 from typing import Literal, Optional
+
+
+def finite(value: Optional[float]) -> Optional[float]:
+    """A usable number, or ``None``.
+
+    NaN and the infinities survive every ordinary guard: ``nan <= 0`` is
+    False, so a corrupt sample walks past a positivity check and only fails
+    later, at an ``int()`` that cannot convert it. The house convention is
+    to reject them at the boundary, as `renderers/step_time/renderer.py`
+    and `diagnostics/system/policy.py` already do.
+    """
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
 
 SeriesMode = Literal["recent", "retained"]
 """Which view a chart is showing.
@@ -63,8 +83,10 @@ class RunSeriesPolicy:
         Round steps rather than a raw fraction so the label a card prints
         ("rolling 2 min") stays a number a reader recognises.
         """
-        if span_s <= 0:
+        usable = finite(span_s)
+        if usable is None or usable <= 0:
             return self.roll_min_s
+        span_s = usable
         raw = max(
             self.roll_min_s,
             min(self.roll_max_s, span_s / self.roll_fraction),
@@ -80,8 +102,11 @@ class RunSeriesPolicy:
 
     def mode_for(self, run_span_s: float, window_span_s: float) -> SeriesMode:
         """Whether the chart should describe the window or the whole run."""
-        if window_span_s <= 0:
+        run = finite(run_span_s)
+        window = finite(window_span_s)
+        if run is None or window is None or window <= 0:
             return "recent"
+        run_span_s, window_span_s = run, window
         if run_span_s > window_span_s * self.retained_factor:
             return "retained"
         return "recent"
@@ -108,10 +133,17 @@ class RunSeriesPlan:
 
     @property
     def preceding_rows(self) -> int:
-        """Rows of history one rolling aggregate covers, for a ROW frame."""
-        return max(
-            1, int(round(self.window_s / max(self.cadence_s, 1e-6))) - 1
-        )
+        """Rows of history one rolling aggregate covers, for a ROW frame.
+
+        Guarded a second time: ``plan_run_series`` rejects a non-finite
+        cadence, but this dataclass is public and a plan built by hand must
+        not be able to take an ``int()`` conversion down with it.
+        """
+        window = finite(self.window_s)
+        cadence = finite(self.cadence_s)
+        if window is None or cadence is None:
+            return 1
+        return max(1, int(round(window / max(cadence, 1e-6))) - 1)
 
     @property
     def eligible_count(self) -> int:
@@ -126,11 +158,9 @@ class RunSeriesPlan:
 
     def frame_clause(self) -> str:
         """The window frame for a rolling aggregate over ``window_s``."""
-        if HAS_RANGE_FRAME:
-            return (
-                f"RANGE BETWEEN {float(self.window_s):.6f} "
-                "PRECEDING AND CURRENT ROW"
-            )
+        window = finite(self.window_s)
+        if HAS_RANGE_FRAME and window is not None:
+            return f"RANGE BETWEEN {window:.6f} PRECEDING AND CURRENT ROW"
         return f"ROWS BETWEEN {self.preceding_rows} PRECEDING AND CURRENT ROW"
 
 
@@ -152,9 +182,10 @@ def cadence_of(span_s: float, sample_count: int) -> Optional[float]:
     Measured rather than assumed: a configured sampler interval says what
     was asked for, and this says what arrived.
     """
-    if sample_count < 2 or span_s <= 0:
+    usable = finite(span_s)
+    if sample_count < 2 or usable is None or usable <= 0:
         return None
-    return span_s / float(sample_count - 1)
+    return usable / float(sample_count - 1)
 
 
 def plan_run_series(
@@ -169,17 +200,18 @@ def plan_run_series(
     ``cadence_s`` may be supplied by a caller that already knows it; when
     omitted it is measured from the span and the count.
     """
-    if sample_count < 2 or span_s <= 0:
+    span = finite(span_s)
+    if sample_count < 2 or span is None or span <= 0:
         return None
     observed = (
-        cadence_s
+        finite(cadence_s)
         if cadence_s is not None
-        else cadence_of(span_s, sample_count)
+        else cadence_of(span, sample_count)
     )
-    if not observed or observed <= 0:
+    if observed is None or observed <= 0:
         return None
 
-    window_s = policy.window_for(span_s)
+    window_s = policy.window_for(span)
     plan = RunSeriesPlan(
         window_s=window_s,
         cadence_s=float(observed),
@@ -198,6 +230,7 @@ def plan_run_series(
 
 __all__ = [
     "DEFAULT_RUN_SERIES_POLICY",
+    "finite",
     "HAS_RANGE_FRAME",
     "RunSeriesPlan",
     "RunSeriesPolicy",

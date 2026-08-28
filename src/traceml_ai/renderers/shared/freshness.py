@@ -27,6 +27,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
+from .run_series import finite
+
 # Ticks a rank may miss before the block stops calling it live. Three is
 # what the Process and System blocks converged on: one missed tick is
 # ordinary jitter, three is a rank that stopped.
@@ -63,8 +65,10 @@ class FreshnessPolicy:
         interval to offer, and is the one place a default cadence is
         written down.
         """
-        value = float(interval_s) if interval_s else float(fallback_s)
-        return cls(interval_s=max(value, 1e-6))
+        usable = finite(interval_s)
+        if usable is None or usable <= 0:
+            usable = finite(fallback_s) or 2.0
+        return cls(interval_s=max(usable, 1e-6))
 
     @classmethod
     def from_observed_cadence(
@@ -79,8 +83,9 @@ class FreshnessPolicy:
         and a rank that samples slower than requested should be judged
         against its real rhythm.
         """
-        if cadence_s and cadence_s > 0:
-            return cls(interval_s=float(cadence_s))
+        observed = finite(cadence_s)
+        if observed is not None and observed > 0:
+            return cls(interval_s=observed)
         return cls.from_interval(configured_s)
 
     @property
@@ -97,9 +102,10 @@ class FreshnessPolicy:
         An unknown age is not stale: absence of a timestamp is missing
         information, not evidence that a rank died.
         """
-        if age_s is None:
+        usable = finite(age_s)
+        if usable is None:
             return False
-        return float(age_s) > self.stale_after_s
+        return usable > self.stale_after_s
 
     def age_of(
         self,
@@ -113,9 +119,11 @@ class FreshnessPolicy:
         put a sample slightly in the future, and a negative age would read
         as fresher than fresh rather than as noise.
         """
-        if sample_ts_s is None:
+        stamp = finite(sample_ts_s)
+        now = finite(now_s)
+        if stamp is None or now is None:
             return None
-        return max(0.0, float(now_s) - float(sample_ts_s))
+        return max(0.0, now - stamp)
 
 
 @dataclass(frozen=True)
@@ -134,7 +142,11 @@ class CachedPayloadTTL:
         """Whether a cached payload of this age may still be served."""
         if self.ttl_s is None:
             return True
-        return float(age_s) <= float(self.ttl_s)
+        usable = finite(age_s)
+        limit = finite(self.ttl_s)
+        if usable is None or limit is None:
+            return False
+        return usable <= limit
 
 
 __all__ = [

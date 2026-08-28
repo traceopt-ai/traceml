@@ -128,3 +128,41 @@ def test_a_long_cache_ttl_does_not_make_a_dead_rank_look_live():
     policy = FreshnessPolicy(interval_s=2.0)
     assert ttl.may_reuse(600.0) is True
     assert policy.is_stale(600.0) is True
+
+
+# --- corrupt numbers ------------------------------------------------------
+NAN = float("nan")
+
+
+def test_a_corrupt_age_is_treated_as_unknown_not_as_live():
+    """`nan > threshold` is False, so a NaN age reads as fresh.
+
+    It is rejected at the boundary instead, the same way the rest of the
+    codebase handles non-finite telemetry.
+    """
+    policy = FreshnessPolicy(interval_s=2.0)
+    assert policy.is_stale(NAN) is False
+    assert policy.age_of(NAN, now_s=100.0) is None
+    assert policy.age_of(100.0, now_s=NAN) is None
+
+
+@pytest.mark.parametrize("bad", [NAN, float("inf")])
+def test_a_corrupt_interval_falls_back_rather_than_poisoning_the_threshold(
+    bad,
+):
+    policy = FreshnessPolicy.from_interval(bad)
+    assert policy.interval_s == pytest.approx(2.0)
+    # the fallback interval, not the floor: 2 s at three ticks is 6 s,
+    # which clears MIN_STALE_AFTER_S on its own
+    assert policy.stale_after_s == pytest.approx(6.0)
+
+
+def test_a_corrupt_observed_cadence_falls_back_to_the_configured_one():
+    assert FreshnessPolicy.from_observed_cadence(
+        NAN, configured_s=7.0
+    ).interval_s == pytest.approx(7.0)
+
+
+def test_a_corrupt_age_may_not_reuse_a_cached_payload():
+    """Unknown age means the cache cannot be shown to be inside its TTL."""
+    assert CachedPayloadTTL(ttl_s=30.0).may_reuse(NAN) is False

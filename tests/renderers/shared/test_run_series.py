@@ -151,3 +151,47 @@ def test_a_custom_policy_is_honoured():
     assert tight.window_for(1e6) == pytest.approx(20.0)
     plan = plan_run_series(span_s=1_000.0, sample_count=501, policy=tight)
     assert plan is not None and plan.max_points == 10
+
+
+# --- corrupt numbers ------------------------------------------------------
+NAN, INF = float("nan"), float("-inf")
+
+
+@pytest.mark.parametrize("bad", [NAN, INF, float("inf")])
+def test_a_corrupt_span_plans_nothing_rather_than_crashing(bad):
+    """NaN walks past every ordinary guard.
+
+    `nan <= 0` is False, so a corrupt sample clears a positivity check and
+    only fails later, at an int() that cannot convert it. Measured before
+    this guard existed: ValueError, cannot convert float NaN to integer.
+    """
+    assert plan_run_series(span_s=bad, sample_count=101) is None
+
+
+@pytest.mark.parametrize("bad", [NAN, INF, float("inf")])
+def test_a_corrupt_cadence_plans_nothing(bad):
+    assert (
+        plan_run_series(span_s=1000.0, sample_count=101, cadence_s=bad) is None
+    )
+
+
+def test_a_corrupt_span_yields_no_cadence():
+    assert cadence_of(NAN, 100) is None
+    assert cadence_of(float("inf"), 100) is None
+
+
+def test_a_corrupt_span_falls_back_to_the_smallest_window():
+    assert DEFAULT_RUN_SERIES_POLICY.window_for(NAN) == pytest.approx(30.0)
+    assert DEFAULT_RUN_SERIES_POLICY.mode_for(NAN, 100.0) == "recent"
+    assert DEFAULT_RUN_SERIES_POLICY.mode_for(100.0, NAN) == "recent"
+
+
+def test_a_hand_built_plan_with_corrupt_numbers_still_answers():
+    """The dataclass is public, so it is guarded a second time."""
+    from traceml_ai.renderers.shared.run_series import RunSeriesPlan
+
+    plan = RunSeriesPlan(
+        window_s=NAN, cadence_s=NAN, stride=1, max_points=120, sample_count=10
+    )
+    assert plan.preceding_rows == 1
+    assert "nan" not in plan.frame_clause().lower()
