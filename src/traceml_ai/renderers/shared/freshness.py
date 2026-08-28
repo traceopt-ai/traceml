@@ -25,7 +25,7 @@ enters as a value rather than a constant.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Literal, Optional
 
 from .run_series import finite
 
@@ -37,6 +37,8 @@ DEFAULT_STALE_TICKS = 3.0
 # However fast the sampler is configured, nothing is called stale before
 # this. Protects a sub-second cadence from flagging on scheduler noise.
 MIN_STALE_AFTER_S = 5.0
+
+FreshnessState = Literal["fresh", "stale", "unknown"]
 
 
 @dataclass(frozen=True)
@@ -96,16 +98,17 @@ class FreshnessPolicy:
             self.interval_s * self.stale_ticks,
         )
 
-    def is_stale(self, age_s: Optional[float]) -> bool:
-        """Whether an entity of this age has stopped reporting.
+    def state_of(self, age_s: Optional[float]) -> FreshnessState:
+        """Whether an entity is fresh, stale, or has an unknown age.
 
-        An unknown age is not stale: absence of a timestamp is missing
-        information, not evidence that a rank died.
+        Absence of a usable timestamp is missing information. Returning an
+        explicit state prevents callers from treating it as either live or
+        dead by accident.
         """
         usable = finite(age_s)
         if usable is None:
-            return False
-        return usable > self.stale_after_s
+            return "unknown"
+        return "stale" if usable > self.stale_after_s else "fresh"
 
     def age_of(
         self,
@@ -153,5 +156,6 @@ __all__ = [
     "CachedPayloadTTL",
     "DEFAULT_STALE_TICKS",
     "FreshnessPolicy",
+    "FreshnessState",
     "MIN_STALE_AFTER_S",
 ]

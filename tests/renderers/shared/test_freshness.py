@@ -73,17 +73,17 @@ def test_the_configured_interval_is_the_fallback_when_nothing_observed():
 # --- the judgement -------------------------------------------------------
 def test_a_rank_inside_its_patience_is_live():
     policy = FreshnessPolicy(interval_s=10.0)
-    assert policy.is_stale(29.0) is False
+    assert policy.state_of(29.0) == "fresh"
 
 
 def test_a_rank_past_its_patience_is_stale():
     policy = FreshnessPolicy(interval_s=10.0)
-    assert policy.is_stale(31.0) is True
+    assert policy.state_of(31.0) == "stale"
 
 
 def test_an_unknown_age_is_not_evidence_of_death():
     """Missing information is not a dead rank; saying so would invent one."""
-    assert FreshnessPolicy(interval_s=2.0).is_stale(None) is False
+    assert FreshnessPolicy(interval_s=2.0).state_of(None) == "unknown"
 
 
 def test_age_is_clamped_so_clock_skew_does_not_read_as_fresher_than_fresh():
@@ -102,7 +102,7 @@ def test_a_cached_payload_ttl_is_a_different_type_entirely():
     so a caller cannot pass one where it meant the other.
     """
     assert not isinstance(CachedPayloadTTL(), FreshnessPolicy)
-    assert not hasattr(CachedPayloadTTL(), "is_stale")
+    assert not hasattr(CachedPayloadTTL(), "state_of")
     assert not hasattr(FreshnessPolicy(interval_s=2.0), "may_reuse")
 
 
@@ -127,7 +127,7 @@ def test_a_long_cache_ttl_does_not_make_a_dead_rank_look_live():
     ttl = CachedPayloadTTL(ttl_s=3600.0)
     policy = FreshnessPolicy(interval_s=2.0)
     assert ttl.may_reuse(600.0) is True
-    assert policy.is_stale(600.0) is True
+    assert policy.state_of(600.0) == "stale"
 
 
 # --- corrupt numbers ------------------------------------------------------
@@ -135,13 +135,13 @@ NAN = float("nan")
 
 
 def test_a_corrupt_age_is_treated_as_unknown_not_as_live():
-    """`nan > threshold` is False, so a NaN age reads as fresh.
+    """`nan > threshold` is False, so a NaN age otherwise reads as fresh.
 
-    It is rejected at the boundary instead, the same way the rest of the
-    codebase handles non-finite telemetry.
+    It becomes an explicit unknown state instead, the same way the rest of
+    the codebase rejects non-finite telemetry at its boundaries.
     """
     policy = FreshnessPolicy(interval_s=2.0)
-    assert policy.is_stale(NAN) is False
+    assert policy.state_of(NAN) == "unknown"
     assert policy.age_of(NAN, now_s=100.0) is None
     assert policy.age_of(100.0, now_s=NAN) is None
 
