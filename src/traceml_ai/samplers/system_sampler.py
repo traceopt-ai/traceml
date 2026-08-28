@@ -18,7 +18,7 @@ The sampler is designed to be:
 from __future__ import annotations
 
 import time
-from typing import List
+from typing import List, Optional
 
 import psutil
 from pynvml import (
@@ -97,7 +97,7 @@ class SystemSampler(BaseSampler):
 
         Stores total system memory for reuse across samples.
         """
-        self.ram_total_memory = 0.0
+        self.ram_total_memory: Optional[float] = None
         try:
             self.ram_total_memory = float(psutil.virtual_memory().total)
         except Exception as e:
@@ -124,7 +124,7 @@ class SystemSampler(BaseSampler):
                 f"[TraceML] NVML initialization failed (GPU unavailable): {e}"
             )
 
-    def _sample_cpu(self) -> float:
+    def _sample_cpu(self) -> Optional[float]:
         """
         Sample current CPU utilization.
         """
@@ -132,9 +132,9 @@ class SystemSampler(BaseSampler):
             return float(psutil.cpu_percent(interval=None))
         except Exception as e:
             self.logger.error(f"[TraceML] CPU sampling failed: {e}")
-            return 0.0
+            return None
 
-    def _sample_ram(self) -> float:
+    def _sample_ram(self) -> Optional[float]:
         """
         Sample current RAM usage.
         """
@@ -142,14 +142,14 @@ class SystemSampler(BaseSampler):
             return float(psutil.virtual_memory().used)
         except Exception as e:
             self.logger.error(f"[TraceML] RAM sampling failed: {e}")
-            return 0.0
+            return None
 
     def _sample_gpus(self) -> List[GPUMetrics]:
         """
         Sample all available GPUs.
 
-        Failure to sample one GPU does not affect others, and a zeroed
-        placeholder is inserted to preserve index alignment.
+        Failure to sample one GPU does not affect others. An unavailable
+        placeholder preserves index alignment without fabricating zeros.
         """
         if not self.gpu_available:
             return []
@@ -183,14 +183,17 @@ class SystemSampler(BaseSampler):
                 self.logger.error(
                     f"[TraceML] GPU {gpu_id} sampling failed: {e}"
                 )
+                # Preserve GPU index alignment while marking every failed
+                # measurement unavailable. Zeros would look like valid idle
+                # hardware and are therefore incorrect telemetry.
                 gpus.append(
                     GPUMetrics(
-                        util=0.0,
-                        mem_used=0.0,
-                        mem_total=0.0,
-                        temperature=0.0,
-                        power_usage=0.0,
-                        power_limit=0.0,
+                        util=None,
+                        mem_used=None,
+                        mem_total=None,
+                        temperature=None,
+                        power_usage=None,
+                        power_limit=None,
                     )
                 )
 
