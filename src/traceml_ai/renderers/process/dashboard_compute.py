@@ -164,8 +164,10 @@ class ProcessDashboardComputer:
         self._configured_interval_s = sampler_interval_s
         self._run_policy = run_series_policy
         self._cache_ttl = CachedPayloadTTL(ttl_s=stale_ttl_s)
-        self._run_cache: Optional[Tuple[RankChart, RankChart]] = None
-        self._run_cache_at: float = 0.0
+        # Per metric, because the two charts can be in different modes:
+        # only a retained chart is worth caching.
+        self._run_cache: Dict[str, RankChart] = {}
+        self._run_cache_at: Dict[str, float] = {}
         self._dashboard_rollup: Deque[ProcessHistoryEntry] = deque(
             maxlen=max(1, int(dashboard_max_rows))
         )
@@ -183,9 +185,9 @@ class ProcessDashboardComputer:
             with self._db.connect() as conn:
                 self._advance(conn)
                 newest_ts = self._db.newest_sample_ts(conn)
-                ranks, _policy = self._rank_snapshots(conn, newest_ts)
+                ranks, _policy, by_rank = self._rank_snapshots(conn, newest_ts)
                 out = self._build_payload(ranks)
-                out = self._with_charts(conn, out)
+                out = self._with_charts(conn, out, by_rank)
         except Exception:
             return self._return_stale()
 
@@ -217,7 +219,11 @@ class ProcessDashboardComputer:
         self,
         conn: Any,
         newest_ts: Optional[float],
-    ) -> Tuple[Tuple[RankSnapshot, ...], FreshnessPolicy]:
+    ) -> Tuple[
+        Tuple[RankSnapshot, ...],
+        FreshnessPolicy,
+        Dict[int, List[Any]],
+    ]:
         """Every rank's own state, read on its own clock.
 
         Two reads, on purpose. The windowed one carries each rank's recent
@@ -263,7 +269,7 @@ class ProcessDashboardComputer:
             )
             for rank_id in sorted(newest_by_rank)
         ]
-        return tuple(snapshots), policy
+        return tuple(snapshots), policy, by_rank
 
     def _observed_cadence(
         self, by_rank: Dict[int, List[Any]]
@@ -317,7 +323,12 @@ class ProcessDashboardComputer:
         return RankSnapshot(
             global_rank=rank_id,
             node_rank=_optional_int(newest_row["node_rank"]),
-            gpu_index=_optional_int(newest_row["gpu_device_index"]),
+            # Same teardown reasoning as the byte fields below: a
+            # rank's last sample lands after torch released the
+            # device, so its device index is NULL there.
+            gpu_index=_optional_int(
+                (newest_gpu or newest_row)["gpu_device_index"]
+            ),
             cpu_capacity_percent=_median(
                 [
                     value
@@ -390,6 +401,8 @@ class ProcessDashboardComputer:
             unknown=len(ranks) - len(live) - len(stale),
         )
 
+        imbalance = self._reserved_imbalance(aggregate_over)
+
         history = tuple(self._dashboard_rollup)
         if not history:
             return ProcessDashboardPayload(
@@ -398,9 +411,7 @@ class ProcessDashboardComputer:
                 cpu_capacity=self._cpu_rollup(aggregate_over),
                 rss_worst=self._rss_rollup(aggregate_over),
                 gpu_reserved=self._cuda_rollup(aggregate_over),
-                reserved_imbalance_percent=self._reserved_imbalance(
-                    aggregate_over
-                ),
+                reserved_imbalance_percent=imbalance,
             )
 
         window = history[-DASHBOARD_WINDOW:]
@@ -444,9 +455,7 @@ class ProcessDashboardComputer:
             chart=_build_chart(window),
             ranks=ranks,
             coverage=coverage,
-            reserved_imbalance_percent=self._reserved_imbalance(
-                aggregate_over
-            ),
+            reserved_imbalance_percent=imbalance,
             cpu_capacity=self._cpu_rollup(aggregate_over),
             rss_worst=self._rss_rollup(aggregate_over),
             gpu_reserved=self._cuda_rollup(aggregate_over),
@@ -472,7 +481,6 @@ class ProcessDashboardComputer:
         worst_rank, worst = max(pairs, key=lambda item: item[1])
         return MetricRollup(
             now=float(worst),
-            p95=float(worst),
             p50=_median([value for _r, value in pairs]),
             worst_rank=int(worst_rank),
         )
@@ -499,7 +507,6 @@ class ProcessDashboardComputer:
             shown = worst.ram_used_p50_bytes or 0.0
         return MetricRollup(
             now=float(shown),
-            p95=float(shown),
             p50=_median([value for _r, value in pairs]),
             total=worst.ram_total_bytes,
             worst_rank=worst.global_rank,
@@ -529,7 +536,6 @@ class ProcessDashboardComputer:
         )
         return MetricRollup(
             now=float(worst.gpu_reserved_bytes or 0.0),
-            p95=float(worst.gpu_reserved_bytes or 0.0),
             total=worst.gpu_total_bytes,
             worst_rank=worst.global_rank,
         )
@@ -559,45 +565,88 @@ class ProcessDashboardComputer:
 
     # --- whole-run series ------------------------------------------------
     def _rank_charts(
-        self, conn: Any, window_span_s: float
+        self,
+        conn: Any,
+        window_span_s: float,
+        by_rank: Dict[int, List[Any]],
     ) -> Tuple[RankChart, RankChart]:
-        """Per-rank CPU and RSS, over the window or over the whole run.
-
-        The mode is decided here and stated on the payload. A rolling mean
-        over minutes cannot visibly change between two ticks, so the
-        whole-run reads are refreshed on their own slower clock; that cache
-        exists because recomputing them every tick was the largest cost
-        measured in this block.
-        """
-        now = time.time()
-        if (
-            self._run_cache is not None
-            and (now - self._run_cache_at) < RUN_REFRESH_S
-        ):
-            return self._run_cache
-
-        charts = (
-            self._one_chart(conn, "cpu", window_span_s),
-            self._one_chart(conn, "rss", window_span_s),
+        """Per-rank CPU and RSS, over the window or over the whole run."""
+        return (
+            self._one_chart(conn, "cpu", window_span_s, by_rank),
+            self._one_chart(conn, "rss", window_span_s, by_rank),
         )
-        self._run_cache = charts
-        self._run_cache_at = now
-        return charts
+
+    def _recent_chart(
+        self,
+        metric: str,
+        by_rank: Dict[int, List[Any]],
+        span_s: Optional[float],
+    ) -> RankChart:
+        """The live view: each rank's own samples, as they were taken.
+
+        Built from the rows the snapshot read already returned rather than
+        from a second query, and rebuilt every tick, because the whole
+        point of the recent view is that it moves.
+        """
+        value_of = (
+            _cpu_capacity_of
+            if metric == "cpu"
+            else (lambda row: _opt_float(row["ram_used_bytes"]))
+        )
+        traces = []
+        for rank_id in sorted(by_rank):
+            stamps, values = [], []
+            for row in by_rank[rank_id]:
+                stamp = _opt_float(row["sample_ts_s"])
+                value = value_of(row)
+                if stamp is None or value is None:
+                    continue
+                stamps.append(stamp)
+                values.append(value)
+            if stamps:
+                traces.append(
+                    RankTrace(
+                        global_rank=rank_id,
+                        timestamps=tuple(stamps),
+                        values=tuple(values),
+                    )
+                )
+        return RankChart(mode="recent", span_s=span_s, traces=tuple(traces))
 
     def _one_chart(
-        self, conn: Any, metric: str, window_span_s: float
+        self,
+        conn: Any,
+        metric: str,
+        window_span_s: float,
+        by_rank: Dict[int, List[Any]],
     ) -> RankChart:
+        """One chart, in whichever mode the run has earned.
+
+        Only the retained branch is cached. A rolling mean over minutes
+        cannot visibly change between two ticks and recomputing it every
+        tick was the largest cost measured in this block, but the recent
+        view is the live one and a cached copy of it would be a chart that
+        stops moving.
+        """
         stats = (
             self._db.cpu_capacity_run_stats(conn)
             if metric == "cpu"
             else self._db.rss_run_stats(conn)
         )
         if stats is None:
-            return RankChart(mode="recent")
+            return self._recent_chart(metric, by_rank, None)
 
         mode = self._run_policy.mode_for(stats.span_s, window_span_s)
         if mode != "retained":
-            return RankChart(mode="recent", span_s=stats.span_s)
+            return self._recent_chart(metric, by_rank, stats.span_s)
+
+        now = time.time()
+        cached = self._run_cache.get(metric)
+        if (
+            cached is not None
+            and (now - self._run_cache_at.get(metric, 0.0)) < RUN_REFRESH_S
+        ):
+            return cached
 
         plan = plan_run_series(
             span_s=stats.span_s,
@@ -605,42 +654,48 @@ class ProcessDashboardComputer:
             policy=self._run_policy,
         )
         if plan is None:
-            return RankChart(mode="recent", span_s=stats.span_s)
+            return self._recent_chart(metric, by_rank, stats.span_s)
 
         rows = (
             self._db.fetch_cpu_capacity_run(conn, plan)
             if metric == "cpu"
             else self._db.fetch_rss_run(conn, plan)
         )
-        by_rank: Dict[int, Tuple[List[float], List[float], List[float]]] = {}
+        rolled: Dict[int, Tuple[List[float], List[float], List[float]]] = {}
         for rank_id, ts, roll_avg, roll_max in rows:
-            stamps, values, peaks = by_rank.setdefault(rank_id, ([], [], []))
+            stamps, values, peaks = rolled.setdefault(rank_id, ([], [], []))
             stamps.append(ts)
             values.append(roll_avg)
             peaks.append(roll_max)
 
-        return RankChart(
+        chart = RankChart(
             mode="retained",
             window_s=plan.window_s,
             span_s=stats.span_s,
             traces=tuple(
                 RankTrace(
                     global_rank=rank_id,
-                    timestamps=tuple(by_rank[rank_id][0]),
-                    values=tuple(by_rank[rank_id][1]),
-                    peaks=tuple(by_rank[rank_id][2]),
+                    timestamps=tuple(rolled[rank_id][0]),
+                    values=tuple(rolled[rank_id][1]),
+                    peaks=tuple(rolled[rank_id][2]),
                 )
-                for rank_id in sorted(by_rank)
+                for rank_id in sorted(rolled)
             ),
         )
+        self._run_cache[metric] = chart
+        self._run_cache_at[metric] = now
+        return chart
 
     # --- degraded reads --------------------------------------------------
     def _with_charts(
-        self, conn: Any, payload: ProcessDashboardPayload
+        self,
+        conn: Any,
+        payload: ProcessDashboardPayload,
+        by_rank: Dict[int, List[Any]],
     ) -> ProcessDashboardPayload:
         """Attach the per-rank charts, in whichever mode the run warrants."""
         window_span = _window_span(payload.history)
-        cpu_chart, rss_chart = self._rank_charts(conn, window_span)
+        cpu_chart, rss_chart = self._rank_charts(conn, window_span, by_rank)
         return replace(
             payload, cpu_capacity_chart=cpu_chart, rss_chart=rss_chart
         )

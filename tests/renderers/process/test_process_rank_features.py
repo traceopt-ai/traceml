@@ -168,10 +168,51 @@ def test_aggregates_describe_the_live_ranks(process_db):
 
 # --- the whole-run series ------------------------------------------------
 def test_a_short_run_stays_on_the_recent_view(process_db):
+    """Recent, and carrying data: the live view is the common case.
+
+    A run only outgrows its window after minutes, so nearly every chart a
+    reader sees is this one. An earlier version of this test asserted the
+    recent chart was EMPTY, which described the code rather than the
+    intent and left both charts blank on every short run.
+    """
     _run(process_db, ranks=2, samples=20)
     out = payload(process_db, sampler_interval_s=2.0)
-    assert out.cpu_capacity_chart.mode == "recent"
-    assert out.cpu_capacity_chart.traces == ()
+    chart = out.cpu_capacity_chart
+    assert chart.mode == "recent"
+    assert chart.is_retained is False
+    assert len(chart.traces) == 2
+    assert all(trace.timestamps for trace in chart.traces)
+    assert all(
+        len(trace.timestamps) == len(trace.values) for trace in chart.traces
+    )
+
+
+def test_the_recent_view_moves_between_ticks(process_db):
+    """It must not be served from the whole-run cache.
+
+    The retained chart is a rolling mean over minutes and is cached
+    because rebuilding it every tick was this block's largest cost. The
+    recent chart is the live one, and a cached copy of it is a chart that
+    stops moving.
+    """
+    _run(process_db, ranks=2, samples=20)
+    computer = ProcessDashboardComputer(
+        db_path=process_db.path, sampler_interval_s=2.0
+    )
+    first = computer.compute().rss_chart
+    _run(process_db, ranks=2, samples=40)
+    second = computer.compute().rss_chart
+
+    assert first.mode == second.mode == "recent"
+    longest_before = max(len(t.timestamps) for t in first.traces)
+    longest_after = max(len(t.timestamps) for t in second.traces)
+    assert longest_after > longest_before
+
+
+def test_every_rank_gets_its_own_recent_line(process_db):
+    _run(process_db, ranks=4, samples=20)
+    chart = payload(process_db, sampler_interval_s=2.0).rss_chart
+    assert [t.global_rank for t in chart.traces] == [0, 1, 2, 3]
 
 
 def test_a_long_run_switches_to_the_retained_view(process_db):

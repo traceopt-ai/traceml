@@ -126,13 +126,17 @@ class RankCoverage:
 class MetricRollup:
     """Window statistics for one metric.
 
-    ``p50`` is optional because not every metric needs a median to be
-    described; a field that is absent says so rather than carrying a zero
-    that reads like a measurement.
+    ``p50`` and ``p95`` are optional because not every metric needs them to
+    be described; a field that is absent says so rather than carrying a
+    number that reads like a measurement.
+
+    The per-rank rollups leave ``p95`` unset. They used to copy ``now``
+    into it, which produced a statistic nobody computed: on a finished run
+    that reported ``p95`` below ``p50``, a rollup contradicting itself.
     """
 
     now: float
-    p95: float
+    p95: Optional[float] = None
     p50: Optional[float] = None
     total: Optional[float] = None
     worst_rank: Optional[int] = None
@@ -224,17 +228,35 @@ class ProcessDashboardPayload:
 
     @property
     def has_data(self) -> bool:
-        """Whether the card has anything to draw."""
-        return bool(self.history)
+        """Whether the card has anything to draw.
+
+        Ranks count as well as steps. The aggregated history needs a step
+        committed across every rank, and the per-rank reads are populated
+        before that happens, so asking only the history calls a live run
+        empty for its first ticks.
+        """
+        return bool(self.history) or bool(self.ranks)
 
     @property
     def gpu_available(self) -> bool:
-        """Whether the newest step reported a GPU.
+        """Whether this run has a GPU to talk about.
 
-        Follows the newest entry rather than any entry, so a run that loses
-        its GPU reporting stops claiming one.
+        Asked of the ranks first, and of the step history only as a
+        fallback. An earlier version asked the newest committed step, on
+        the reasoning that a run losing its GPU reporting should stop
+        claiming one. Teardown makes that unworkable: the last samples of
+        every run land after torch has released the device, so the newest
+        step carries no GPU snapshot and a finished four-GPU run rendered
+        as CPU-only, blanking two tiles while the same card printed a
+        reserved-memory spread derived from the CUDA bytes it had just
+        denied having.
+
+        A rank's ``gpu_reported`` is read from its newest REPORTING row
+        for that same reason, so it stays true through teardown.
         """
-        return bool(self.history) and self.history[-1].gpu is not None
+        if any(rank.gpu_reported for rank in self.ranks):
+            return True
+        return any(entry.gpu is not None for entry in self.history)
 
     @property
     def live_ranks(self) -> Tuple[RankSnapshot, ...]:
