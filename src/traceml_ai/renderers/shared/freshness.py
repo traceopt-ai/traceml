@@ -27,6 +27,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, Optional
 
+from traceml_ai.runtime.settings import DEFAULT_INTERVAL_SEC
+
 from .run_series import finite
 
 # Ticks a rank may miss before the block stops calling it live. Three is
@@ -59,7 +61,7 @@ class FreshnessPolicy:
         cls,
         interval_s: Optional[float],
         *,
-        fallback_s: float = 2.0,
+        fallback_s: float = DEFAULT_INTERVAL_SEC,
     ) -> "FreshnessPolicy":
         """Build from a configured sampler interval.
 
@@ -69,7 +71,7 @@ class FreshnessPolicy:
         """
         usable = finite(interval_s)
         if usable is None or usable <= 0:
-            usable = finite(fallback_s) or 2.0
+            usable = finite(fallback_s) or DEFAULT_INTERVAL_SEC
         return cls(interval_s=max(usable, 1e-6))
 
     @classmethod
