@@ -284,3 +284,47 @@ def test_the_card_renders_the_same_from_a_real_database(tmp_path):
     assert ram_series[0][1] == pytest.approx(25.0)
     gpu_series = panel["chart"].options["series"][1]["data"]
     assert gpu_series[0][1] == pytest.approx(37.5)
+
+
+def test_a_gap_in_the_timestamps_drops_only_that_sample():
+    """The one place this refactor does NOT preserve 0.3.7 behavior.
+
+    On 0.3.7 the card zipped a timestamp list that had already had its gaps
+    filtered out against an unfiltered window, guarded by a length check.
+    Both branches were wrong. With few samples the check failed and the
+    chart drew NOTHING: measured 0 points where 2 were plottable. With
+    enough samples the check passed and the two lists were zipped anyway,
+    so every value landed on someone else's moment: measured on a 150-step
+    history with 5 gaps, the first plotted RAM value belonged to step 51
+    and was drawn at step 46.
+
+    Points now carry their own timestamp, so a gap removes one sample and
+    nothing else. This is deliberate and is the only behavior change in
+    this PR; reproducing a silent misalignment to preserve it would be the
+    worse choice.
+    """
+    payload = ProcessDashboardPayload(
+        history=(
+            ProcessHistoryEntry(
+                seq=1,
+                ts=1_700_000_001.0,
+                cpu_percent_max=50.0,
+                ram_used_bytes_max=4.0 * GB,
+                ram_total_bytes=16.0 * GB,
+            ),
+        ),
+        window_len=3,
+        cpu=MetricRollup(now=50.0, p95=50.0),
+        ram=MetricRollup(now=4.0 * GB, p95=4.0 * GB, total=16.0 * GB),
+        chart=ChartSeries(
+            ram_percent=ChartTrace(
+                label="RAM",
+                timestamps=(1_700_000_001.0, None, 1_700_000_003.0),
+                values=(25.0, 25.0, 25.0),
+            )
+        ),
+    )
+    panel = _panel()
+    process_section.update_process_section(panel, payload)
+    points = panel["chart"].options["series"][0]["data"]
+    assert [ms for ms, _v in points] == [1_700_000_001_000, 1_700_000_003_000]
