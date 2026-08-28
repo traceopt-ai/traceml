@@ -5,7 +5,6 @@ This module contains all presentation logic for process-level telemetry.
 """
 
 import shutil
-from typing import Any, Dict
 
 from rich.panel import Panel
 from rich.table import Table
@@ -16,6 +15,7 @@ from traceml_ai.renderers.base_renderer import BaseRenderer
 from traceml_ai.utils.formatting import fmt_mem_new, fmt_mem_triple
 
 from .computer import ProcessMetricsComputer
+from .dashboard_models import ProcessDashboardPayload
 
 
 class ProcessRenderer(BaseRenderer):
@@ -90,8 +90,8 @@ class ProcessRenderer(BaseRenderer):
             width=width,
         )
 
-    def get_dashboard_renderable(self) -> Dict[str, Any]:
+    def get_dashboard_renderable(self) -> ProcessDashboardPayload:
         """
-        Return the dashboard/UI payload.
+        Return the dashboard payload for the Process card.
         """
         return self._computer.compute_dashboard()

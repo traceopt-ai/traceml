@@ -16,6 +16,7 @@ from typing import Any, Dict, Optional
 
 from .cli_compute import ProcessCLIComputer
 from .dashboard_compute import ProcessDashboardComputer
+from .dashboard_models import ProcessDashboardPayload
 
 
 class ProcessMetricsComputer:
@@ -54,8 +55,8 @@ class ProcessMetricsComputer:
         """
         return self._cli.compute()
 
-    def compute_dashboard(self) -> Dict[str, Any]:
+    def compute_dashboard(self) -> ProcessDashboardPayload:
         """
-        Return the dashboard/UI payload for process metrics.
+        Return the dashboard payload for process metrics.
         """
         return self._dashboard.compute()

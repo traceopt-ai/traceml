@@ -1,62 +1,32 @@
-"""Process metrics — RAM% / GPU-mem% time-series + KPIs (PR2 revamp).
+"""Process metrics card: RAM and GPU-memory over time, plus four tiles.
 
-Reuses the original client-side rollup math; renders with glass + ECharts.
-Renderer payload (history rows + series + gpu_used_imbalance) is unchanged.
+Presentation only. Every number here arrives on a
+``ProcessDashboardPayload`` already decided: the percentiles, the window
+bound and the share-of-capacity arithmetic moved to
+``renderers/process/dashboard_compute.py``, which is where what a metric
+MEANS is settled. What is left in this module is layout, units, colours
+and chart options.
+
+Whether the run has a GPU is read from ``payload.gpu_available``, not
+inferred from which keys happen to be present.
 """
 
 from __future__ import annotations
 
-from datetime import datetime
+from math import isfinite
 from typing import Any, Dict, List, Optional
 
 from nicegui import ui
 
+from traceml_ai.renderers.process.dashboard_models import (
+    ChartTrace,
+    ProcessDashboardPayload,
+)
+
 from . import theme
 
-
-def _to_ms(s: str) -> Optional[int]:
-    try:
-        return int(datetime.fromisoformat(s).timestamp() * 1000)
-    except Exception:
-        return None
-
-
-def _percentile(vals: List[float], p: float) -> float:
-    vals = sorted(v for v in vals if v is not None)
-    if not vals:
-        return 0.0
-    k = (len(vals) - 1) * p / 100.0
-    f = int(k)
-    c = min(int(k) + 1, len(vals) - 1)
-    return vals[f] if f == c else vals[f] * (c - k) + vals[c] * (k - f)
-
-
-def _compute_rollups(window: List[Dict[str, Any]]) -> Dict[str, Any]:
-    last = window[-1]
-    cpu_hist = [float(r.get("cpu_max", 0.0) or 0.0) for r in window]
-    ram_hist = [float(r.get("ram_used_max", 0.0) or 0.0) for r in window]
-    gpu_hist = [
-        float(r.get("gpu_used", 0.0) or 0.0)
-        for r in window
-        if r.get("gpu_used") is not None
-    ]
-    return {
-        "gpu_available": last.get("gpu_used") is not None,
-        "cpu": {
-            "now": cpu_hist[-1],
-            "p50": _percentile(cpu_hist, 50),
-            "p95": _percentile(cpu_hist, 95),
-        },
-        "ram": {
-            "now": ram_hist[-1],
-            "p95": _percentile(ram_hist, 95),
-            "total": float(last.get("ram_total", 0.0) or 0.0),
-        },
-        "gpu": {
-            "now": gpu_hist[-1] if gpu_hist else 0.0,
-            "p95": _percentile(gpu_hist, 95) if gpu_hist else 0.0,
-        },
-    }
+NA_GPU = "N/A"
+DASH = "—"
 
 
 def build_process_section() -> Dict[str, Any]:
@@ -104,73 +74,81 @@ def build_process_section() -> Dict[str, Any]:
                         f"{lab} <span class='kq'>{qual}</span>",
                         sanitize=False,
                     ).classes("klab")
-                    kpis[key] = ui.html("—", sanitize=False).classes("kval")
+                    kpis[key] = ui.html(DASH, sanitize=False).classes("kval")
     return {"chart": chart, "win": win, "kpis": kpis}
 
 
-def update_process_section(
-    panel: Dict[str, Any], data: Dict[str, Any]
-) -> None:
-    if not isinstance(data, dict):
-        return
-    history = data.get("history", []) or []
-    if not history:
-        return
-    window = history[-100:]
-    series = data.get("series", {}) or {}
-    x_time = series.get("x_time", []) or []
+def to_ms(seconds: Optional[float]) -> Optional[int]:
+    """A sample time as ECharts wants it, or ``None`` when unusable."""
+    if seconds is None:
+        return None
+    try:
+        value = float(seconds)
+    except (TypeError, ValueError):
+        return None
+    if not isfinite(value) or value <= 0.0:
+        return None
+    return int(value * 1000.0)
 
-    ram_total = max(float(window[-1].get("ram_total", 1.0) or 1.0), 1.0)
-    ram_pct = [
-        (float(r.get("ram_used_max", 0.0) or 0.0) / ram_total) * 100.0
-        for r in window
+
+def gb_value(value: Optional[float]) -> str:
+    """Bytes as gigabytes, or a dash when the number does not exist."""
+    number = theme.gb(value) if value is not None else None
+    return f"{number:.2f}" if number is not None else DASH
+
+
+def trace_points(trace: Optional[ChartTrace]) -> List[List[Any]]:
+    """One trace as [time, value] pairs, dropping unplottable samples."""
+    if trace is None:
+        return []
+    return [
+        [ms, value]
+        for ms, value in zip(
+            (to_ms(t) for t in trace.timestamps), trace.values
+        )
+        if ms is not None
     ]
-    if x_time and len(x_time) >= len(window):
-        xms = [_to_ms(s) for s in x_time[-len(window) :]]
-    else:
-        xms = [None] * len(window)
+
+
+def window_text(payload: ProcessDashboardPayload) -> str:
+    return f"last {payload.window_len} samples"
+
+
+def update_process_section(panel: Dict[str, Any], data: Any) -> None:
+    if not isinstance(data, ProcessDashboardPayload) or not data.has_data:
+        return
 
     chart = panel["chart"]
-    chart.options["series"][0]["data"] = [
-        [t, v] for t, v in zip(xms, ram_pct) if t is not None
-    ]
+    ram_points = trace_points(data.chart.ram_percent if data.chart else None)
+    gpu_points = trace_points(data.chart.gpu_percent if data.chart else None)
+    chart.options["series"][0]["data"] = ram_points
+    chart.options["series"][1]["data"] = gpu_points
 
-    gpu_window = [
-        (i, r) for i, r in enumerate(window) if r.get("gpu_used") is not None
-    ]
-    if gpu_window and window[-1].get("gpu_total") is not None:
-        gtot = max(float(window[-1].get("gpu_total", 1.0) or 1.0), 1.0)
-        gdata = [
-            [xms[i], (float(r.get("gpu_used", 0.0) or 0.0) / gtot) * 100.0]
-            for i, r in gpu_window
-            if i < len(xms) and xms[i] is not None
-        ]
-        chart.options["series"][1]["data"] = gdata
-    else:
-        gdata = []
-        chart.options["series"][1]["data"] = []
-    ymax = theme.nice_ymax(ram_pct + [v for _, v in gdata])
+    ymax = theme.nice_ymax(
+        [v for _t, v in ram_points] + [v for _t, v in gpu_points]
+    )
     chart.options["yAxis"][0]["max"] = ymax
     chart.options["yAxis"][1]["max"] = ymax
     chart.update()
 
-    roll = _compute_rollups(window)
-    panel["win"].text = f"last {len(window)} samples"
-    k = panel["kpis"]
-    k["cpu"].content = theme.kval(f"{roll['cpu']['now']:.0f}", "%")
-    rn = theme.gb(roll["ram"]["now"])
-    k["ram"].content = theme.kval(f"{rn:.2f}" if rn is not None else "—", "GB")
-    if roll["gpu_available"]:
-        gm = theme.gb(roll["gpu"]["now"])
-        k["gmem"].content = theme.kval(
-            f"{gm:.2f}" if gm is not None else "—", "GB"
-        )
-        imb = data.get("gpu_used_imbalance")
-        gi = theme.gb(imb) if imb is not None else None
-        k["gimb"].content = theme.kval(
-            f"{gi:.2f}" if gi is not None else "—",
-            "GB" if gi is not None else "",
-        )
-    else:
-        k["gmem"].content = "N/A"
-        k["gimb"].content = "—"
+    panel["win"].text = window_text(data)
+    kpis = panel["kpis"]
+    kpis["cpu"].content = theme.kval(
+        f"{data.cpu.now:.0f}" if data.cpu else DASH, "%"
+    )
+    kpis["ram"].content = theme.kval(
+        gb_value(data.ram.now if data.ram else None), "GB"
+    )
+
+    if not data.gpu_available:
+        kpis["gmem"].content = NA_GPU
+        kpis["gimb"].content = DASH
+        return
+
+    kpis["gmem"].content = theme.kval(
+        gb_value(data.gpu.now if data.gpu else None), "GB"
+    )
+    imbalance = gb_value(data.gpu_used_imbalance_bytes)
+    kpis["gimb"].content = theme.kval(
+        imbalance, "GB" if imbalance != DASH else ""
+    )
