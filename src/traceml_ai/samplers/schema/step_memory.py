@@ -74,7 +74,7 @@ class StepMemorySample:
         """
         return StepMemorySample(
             sample_idx=data["seq"],
-            timestamp=float(data.get("ts", 0.0)),
+            timestamp=float(data["ts"]),
             model_id=data.get("model_id"),
             device=data.get("device"),
             step=data.get("step"),
