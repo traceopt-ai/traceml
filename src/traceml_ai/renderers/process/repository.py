@@ -399,26 +399,23 @@ class ProcessRepository:
     def _run_stats(
         self, conn: sqlite3.Connection, value_sql: str
     ) -> Optional[RunStats]:
-        try:
-            row = conn.execute(
-                f"""
-                WITH per_rank AS (
-                    SELECT
-                        COUNT(*) AS n,
-                        MIN(sample_ts_s) AS lo,
-                        MAX(sample_ts_s) AS hi
-                    FROM process_samples
-                    WHERE sample_ts_s IS NOT NULL
-                      AND ({value_sql}) IS NOT NULL
-                      AND COALESCE(global_rank, rank) IS NOT NULL
-                    GROUP BY COALESCE(global_rank, rank)
-                )
-                SELECT MIN(lo), MAX(hi), SUM(n), COUNT(*), MAX(n)
-                FROM per_rank;
-                """
-            ).fetchone()
-        except sqlite3.Error:
-            return None
+        row = conn.execute(
+            f"""
+            WITH per_rank AS (
+                SELECT
+                    COUNT(*) AS n,
+                    MIN(sample_ts_s) AS lo,
+                    MAX(sample_ts_s) AS hi
+                FROM process_samples
+                WHERE sample_ts_s IS NOT NULL
+                  AND ({value_sql}) IS NOT NULL
+                  AND COALESCE(global_rank, rank) IS NOT NULL
+                GROUP BY COALESCE(global_rank, rank)
+            )
+            SELECT MIN(lo), MAX(hi), SUM(n), COUNT(*), MAX(n)
+            FROM per_rank;
+            """
+        ).fetchone()
         if row is None or row[0] is None or row[1] is None:
             return None
         return RunStats(
@@ -441,48 +438,45 @@ class ProcessRepository:
         two public methods above each pass one of this module's own
         constants, so no expression reaches here from outside the class.
         """
-        try:
-            return [
-                (int(r[0]), float(r[1]), float(r[2]), float(r[3]))
-                for r in conn.execute(
-                    f"""
-                    WITH base AS (
-                        SELECT
-                            COALESCE(global_rank, rank) AS rank_id,
-                            sample_ts_s AS ts,
-                            ({value_sql}) AS v,
-                            ROW_NUMBER() OVER (
-                                PARTITION BY COALESCE(global_rank, rank)
-                                ORDER BY sample_ts_s ASC, id ASC
-                            ) AS rn
-                        FROM process_samples
-                        WHERE sample_ts_s IS NOT NULL
-                          AND ({value_sql}) IS NOT NULL
-                          AND COALESCE(global_rank, rank) IS NOT NULL
-                    ),
-                    rolled AS (
-                        SELECT
-                            rank_id, ts, rn,
-                            AVG(v) OVER (
-                                PARTITION BY rank_id ORDER BY ts
-                                {plan.frame_clause()}
-                            ) AS roll_avg,
-                            MAX(v) OVER (
-                                PARTITION BY rank_id ORDER BY ts
-                                {plan.frame_clause()}
-                            ) AS roll_max
-                        FROM base
-                    )
-                    SELECT rank_id, ts, roll_avg, roll_max
-                    FROM rolled
-                    WHERE rn % ? = 0 AND rn > ?
-                    ORDER BY rank_id ASC, ts ASC;
-                    """,
-                    (int(plan.stride), int(plan.preceding_rows)),
-                ).fetchall()
-            ]
-        except sqlite3.Error:
-            return []
+        return [
+            (int(r[0]), float(r[1]), float(r[2]), float(r[3]))
+            for r in conn.execute(
+                f"""
+                WITH base AS (
+                    SELECT
+                        COALESCE(global_rank, rank) AS rank_id,
+                        sample_ts_s AS ts,
+                        ({value_sql}) AS v,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY COALESCE(global_rank, rank)
+                            ORDER BY sample_ts_s ASC, id ASC
+                        ) AS rn
+                    FROM process_samples
+                    WHERE sample_ts_s IS NOT NULL
+                      AND ({value_sql}) IS NOT NULL
+                      AND COALESCE(global_rank, rank) IS NOT NULL
+                ),
+                rolled AS (
+                    SELECT
+                        rank_id, ts, rn,
+                        AVG(v) OVER (
+                            PARTITION BY rank_id ORDER BY ts
+                            {plan.frame_clause()}
+                        ) AS roll_avg,
+                        MAX(v) OVER (
+                            PARTITION BY rank_id ORDER BY ts
+                            {plan.frame_clause()}
+                        ) AS roll_max
+                    FROM base
+                )
+                SELECT rank_id, ts, roll_avg, roll_max
+                FROM rolled
+                WHERE rn % ? = 0 AND rn > ?
+                ORDER BY rank_id ASC, ts ASC;
+                """,
+                (int(plan.stride), int(plan.preceding_rows)),
+            ).fetchall()
+        ]
 
 
 __all__ = ["ProcessRepository", "RunStats"]

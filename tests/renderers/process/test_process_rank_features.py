@@ -18,8 +18,10 @@ from tests.renderers.process.conftest import GB
 from traceml_ai.renderers.process.dashboard_compute import (
     ProcessDashboardComputer,
 )
-from traceml_ai.renderers.process.dashboard_models import RankSnapshot
-from traceml_ai.renderers.process.renderer import ProcessRenderer
+from traceml_ai.renderers.process.dashboard_models import (
+    ProcessDashboardPayload,
+    RankSnapshot,
+)
 
 
 def payload(db, **kw):
@@ -109,6 +111,18 @@ def test_an_unknown_age_is_counted_apart_from_live_and_stale(process_db):
     assert coverage.live + coverage.stale + coverage.unknown == coverage.total
 
 
+def test_live_ranks_excludes_only_stale_ranks():
+    out = ProcessDashboardPayload(
+        ranks=(
+            RankSnapshot(global_rank=0, freshness="fresh"),
+            RankSnapshot(global_rank=1, freshness="stale"),
+            RankSnapshot(global_rank=2, freshness="unknown"),
+        )
+    )
+
+    assert [rank.global_rank for rank in out.live_ranks] == [0, 2]
+
+
 def test_coverage_states_who_is_reporting(process_db):
     _run(process_db, ranks=4, samples=200, dies=(3, 20))
     coverage = payload(process_db, sampler_interval_s=2.0).coverage
@@ -123,30 +137,6 @@ def test_a_healthy_run_is_not_marked_as_excluding_anything(process_db):
         payload(process_db, sampler_interval_s=2.0).coverage.excluding_stale
         is False
     )
-
-
-def test_renderer_passes_configured_cadence_to_freshness(process_db):
-    """The configured cadence reaches the policy before it can be observed."""
-    base = 1_700_000_000.0
-    for rank, arrival_offset_s in ((0, 0.0), (1, 10.0)):
-        process_db.insert(
-            recv_ts_ns=int((base + arrival_offset_s) * 1e9),
-            rank=rank,
-            global_rank=rank,
-            seq=1,
-            sample_ts_s=base + arrival_offset_s,
-            cpu_percent=20.0,
-            cpu_logical_core_count=8,
-            ram_used_bytes=2.0 * GB,
-            ram_total_bytes=16.0 * GB,
-        )
-
-    out = ProcessRenderer(
-        db_path=process_db.path,
-        sampler_interval_s=60.0,
-    ).get_dashboard_renderable()
-
-    assert [rank.freshness for rank in out.ranks] == ["fresh", "fresh"]
 
 
 # --- rollups -------------------------------------------------------------

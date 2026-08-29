@@ -260,8 +260,8 @@ class ProcessDashboardPayload:
 
     @property
     def live_ranks(self) -> Tuple[RankSnapshot, ...]:
-        """Ranks still reporting, which is what aggregates describe."""
-        return tuple(rank for rank in self.ranks if not rank.stale)
+        """Non-stale ranks, including unknown ages, used by aggregates."""
+        return tuple(rank for rank in self.ranks if rank.freshness != "stale")
 
 
 __all__ = [
