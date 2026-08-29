@@ -19,6 +19,7 @@ from traceml_ai.renderers.process.dashboard_compute import (
     ProcessDashboardComputer,
 )
 from traceml_ai.renderers.process.dashboard_models import RankSnapshot
+from traceml_ai.renderers.process.renderer import ProcessRenderer
 
 
 def payload(db, **kw):
@@ -122,6 +123,30 @@ def test_a_healthy_run_is_not_marked_as_excluding_anything(process_db):
         payload(process_db, sampler_interval_s=2.0).coverage.excluding_stale
         is False
     )
+
+
+def test_renderer_passes_configured_cadence_to_freshness(process_db):
+    """The configured cadence reaches the policy before it can be observed."""
+    base = 1_700_000_000.0
+    for rank, arrival_offset_s in ((0, 0.0), (1, 10.0)):
+        process_db.insert(
+            recv_ts_ns=int((base + arrival_offset_s) * 1e9),
+            rank=rank,
+            global_rank=rank,
+            seq=1,
+            sample_ts_s=base + arrival_offset_s,
+            cpu_percent=20.0,
+            cpu_logical_core_count=8,
+            ram_used_bytes=2.0 * GB,
+            ram_total_bytes=16.0 * GB,
+        )
+
+    out = ProcessRenderer(
+        db_path=process_db.path,
+        sampler_interval_s=60.0,
+    ).get_dashboard_renderable()
+
+    assert [rank.freshness for rank in out.ranks] == ["fresh", "fresh"]
 
 
 # --- rollups -------------------------------------------------------------
