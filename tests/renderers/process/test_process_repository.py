@@ -20,11 +20,17 @@ import pytest
 
 from tests.renderers.process.conftest import GB
 from traceml_ai.renderers.process.repository import ProcessRepository
+from traceml_ai.renderers.shared.run_series import RunSeriesPlan
 
 
 @pytest.fixture
 def repo(process_db):
     return ProcessRepository(db_path=process_db.path), process_db
+
+
+class _FailingConnection:
+    def execute(self, *_args, **_kwargs):
+        raise sqlite3.OperationalError("query failed")
 
 
 def test_latest_seq_is_the_newest_row_carrying_one(repo):
@@ -217,3 +223,22 @@ def test_connect_yields_named_row_access(repo):
         ).fetchone()
     assert isinstance(row, sqlite3.Row)
     assert row["cpu_percent"] == pytest.approx(42.0)
+
+
+def test_run_stats_sql_errors_propagate(repo):
+    repository, _db = repo
+    with pytest.raises(sqlite3.OperationalError, match="query failed"):
+        repository.cpu_capacity_run_stats(_FailingConnection())
+
+
+def test_run_history_sql_errors_propagate(repo):
+    repository, _db = repo
+    plan = RunSeriesPlan(
+        window_s=30.0,
+        cadence_s=2.0,
+        stride=1,
+        max_points=120,
+        sample_count=100,
+    )
+    with pytest.raises(sqlite3.OperationalError, match="query failed"):
+        repository.fetch_cpu_capacity_run(_FailingConnection(), plan)
