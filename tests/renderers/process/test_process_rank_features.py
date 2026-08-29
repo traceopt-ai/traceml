@@ -18,7 +18,10 @@ from tests.renderers.process.conftest import GB
 from traceml_ai.renderers.process.dashboard_compute import (
     ProcessDashboardComputer,
 )
-from traceml_ai.renderers.process.dashboard_models import RankSnapshot
+from traceml_ai.renderers.process.dashboard_models import (
+    ProcessDashboardPayload,
+    RankSnapshot,
+)
 
 
 def payload(db, **kw):
@@ -106,6 +109,18 @@ def test_an_unknown_age_is_counted_apart_from_live_and_stale(process_db):
     assert (coverage.total, coverage.live, coverage.stale) == (3, 1, 1)
     assert coverage.unknown == 1
     assert coverage.live + coverage.stale + coverage.unknown == coverage.total
+
+
+def test_live_ranks_excludes_only_stale_ranks():
+    out = ProcessDashboardPayload(
+        ranks=(
+            RankSnapshot(global_rank=0, freshness="fresh"),
+            RankSnapshot(global_rank=1, freshness="stale"),
+            RankSnapshot(global_rank=2, freshness="unknown"),
+        )
+    )
+
+    assert [rank.global_rank for rank in out.live_ranks] == [0, 2]
 
 
 def test_coverage_states_who_is_reporting(process_db):
