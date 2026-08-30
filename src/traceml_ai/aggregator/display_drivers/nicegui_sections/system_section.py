@@ -195,6 +195,25 @@ def sparkline_svg(
     )
 
 
+def gpus_unreported(gpus: List[Dict[str, Any]]) -> bool:
+    """Whether every GPU present sent nothing but the zero fallback.
+
+    The sampler emits an all-zero row when it cannot read a device, which
+    is absence rather than a GPU sitting at zero, and the card must not
+    draw it as a measurement.
+
+    Named rather than inlined so the rule can be pinned by a test. Note it
+    is not the same rule the compute layer uses: this asks for mem_total
+    AND power both absent, while the computer asks for mem_total OR
+    power_limit_w present. A GPU reporting one and not the other is
+    "reported" to one of them and "unreported" to the other.
+    """
+    return bool(gpus) and all(
+        gpu.get("mem_total") is None and gpu.get("power") is None
+        for gpu in gpus
+    )
+
+
 def odd_ones_out(gpus: List[Dict[str, Any]]) -> set:
     """GPU indices on the smaller side of the utilisation split.
 
@@ -580,11 +599,7 @@ def _update_system_tiles(
     gpus = roll.get("gpus", []) or []
     ctx = roll.get("ctx", {}) or {}
     n_gpus = len(gpus) or int(ctx.get("gpu_count", 0))
-    # The sampler's all-zero fallback is unreported, not a zero-valued GPU.
-    unreported = bool(gpus) and all(
-        gpu.get("mem_total") is None and gpu.get("power") is None
-        for gpu in gpus
-    )
+    unreported = gpus_unreported(gpus)
 
     util_p50 = (roll.get("gpu_util", {}) or {}).get("p50")
     panel["tiles"]["util"].content = theme.kval(_num(util_p50), "%")

@@ -13,7 +13,8 @@ import time
 from typing import Any, Dict, Optional
 
 from .cli_cluster import CLI_CLUSTER_WINDOW_ROWS, SystemCLIClusterBuilder
-from .common import SystemCLISnapshot, SystemMetricsDB
+from .common import SystemCLISnapshot
+from .repository import SystemRepository
 
 
 class SystemCLIComputer:
@@ -31,7 +32,7 @@ class SystemCLIComputer:
         node_rank: Optional[int] = None,
         stale_ttl_s: Optional[float] = 30.0,
     ) -> None:
-        self._db = SystemMetricsDB(db_path=db_path, node_rank=node_rank)
+        self._db = SystemRepository(db_path=db_path, node_rank=node_rank)
         self._cluster = SystemCLIClusterBuilder(self._db)
         self._last_ok: Optional[Dict[str, Any]] = None
         self._last_ok_ts: float = 0.0

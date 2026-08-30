@@ -14,7 +14,8 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
-from .common import SystemDashboardPayload, SystemMetricsDB
+from .common import SystemDashboardPayload
+from .repository import SystemRepository
 
 # Whole-run charts add value only after the run outgrows the recent window.
 _RUN_VIEW_FACTOR = 1.2
@@ -81,7 +82,7 @@ class SystemDashboardComputer:
         node_rank: Optional[int] = None,
         stale_ttl_s: Optional[float] = 30.0,
     ) -> None:
-        self._db = SystemMetricsDB(db_path=db_path, node_rank=node_rank)
+        self._db = SystemRepository(db_path=db_path, node_rank=node_rank)
         self._last_ok: Optional[Dict[str, Any]] = None
         self._last_ok_ts: float = 0.0
         self._stale_ttl_s: Optional[float] = (
