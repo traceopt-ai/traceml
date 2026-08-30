@@ -4,7 +4,11 @@
 # you may not use this file except in compliance with the License.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Execute a user script inside the TraceML runtime."""
+"""Run a user script with a best-effort TraceML runtime around it.
+
+The executor is intentionally transparent to user failures: Python and
+torchrun remain responsible for exception reporting and process exit status.
+"""
 
 import os
 import runpy
@@ -12,7 +16,7 @@ import sys
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Callable, Dict, Optional, Union
 
 from traceml_ai.runtime.launch_context import (
     LaunchContext,
@@ -33,7 +37,6 @@ from traceml_ai.telemetry.retention import (
     parse_history_retention,
 )
 
-INTERRUPTED_EXIT_CODE = 130
 DEFAULT_LOGS_DIR = "./logs"
 DEFAULT_AGGREGATOR_HOST = "127.0.0.1"
 DEFAULT_AGGREGATOR_BIND_HOST = "127.0.0.1"
@@ -119,11 +122,12 @@ def write_user_error_log(
     error: Optional[BaseException] = None,
 ) -> None:
     """
-    Append a user-script crash or exit report to torchrun_error.log.
+    Append an ordinary user-script exception to torchrun_error.log.
 
-    This log is reserved for failures originating from the executed user
-    script, including unhandled exceptions, KeyboardInterrupt, and nonzero
-    SystemExit outcomes.
+    This is a compatibility bridge until launcher-owned stderr persistence is
+    available for every display mode. It must never replace or alter native
+    exception propagation, and it can be removed once the launcher output is
+    the canonical durable record.
     """
     _append_error_log(
         cfg=cfg,
@@ -351,105 +355,59 @@ def run_user_script(script_path: str, script_args: list[str]) -> None:
         runpy.run_path(resolved_script_path, run_name="__main__")
 
 
-def report_crash(cfg: Dict[str, Any], error: BaseException) -> None:
-    """
-    Persist an enriched user-script crash report.
+def _execute_with_runtime() -> None:
+    """Execute the user script while owning one TraceML runtime lifecycle.
 
-    The crash report is written to torchrun_error.log.
-
-    This function intentionally does not print large tracebacks to the terminal,
-    because the aggregator may own the terminal UI and overwrite them.
-    """
-    write_user_error_log(
-        cfg,
-        header="Unhandled exception in user script",
-        error=error,
-    )
-
-
-def _coerce_exit_code(code: Any) -> int:
-    """
-    Normalize SystemExit.code into a process exit code.
-
-    Rules
-    -----
-    - None -> 0
-    - int -> int
-    - anything else -> 1
-    """
-    if code is None:
-        return 0
-    if isinstance(code, int):
-        return code
-    return 1
-
-
-def main() -> None:
-    """
-    TraceML executor entrypoint.
-
-    Execution flow
-    --------------
-    1. Read TraceML configuration from environment variables
-    2. Start the TraceML runtime
-    3. Execute the user script in-process
-    4. Stop the runtime
-    5. Persist enriched crash context if needed
-    6. Exit with the user script's resulting exit code
-
-    Error handling policy
-    ---------------------
-    - User script failures are written to torchrun_error.log
-    - TraceML internal failures are written to runtime_error.log
-    - Large error reports are not printed to the terminal because the
-      aggregator may control the terminal UI
+    User exceptions are logged best effort for compatibility and then
+    re-raised unchanged. The ``finally`` block guarantees Python-level cleanup
+    without converting ``SystemExit``, ``KeyboardInterrupt``, or ordinary
+    exceptions into TraceML-specific failures.
     """
     cfg = read_traceml_env()
-    script_args = extract_script_args()
-
     runtime = start_runtime(cfg)
 
-    exit_code = 0
-    error: Optional[BaseException] = None
-
     try:
-        run_user_script(str(cfg["script_path"]), script_args)
-
-    except KeyboardInterrupt as interrupt_error:
+        run_user_script(
+            str(cfg["script_path"]),
+            extract_script_args(),
+        )
+    except Exception as error:
         write_user_error_log(
             cfg,
-            header="KeyboardInterrupt (Ctrl+C)",
-            error=interrupt_error,
+            header="Unhandled exception in user script",
+            error=error,
         )
-        exit_code = INTERRUPTED_EXIT_CODE
-        error = None
-
-    except SystemExit as system_exit:
-        exit_code = _coerce_exit_code(system_exit.code)
-
-        if exit_code != 0:
-            write_user_error_log(
-                cfg,
-                header=(
-                    "User script exited via SystemExit " f"(code={exit_code})"
-                ),
-                error=system_exit,
-            )
-
-        error = None
-
-    except Exception as unhandled_error:
-        error = unhandled_error
-        exit_code = 1
-
+        raise
     finally:
         stop_runtime(runtime, cfg)
 
-    if error is not None:
-        report_crash(cfg, error)
-        raise SystemExit(1)
 
-    raise SystemExit(exit_code)
+def _run_with_torchelastic_record(
+    entrypoint: Callable[[], None],
+) -> None:
+    """Use torchrun's native error recorder when torchrun configured one.
+
+    The import remains lazy so torch-free execution paths do not acquire a
+    PyTorch dependency. Older or incomplete PyTorch installations fall back to
+    normal Python propagation rather than preventing the user script from
+    running.
+    """
+    if not os.environ.get("TORCHELASTIC_ERROR_FILE"):
+        entrypoint()
+        return
+
+    try:
+        from torch.distributed.elastic.multiprocessing.errors import record
+    except ImportError:
+        entrypoint()
+        return
+
+    record(entrypoint)()
+
+
+def main() -> None:
+    """Run the transparent executor, using torchrun error recording if set."""
+    _run_with_torchelastic_record(_execute_with_runtime)
 
 
 if __name__ == "__main__":
