@@ -17,7 +17,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Mapping, Optional
+from typing import Any, Callable, Mapping, Optional
 
 from traceml_ai.launcher.launch_config import (
     TORCH_LAUNCHER_REQUIRED,
@@ -36,6 +36,7 @@ from traceml_ai.launcher.process import (
     DEFAULT_SHUTDOWN_TIMEOUT_SEC,
     DEFAULT_TCP_READY_TIMEOUT_SEC,
     StderrTailCapture,
+    TrainingOutcome,
     install_shutdown_handlers,
     start_aggregator_process,
     start_stderr_tail_capture,
@@ -159,6 +160,37 @@ def _finish_stderr_capture(
     capture.finish(session_root / "crash_stderr.log")
 
 
+def _run_noncritical_launcher_step(
+    description: str,
+    operation: Callable[[], Any],
+) -> None:
+    """Run auxiliary launcher work without changing a started training run."""
+    try:
+        operation()
+    except Exception as exc:
+        _log_launcher_exception(description, exc)
+        print(
+            f"[TraceML] WARNING: {description}: {exc}",
+            file=sys.stderr,
+        )
+
+
+def _exit_with_training_outcome(outcome: TrainingOutcome) -> None:
+    """Print the final training status and exit with its command result."""
+    if outcome.signal_name is not None:
+        message = (
+            f"Training terminated by {outcome.signal_name} "
+            f"(exit code {outcome.cli_exit_code})."
+        )
+    elif outcome.returncode == 0:
+        message = "Training completed successfully (exit code 0)."
+    else:
+        message = f"Training failed (exit code {outcome.cli_exit_code})."
+
+    print(f"[TraceML] {message}", file=sys.stderr, flush=True)
+    raise SystemExit(outcome.cli_exit_code)
+
+
 def resolve_existing_script_path(script_path: str) -> str:
     """Resolve and validate the target training script path."""
     path = Path(script_path)
@@ -216,8 +248,8 @@ def _launch_disabled_process(
         cwd=launch_context.launch_cwd,
         capture_stderr=False,
     )
-    train_proc.wait()
-    raise SystemExit(train_proc.returncode)
+    returncode = train_proc.wait()
+    _exit_with_training_outcome(TrainingOutcome(returncode))
 
 
 def _require_torch_launcher_support(torchrun: TorchrunLaunchConfig) -> None:
@@ -560,9 +592,12 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         capture_stderr=capture_stderr,
     )
     if owns_aggregator:
-        update_run_manifest(
-            manifest_path,
-            extra={"lifecycle": {"training_started_at": utc_now_iso()}},
+        _run_noncritical_launcher_step(
+            "failed to record the training start time",
+            lambda: update_run_manifest(
+                manifest_path,
+                extra={"lifecycle": {"training_started_at": utc_now_iso()}},
+            ),
         )
     stderr_capture = (
         start_stderr_tail_capture(train_proc) if capture_stderr else None
@@ -573,31 +608,46 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     while True:
         train_rc = train_proc.poll()
         if train_rc is not None:
+            outcome = TrainingOutcome(train_rc)
             if owns_aggregator:
-                update_run_manifest(
-                    manifest_path,
-                    extra={"lifecycle": {"training_ended_at": utc_now_iso()}},
+                _run_noncritical_launcher_step(
+                    "failed to record the training end time",
+                    lambda: update_run_manifest(
+                        manifest_path,
+                        extra={
+                            "lifecycle": {"training_ended_at": utc_now_iso()}
+                        },
+                    ),
                 )
-            _finish_stderr_capture(stderr_capture, session_root)
+            _run_noncritical_launcher_step(
+                "failed to finish stderr capture",
+                lambda: _finish_stderr_capture(stderr_capture, session_root),
+            )
             if agg_proc is not None:
                 print(
                     "[TraceML] Training finished; stopping aggregator...",
                     file=sys.stderr,
                 )
-                terminate_process_group(
-                    agg_proc,
-                    timeout_sec=(
-                        float(env["TRACEML_FINALIZE_TIMEOUT_SEC"])
-                        + DEFAULT_SHUTDOWN_TIMEOUT_SEC
+                _run_noncritical_launcher_step(
+                    "failed to stop the TraceML aggregator",
+                    lambda: terminate_process_group(
+                        agg_proc,
+                        timeout_sec=(
+                            float(env["TRACEML_FINALIZE_TIMEOUT_SEC"])
+                            + DEFAULT_SHUTDOWN_TIMEOUT_SEC
+                        ),
                     ),
                 )
 
             final_status = "completed" if train_rc == 0 else "failed"
-            update_run_manifest(
-                manifest_path,
-                status=final_status,
-                artifacts=collect_existing_artifacts(
-                    db_path, session_root=session_root
+            _run_noncritical_launcher_step(
+                "failed to finalize the run manifest",
+                lambda: update_run_manifest(
+                    manifest_path,
+                    status=final_status,
+                    artifacts=collect_existing_artifacts(
+                        db_path, session_root=session_root
+                    ),
                 ),
             )
             if (
@@ -608,16 +658,17 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                 and not (session_root / "final_summary.json").is_file()
             ):
                 print(
-                    "[TraceML] ERROR: training finished successfully, but "
+                    "[TraceML] WARNING: training finished successfully, but "
                     "TraceML did not produce final_summary.json.",
                     file=sys.stderr,
                 )
-                update_run_manifest(manifest_path, status="failed")
-                raise SystemExit(1)
             if agg_proc is not None and agg_proc.returncode not in (0, None):
-                if train_rc == 0:
-                    raise SystemExit(int(agg_proc.returncode))
-            raise SystemExit(train_rc)
+                print(
+                    "[TraceML] WARNING: aggregator finalization exited "
+                    f"with code {agg_proc.returncode}.",
+                    file=sys.stderr,
+                )
+            _exit_with_training_outcome(outcome)
 
         if agg_proc is not None and agg_proc.poll() is not None:
             agg_rc = agg_proc.returncode
@@ -626,13 +677,16 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                 "Training will continue without TraceML telemetry.",
                 file=sys.stderr,
             )
-            update_run_manifest(
-                manifest_path,
-                extra={
-                    "telemetry_status": "degraded",
-                    "aggregator_exited_early": True,
-                    "aggregator_exit_code": agg_rc,
-                },
+            _run_noncritical_launcher_step(
+                "failed to record degraded telemetry status",
+                lambda: update_run_manifest(
+                    manifest_path,
+                    extra={
+                        "telemetry_status": "degraded",
+                        "aggregator_exited_early": True,
+                        "aggregator_exit_code": agg_rc,
+                    },
+                ),
             )
             agg_proc = None
 

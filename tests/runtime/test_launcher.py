@@ -7,8 +7,10 @@
 import argparse
 import json
 import os
+import signal
 import sys
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -34,6 +36,7 @@ from traceml_ai.launcher.manifest import (
     update_run_manifest,
     write_run_manifest,
 )
+from traceml_ai.launcher.process import TrainingOutcome
 from traceml_ai.runtime.settings import DEFAULT_FINALIZE_TIMEOUT_SEC
 from traceml_ai.telemetry.retention import DEFAULT_HISTORY_RETENTION_S
 
@@ -469,7 +472,7 @@ def test_disabled_launch_validation_honors_env_kill_switch(
 
 
 def test_disabled_launch_runs_script_directly_and_skips_traceml_setup(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, capsys
 ) -> None:
     script = tmp_path / "train.py"
     script.write_text("print('native')\n", encoding="utf-8")
@@ -570,6 +573,85 @@ def test_disabled_launch_runs_script_directly_and_skips_traceml_setup(
     assert observed["capture_stderr"] is False
     assert observed["manifest_path"] is None
     assert not (tmp_path / "logs").exists()
+    assert capsys.readouterr().err.splitlines()[-1] == (
+        "[TraceML] Training failed (exit code 17)."
+    )
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signal semantics")
+def test_training_outcome_only_classifies_direct_negative_signals() -> None:
+    signaled = TrainingOutcome(-signal.SIGSEGV)
+
+    assert signaled.signal_name == "SIGSEGV"
+    assert signaled.cli_exit_code == 128 + signal.SIGSEGV
+    assert TrainingOutcome(1).signal_name is None
+    assert TrainingOutcome(1).cli_exit_code == 1
+
+
+@pytest.mark.parametrize(
+    ("train_rc", "aggregator_rc", "finalization_fails"),
+    [
+        (0, 9, False),
+        (0, 0, False),
+        (7, 0, False),
+        (0, 0, True),
+    ],
+)
+def test_started_training_result_is_authoritative(
+    monkeypatch,
+    tmp_path,
+    capsys,
+    train_rc,
+    aggregator_rc,
+    finalization_fails,
+) -> None:
+    script = tmp_path / "train.py"
+    script.write_text("print('train')\n", encoding="utf-8")
+    args = build_parser().parse_args(
+        [
+            "run",
+            str(script),
+            "--mode",
+            "summary",
+            "--logs-dir",
+            str(tmp_path / "logs"),
+            "--run-name",
+            "outcome-test",
+        ]
+    )
+
+    aggregator = Mock(pid=10, returncode=aggregator_rc)
+    training = Mock()
+    training.poll.return_value = train_rc
+
+    monkeypatch.chdir(tmp_path)
+    replacements = {
+        "install_shutdown_handlers": Mock(),
+        "start_aggregator_process": Mock(return_value=aggregator),
+        "wait_for_tcp_listen": Mock(return_value=True),
+        "start_training_process": Mock(return_value=training),
+        "terminate_process_group": Mock(),
+        "write_code_manifest": Mock(return_value=None),
+        "write_run_manifest": Mock(return_value=tmp_path / "manifest.json"),
+        "update_run_manifest": Mock(),
+    }
+    for name, replacement in replacements.items():
+        monkeypatch.setattr(launcher_commands, name, replacement)
+
+    if finalization_fails:
+        monkeypatch.setattr(
+            launcher_commands,
+            "collect_existing_artifacts",
+            Mock(side_effect=OSError("manifest unavailable")),
+        )
+
+    with pytest.raises(SystemExit) as exc:
+        launcher_commands.launch_process(str(script), args)
+
+    assert exc.value.code == TrainingOutcome(train_rc).cli_exit_code
+    final_line = capsys.readouterr().err.splitlines()[-1]
+    expected_status = "completed successfully" if train_rc == 0 else "failed"
+    assert f"Training {expected_status}" in final_line
 
 
 @pytest.mark.parametrize("value", ["0", "-1m", "bad", "nan", "inf"])
