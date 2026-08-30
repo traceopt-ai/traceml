@@ -195,7 +195,10 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
         self._renderers: List[DashboardRenderer] = [
             ContextRenderer(db_path=self._settings.db_path),
             SystemRenderer(db_path=self._settings.db_path),
-            ProcessRenderer(db_path=self._settings.db_path),
+            ProcessRenderer(
+                db_path=self._settings.db_path,
+                sampler_interval_s=self._settings.sampler_interval_sec,
+            ),
             StepMemoryRenderer(db_path=self._settings.db_path),
         ]
 

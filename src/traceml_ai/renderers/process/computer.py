@@ -31,6 +31,9 @@ class ProcessMetricsComputer:
         Maximum age in seconds for stale fallback reuse.
     dashboard_max_rows:
         Maximum retained history rows for dashboard UI.
+    sampler_interval_s:
+        Configured process-sampling cadence used until an observed cadence is
+        available.
     """
 
     def __init__(
@@ -38,6 +41,7 @@ class ProcessMetricsComputer:
         db_path: str,
         stale_ttl_s: Optional[float] = 30.0,
         dashboard_max_rows: int = 200,
+        sampler_interval_s: Optional[float] = None,
     ) -> None:
         self._cli = ProcessCLIComputer(
             db_path=db_path,
@@ -47,6 +51,7 @@ class ProcessMetricsComputer:
             db_path=db_path,
             dashboard_max_rows=dashboard_max_rows,
             stale_ttl_s=stale_ttl_s,
+            sampler_interval_s=sampler_interval_s,
         )
 
     def compute_cli(self) -> Dict[str, Any]:

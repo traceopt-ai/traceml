@@ -62,6 +62,28 @@ def test_driver_defaults_match_settings_defaults() -> None:
     assert driver._show is True
 
 
+def test_driver_passes_sampler_interval_to_process_renderer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import traceml_ai.aggregator.display_drivers.nicegui as nicegui_driver
+
+    captured: dict[str, object] = {}
+
+    class ProcessRendererSpy:
+        def __init__(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+    monkeypatch.setattr(
+        nicegui_driver,
+        "ProcessRenderer",
+        ProcessRendererSpy,
+    )
+
+    _driver(sampler_interval_sec=60.0)
+
+    assert captured["sampler_interval_s"] == 60.0
+
+
 def test_staleness_text_empty_before_any_data() -> None:
     driver = _driver()
     assert driver._last_data_monotonic is None

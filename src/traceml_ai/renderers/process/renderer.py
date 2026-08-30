@@ -5,6 +5,7 @@ This module contains all presentation logic for process-level telemetry.
 """
 
 import shutil
+from typing import Optional
 
 from rich.panel import Panel
 from rich.table import Table
@@ -25,10 +26,17 @@ class ProcessRenderer(BaseRenderer):
 
     NAME = "Process"
 
-    def __init__(self, db_path: str):
+    def __init__(
+        self,
+        db_path: str,
+        sampler_interval_s: Optional[float] = None,
+    ) -> None:
         super().__init__(name=self.NAME, layout_section_name=PROCESS_LAYOUT)
         self.db_path = db_path
-        self._computer = ProcessMetricsComputer(db_path=self.db_path)
+        self._computer = ProcessMetricsComputer(
+            db_path=self.db_path,
+            sampler_interval_s=sampler_interval_s,
+        )
         self._logger = get_error_logger(self.NAME + "Renderer")
 
     def get_panel_renderable(self) -> Panel:
