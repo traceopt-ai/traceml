@@ -53,6 +53,13 @@ def process_free_db(tmp_path):
 
 
 def _gpu(idx: int, **kw):
+    """One GPU row, as the compute layer's mapping.
+
+    `_odd_gpus` reads mappings because that is what it is handed inside
+    the compute layer; `gpus_unreported` reads the typed rows the card
+    receives. `_typed_gpu` below bridges the two for the tests that need
+    the card's side.
+    """
     row = {
         "gpu_idx": idx,
         "util_p50": None,
@@ -63,6 +70,14 @@ def _gpu(idx: int, **kw):
     }
     row.update(kw)
     return row
+
+
+def _typed_gpu(idx: int, **kw):
+    from traceml_ai.renderers.system.dashboard_models import (
+        gpu_rows_from_dicts,
+    )
+
+    return gpu_rows_from_dicts([_gpu(idx, **kw)])[0]
 
 
 # --- the outlier split, now owned by the compute layer -------------------
@@ -126,14 +141,14 @@ def test_the_card_asks_the_computer_whether_a_gpu_reported():
     is a device that spoke and had nothing to say, and it no longer makes
     the card announce that the whole GPU sample is missing.
     """
-    none_reported = [_gpu(0), _gpu(1)]
+    none_reported = [_typed_gpu(0), _typed_gpu(1)]
     assert system_section.gpus_unreported(none_reported) is True
 
-    one_reported = [_gpu(0, reported=True), _gpu(1)]
+    one_reported = [_typed_gpu(0, reported=True), _typed_gpu(1)]
     assert system_section.gpus_unreported(one_reported) is False
 
     # The case the two rules disagreed about: values absent, device present.
-    valueless_but_present = [_gpu(0, reported=True)]
+    valueless_but_present = [_typed_gpu(0, reported=True)]
     assert system_section.gpus_unreported(valueless_but_present) is False
 
 

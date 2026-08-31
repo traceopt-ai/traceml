@@ -164,7 +164,10 @@ class RunContext:
     world_size: int = 0
     gpu_count: int = 0
     hostname: str = ""
-    system_node: Optional[int] = None
+    # The host this payload describes: which node was picked, how many
+    # were seen in the window, and its name. A mapping rather than an
+    # index because the card needs all three to say "node 0 of 2".
+    system_node: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {

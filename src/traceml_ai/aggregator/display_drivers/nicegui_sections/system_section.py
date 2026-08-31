@@ -19,9 +19,17 @@ from __future__ import annotations
 
 import math
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from nicegui import ui
+
+from traceml_ai.renderers.system.dashboard_models import (
+    GpuRow,
+    RunContext,
+    SystemDashboardPayload,
+    SystemRollups,
+    SystemSeries,
+)
 
 from . import theme
 
@@ -86,7 +94,7 @@ def format_gb_pair(used_bytes: Any, total_bytes: Any) -> Tuple[str, str]:
 
 def disclosure_text(
     gpus: List[Dict[str, Any]],
-    roll: Dict[str, Any],
+    roll: SystemRollups,
     *,
     is_open: bool,
 ) -> str:
@@ -107,21 +115,21 @@ def disclosure_text(
     tail = " · click to close" if is_open else " · click to open"
     if n == 1:
         return "1 GPU" + tail
-    span = roll.get("util_range")
+    span = roll.util_range
     if not span:
         return f"{n} GPUs" + tail
     low, high = span
     return f"{n} GPUs · util {low:.0f} to {high:.0f}%" + tail
 
 
-def node_scope_text(ctx: Dict[str, Any]) -> str:
+def node_scope_text(ctx: Optional[RunContext]) -> str:
     """'node 0 of 2' when the payload dropped other machines, else ''.
 
     Reads only the System payload's own ``system_node`` (the hosts seen in
     this window); the strip's node count lives on the CONTEXT payload and
     is not this block's to read.
     """
-    node = ctx.get("system_node") if isinstance(ctx, dict) else None
+    node = ctx.system_node if ctx is not None else None
     if not isinstance(node, dict):
         return ""
     in_window = int(node.get("nodes_in_window") or 1)
@@ -201,7 +209,7 @@ def sparkline_svg(
     )
 
 
-def gpus_unreported(gpus: List[Dict[str, Any]]) -> bool:
+def gpus_unreported(gpus: Sequence[GpuRow]) -> bool:
     """Whether every GPU present sent nothing but the zero fallback.
 
     The sampler emits an all-zero row when it cannot read a device, which
@@ -215,10 +223,10 @@ def gpus_unreported(gpus: List[Dict[str, Any]]) -> bool:
     carried a power limit and no memory total. The computer decides what a
     metric means; this asks it.
     """
-    return bool(gpus) and not any(gpu.get("reported") for gpu in gpus)
+    return bool(gpus) and not any(gpu.reported for gpu in gpus)
 
 
-def odd_ones_out(roll: Dict[str, Any]) -> set:
+def odd_ones_out(roll: SystemRollups) -> set:
     """GPU indices the computer marked as the smaller utilisation group.
 
     Read, not derived. The rule splits at the midpoint between the lowest
@@ -227,7 +235,7 @@ def odd_ones_out(roll: Dict[str, Any]) -> set:
     diagnosis rule, so it moved to the compute layer unchanged; this reads
     the answer.
     """
-    return {int(i) for i in (roll.get("odd_gpus") or ())}
+    return {int(i) for i in roll.odd_gpus}
 
 
 # Host CPU is psutil.cpu_percent(): the mean across logical cores, where 100%
@@ -245,9 +253,9 @@ def _num(value: Any, fmt: str = "{:.0f}") -> str:
 
 
 def rows_html(
-    gpus: List[Dict[str, Any]],
+    gpus: Sequence[GpuRow],
     power_series: List[Dict[str, Any]],
-    roll: Dict[str, Any],
+    roll: SystemRollups,
 ) -> str:
     """Build GPU rows and highlight the smaller side of a wide util split.
 
@@ -262,39 +270,39 @@ def rows_html(
         int(p.get("gpu_idx", -1)): p.get("values") or []
         for p in power_series or []
     }
-    marked = odd_ones_out(roll) if roll.get("rows_over") else set()
+    marked = odd_ones_out(roll) if roll.rows_over else set()
     head = (
         "<tr><th>gpu</th><th>util</th><th>power trend</th>"
         "<th>mem GB</th><th>temp °C</th><th>W / limit</th></tr>"
     )
     rows = []
     for g in gpus:
-        idx = int(g.get("gpu_idx", 0))
+        idx = int(g.gpu_idx)
         color = gpu_color(idx)
-        used, total = g.get("mem_used"), g.get("mem_total")
+        used, total = g.mem_used, g.mem_total
         if used is not None and total:
             mem = f"{theme.gb(used):.2f} / {theme.gb(total):.1f}"
         elif used is not None:
             mem = f"{theme.gb(used):.2f}"
         else:
             mem = NA
-        power, limit = g.get("power"), g.get("power_limit")
+        power, limit = g.power, g.power_limit
         if power is not None and limit:
             watts = f"{power:.0f} / {limit:.0f}"
         elif power is not None:
             watts = f"{power:.0f} W"
         else:
             watts = NA
-        util = g.get("util_p50")
+        util = g.util_p50
         if util is None:
-            util = g.get("util_now")
+            util = g.util_now
         cls = ' class="tml-mark"' if idx in marked else ""
         rows.append(
             f"<tr{cls}>"
             f'<td><span style="color:{color}">■</span> gpu{idx}</td>'
             f'<td class="tml-util">{_num(util)}</td>'
             f"<td>{sparkline_svg(series_by_idx.get(idx, []), color)}</td>"
-            f"<td>{mem}</td><td>{_num(g.get('temp'))}</td><td>{watts}</td>"
+            f"<td>{mem}</td><td>{_num(g.temp)}</td><td>{watts}</td>"
             "</tr>"
         )
     return f'<table class="tml-gpus">{head}{"".join(rows)}</table>'
@@ -504,8 +512,8 @@ def _set_gpu_visible(panel: Dict[str, Any], visible: bool) -> None:
 
 def _update_cpu_chart(
     panel: Dict[str, Any],
-    roll: Dict[str, Any],
-    series: Dict[str, Any],
+    roll: SystemRollups,
+    series: SystemSeries,
     *,
     changed: bool,
     secs: List[Optional[float]],
@@ -515,12 +523,12 @@ def _update_cpu_chart(
     aligned: Optional[Tuple[float, float]],
 ) -> None:
     """Update the CPU trace, axis, value and label for the selected view."""
-    cpu = series.get("cpu", []) or []
-    run = series.get("cpu_run") or {}
-    run_t = run.get("t") or []
-    run_avg = run.get("avg") or []
-    run_max = run.get("max") or []
-    run_span = float(run.get("span_s") or 0.0)
+    cpu = list(series.cpu)
+    run = series.cpu_run
+    run_t = list(run.t)
+    run_avg = list(run.avg)
+    run_max = list(run.max)
+    run_span = float(run.span_s)
     chart = panel["cpu_chart"]
 
     if changed and whole_run:
@@ -544,11 +552,11 @@ def _update_cpu_chart(
         chart.options["yAxis"]["interval"] = ymax / 2.0
         chart.update()
 
-    cpu_p50 = (roll.get("cpu", {}) or {}).get("p50")
+    cpu_p50 = roll.cpu.p50 if roll.cpu else None
     panel["cpu_value"].text = f"{cpu_p50:.0f}%" if cpu_p50 is not None else ""
     span_words = format_span(span)
     if whole_run:
-        window = format_window(float(run.get("window_s") or 0.0))
+        window = format_window(run.window_s)
         panel["cpu_label"].text = f"{CPU_LABEL} · whole run" + (
             f" · rolling {window}" if window else ""
         )
@@ -565,19 +573,26 @@ def _update_cpu_chart(
 
 def _update_system_tiles(
     panel: Dict[str, Any],
-    roll: Dict[str, Any],
+    roll: SystemRollups,
     *,
     gpu_on: bool,
     has_data: bool,
 ) -> None:
-    """Update the System header and four resource tiles."""
-    ram = roll.get("ram", {}) or {}
-    num, rest = format_gb_pair(ram.get("now"), ram.get("total"))
+    """Update the System header and four resource tiles.
+
+    Reads the typed rollups. Absence is a ``None`` field rather than a
+    missing key, so a tile that has nothing to say says so instead of
+    asking whether somebody remembered to put the key there.
+    """
+    ram = roll.ram
+    num, rest = format_gb_pair(
+        ram.now if ram else None, ram.total if ram else None
+    )
     panel["tiles"]["ram"].content = theme.kval(num, f" {rest}" if rest else "")
     panel["subs"]["ram"].text = "used / total"
 
     notes = []
-    node_note = node_scope_text(roll.get("ctx", {}) or {})
+    node_note = node_scope_text(roll.ctx)
     if node_note:
         notes.append(node_note)
     if not has_data:
@@ -590,19 +605,18 @@ def _update_system_tiles(
             panel["subs"][key].text = "no GPU" if has_data else ""
         return
 
-    gpus = roll.get("gpus", []) or []
-    ctx = roll.get("ctx", {}) or {}
-    n_gpus = len(gpus) or int(ctx.get("gpu_count", 0))
-    unreported = gpus_unreported(gpus)
+    n_gpus = len(roll.gpus) or (roll.ctx.gpu_count if roll.ctx else 0)
+    unreported = roll.gpus_unreported
 
-    util_p50 = (roll.get("gpu_util", {}) or {}).get("p50")
-    panel["tiles"]["util"].content = theme.kval(_num(util_p50), "%")
+    util = roll.gpu_util
+    panel["tiles"]["util"].content = theme.kval(
+        _num(util.p50 if util else None), "%"
+    )
     one_gpu = n_gpus == 1
     panel["subs"]["util"].text = (
         "1 GPU" if one_gpu else f"avg of {n_gpus} GPUs"
     )
 
-    gpu_mem = roll.get("gpu_mem", {}) or {}
     if unreported:
         panel["tiles"]["mem"].content = NA
         panel["subs"]["mem"].text = "GPU sample unreported"
@@ -610,19 +624,24 @@ def _update_system_tiles(
         panel["subs"]["temp"].text = "GPU sample unreported"
         return
 
-    num, rest = format_gb_pair(gpu_mem.get("now"), gpu_mem.get("total"))
+    mem = roll.gpu_mem
+    num, rest = format_gb_pair(
+        mem.now if mem else None, mem.total if mem else None
+    )
     panel["tiles"]["mem"].content = theme.kval(num, f" {rest}" if rest else "")
     panel["subs"]["mem"].text = "used / total" if one_gpu else "max GPU"
-    temp_now = (roll.get("temp", {}) or {}).get("now")
-    panel["tiles"]["temp"].content = theme.kval(_num(temp_now), " °C")
+    temp = roll.temp
+    panel["tiles"]["temp"].content = theme.kval(
+        _num(temp.now if temp else None), " °C"
+    )
     # A qualifier keeps all four tile heights equal on single-GPU hosts.
     panel["subs"]["temp"].text = "1 GPU" if one_gpu else "max GPU"
 
 
 def _update_power_chart(
     panel: Dict[str, Any],
-    roll: Dict[str, Any],
-    series: Dict[str, Any],
+    roll: SystemRollups,
+    series: SystemSeries,
     *,
     gpu_on: bool,
     has_data: bool,
@@ -641,9 +660,9 @@ def _update_power_chart(
         )
         return
 
-    gpu_power = roll.get("gpu_power", {}) or {}
-    limit = gpu_power.get("limit")
-    pseries = series.get("gpu_power", []) or []
+    gpu_power = roll.gpu_power
+    limit = gpu_power.limit if gpu_power else None
+    pseries = list(series.gpu_power)
     flat = [value for item in pseries for value in (item.get("values") or [])]
     chart = panel["power_chart"]
     if not any(value is not None for value in flat):
@@ -653,7 +672,7 @@ def _update_power_chart(
     if not changed:
         return
 
-    run = series.get("gpu_power_run") or []
+    run = list(series.gpu_power_run)
     run_span = float(run[0].get("span_s") or 0.0) if run else 0.0
     if whole_run:
         # Draw each bucket's mean and minimum. The maximum stays in the payload.
@@ -705,7 +724,7 @@ def _update_power_chart(
                     "insideEndTop",
                 )
             )
-        floor_w = gpu_power.get("floor")
+        floor_w = gpu_power.floor if gpu_power else None
         if floor_w is not None and (
             limit is None or float(floor_w) < float(limit) * 0.9
         ):
@@ -776,8 +795,8 @@ def _update_power_chart(
 
 def _update_gpu_rows(
     panel: Dict[str, Any],
-    roll: Dict[str, Any],
-    series: Dict[str, Any],
+    roll: SystemRollups,
+    series: SystemSeries,
     *,
     gpu_on: bool,
     has_data: bool,
@@ -789,9 +808,9 @@ def _update_gpu_rows(
         )
         return
 
-    gpus = roll.get("gpus", []) or []
-    pseries = series.get("gpu_power", []) or []
-    over = bool(roll.get("rows_over"))
+    gpus = list(roll.gpus)
+    pseries = list(series.gpu_power)
+    over = roll.rows_over
     if should_auto_open(prev_over=panel["_over"], over=over):
         panel["rows"].value = True
     panel["_over"] = over
@@ -801,43 +820,41 @@ def _update_gpu_rows(
     panel["rows_html"].content = rows_html(gpus, pseries, roll)
 
 
-def update_system_section(panel: Dict[str, Any], data: Dict[str, Any]) -> None:
+def update_system_section(panel: Dict[str, Any], data: Any) -> None:
     """Coordinate System presentation updates from one computed payload."""
-    if not isinstance(data, dict):
+    if not isinstance(data, SystemDashboardPayload):
         return
-    roll = data.get("rollups", {}) or {}
-    series = data.get("series", {}) or {}
-    gpu_on = bool(data.get("gpu_available") or roll.get("gpu_available"))
-    has_data = bool(data.get("window_len"))
+    roll = data.rollups
+    series = data.series
+    gpu_on = bool(data.gpu_available or roll.gpu_available)
+    has_data = bool(data.window_len)
     _set_gpu_visible(panel, gpu_on)
 
-    x_time = series.get("x_time", []) or []
+    x_time = list(series.x_time)
     secs = _relative_seconds(x_time)
     newest_epoch = _newest_epoch(x_time)
     present = [second for second in secs if second is not None]
     span = -min(present) if present else 0.0
 
     # The UI timer is faster than sampling; avoid resending unchanged charts.
-    gpu_power = roll.get("gpu_power", {}) or {}
-    pseries = series.get("gpu_power", []) or []
+    pseries = list(series.gpu_power)
     signature = (
         x_time[-1] if x_time else None,
-        data.get("window_len"),
+        data.window_len,
         len(pseries),
-        gpu_power.get("limit"),
+        roll.gpu_power.limit if roll.gpu_power else None,
         gpu_on,
     )
     changed = signature != panel.get("_sig")
     panel["_sig"] = signature
 
-    cpu_run = series.get("cpu_run") or {}
-    cpu_run_t = cpu_run.get("t") or []
-    power_run = series.get("gpu_power_run") or []
+    cpu_run_t = list(series.cpu_run.t)
+    power_run = list(series.gpu_power_run)
     # Read, not decided. The card asked ">2 points" of one series and
     # "non-empty" of the other, so its two charts could disagree about
     # which view they were showing.
-    cpu_whole = bool(series.get("cpu_run_whole"))
-    power_whole = bool(series.get("power_run_whole"))
+    cpu_whole = series.cpu_run_whole
+    power_whole = series.power_run_whole
     # Whole-run charts share one clock so vertical comparisons align.
     aligned = (
         shared_run_axis(cpu_run_t, power_run)
