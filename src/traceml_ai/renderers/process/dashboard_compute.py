@@ -59,7 +59,11 @@ from .repository import ProcessRepository
 DASHBOARD_WINDOW = 100
 
 # Samples per rank in the recent-window view.
-RANK_WINDOW_N = 100
+# The recent window the tiles describe, as a DURATION. A sample count
+# means a different span at every sampling rate, so two runs sampling at
+# different cadences could not be compared and the card could not say what
+# period it was summarising.
+RECENT_WINDOW_S = 60.0
 
 # A rolling mean over minutes cannot visibly change between two ticks, so
 # the whole-run reads refresh on their own slower clock. Recomputing them
@@ -138,6 +142,45 @@ def _cpu_capacity_of(row: Any) -> Optional[float]:
     if used is None or cores is None or cores <= 0:
         return None
     return used / cores
+
+
+def _total_trace(traces: Sequence[RankTrace]) -> Optional[RankTrace]:
+    """Every rank summed, on the union of their sample times.
+
+    Ranks sample on their own clocks, so adding the series index by index
+    would add readings taken at different moments. Each rank's last known
+    value is carried forward to every timestamp instead, which is what a
+    step function does between samples, and the sum is taken there.
+
+    A rank that has not reported yet contributes nothing rather than a
+    zero, so the total does not dip while ranks are still starting.
+    """
+    usable = [t for t in traces if t.timestamps]
+    if len(usable) < 2:
+        return None
+    stamps = sorted({float(s) for t in usable for s in t.timestamps})
+    if not stamps:
+        return None
+
+    cursors = [0] * len(usable)
+    last: List[Optional[float]] = [None] * len(usable)
+    values: List[float] = []
+    for stamp in stamps:
+        for i, trace in enumerate(usable):
+            while (
+                cursors[i] < len(trace.timestamps)
+                and float(trace.timestamps[cursors[i]]) <= stamp
+            ):
+                last[i] = float(trace.values[cursors[i]])
+                cursors[i] += 1
+        seen = [v for v in last if v is not None]
+        values.append(sum(seen) if seen else 0.0)
+
+    return RankTrace(
+        global_rank=-1,
+        timestamps=tuple(stamps),
+        values=tuple(values),
+    )
 
 
 class ProcessDashboardComputer:
@@ -237,7 +280,7 @@ class ProcessDashboardComputer:
         with its true age instead of vanishing from the block.
         """
         window_rows = self._db.fetch_recent_rank_window(
-            conn, window_n=RANK_WINDOW_N, newest_ts=newest_ts
+            conn, window_s=RECENT_WINDOW_S, newest_ts=newest_ts
         )
         latest_rows = self._db.fetch_rank_latest(conn)
 
@@ -376,6 +419,17 @@ class ProcessDashboardComputer:
                     if value is not None
                 ]
             ),
+            gpu_reserved_peak_bytes=max(
+                (
+                    value
+                    for value in (
+                        _opt_float(r["gpu_mem_reserved_bytes"])
+                        for r in reported
+                    )
+                    if value is not None
+                ),
+                default=None,
+            ),
             gpu_total_bytes=(
                 _opt_float(newest_gpu["gpu_mem_total_bytes"])
                 if newest_gpu is not None
@@ -511,12 +565,14 @@ class ProcessDashboardComputer:
         ]
         if not pairs:
             return None
-        worst, _p50 = max(pairs, key=lambda item: item[1])
-        shown = worst.ram_used_bytes
-        if shown is None:
-            shown = worst.ram_used_p50_bytes or 0.0
+        worst, worst_p50 = max(pairs, key=lambda item: item[1])
+        # The median, not the newest sample. The newest reading of a
+        # finished run lands after teardown, so the tile used to show a
+        # collapsed value beside a chart still drawn at the run's real
+        # level. One rule for the whole section: each rank's median over
+        # the recent window, then the highest of those.
         return MetricRollup(
-            now=float(shown),
+            now=float(worst_p50),
             p50=_median([value for _r, value in pairs]),
             total=worst.ram_total_bytes,
             worst_rank=worst.global_rank,
@@ -533,19 +589,23 @@ class ProcessDashboardComputer:
         candidates = [
             r
             for r in ranks
-            if r.gpu_reserved_bytes is not None
+            if r.gpu_reserved_peak_bytes is not None
             and r.gpu_total_bytes is not None
             and r.gpu_total_bytes > 0
         ]
         if not candidates:
             return None
+        # Each rank's PEAK reserved over the window, then the rank with the
+        # least headroom against that peak. Peak rather than newest because
+        # the question this tile answers is which rank comes closest to
+        # filling its card, and that is a high-water mark.
         worst = min(
             candidates,
             key=lambda r: (r.gpu_total_bytes or 0.0)
-            - (r.gpu_reserved_bytes or 0.0),
+            - (r.gpu_reserved_peak_bytes or 0.0),
         )
         return MetricRollup(
-            now=float(worst.gpu_reserved_bytes or 0.0),
+            now=float(worst.gpu_reserved_peak_bytes or 0.0),
             total=worst.gpu_total_bytes,
             worst_rank=worst.global_rank,
         )
@@ -553,26 +613,32 @@ class ProcessDashboardComputer:
     def _alloc_rollup(
         self, ranks: Sequence[RankSnapshot]
     ) -> Optional[MetricRollup]:
-        """Live tensors on the median rank.
+        """Live tensors on the rank the reserved tile chose.
 
-        The median rather than the worst, because allocated bytes are the
-        model's shape rather than a risk: on a healthy synchronous run
-        every rank holds much the same, and the median says what that is
-        while the reserved tile beside it names the rank at risk.
+        The SAME rank, so the two GPU tiles describe one device rather than
+        two. Read side by side they answer "how close is the tightest rank
+        to filling its card, and how much of what it holds is live tensors"
+        rather than mixing a worst case with a cohort median.
 
         Read from the ranks, not from the aggregated step history. The
         history's newest step carries no GPU snapshot once a run tears
         down, which left this tile reading "n/a" directly above rows that
         listed each rank's allocated bytes.
         """
-        values = [
-            r.gpu_allocated_p50_bytes
-            for r in ranks
-            if r.gpu_allocated_p50_bytes is not None
-        ]
-        if not values:
+        reserved = self._cuda_rollup(ranks)
+        if reserved is None or reserved.worst_rank is None:
             return None
-        return MetricRollup(now=float(_median(values) or 0.0))
+        chosen = next(
+            (r for r in ranks if r.global_rank == reserved.worst_rank),
+            None,
+        )
+        if chosen is None or chosen.gpu_allocated_p50_bytes is None:
+            return None
+        return MetricRollup(
+            now=float(chosen.gpu_allocated_p50_bytes),
+            total=chosen.gpu_total_bytes,
+            worst_rank=chosen.global_rank,
+        )
 
     def _reserved_imbalance(
         self, ranks: Sequence[RankSnapshot]
@@ -672,7 +738,13 @@ class ProcessDashboardComputer:
                         values=tuple(values),
                     )
                 )
-        return RankChart(mode="recent", span_s=span_s, traces=tuple(traces))
+        built = tuple(traces)
+        return RankChart(
+            mode="recent",
+            span_s=span_s,
+            traces=built,
+            total=_total_trace(built),
+        )
 
     def _one_chart(
         self,
@@ -729,19 +801,21 @@ class ProcessDashboardComputer:
             values.append(roll_avg)
             peaks.append(roll_max)
 
+        built = tuple(
+            RankTrace(
+                global_rank=rank_id,
+                timestamps=tuple(rolled[rank_id][0]),
+                values=tuple(rolled[rank_id][1]),
+                peaks=tuple(rolled[rank_id][2]),
+            )
+            for rank_id in sorted(rolled)
+        )
         chart = RankChart(
             mode="retained",
             window_s=plan.window_s,
             span_s=stats.span_s,
-            traces=tuple(
-                RankTrace(
-                    global_rank=rank_id,
-                    timestamps=tuple(rolled[rank_id][0]),
-                    values=tuple(rolled[rank_id][1]),
-                    peaks=tuple(rolled[rank_id][2]),
-                )
-                for rank_id in sorted(rolled)
-            ),
+            traces=built,
+            total=_total_trace(built),
         )
         self._run_cache[metric] = chart
         self._run_cache_at[metric] = now

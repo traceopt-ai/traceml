@@ -52,6 +52,11 @@ _MONO = "font-family:var(--mono);"
 # diagnostic is invisible.
 SCOPE_NOTE = "one process per rank · DataLoader workers not included"
 
+# The span the tiles summarise, stated on the card. It is a duration
+# rather than a sample count so it means the same thing at every
+# sampling rate.
+SECTION_TITLE = "Process resources · recent 60s"
+
 _CPU_TOOLTIP = (
     "Each rank's trainer process, as a share of the host's total CPU "
     "capacity: 100% means every logical core busy. DataLoader workers are "
@@ -81,7 +86,7 @@ def build_process_section() -> Dict[str, Any]:
             .classes("w-full items-center")
             .style("margin-bottom:10px; gap:12px;")
         ):
-            ui.label("Process").classes("ctitle")
+            ui.label(SECTION_TITLE).classes("ctitle")
             ui.element("div").style("flex:1;")
             panel["note"] = ui.label(SCOPE_NOTE).classes("cmeta")
 
@@ -243,6 +248,22 @@ def _rank_series(
     # sample to join them.
     sparse = any(len(trace.timestamps) < 2 for trace in chart.traces)
     series = []
+    if chart.total is not None and chart.total.timestamps:
+        # Drawn first so the rank lines sit on top of it, and in the ink
+        # colour rather than a rank colour: it is not a rank, and giving it
+        # one would make it look like the fifth GPU.
+        total = theme.line_series(
+            "Total",
+            theme.INK,
+            [
+                [stamp - anchor, value / scale]
+                for stamp, value in zip(
+                    chart.total.timestamps, chart.total.values
+                )
+            ],
+            width=2.2,
+        )
+        series.append(total)
     for trace in chart.traces:
         line = theme.line_series(
             f"R{int(trace.global_rank)}",
@@ -288,7 +309,14 @@ def _draw_chart(
     # nothing draws them; fitting the axis to those put its floor above
     # the drawn line, which clipped the early samples and understated the
     # very drift this chart exists to show.
-    flat = [value / scale for trace in chart.traces for value in trace.values]
+    # Every line that is DRAWN, the total included. It is the sum across
+    # ranks, so it sits above all of them; fitting the axis to the rank
+    # traces alone would put the one line the reader most wants above the
+    # ceiling and clip it.
+    drawn = list(chart.traces)
+    if chart.total is not None and chart.total.timestamps:
+        drawn.append(chart.total)
+    flat = [value / scale for trace in drawn for value in trace.values]
     bounds = bounds_of(flat)
     if isinstance(bounds, tuple):
         low, high, tick = bounds
@@ -330,7 +358,16 @@ def _chart_signature(payload: ProcessDashboardPayload) -> Tuple[Any, ...]:
 def _tile_gb(
     panel: Dict[str, Any], key: str, rollup: Optional[MetricRollup], sub: str
 ) -> None:
-    value, rest = format_gb_pair(rollup.now if rollup else None, None)
+    """A byte level against the capacity it is measured out of.
+
+    Every memory tile carries its denominator. A level without one cannot
+    be read: 14 GB is unremarkable on an 80 GB card and nearly fatal on a
+    16 GB one.
+    """
+    value, rest = format_gb_pair(
+        rollup.now if rollup else None,
+        rollup.total if rollup else None,
+    )
     panel["tiles"][key].content = theme.kval(value, f" {rest}" if rest else "")
     panel["subs"][key].text = sub
 
@@ -347,12 +384,12 @@ def update_process_section(panel: Dict[str, Any], data: Any) -> None:
     worst = capacity.now if capacity else None
     panel["tiles"]["cpu"].content = theme.kval(
         num(worst, "{:.1f}") if worst is not None else NA,
-        "%" if worst is not None else "",
+        "% of host" if worst is not None else "",
     )
     panel["subs"]["cpu"].text = (
-        f"worst rank · R{int(capacity.worst_rank)} · of host capacity"
+        f"highest median · R{int(capacity.worst_rank)}"
         if capacity is not None and capacity.worst_rank is not None
-        else "of host capacity"
+        else "of host"
     )
 
     rss = data.rss_worst
@@ -361,7 +398,7 @@ def update_process_section(panel: Dict[str, Any], data: Any) -> None:
         "rss",
         rss,
         (
-            f"worst rank · R{int(rss.worst_rank)}"
+            f"highest median · R{int(rss.worst_rank)}"
             if rss is not None and rss.worst_rank is not None
             else "used / total"
         ),
@@ -374,16 +411,21 @@ def update_process_section(panel: Dict[str, Any], data: Any) -> None:
             "reserved",
             reserved,
             (
-                f"least-headroom rank · R{int(reserved.worst_rank)}"
+                f"least headroom · R{int(reserved.worst_rank)}"
                 if reserved is not None and reserved.worst_rank is not None
                 else "reserved / total"
             ),
         )
+        allocated = data.gpu_allocated
         _tile_gb(
             panel,
             "alloc",
-            data.gpu_allocated,
-            "median rank · live tensors",
+            allocated,
+            (
+                f"least-headroom rank · R{int(allocated.worst_rank)}"
+                if allocated is not None and allocated.worst_rank is not None
+                else "live tensors"
+            ),
         )
     else:
         seen = bool(data.window_len or data.ranks)

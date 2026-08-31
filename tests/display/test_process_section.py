@@ -196,7 +196,9 @@ def _payload(
             else None
         ),
         gpu=(MetricRollup(now=6.0 * GIB, p95=6.0 * GIB) if gpu else None),
-        gpu_allocated=(MetricRollup(now=6.0 * GIB) if gpu else None),
+        gpu_allocated=(
+            MetricRollup(now=6.0 * GIB, worst_rank=1) if gpu else None
+        ),
         reserved_imbalance_percent=imbalance,
         rows_open=rows_open,
         cpu_capacity_chart=_chart(*ranks),
@@ -205,18 +207,20 @@ def _payload(
 
 
 # --- the four tiles ------------------------------------------------------
-def test_the_cpu_tile_leads_with_the_worst_rank_and_names_it():
+def test_the_cpu_tile_leads_with_the_highest_median_and_names_it():
+    """One rule for the section: per-rank median, then the highest."""
     panel = _panel()
     process_section.update_process_section(panel, _payload())
     assert "87.5" in panel["tiles"]["cpu"].content
-    assert panel["subs"]["cpu"].text == ("worst rank · R1 · of host capacity")
+    assert "of host" in panel["tiles"]["cpu"].content
+    assert panel["subs"]["cpu"].text == "highest median · R1"
 
 
-def test_the_rss_tile_names_its_worst_rank():
+def test_the_rss_tile_names_the_rank_with_the_highest_median():
     panel = _panel()
     process_section.update_process_section(panel, _payload())
     assert "2.5" in panel["tiles"]["rss"].content
-    assert panel["subs"]["rss"].text == "worst rank · R0"
+    assert panel["subs"]["rss"].text == "highest median · R0"
 
 
 def test_allocated_and_reserved_are_two_tiles_not_one():
@@ -234,8 +238,9 @@ def test_allocated_and_reserved_are_two_tiles_not_one():
     # history's newest step has no GPU snapshot once a run tears down,
     # which left this tile "n/a" above rows listing each rank's bytes.
     assert panel["tiles"]["alloc"].content != "n/a"
-    assert panel["subs"]["reserved"].text == "least-headroom rank · R1"
-    assert panel["subs"]["alloc"].text == "median rank · live tensors"
+    assert panel["subs"]["reserved"].text == "least headroom · R1"
+    # Both GPU tiles describe ONE device, so they can be read together.
+    assert panel["subs"]["alloc"].text == "least-headroom rank · R1"
 
 
 def test_a_cpu_only_run_marks_both_gpu_tiles_absent():
@@ -606,3 +611,50 @@ def test_the_allocated_tile_survives_a_teardown_step():
     panel = _panel()
     process_section.update_process_section(panel, payload)
     assert "4.0" in panel["tiles"]["alloc"].content
+
+
+def test_the_total_line_is_drawn_and_fits_inside_the_axis():
+    """The total is the sum across ranks, so it is the highest line.
+
+    Fitting the axis to the per-rank traces alone would clip exactly the
+    line a reader looks at first. This is the same defect that clipped the
+    RSS chart when the axis was fitted to the peaks.
+    """
+    chart = RankChart(
+        mode="recent",
+        traces=(
+            RankTrace(
+                global_rank=0,
+                timestamps=(1.0, 2.0, 3.0),
+                values=(10.0, 11.0, 12.0),
+            ),
+            RankTrace(
+                global_rank=1,
+                timestamps=(1.0, 2.0, 3.0),
+                values=(10.0, 11.0, 12.0),
+            ),
+        ),
+        total=RankTrace(
+            global_rank=-1,
+            timestamps=(1.0, 2.0, 3.0),
+            values=(20.0, 22.0, 24.0),
+        ),
+    )
+    payload = ProcessDashboardPayload(
+        window_len=3,
+        ranks=(_rank(0), _rank(1)),
+        coverage=RankCoverage(total=2, live=2),
+        cpu_capacity=MetricRollup(now=12.0, worst_rank=0),
+        cpu_capacity_chart=chart,
+        rss_chart=chart,
+    )
+    panel = _panel()
+    process_section.update_process_section(panel, payload)
+
+    series = panel["cpu_chart"].options["series"]
+    assert len(series) == 3, "two ranks plus the total"
+    assert series[0]["name"] == "Total"
+
+    drawn = [v for s in series for _t, v in s["data"]]
+    top = panel["cpu_chart"].options["yAxis"]["max"]
+    assert top >= max(drawn), "the total must not be clipped"

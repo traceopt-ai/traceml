@@ -86,6 +86,7 @@ class RankSnapshot:
     gpu_allocated_p50_bytes: Optional[float] = None
     gpu_reserved_bytes: Optional[float] = None
     gpu_reserved_p50_bytes: Optional[float] = None
+    gpu_reserved_peak_bytes: Optional[float] = None
     gpu_total_bytes: Optional[float] = None
 
     age_s: Optional[float] = None
@@ -180,6 +181,11 @@ class RankChart:
     window_s: Optional[float] = None
     span_s: Optional[float] = None
     traces: Tuple[RankTrace, ...] = ()
+    # Every rank added together, on the union of their sample times. The
+    # per-rank lines answer "which rank", the total answers "how much of
+    # the host is this job using", and neither can be read off the other
+    # when ranks sample on their own clocks.
+    total: Optional[RankTrace] = None
 
     @property
     def is_retained(self) -> bool:
