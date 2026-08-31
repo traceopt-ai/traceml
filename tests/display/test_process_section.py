@@ -40,6 +40,7 @@ from traceml_ai.renderers.process.dashboard_compute import (  # noqa: E402
     ProcessDashboardComputer,
 )
 from traceml_ai.renderers.process.dashboard_models import (  # noqa: E402
+    CudaHeadroomSample,
     MetricRollup,
     ProcessDashboardPayload,
     RankChart,
@@ -123,9 +124,12 @@ def _rank(
         ram_used_bytes=rss,
         ram_used_p50_bytes=rss,
         ram_total_bytes=64.0 * GIB,
-        gpu_allocated_p50_bytes=allocated,
-        gpu_reserved_bytes=reserved,
         gpu_reserved_p50_bytes=reserved,
+        cuda_least_headroom_sample=CudaHeadroomSample(
+            allocated_bytes=allocated,
+            reserved_bytes=reserved,
+            total_bytes=40.0 * GIB,
+        ),
         gpu_total_bytes=40.0 * GIB,
         age_s=age_s,
         freshness=freshness,
@@ -319,6 +323,24 @@ def test_every_rank_is_a_row_with_its_identity_and_its_memory():
     assert "R0" in html and "R1" in html
     assert "G0" in html and "N0" in html
     assert "cuda allocated" in html and "cuda reserved" in html
+
+
+def test_each_row_pairs_cuda_values_from_its_least_headroom_sample():
+    """The row and selected CUDA tiles share one per-rank sample basis."""
+    rank = RankSnapshot(
+        global_rank=0,
+        gpu_reserved_p50_bytes=5.0 * GIB,
+        cuda_least_headroom_sample=CudaHeadroomSample(
+            allocated_bytes=22.0 * GIB,
+            reserved_bytes=30.0 * GIB,
+            total_bytes=40.0 * GIB,
+        ),
+    )
+
+    html = process_section.rows_html((rank,), None)
+
+    assert "22.0 / 40.0 GB" in html
+    assert "30.0 / 40.0 GB" in html
 
 
 def test_a_stale_rank_is_dimmed_and_kept():

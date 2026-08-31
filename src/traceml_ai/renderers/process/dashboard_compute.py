@@ -43,6 +43,7 @@ from traceml_ai.renderers.shared.run_series import (
 from .dashboard_models import (
     ChartSeries,
     ChartTrace,
+    CudaHeadroomSample,
     GpuSnapshot,
     MetricRollup,
     ProcessDashboardPayload,
@@ -128,6 +129,47 @@ def _gpu_reported(row: Any) -> bool:
         return total is not None and total > 0
     except (KeyError, IndexError, TypeError):
         return False
+
+
+def _least_headroom_sample(
+    rows: Sequence[Any],
+) -> Optional[CudaHeadroomSample]:
+    """The least-headroom row, kept whole so CUDA tile values stay paired.
+
+    Equal-headroom samples resolve to the newest usable row. This makes the
+    result deterministic while preferring the most recent view of live
+    allocations when reserved capacity is unchanged.
+    """
+    candidates = []
+    for row in rows:
+        reserved = _opt_float(row["gpu_mem_reserved_bytes"])
+        total = _opt_float(row["gpu_mem_total_bytes"])
+        if reserved is None or total is None or total <= 0:
+            continue
+        stamp = _opt_float(row["sample_ts_s"])
+        seq = _opt_float(row["seq"])
+        row_id = _opt_float(row["id"])
+        candidates.append(
+            (
+                row,
+                total - reserved,
+                stamp if stamp is not None else float("-inf"),
+                seq if seq is not None else float("-inf"),
+                row_id if row_id is not None else float("-inf"),
+            )
+        )
+    if not candidates:
+        return None
+
+    chosen, _headroom, _stamp, _seq, _row_id = min(
+        candidates,
+        key=lambda item: (item[1], -item[2], -item[3], -item[4]),
+    )
+    return CudaHeadroomSample(
+        allocated_bytes=_opt_float(chosen["gpu_mem_used_bytes"]),
+        reserved_bytes=float(chosen["gpu_mem_reserved_bytes"]),
+        total_bytes=float(chosen["gpu_mem_total_bytes"]),
+    )
 
 
 def _cpu_capacity_of(row: Any) -> Optional[float]:
@@ -395,20 +437,6 @@ class ProcessDashboardComputer:
                 ]
             ),
             ram_total_bytes=_opt_float(newest_row["ram_total_bytes"]),
-            gpu_allocated_p50_bytes=_median(
-                [
-                    value
-                    for value in (
-                        _opt_float(r["gpu_mem_used_bytes"]) for r in reported
-                    )
-                    if value is not None
-                ]
-            ),
-            gpu_reserved_bytes=(
-                _opt_float(newest_gpu["gpu_mem_reserved_bytes"])
-                if newest_gpu is not None
-                else None
-            ),
             gpu_reserved_p50_bytes=_median(
                 [
                     value
@@ -419,17 +447,7 @@ class ProcessDashboardComputer:
                     if value is not None
                 ]
             ),
-            gpu_reserved_peak_bytes=max(
-                (
-                    value
-                    for value in (
-                        _opt_float(r["gpu_mem_reserved_bytes"])
-                        for r in reported
-                    )
-                    if value is not None
-                ),
-                default=None,
-            ),
+            cuda_least_headroom_sample=_least_headroom_sample(reported),
             gpu_total_bytes=(
                 _opt_float(newest_gpu["gpu_mem_total_bytes"])
                 if newest_gpu is not None
@@ -581,33 +599,30 @@ class ProcessDashboardComputer:
     def _cuda_rollup(
         self, ranks: Sequence[RankSnapshot]
     ) -> Optional[MetricRollup]:
-        """Reserved memory on the rank with the least headroom.
+        """Reserved memory from the window's least-headroom rank and row."""
+        worst = self._least_headroom_rank(ranks)
+        if worst is None or worst.cuda_least_headroom_sample is None:
+            return None
+        sample = worst.cuda_least_headroom_sample
+        return MetricRollup(
+            now=sample.reserved_bytes,
+            total=sample.total_bytes,
+            worst_rank=worst.global_rank,
+        )
 
-        Not the largest user: the process at risk is the one closest to
-        filling its card.
-        """
+    @staticmethod
+    def _least_headroom_rank(
+        ranks: Sequence[RankSnapshot],
+    ) -> Optional[RankSnapshot]:
+        """Select across each rank's least-headroom sample."""
         candidates = [
-            r
-            for r in ranks
-            if r.gpu_reserved_peak_bytes is not None
-            and r.gpu_total_bytes is not None
-            and r.gpu_total_bytes > 0
+            r for r in ranks if r.cuda_least_headroom_sample is not None
         ]
         if not candidates:
             return None
-        # Each rank's PEAK reserved over the window, then the rank with the
-        # least headroom against that peak. Peak rather than newest because
-        # the question this tile answers is which rank comes closest to
-        # filling its card, and that is a high-water mark.
-        worst = min(
+        return min(
             candidates,
-            key=lambda r: (r.gpu_total_bytes or 0.0)
-            - (r.gpu_reserved_peak_bytes or 0.0),
-        )
-        return MetricRollup(
-            now=float(worst.gpu_reserved_peak_bytes or 0.0),
-            total=worst.gpu_total_bytes,
-            worst_rank=worst.global_rank,
+            key=lambda rank: rank.cuda_least_headroom_sample.headroom_bytes,
         )
 
     def _alloc_rollup(
@@ -625,18 +640,18 @@ class ProcessDashboardComputer:
         down, which left this tile reading "n/a" directly above rows that
         listed each rank's allocated bytes.
         """
-        reserved = self._cuda_rollup(ranks)
-        if reserved is None or reserved.worst_rank is None:
+        chosen = self._least_headroom_rank(ranks)
+        if chosen is None or chosen.cuda_least_headroom_sample is None:
             return None
-        chosen = next(
-            (r for r in ranks if r.global_rank == reserved.worst_rank),
-            None,
-        )
-        if chosen is None or chosen.gpu_allocated_p50_bytes is None:
+        # Reserved and allocated deliberately come from this exact rank and
+        # row. Pairing the rank's reserved peak with its allocated median
+        # would describe two different moments as though they were one.
+        sample = chosen.cuda_least_headroom_sample
+        if sample.allocated_bytes is None:
             return None
         return MetricRollup(
-            now=float(chosen.gpu_allocated_p50_bytes),
-            total=chosen.gpu_total_bytes,
+            now=sample.allocated_bytes,
+            total=sample.total_bytes,
             worst_rank=chosen.global_rank,
         )
 

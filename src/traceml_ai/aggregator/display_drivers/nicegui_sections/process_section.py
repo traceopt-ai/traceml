@@ -192,6 +192,10 @@ def rows_html(
 
     A rank that stopped is dimmed and kept. Dropping it would hide the one
     fact worth having when a job stalls, which is WHICH rank stopped.
+
+    Each row's CUDA columns come from that rank's least-headroom sample in
+    the recent window. Keeping allocated and reserved on the paired sample
+    makes the selected headline row directly verifiable in this table.
     """
     trend = {
         trace.global_rank: trace.values
@@ -219,10 +223,15 @@ def rows_html(
             ),
             rank.ram_total_bytes,
         )
+        cuda = rank.cuda_least_headroom_sample
         reserved, reserved_rest = format_gb_pair(
-            rank.gpu_reserved_bytes, rank.gpu_total_bytes
+            cuda.reserved_bytes if cuda is not None else None,
+            cuda.total_bytes if cuda is not None else None,
         )
-        alloc, alloc_rest = format_gb_pair(rank.gpu_allocated_p50_bytes, None)
+        alloc, alloc_rest = format_gb_pair(
+            cuda.allocated_bytes if cuda is not None else None,
+            cuda.total_bytes if cuda is not None else None,
+        )
         capacity = rank.cpu_capacity_percent
         row = '<tr class="tml-stale">' if rank.freshness == "stale" else "<tr>"
         gpu_cell = (

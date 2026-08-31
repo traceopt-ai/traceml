@@ -42,6 +42,25 @@ class GpuSnapshot:
 
 
 @dataclass(frozen=True)
+class CudaHeadroomSample:
+    """One rank's least-headroom CUDA sample in the recent window.
+
+    Allocated, reserved and total bytes stay together because the two CUDA
+    tiles must describe the same rank at the same sample, not statistics
+    independently selected from different moments.
+    """
+
+    allocated_bytes: Optional[float]
+    reserved_bytes: float
+    total_bytes: float
+
+    @property
+    def headroom_bytes(self) -> float:
+        """Device bytes not reserved at this sample."""
+        return self.total_bytes - self.reserved_bytes
+
+
+@dataclass(frozen=True)
 class ProcessHistoryEntry:
     """One globally committed step, aggregated across ranks.
 
@@ -66,12 +85,10 @@ class RankSnapshot:
     squeezed out by livelier peers, and a rank that never reports must not
     shrink everyone else's window.
 
-    The levels here are deliberately not all "the newest sample". CPU and
-    the allocator's live bytes are sampled far slower than they move, so a
-    single reading lands wherever the sawtooth happened to be; those carry
-    a window median. Reserved memory and RSS carry both, because which rank
-    is WORST is a judgement about its typical state while the number SHOWN
-    should be what that rank last actually sent.
+    The levels here are deliberately not all "the newest sample". CPU, RSS
+    and the allocator's live bytes carry window summaries where needed.
+    CUDA also carries the complete least-headroom sample so allocated and
+    reserved can never be paired across different moments.
     """
 
     global_rank: int
@@ -83,10 +100,8 @@ class RankSnapshot:
     ram_used_p50_bytes: Optional[float] = None
     ram_total_bytes: Optional[float] = None
 
-    gpu_allocated_p50_bytes: Optional[float] = None
-    gpu_reserved_bytes: Optional[float] = None
     gpu_reserved_p50_bytes: Optional[float] = None
-    gpu_reserved_peak_bytes: Optional[float] = None
+    cuda_least_headroom_sample: Optional[CudaHeadroomSample] = None
     gpu_total_bytes: Optional[float] = None
 
     age_s: Optional[float] = None
@@ -275,6 +290,7 @@ class ProcessDashboardPayload:
 __all__ = [
     "ChartSeries",
     "ChartTrace",
+    "CudaHeadroomSample",
     "GpuSnapshot",
     "MetricRollup",
     "ProcessDashboardPayload",

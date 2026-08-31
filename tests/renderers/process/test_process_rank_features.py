@@ -459,14 +459,22 @@ def test_reserved_selects_on_each_rank_s_peak_not_its_newest(process_db):
     assert out.gpu_reserved.now == pytest.approx(30.0 * GB)
 
 
-def test_allocated_describes_the_same_rank_as_reserved(process_db):
-    """Two GPU tiles, one device, so they can be read together."""
+def test_allocated_and_reserved_come_from_the_same_rank_and_row(process_db):
+    """Two GPU tiles describe one device at one least-headroom sample."""
     for seq in range(1, 21):
-        for rank, reserved, alloc in (
-            (0, 5.0 * GB, 1.0 * GB),
-            (1, 30.0 * GB, 22.0 * GB),
-            (2, 6.0 * GB, 2.0 * GB),
-        ):
+        for rank in range(3):
+            reserved, alloc = {
+                0: (5.0 * GB, 1.0 * GB),
+                1: (
+                    30.0 * GB if seq in (10, 15) else 10.0 * GB,
+                    (
+                        24.0 * GB
+                        if seq == 15
+                        else (22.0 * GB if seq == 10 else 3.0 * GB)
+                    ),
+                ),
+                2: (6.0 * GB, 2.0 * GB),
+            }[rank]
             process_db.insert(
                 recv_ts_ns=int((1_700_000_000 + seq * 2) * 1e9),
                 rank=rank,
@@ -487,10 +495,13 @@ def test_allocated_describes_the_same_rank_as_reserved(process_db):
 
     out = payload(process_db, sampler_interval_s=2.0)
     assert out.gpu_reserved.worst_rank == 1
+    assert out.gpu_reserved.now == pytest.approx(30.0 * GB)
     assert out.gpu_allocated is not None
     assert out.gpu_allocated.worst_rank == 1
-    # The median rank's allocated is 2.0 GB; this must not be that.
-    assert out.gpu_allocated.now == pytest.approx(22.0 * GB)
+    # R1's median allocation is 3 GB. The allocated tile instead uses the
+    # exact row chosen for reserved; of equal peaks, the newest row wins.
+    assert out.gpu_allocated.now == pytest.approx(24.0 * GB)
+    assert out.gpu_allocated.total == out.gpu_reserved.total
 
 
 def test_the_total_sums_ranks_on_their_own_clocks(process_db):
