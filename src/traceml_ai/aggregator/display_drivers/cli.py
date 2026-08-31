@@ -86,7 +86,10 @@ class CLIDisplayDriver(BaseDisplayDriver):
         # Watch profile
         self._renderers: List[CLIRenderer] = [
             SystemRenderer(db_path=self._settings.db_path),
-            ProcessRenderer(db_path=self._settings.db_path),
+            ProcessRenderer(
+                db_path=self._settings.db_path,
+                sampler_interval_s=self._settings.sampler_interval_sec,
+            ),
             StdoutStderrRenderer(db_path=self._settings.db_path),
         ]
 
