@@ -15,10 +15,9 @@ things now. The two differences worth naming:
   reserved`` pair. One tile could not say which of the two it held, and the
   two numbers answer different questions: allocated is what the tensors
   need, reserved is what the process is holding from the device.
-* The ``CPU`` and ``RAM`` tiles become ``cpu capacity`` and ``rss``, which
-  are the per-rank, denominator-carrying versions of the same quantities.
-  A raw 700% CPU reading is not comparable between hosts; 87.5% of the
-  host's capacity is.
+* The ``CPU`` and ``RAM`` tiles become ``cpu`` and ``rss``. CPU keeps its
+  meaning in the value: a raw 700% process reading is not comparable between
+  hosts, while 87.5% of the host is.
 
 ``test_the_card_renders_the_same_from_a_real_database`` closes the loop
 from database through compute to screen, and states both new meanings as

@@ -92,7 +92,7 @@ def build_process_section() -> Dict[str, Any]:
 
         with ui.element("div").classes("tilerow").style("margin-bottom:10px;"):
             for key, label, accent in (
-                ("cpu", "cpu capacity", theme.C_CPU),
+                ("cpu", "cpu", theme.C_CPU),
                 ("rss", "rss", theme.C_CPU),
                 ("reserved", "cuda reserved", theme.C_GPU),
                 ("alloc", "cuda allocated", theme.C_GPU),
