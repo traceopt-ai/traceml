@@ -1,9 +1,13 @@
 import json
+import os
+import subprocess
 import sys
 import types
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+import pytest
+
+ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
@@ -30,6 +34,7 @@ sys.modules.setdefault(
     ),
 )
 
+import traceml_ai.runtime.executor as executor  # noqa: E402
 from traceml_ai.runtime.executor import (  # noqa: E402
     build_runtime_settings,
     extract_script_args,
@@ -202,3 +207,102 @@ def test_write_user_error_log_records_error(tmp_path):
     )
     assert "User script failed" in log_text
     assert "RuntimeError: boom" in log_text
+
+
+@pytest.mark.parametrize(
+    "user_exit",
+    [SystemExit(7), KeyboardInterrupt()],
+)
+def test_execute_with_runtime_preserves_base_exceptions_without_user_log(
+    monkeypatch,
+    user_exit,
+):
+    cfg = {"script_path": "train.py"}
+    events = []
+
+    monkeypatch.setattr(executor, "read_traceml_env", lambda: cfg)
+    monkeypatch.setattr(executor, "start_runtime", lambda value: object())
+    monkeypatch.setattr(executor, "extract_script_args", lambda: [])
+
+    def exit_user_script(*_args):
+        raise user_exit
+
+    monkeypatch.setattr(executor, "run_user_script", exit_user_script)
+    monkeypatch.setattr(
+        executor,
+        "write_user_error_log",
+        lambda *_args, **_kwargs: events.append("logged"),
+    )
+    monkeypatch.setattr(
+        executor,
+        "stop_runtime",
+        lambda *_args: events.append("stopped"),
+    )
+
+    with pytest.raises(type(user_exit)) as exc_info:
+        executor._execute_with_runtime()
+
+    assert exc_info.value is user_exit
+    assert events == ["stopped"]
+
+
+def test_torchelastic_record_wraps_entrypoint_when_configured(monkeypatch):
+    calls = []
+
+    def fake_record(entrypoint):
+        def wrapped():
+            calls.append("record")
+            return entrypoint()
+
+        return wrapped
+
+    monkeypatch.setenv("TORCHELASTIC_ERROR_FILE", "error.json")
+    monkeypatch.setitem(
+        sys.modules,
+        "torch.distributed.elastic.multiprocessing.errors",
+        types.SimpleNamespace(record=fake_record),
+    )
+
+    executor._run_with_torchelastic_record(lambda: calls.append("entrypoint"))
+
+    assert calls == ["record", "entrypoint"]
+
+
+def test_executor_subprocess_preserves_native_traceback_and_compatibility_log(
+    tmp_path,
+):
+    script_path = tmp_path / "raise_error.py"
+    script_path.write_text(
+        "raise RuntimeError('subprocess boom')\n",
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env.pop("TORCHELASTIC_ERROR_FILE", None)
+    env.update(
+        {
+            "PYTHONPATH": str(SRC),
+            "TRACEML_SCRIPT_PATH": str(script_path),
+            "TRACEML_DISABLED": "1",
+            "TRACEML_LOGS_DIR": str(tmp_path / "logs"),
+            "TRACEML_SESSION_ID": "executor-test",
+        }
+    )
+    result = subprocess.run(
+        [sys.executable, "-m", "traceml_ai.runtime.executor"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env=env,
+    )
+
+    assert result.returncode == 1
+    assert "Traceback (most recent call last)" in result.stderr
+    assert "RuntimeError: subprocess boom" in result.stderr
+    compatibility_log = (
+        tmp_path / "logs" / "executor-test" / "torchrun_error.log"
+    )
+    assert compatibility_log.is_file()
+    assert "RuntimeError: subprocess boom" in compatibility_log.read_text(
+        encoding="utf-8"
+    )
