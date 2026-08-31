@@ -286,6 +286,10 @@ def test_whole_run_charts_share_one_clock_axis() -> None:
             "cpu": [30.0, 31.0],
             "gpu_avg": [99.0, 99.0],
             "gpu_power": [{"gpu_idx": 0, "values": [66.0, 68.0]}],
+            # Both flags are computed now, so a hand-built payload states
+            # which view each chart is in rather than the card inferring it.
+            "cpu_run_whole": True,
+            "power_run_whole": True,
             "cpu_run": {
                 "t": cpu_t,
                 "avg": [30.0] * 40,

@@ -34,6 +34,24 @@ from traceml_ai.aggregator.display_drivers.nicegui_sections import (  # noqa: E4
 from traceml_ai.renderers.system import dashboard_compute  # noqa: E402
 
 
+@pytest.fixture
+def process_free_db(tmp_path):
+    """An empty system database, computed through the real compute layer."""
+    import sqlite3
+
+    from traceml_ai.aggregator.sqlite_writers.system import init_schema
+    from traceml_ai.renderers.system.dashboard_compute import (
+        SystemDashboardComputer,
+    )
+
+    path = tmp_path / "telemetry.db"
+    conn = sqlite3.connect(path)
+    init_schema(conn)
+    conn.commit()
+    conn.close()
+    return SystemDashboardComputer(db_path=str(path)).compute()
+
+
 def _gpu(idx: int, **kw):
     row = {
         "gpu_idx": idx,
@@ -121,3 +139,31 @@ def test_the_card_asks_the_computer_whether_a_gpu_reported():
 
 def test_no_gpus_at_all_is_not_the_same_as_unreported():
     assert system_section.gpus_unreported([]) is False
+
+
+# --- one rule for "is this the whole-run view" ---------------------------
+def test_both_charts_answer_the_whole_run_question_the_same_way():
+    """The card asked two different questions and could disagree.
+
+    It tested `len(t) > 2` of the CPU history and merely non-empty of the
+    power history, so on a run with one or two power buckets the power
+    chart claimed the whole-run view while the CPU chart did not, and the
+    pair stopped sharing a clock.
+    """
+    two_points = {"t": [1.0, 2.0], "avg": [1.0, 2.0]}
+    three_points = {"t": [1.0, 2.0, 3.0], "avg": [1.0, 2.0, 3.0]}
+    assert dashboard_compute._has_whole_run(two_points) is False
+    assert dashboard_compute._has_whole_run(three_points) is True
+
+    # The bucket list form answers the same question the same way.
+    assert dashboard_compute._has_whole_run([{"t": [1.0, 2.0]}]) is False
+    assert dashboard_compute._has_whole_run([{"t": [1.0, 2.0, 3.0]}]) is True
+    assert dashboard_compute._has_whole_run([]) is False
+    assert dashboard_compute._has_whole_run({}) is False
+
+
+def test_a_short_run_puts_neither_chart_in_the_whole_run_view(process_free_db):
+    """End to end: the flags travel on the payload and agree."""
+    out = process_free_db
+    assert out["series"]["cpu_run_whole"] is False
+    assert out["series"]["power_run_whole"] is False

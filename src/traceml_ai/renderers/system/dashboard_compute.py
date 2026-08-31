@@ -70,7 +70,26 @@ def _empty_dashboard_series() -> Dict[str, Any]:
             "window_s": 0.0,
         },
         "gpu_power_run": [],
+        "cpu_run_whole": False,
+        "power_run_whole": False,
     }
+
+
+# A whole-run line needs more than two points to say anything about a
+# trend. One rule, applied to both series: the card used to ask ">2
+# points" of the CPU history and merely "non-empty" of the power history,
+# so its two charts could disagree about which view they were showing.
+_MIN_WHOLE_RUN_POINTS = 2
+
+
+def _has_whole_run(entries: Any) -> bool:
+    """Whether a whole-run series has enough shape to draw."""
+    if isinstance(entries, dict):
+        return len(entries.get("t") or ()) > _MIN_WHOLE_RUN_POINTS
+    longest = 0
+    for entry in entries or ():
+        longest = max(longest, len(entry.get("t") or ()))
+    return longest > _MIN_WHOLE_RUN_POINTS
 
 
 def _gpu_medians(gpus: List[Dict[str, Any]]) -> List[tuple]:
@@ -460,6 +479,12 @@ class SystemDashboardComputer:
                 # the host is doing now, these say what it has done.
                 "cpu_run": cpu_run,
                 "gpu_power_run": power_run if gpu_available else [],
+                # Which view each chart is in, decided once here rather
+                # than twice in the card with two different rules.
+                "cpu_run_whole": _has_whole_run(cpu_run),
+                "power_run_whole": _has_whole_run(
+                    power_run if gpu_available else []
+                ),
             },
         ).to_dict()
 

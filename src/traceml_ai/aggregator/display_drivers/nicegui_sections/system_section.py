@@ -833,8 +833,11 @@ def update_system_section(panel: Dict[str, Any], data: Dict[str, Any]) -> None:
     cpu_run = series.get("cpu_run") or {}
     cpu_run_t = cpu_run.get("t") or []
     power_run = series.get("gpu_power_run") or []
-    cpu_whole = len(cpu_run_t) > 2
-    power_whole = bool(power_run)
+    # Read, not decided. The card asked ">2 points" of one series and
+    # "non-empty" of the other, so its two charts could disagree about
+    # which view they were showing.
+    cpu_whole = bool(series.get("cpu_run_whole"))
+    power_whole = bool(series.get("power_run_whole"))
     # Whole-run charts share one clock so vertical comparisons align.
     aligned = (
         shared_run_axis(cpu_run_t, power_run)
