@@ -574,7 +574,7 @@ def test_disabled_launch_runs_script_directly_and_skips_traceml_setup(
     assert observed["manifest_path"] is None
     assert not (tmp_path / "logs").exists()
     assert capsys.readouterr().err.splitlines()[-1] == (
-        "[TraceML] Training failed (exit code 17)."
+        "[TraceML] Training failed — torchrun exited with code 17."
     )
 
 
@@ -593,10 +593,11 @@ def test_training_outcome_only_classifies_direct_negative_signals() -> None:
     [
         (0, 9, False),
         (0, 0, False),
-        (7, 0, False),
+        (1, 0, False),
         (0, 0, True),
     ],
 )
+@pytest.mark.parametrize("mode", ["summary", "cli", "dashboard"])
 def test_started_training_result_is_authoritative(
     monkeypatch,
     tmp_path,
@@ -604,6 +605,7 @@ def test_started_training_result_is_authoritative(
     train_rc,
     aggregator_rc,
     finalization_fails,
+    mode,
 ) -> None:
     script = tmp_path / "train.py"
     script.write_text("print('train')\n", encoding="utf-8")
@@ -612,7 +614,7 @@ def test_started_training_result_is_authoritative(
             "run",
             str(script),
             "--mode",
-            "summary",
+            mode,
             "--logs-dir",
             str(tmp_path / "logs"),
             "--run-name",
@@ -634,6 +636,7 @@ def test_started_training_result_is_authoritative(
         "write_code_manifest": Mock(return_value=None),
         "write_run_manifest": Mock(return_value=tmp_path / "manifest.json"),
         "update_run_manifest": Mock(),
+        "_require_dashboard_dependencies": Mock(),
     }
     for name, replacement in replacements.items():
         monkeypatch.setattr(launcher_commands, name, replacement)
@@ -652,6 +655,8 @@ def test_started_training_result_is_authoritative(
     final_line = capsys.readouterr().err.splitlines()[-1]
     expected_status = "completed successfully" if train_rc == 0 else "failed"
     assert f"Training {expected_status}" in final_line
+    if train_rc != 0:
+        assert "torchrun exited with code 1" in final_line
 
 
 @pytest.mark.parametrize("value", ["0", "-1m", "bad", "nan", "inf"])

@@ -175,7 +175,16 @@ def _run_noncritical_launcher_step(
         )
 
 
-def _exit_with_training_outcome(outcome: TrainingOutcome) -> None:
+def _is_torchrun_command(command: list[str]) -> bool:
+    """Return whether a constructed launcher command invokes torchrun."""
+    return command[1:3] == ["-m", "torch.distributed.run"]
+
+
+def _exit_with_training_outcome(
+    outcome: TrainingOutcome,
+    *,
+    launched_with_torchrun: bool,
+) -> None:
     """Print the final training status and exit with its command result."""
     if outcome.signal_name is not None:
         message = (
@@ -184,6 +193,11 @@ def _exit_with_training_outcome(outcome: TrainingOutcome) -> None:
         )
     elif outcome.returncode == 0:
         message = "Training completed successfully (exit code 0)."
+    elif launched_with_torchrun:
+        message = (
+            "Training failed — torchrun exited with code "
+            f"{outcome.cli_exit_code}."
+        )
     else:
         message = f"Training failed (exit code {outcome.cli_exit_code})."
 
@@ -233,8 +247,10 @@ def _launch_disabled_process(
         "[TraceML] TraceML is disabled via --disable-traceml. "
         "Running natively."
     )
+    launcher_cmd = torchrun_cfg.to_command()
+    launched_with_torchrun = _is_torchrun_command(launcher_cmd)
     train_cmd = [
-        *torchrun_cfg.to_command(),
+        *launcher_cmd,
         str(script_path),
         *(args.args or []),
     ]
@@ -249,7 +265,10 @@ def _launch_disabled_process(
         capture_stderr=False,
     )
     returncode = train_proc.wait()
-    _exit_with_training_outcome(TrainingOutcome(returncode))
+    _exit_with_training_outcome(
+        TrainingOutcome(returncode),
+        launched_with_torchrun=launched_with_torchrun,
+    )
 
 
 def _require_torch_launcher_support(torchrun: TorchrunLaunchConfig) -> None:
@@ -520,8 +539,10 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     runner_path = str(traceml_root / "runtime" / "executor.py")
     script_args = args.args or []
 
+    launcher_cmd = torchrun_cfg.to_command()
+    launched_with_torchrun = _is_torchrun_command(launcher_cmd)
     train_cmd = [
-        *torchrun_cfg.to_command(),
+        *launcher_cmd,
         runner_path,
         "--",
         *script_args,
@@ -668,7 +689,10 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                     f"with code {agg_proc.returncode}.",
                     file=sys.stderr,
                 )
-            _exit_with_training_outcome(outcome)
+            _exit_with_training_outcome(
+                outcome,
+                launched_with_torchrun=launched_with_torchrun,
+            )
 
         if agg_proc is not None and agg_proc.poll() is not None:
             agg_rc = agg_proc.returncode
