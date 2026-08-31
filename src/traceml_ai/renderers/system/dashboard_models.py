@@ -180,22 +180,19 @@ class RunContext:
 
 @dataclass(frozen=True)
 class CpuRunSeries:
-    """Host CPU over the whole run, rolled and decimated to fit a chart."""
+    """Host CPU over the whole run, rolled and decimated to fit a chart.
+
+    Whether this series has earned the whole-run view is NOT asked here.
+    ``_has_whole_run`` in the compute layer decides it for both charts and
+    the answer travels as ``SystemSeries.cpu_run_whole``. A second copy of
+    that rule on this class is how the card came to hold two of them.
+    """
 
     t: Tuple[float, ...] = ()
     avg: Tuple[float, ...] = ()
     max: Tuple[float, ...] = ()
     span_s: float = 0.0
     window_s: float = 0.0
-
-    @property
-    def is_populated(self) -> bool:
-        """Whether the whole-run view has anything to draw.
-
-        Stated here so the card stops deciding it, which it did with two
-        different rules for its two charts.
-        """
-        return len(self.t) > 2
 
     def to_dict(self) -> Dict[str, Any]:
         return {
