@@ -62,31 +62,37 @@ def test_disclosure_text_states_the_range_and_no_verdict() -> None:
     def g(idx, util):
         return {"gpu_idx": idx, "util_p50": util, "util_now": util}
 
+    def roll(gpus):
+        """The range now arrives on the payload; the card only formats it."""
+        values = [x["util_p50"] for x in gpus]
+        return {"util_range": (min(values), max(values)) if values else None}
+
     one_busy = [g(0, 100), g(1, 0), g(2, 0), g(3, 0)]
     all_busy = [g(i, 99) for i in range(4)]
     ramp = [g(0, 100), g(1, 60), g(2, 55), g(3, 40)]
 
-    assert disclosure_text(one_busy, is_open=True) == (
+    assert disclosure_text(one_busy, roll(one_busy), is_open=True) == (
         "4 GPUs · util 0 to 100% · click to close"
     )
-    assert disclosure_text(one_busy, is_open=False) == (
+    assert disclosure_text(one_busy, roll(one_busy), is_open=False) == (
         "4 GPUs · util 0 to 100% · click to open"
     )
-    assert disclosure_text(ramp, is_open=True) == (
+    assert disclosure_text(ramp, roll(ramp), is_open=True) == (
         "4 GPUs · util 40 to 100% · click to close"
     )
-    assert disclosure_text(all_busy, is_open=False) == (
+    assert disclosure_text(all_busy, roll(all_busy), is_open=False) == (
         "4 GPUs · util 99 to 99% · click to open"
     )
     # One GPU has no range to speak of, and no rows worth naming.
     assert (
-        disclosure_text([g(0, 99)], is_open=False) == "1 GPU · click to open"
+        disclosure_text([g(0, 99)], roll([g(0, 99)]), is_open=False)
+        == "1 GPU · click to open"
     )
-    assert disclosure_text([], is_open=False) == ""
+    assert disclosure_text([], {}, is_open=False) == ""
     # No word anywhere claims a verdict the engine owns.
     for text in (
-        disclosure_text(one_busy, is_open=True),
-        disclosure_text(all_busy, is_open=False),
+        disclosure_text(one_busy, roll(one_busy), is_open=True),
+        disclosure_text(all_busy, roll(all_busy), is_open=False),
     ):
         for word in ("idle", "busy", "alike", "uneven", "low", "healthy"):
             assert word not in text
@@ -167,7 +173,7 @@ def test_rows_table_reads_per_gpu_and_tints_only_the_busy_row() -> None:
         {"gpu_idx": 0, "values": [66.0, 68.0]},
         {"gpu_idx": 1, "values": [33.0, 33.0]},
     ]
-    html = rows_html(_gpus(), series, spread=100.0)
+    html = rows_html(_gpus(), series, {"rows_over": True, "odd_gpus": [0]})
     assert "gpu0" in html and "gpu1" in html
     assert "6.67 / 16.1" in html and "0.47 / 16.1" in html
     assert "68 / 70" in html and "33 / 70" in html
@@ -179,7 +185,7 @@ def test_rows_table_reads_per_gpu_and_tints_only_the_busy_row() -> None:
         in html
     )
     # ...and none when every GPU reads the same.
-    calm = rows_html(_gpus(), series, spread=0.0)
+    calm = rows_html(_gpus(), series, {"rows_over": False})
     assert "tml-mark" not in calm
     # No verdict words anywhere on the block.
     for word in ("Hot", "Warm", "HIGH", "verdict"):
@@ -187,19 +193,18 @@ def test_rows_table_reads_per_gpu_and_tints_only_the_busy_row() -> None:
 
 
 def test_tint_marks_the_odd_ones_out() -> None:
-    def g(i, u):
-        return {"gpu_idx": i, "util_p50": u, "util_now": u}
+    """The card reads the marked set; the rule itself lives in compute.
 
-    # 1 busy of 4: the busy GPU is the anomaly.
-    assert odd_ones_out([g(0, 100), g(1, 0), g(2, 0), g(3, 0)]) == {0}
-    # 3 busy of 4 (a starved or dead rank): the idle GPU is the anomaly,
-    # not the first busy row.
-    assert odd_ones_out([g(0, 100), g(1, 100), g(2, 100), g(3, 0)]) == {3}
-    # 2 and 2: ties go to the busy side.
-    assert odd_ones_out([g(0, 100), g(1, 0), g(2, 100), g(3, 0)]) == {0, 2}
-    # Nothing to mark when every GPU reads the same, or only one reports.
-    assert odd_ones_out([g(0, 100), g(1, 100)]) == set()
-    assert odd_ones_out([g(0, 100), {"gpu_idx": 1}]) == set()
+    These cases moved with it and are asserted unchanged against
+    `_odd_gpus` in tests/display/test_system_section_characterization.py.
+    What is checked here is that the card marks what it is handed and
+    invents nothing.
+    """
+    assert odd_ones_out({"odd_gpus": [0]}) == {0}
+    assert odd_ones_out({"odd_gpus": [3]}) == {3}
+    assert odd_ones_out({"odd_gpus": [0, 2]}) == {0, 2}
+    assert odd_ones_out({"odd_gpus": []}) == set()
+    assert odd_ones_out({}) == set()
 
 
 def test_no_gpu_colour_is_the_limit_red() -> None:
@@ -226,7 +231,7 @@ def test_rows_table_shows_absence_not_zero() -> None:
             "power_limit": None,
         }
     )
-    html = rows_html(gpus, [], spread=None)
+    html = rows_html(gpus, [], {"rows_over": False})
     assert "gpu1" in html
     assert "n/a" in html
     assert "0 / 0" not in html
@@ -418,6 +423,11 @@ def test_section_builds_and_updates_without_a_browser() -> None:
             "ram": {"now": 9.0 * GB, "total": 200.0 * GB},
             "gpu_util": {"now": 0.0, "p50": 25.0, "p95": 25.0},
             "gpu_delta": {"now": 0.0, "p95": 100.0},
+            # The computer decides both of these now, so a hand-built
+            # payload has to carry its answers rather than let the card
+            # re-derive them from the rows.
+            "rows_over": True,
+            "util_range": (0.0, 100.0),
             "gpu_mem": {"now": 6.67 * GB, "total": 16.1 * GB},
             "temp": {"now": 54.0, "status": "OK"},
             "gpu_power": {"now": 68.0, "p50": 67.0, "limit": 70.0},

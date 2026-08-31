@@ -11,7 +11,7 @@ The CPU and GPU-power charts initially show recent raw samples. After the run
 outgrows that window, they use bounded whole-run series: rolling CPU values
 and fixed-duration GPU-power buckets. Both charts share a wall-clock axis.
 
-Per-GPU rows open when utilisation spread crosses ``SPREAD_EXPAND_PTS``.
+Per-GPU rows open when the computer says the spread has earned it.
 This section presents measurements and leaves verdicts to diagnostics.
 """
 
@@ -27,7 +27,6 @@ from . import theme
 
 # Window-p95 GPU utilisation spread (max - min, percentage points) that
 # automatically opens the per-GPU rows.
-SPREAD_EXPAND_PTS = 20.0
 
 _GPU_COLORS = (
     "#f97316",
@@ -85,27 +84,34 @@ def format_gb_pair(used_bytes: Any, total_bytes: Any) -> Tuple[str, str]:
     return (num, f"/ {total_s} GB")
 
 
-def disclosure_text(gpus: List[Dict[str, Any]], *, is_open: bool) -> str:
+def disclosure_text(
+    gpus: List[Dict[str, Any]],
+    roll: Dict[str, Any],
+    *,
+    is_open: bool,
+) -> str:
     """Header of the per-GPU rows: the utilisation range, and nothing else.
 
-    The text reports the observed range without assigning a verdict. Its tail
-    reflects the disclosure's current state, including user changes.
+    The range is read from the payload rather than recomputed. Computing
+    it here made a SECOND definition of "the spread across GPUs" living
+    beside ``gpu_delta``, and the two could disagree: this is the range of
+    window medians, that is the 95th percentile of per-tick max minus min.
+    Both are legitimate; two unnamed ones on one card were not.
+
+    The text reports the observed range without assigning a verdict. Its
+    tail reflects the disclosure's current state, including user changes.
     """
-    utils = []
-    for g in gpus:
-        u = g.get("util_p50")
-        if u is None:
-            u = g.get("util_now")
-        if u is not None:
-            utils.append(float(u))
-    n = len(utils)
+    n = len(gpus)
     if n == 0:
         return ""
     tail = " · click to close" if is_open else " · click to open"
     if n == 1:
         return "1 GPU" + tail
-    lo, hi = min(utils), max(utils)
-    return f"{n} GPUs · util {lo:.0f} to {hi:.0f}%" + tail
+    span = roll.get("util_range")
+    if not span:
+        return f"{n} GPUs" + tail
+    low, high = span
+    return f"{n} GPUs · util {low:.0f} to {high:.0f}%" + tail
 
 
 def node_scope_text(ctx: Dict[str, Any]) -> str:
@@ -212,29 +218,16 @@ def gpus_unreported(gpus: List[Dict[str, Any]]) -> bool:
     return bool(gpus) and not any(gpu.get("reported") for gpu in gpus)
 
 
-def odd_ones_out(gpus: List[Dict[str, Any]]) -> set:
-    """GPU indices on the smaller side of the utilisation split.
+def odd_ones_out(roll: Dict[str, Any]) -> set:
+    """GPU indices the computer marked as the smaller utilisation group.
 
-    Values split at the midpoint between the lowest and highest per-GPU
-    median. The smaller group is highlighted; ties select the higher group.
+    Read, not derived. The rule splits at the midpoint between the lowest
+    and highest per-GPU median and selects the smaller side, which derives
+    a threshold and then picks entities by it. That is the shape of a
+    diagnosis rule, so it moved to the compute layer unchanged; this reads
+    the answer.
     """
-    utils = []
-    for g in gpus:
-        u = g.get("util_p50")
-        if u is None:
-            u = g.get("util_now")
-        if u is not None:
-            utils.append((int(g.get("gpu_idx", 0)), float(u)))
-    if len(utils) < 2:
-        return set()
-    lo = min(u for _, u in utils)
-    hi = max(u for _, u in utils)
-    if hi <= lo:
-        return set()
-    mid = (hi + lo) / 2.0
-    high = {i for i, u in utils if u > mid}
-    low = {i for i, u in utils if u <= mid}
-    return high if len(high) <= len(low) else low
+    return {int(i) for i in (roll.get("odd_gpus") or ())}
 
 
 # Host CPU is psutil.cpu_percent(): the mean across logical cores, where 100%
@@ -254,10 +247,14 @@ def _num(value: Any, fmt: str = "{:.0f}") -> str:
 def rows_html(
     gpus: List[Dict[str, Any]],
     power_series: List[Dict[str, Any]],
-    *,
-    spread: Optional[float],
+    roll: Dict[str, Any],
 ) -> str:
     """Build GPU rows and highlight the smaller side of a wide util split.
+
+    Both the decision to highlight and the choice of which GPUs arrive on
+    the payload. The card used to hold a threshold of its own and compare
+    the spread against it, which is a severity call in the one layer that
+    may not make one.
 
     Absent values use ``NA`` and are never represented as zero.
     """
@@ -265,8 +262,7 @@ def rows_html(
         int(p.get("gpu_idx", -1)): p.get("values") or []
         for p in power_series or []
     }
-    over = spread is not None and spread > SPREAD_EXPAND_PTS
-    marked = odd_ones_out(gpus) if over else set()
+    marked = odd_ones_out(roll) if roll.get("rows_over") else set()
     head = (
         "<tr><th>gpu</th><th>util</th><th>power trend</th>"
         "<th>mem GB</th><th>temp °C</th><th>W / limit</th></tr>"
@@ -795,15 +791,14 @@ def _update_gpu_rows(
 
     gpus = roll.get("gpus", []) or []
     pseries = series.get("gpu_power", []) or []
-    spread = (roll.get("gpu_delta", {}) or {}).get("p95")
-    over = spread is not None and float(spread) > SPREAD_EXPAND_PTS
+    over = bool(roll.get("rows_over"))
     if should_auto_open(prev_over=panel["_over"], over=over):
         panel["rows"].value = True
     panel["_over"] = over
     panel["rows_hint"].text = disclosure_text(
-        gpus, is_open=bool(panel["rows"].value)
+        gpus, roll, is_open=bool(panel["rows"].value)
     )
-    panel["rows_html"].content = rows_html(gpus, pseries, spread=spread)
+    panel["rows_html"].content = rows_html(gpus, pseries, roll)
 
 
 def update_system_section(panel: Dict[str, Any], data: Dict[str, Any]) -> None:

@@ -31,6 +31,7 @@ pytest.importorskip("nicegui")
 from traceml_ai.aggregator.display_drivers.nicegui_sections import (  # noqa: E402
     system_section,
 )
+from traceml_ai.renderers.system import dashboard_compute  # noqa: E402
 
 
 def _gpu(idx: int, **kw):
@@ -46,16 +47,18 @@ def _gpu(idx: int, **kw):
     return row
 
 
-# --- the outlier split ---------------------------------------------------
+# --- the outlier split, now owned by the compute layer -------------------
+# The rule moved out of the card in part 5a-ii. Its assertions are
+# unchanged, which is the point: the move preserved behaviour exactly.
 def test_one_busy_gpu_among_four_is_the_marked_one():
     gpus = [_gpu(i, util_p50=u) for i, u in enumerate([100.0, 2.0, 2.0, 2.0])]
-    assert system_section.odd_ones_out(gpus) == {0}
+    assert dashboard_compute._odd_gpus(gpus) == [0]
 
 
 def test_one_idle_gpu_among_four_is_the_marked_one():
     """The smaller group is marked whichever side of the split it is on."""
     gpus = [_gpu(i, util_p50=u) for i, u in enumerate([98.0, 98.0, 98.0, 3.0])]
-    assert system_section.odd_ones_out(gpus) == {3}
+    assert dashboard_compute._odd_gpus(gpus) == [3]
 
 
 def test_a_two_gpu_host_marks_the_faster_one():
@@ -67,27 +70,27 @@ def test_a_two_gpu_host_marks_the_faster_one():
     even when the interesting one is the card that fell behind.
     """
     gpus = [_gpu(0, util_p50=95.0), _gpu(1, util_p50=10.0)]
-    assert system_section.odd_ones_out(gpus) == {0}
+    assert dashboard_compute._odd_gpus(gpus) == [0]
 
 
 def test_evenly_loaded_gpus_mark_nothing():
     gpus = [_gpu(i, util_p50=50.0) for i in range(4)]
-    assert system_section.odd_ones_out(gpus) == set()
+    assert dashboard_compute._odd_gpus(gpus) == []
 
 
 def test_a_single_gpu_marks_nothing():
-    assert system_section.odd_ones_out([_gpu(0, util_p50=99.0)]) == set()
+    assert dashboard_compute._odd_gpus([_gpu(0, util_p50=99.0)]) == []
 
 
 def test_the_split_falls_back_to_the_instantaneous_reading():
     """`util_p50` is preferred; `util_now` is used when it is absent."""
     gpus = [_gpu(0, util_now=100.0), _gpu(1, util_now=1.0)]
-    assert system_section.odd_ones_out(gpus) == {0}
+    assert dashboard_compute._odd_gpus(gpus) == [0]
 
 
 def test_a_gpu_with_no_utilisation_at_all_is_not_in_either_group():
     gpus = [_gpu(0, util_p50=90.0), _gpu(1, util_p50=5.0), _gpu(2)]
-    assert 2 not in system_section.odd_ones_out(gpus)
+    assert 2 not in dashboard_compute._odd_gpus(gpus)
 
 
 # --- the two definitions of "never reported" -----------------------------

@@ -73,6 +73,72 @@ def _empty_dashboard_series() -> Dict[str, Any]:
     }
 
 
+def _gpu_medians(gpus: List[Dict[str, Any]]) -> List[tuple]:
+    """Each GPU's representative utilisation, as (index, value).
+
+    The window median where there is one, else the newest reading. One
+    definition, used by everything that asks about the spread across
+    devices, so two surfaces on the same card cannot answer differently.
+    """
+    out = []
+    for g in gpus:
+        value = g.get("util_p50")
+        if value is None:
+            value = g.get("util_now")
+        if value is not None:
+            out.append((int(g.get("gpu_idx", 0)), float(value)))
+    return out
+
+
+def _odd_gpus(gpus: List[Dict[str, Any]]) -> List[int]:
+    """The GPUs on the smaller side of the utilisation split.
+
+    Values split at the midpoint between the lowest and highest
+    representative utilisation; the smaller group is the one worth
+    pointing at, and a tie goes to the higher group.
+
+    Moved here from the card unchanged. It derives a threshold and then
+    selects entities by it, which is the shape of a diagnosis rule and not
+    of a drawing decision, so it belongs on this side of the boundary. Its
+    behaviour is deliberately preserved, including the consequence that on
+    a two-GPU host the groups always tie and the busier card is the one
+    marked.
+    """
+    pairs = _gpu_medians(gpus)
+    if len(pairs) < 2:
+        return []
+    low_value = min(v for _i, v in pairs)
+    high_value = max(v for _i, v in pairs)
+    if high_value <= low_value:
+        return []
+    mid = (high_value + low_value) / 2.0
+    high = [i for i, v in pairs if v > mid]
+    low = [i for i, v in pairs if v <= mid]
+    return sorted(high if len(high) <= len(low) else low)
+
+
+# Utilisation spread, in percentage points, at which the per-GPU rows
+# have earned opening themselves. A threshold against a measurement is a
+# severity judgement, so it lives here and not in the card.
+SPREAD_EXPAND_PTS = 20.0
+
+
+def _util_range(gpus: List[Dict[str, Any]]) -> Optional[tuple]:
+    """The lowest and highest representative utilisation, or None.
+
+    The card computed this itself for its disclosure header, which made it
+    a SECOND definition of "the spread across GPUs" living beside
+    ``gpu_delta``, and the two could disagree: one is the range of window
+    medians, the other the 95th percentile of per-tick max minus min.
+    Both are legitimate; having two of them unnamed on one card was not.
+    """
+    pairs = _gpu_medians(gpus)
+    if not pairs:
+        return None
+    values = [v for _i, v in pairs]
+    return (min(values), max(values))
+
+
 class SystemDashboardComputer:
     """Compute dashboard rollups and short time-series."""
 
@@ -353,6 +419,14 @@ class SystemDashboardComputer:
                 else []
             ),
         }
+
+        gpu_rows = rollups["gpus"]
+        rollups["odd_gpus"] = _odd_gpus(gpu_rows)
+        rollups["util_range"] = _util_range(gpu_rows)
+        spread = (rollups.get("gpu_delta") or {}).get("p95")
+        rollups["rows_over"] = (
+            spread is not None and float(spread) > SPREAD_EXPAND_PTS
+        )
 
         rollups["ctx"] = {
             "world_size": int(last["world_size"] or 0),
