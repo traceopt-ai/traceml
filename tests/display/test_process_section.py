@@ -658,3 +658,24 @@ def test_the_total_line_is_drawn_and_fits_inside_the_axis():
     drawn = [v for s in series for _t, v in s["data"]]
     top = panel["cpu_chart"].options["yAxis"]["max"]
     assert top >= max(drawn), "the total must not be clipped"
+
+
+def test_the_rss_row_shows_the_same_basis_as_the_rss_tile():
+    """A reader who checks the tile against the rows must find it there.
+
+    The tile names a rank at its median. The row used to show that rank's
+    newest sample, so on a finished run the tile said 2.1 GB and the row
+    it pointed at said 1.0 GB.
+    """
+    ranks = (
+        RankSnapshot(
+            global_rank=0,
+            ram_used_bytes=1.0 * GIB,
+            ram_used_p50_bytes=2.1 * GIB,
+            ram_total_bytes=187.0 * GIB,
+            freshness="fresh",
+        ),
+    )
+    html = process_section.rows_html(ranks, None)
+    assert "2.1" in html
+    assert "1.0 /" not in html

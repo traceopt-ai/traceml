@@ -206,8 +206,18 @@ def rows_html(
     for rank in ranks:
         index = int(rank.global_rank)
         colour = charting.rank_color(index)
+        # The median over the window, matching the tile above. Showing the
+        # newest sample here made the card contradict itself: the tile
+        # named R1 at its median while R1's own row showed its post
+        # teardown value, so the number a reader went to the rows to
+        # verify disagreed with the one that sent them there.
         used, used_rest = format_gb_pair(
-            rank.ram_used_bytes, rank.ram_total_bytes
+            (
+                rank.ram_used_p50_bytes
+                if rank.ram_used_p50_bytes is not None
+                else rank.ram_used_bytes
+            ),
+            rank.ram_total_bytes,
         )
         reserved, reserved_rest = format_gb_pair(
             rank.gpu_reserved_bytes, rank.gpu_total_bytes
