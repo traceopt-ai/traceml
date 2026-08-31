@@ -310,23 +310,28 @@ class ProcessRepository:
     def fetch_recent_rank_window(
         self,
         conn: sqlite3.Connection,
-        window_n: int = 100,
+        window_s: float = 60.0,
         newest_ts: Optional[float] = None,
-        max_age_s: float = 20.0 * 60.0,
+        max_rows_per_rank: int = 2000,
     ) -> List[sqlite3.Row]:
-        """The last ``window_n`` samples of EVERY rank, newest last.
+        """Every rank's samples from the last ``window_s`` seconds.
 
-        Per rank, not globally. A rank that stopped reporting keeps its own
-        history instead of being squeezed out by livelier peers, and a rank
-        that never reports does not shrink everyone else's window.
+        A DURATION, not a sample count. The two are the same thing only at
+        one sampling rate: at the default two-second cadence a hundred
+        samples is a little over three minutes, at a half-second cadence it
+        is under one, so a card labelled "last 100 samples" describes a
+        different span on every run and two runs cannot be compared.
 
-        Bounded by time before the partition runs: without it the
-        ROW_NUMBER scans every row ever written in order to rank the last
-        hundred, and that scan grows with the run.
+        Per rank rather than globally. A rank that stopped reporting keeps
+        its own history instead of being squeezed out by livelier peers.
+
+        ``max_rows_per_rank`` is a backstop, not the window: a pathological
+        sampler cannot make one tick's read unbounded. It sits far above
+        any real cadence, so under normal operation the duration decides.
         """
         floor_ts = None
         if newest_ts is not None:
-            floor_ts = newest_ts - max(60.0, float(max_age_s))
+            floor_ts = float(newest_ts) - max(0.0, float(window_s))
         return conn.execute(
             """
             WITH recent AS (
@@ -347,7 +352,7 @@ class ProcessRepository:
             WHERE rn <= ?
             ORDER BY COALESCE(global_rank, rank) ASC, seq ASC, id ASC;
             """,
-            (floor_ts, floor_ts, int(max(1, window_n))),
+            (floor_ts, floor_ts, int(max(1, max_rows_per_rank))),
         ).fetchall()
 
     def fetch_rank_latest(self, conn: sqlite3.Connection) -> List[sqlite3.Row]:

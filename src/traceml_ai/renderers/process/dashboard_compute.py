@@ -43,6 +43,7 @@ from traceml_ai.renderers.shared.run_series import (
 from .dashboard_models import (
     ChartSeries,
     ChartTrace,
+    CudaHeadroomSample,
     GpuSnapshot,
     MetricRollup,
     ProcessDashboardPayload,
@@ -58,14 +59,23 @@ from .repository import ProcessRepository
 # section applied to its own history slice on 0.3.7.
 DASHBOARD_WINDOW = 100
 
-# Samples per rank in the recent-window view.
-RANK_WINDOW_N = 100
+# The recent window the tiles describe, as a DURATION. A sample count
+# means a different span at every sampling rate, so two runs sampling at
+# different cadences could not be compared and the card could not say what
+# period it was summarising. The same duration drives both the repository
+# read and the recent-to-retained chart transition.
+RECENT_WINDOW_S = 60.0
 
 # A rolling mean over minutes cannot visibly change between two ticks, so
 # the whole-run reads refresh on their own slower clock. Recomputing them
 # every tick was the single largest cost measured in this block, which is
 # the demonstrated need this cache exists for.
 RUN_REFRESH_S = 15.0
+
+# Reserved-memory spread at which the per-rank rows have earned opening
+# themselves. Below this the rows are a detail; at or above it, WHICH rank
+# is holding more is the question the reader now has.
+IMBALANCE_OPEN_PCT = 15.0
 
 
 def percentile(values: Sequence[Optional[float]], p: float) -> float:
@@ -121,6 +131,47 @@ def _gpu_reported(row: Any) -> bool:
         return False
 
 
+def _least_headroom_sample(
+    rows: Sequence[Any],
+) -> Optional[CudaHeadroomSample]:
+    """The least-headroom row, kept whole so CUDA tile values stay paired.
+
+    Equal-headroom samples resolve to the newest usable row. This makes the
+    result deterministic while preferring the most recent view of live
+    allocations when reserved capacity is unchanged.
+    """
+    candidates = []
+    for row in rows:
+        reserved = _opt_float(row["gpu_mem_reserved_bytes"])
+        total = _opt_float(row["gpu_mem_total_bytes"])
+        if reserved is None or total is None or total <= 0:
+            continue
+        stamp = _opt_float(row["sample_ts_s"])
+        seq = _opt_float(row["seq"])
+        row_id = _opt_float(row["id"])
+        candidates.append(
+            (
+                row,
+                total - reserved,
+                stamp if stamp is not None else float("-inf"),
+                seq if seq is not None else float("-inf"),
+                row_id if row_id is not None else float("-inf"),
+            )
+        )
+    if not candidates:
+        return None
+
+    chosen, _headroom, _stamp, _seq, _row_id = min(
+        candidates,
+        key=lambda item: (item[1], -item[2], -item[3], -item[4]),
+    )
+    return CudaHeadroomSample(
+        allocated_bytes=_opt_float(chosen["gpu_mem_used_bytes"]),
+        reserved_bytes=float(chosen["gpu_mem_reserved_bytes"]),
+        total_bytes=float(chosen["gpu_mem_total_bytes"]),
+    )
+
+
 def _cpu_capacity_of(row: Any) -> Optional[float]:
     """CPU as a share of the host's cores, not a sum across them.
 
@@ -133,6 +184,45 @@ def _cpu_capacity_of(row: Any) -> Optional[float]:
     if used is None or cores is None or cores <= 0:
         return None
     return used / cores
+
+
+def _total_trace(traces: Sequence[RankTrace]) -> Optional[RankTrace]:
+    """Every rank summed, on the union of their sample times.
+
+    Ranks sample on their own clocks, so adding the series index by index
+    would add readings taken at different moments. Each rank's last known
+    value is carried forward to every timestamp instead, which is what a
+    step function does between samples, and the sum is taken there.
+
+    A rank that has not reported yet contributes nothing rather than a
+    zero, so the total does not dip while ranks are still starting.
+    """
+    usable = [t for t in traces if t.timestamps]
+    if len(usable) < 2:
+        return None
+    stamps = sorted({float(s) for t in usable for s in t.timestamps})
+    if not stamps:
+        return None
+
+    cursors = [0] * len(usable)
+    last: List[Optional[float]] = [None] * len(usable)
+    values: List[float] = []
+    for stamp in stamps:
+        for i, trace in enumerate(usable):
+            while (
+                cursors[i] < len(trace.timestamps)
+                and float(trace.timestamps[cursors[i]]) <= stamp
+            ):
+                last[i] = float(trace.values[cursors[i]])
+                cursors[i] += 1
+        seen = [v for v in last if v is not None]
+        values.append(sum(seen) if seen else 0.0)
+
+    return RankTrace(
+        global_rank=-1,
+        timestamps=tuple(stamps),
+        values=tuple(values),
+    )
 
 
 class ProcessDashboardComputer:
@@ -232,7 +322,7 @@ class ProcessDashboardComputer:
         with its true age instead of vanishing from the block.
         """
         window_rows = self._db.fetch_recent_rank_window(
-            conn, window_n=RANK_WINDOW_N, newest_ts=newest_ts
+            conn, window_s=RECENT_WINDOW_S, newest_ts=newest_ts
         )
         latest_rows = self._db.fetch_rank_latest(conn)
 
@@ -347,20 +437,6 @@ class ProcessDashboardComputer:
                 ]
             ),
             ram_total_bytes=_opt_float(newest_row["ram_total_bytes"]),
-            gpu_allocated_p50_bytes=_median(
-                [
-                    value
-                    for value in (
-                        _opt_float(r["gpu_mem_used_bytes"]) for r in reported
-                    )
-                    if value is not None
-                ]
-            ),
-            gpu_reserved_bytes=(
-                _opt_float(newest_gpu["gpu_mem_reserved_bytes"])
-                if newest_gpu is not None
-                else None
-            ),
             gpu_reserved_p50_bytes=_median(
                 [
                     value
@@ -371,6 +447,7 @@ class ProcessDashboardComputer:
                     if value is not None
                 ]
             ),
+            cuda_least_headroom_sample=_least_headroom_sample(reported),
             gpu_total_bytes=(
                 _opt_float(newest_gpu["gpu_mem_total_bytes"])
                 if newest_gpu is not None
@@ -402,6 +479,7 @@ class ProcessDashboardComputer:
         )
 
         imbalance = self._reserved_imbalance(aggregate_over)
+        rows_open = self._rows_trigger(aggregate_over, imbalance)
 
         history = tuple(self._dashboard_rollup)
         if not history:
@@ -411,7 +489,9 @@ class ProcessDashboardComputer:
                 cpu_capacity=self._cpu_rollup(aggregate_over),
                 rss_worst=self._rss_rollup(aggregate_over),
                 gpu_reserved=self._cuda_rollup(aggregate_over),
+                gpu_allocated=self._alloc_rollup(aggregate_over),
                 reserved_imbalance_percent=imbalance,
+                rows_open=rows_open,
             )
 
         window = history[-DASHBOARD_WINDOW:]
@@ -456,9 +536,11 @@ class ProcessDashboardComputer:
             ranks=ranks,
             coverage=coverage,
             reserved_imbalance_percent=imbalance,
+            rows_open=rows_open,
             cpu_capacity=self._cpu_rollup(aggregate_over),
             rss_worst=self._rss_rollup(aggregate_over),
             gpu_reserved=self._cuda_rollup(aggregate_over),
+            gpu_allocated=self._alloc_rollup(aggregate_over),
         )
 
     # --- rollups ---------------------------------------------------------
@@ -501,12 +583,14 @@ class ProcessDashboardComputer:
         ]
         if not pairs:
             return None
-        worst, _p50 = max(pairs, key=lambda item: item[1])
-        shown = worst.ram_used_bytes
-        if shown is None:
-            shown = worst.ram_used_p50_bytes or 0.0
+        worst, worst_p50 = max(pairs, key=lambda item: item[1])
+        # The median, not the newest sample. The newest reading of a
+        # finished run lands after teardown, so the tile used to show a
+        # collapsed value beside a chart still drawn at the run's real
+        # level. One rule for the whole section: each rank's median over
+        # the recent window, then the highest of those.
         return MetricRollup(
-            now=float(shown),
+            now=float(worst_p50),
             p50=_median([value for _r, value in pairs]),
             total=worst.ram_total_bytes,
             worst_rank=worst.global_rank,
@@ -515,29 +599,60 @@ class ProcessDashboardComputer:
     def _cuda_rollup(
         self, ranks: Sequence[RankSnapshot]
     ) -> Optional[MetricRollup]:
-        """Reserved memory on the rank with the least headroom.
+        """Reserved memory from the window's least-headroom rank and row."""
+        worst = self._least_headroom_rank(ranks)
+        if worst is None or worst.cuda_least_headroom_sample is None:
+            return None
+        sample = worst.cuda_least_headroom_sample
+        return MetricRollup(
+            now=sample.reserved_bytes,
+            total=sample.total_bytes,
+            worst_rank=worst.global_rank,
+        )
 
-        Not the largest user: the process at risk is the one closest to
-        filling its card.
-        """
+    @staticmethod
+    def _least_headroom_rank(
+        ranks: Sequence[RankSnapshot],
+    ) -> Optional[RankSnapshot]:
+        """Select across each rank's least-headroom sample."""
         candidates = [
-            r
-            for r in ranks
-            if r.gpu_reserved_bytes is not None
-            and r.gpu_total_bytes is not None
-            and r.gpu_total_bytes > 0
+            r for r in ranks if r.cuda_least_headroom_sample is not None
         ]
         if not candidates:
             return None
-        worst = min(
+        return min(
             candidates,
-            key=lambda r: (r.gpu_total_bytes or 0.0)
-            - (r.gpu_reserved_bytes or 0.0),
+            key=lambda rank: rank.cuda_least_headroom_sample.headroom_bytes,
         )
+
+    def _alloc_rollup(
+        self, ranks: Sequence[RankSnapshot]
+    ) -> Optional[MetricRollup]:
+        """Live tensors on the rank the reserved tile chose.
+
+        The SAME rank, so the two GPU tiles describe one device rather than
+        two. Read side by side they answer "how close is the tightest rank
+        to filling its card, and how much of what it holds is live tensors"
+        rather than mixing a worst case with a cohort median.
+
+        Read from the ranks, not from the aggregated step history. The
+        history's newest step carries no GPU snapshot once a run tears
+        down, which left this tile reading "n/a" directly above rows that
+        listed each rank's allocated bytes.
+        """
+        chosen = self._least_headroom_rank(ranks)
+        if chosen is None or chosen.cuda_least_headroom_sample is None:
+            return None
+        # Reserved and allocated deliberately come from this exact rank and
+        # row. Pairing the rank's reserved peak with its allocated median
+        # would describe two different moments as though they were one.
+        sample = chosen.cuda_least_headroom_sample
+        if sample.allocated_bytes is None:
+            return None
         return MetricRollup(
-            now=float(worst.gpu_reserved_bytes or 0.0),
-            total=worst.gpu_total_bytes,
-            worst_rank=worst.global_rank,
+            now=sample.allocated_bytes,
+            total=sample.total_bytes,
+            worst_rank=chosen.global_rank,
         )
 
     def _reserved_imbalance(
@@ -563,17 +678,44 @@ class ProcessDashboardComputer:
             return None
         return float((high - low) / high * 100.0)
 
+    def _rows_trigger(
+        self,
+        ranks: Sequence[RankSnapshot],
+        imbalance: Optional[float],
+    ) -> bool:
+        """Whether the per-rank rows have earned opening themselves.
+
+        Armed only once every reporting rank has HELD an allocation across
+        its window. Ranks reach their first CUDA allocation seconds to
+        minutes apart, and an unarmed trigger reads that ordinary ramp as
+        total imbalance on every run's first ticks, so the rows would fly
+        open on a healthy start.
+
+        This is a judgement about the telemetry, which is why it is decided
+        here and shipped as a fact. A view that compared the imbalance to a
+        number of its own would be making a severity call in the layer that
+        is only allowed to draw one.
+        """
+        armed = bool(ranks) and all(
+            rank.gpu_reserved_p50_bytes is not None
+            and rank.gpu_reserved_p50_bytes > 0
+            for rank in ranks
+        )
+        if not armed or imbalance is None:
+            return False
+        return float(imbalance) >= IMBALANCE_OPEN_PCT
+
     # --- whole-run series ------------------------------------------------
     def _rank_charts(
         self,
         conn: Any,
-        window_span_s: float,
+        recent_window_s: float,
         by_rank: Dict[int, List[Any]],
     ) -> Tuple[RankChart, RankChart]:
         """Per-rank CPU and RSS, over the window or over the whole run."""
         return (
-            self._one_chart(conn, "cpu", window_span_s, by_rank),
-            self._one_chart(conn, "rss", window_span_s, by_rank),
+            self._one_chart(conn, "cpu", recent_window_s, by_rank),
+            self._one_chart(conn, "rss", recent_window_s, by_rank),
         )
 
     def _recent_chart(
@@ -611,13 +753,19 @@ class ProcessDashboardComputer:
                         values=tuple(values),
                     )
                 )
-        return RankChart(mode="recent", span_s=span_s, traces=tuple(traces))
+        built = tuple(traces)
+        return RankChart(
+            mode="recent",
+            span_s=span_s,
+            traces=built,
+            total=_total_trace(built),
+        )
 
     def _one_chart(
         self,
         conn: Any,
         metric: str,
-        window_span_s: float,
+        recent_window_s: float,
         by_rank: Dict[int, List[Any]],
     ) -> RankChart:
         """One chart, in whichever mode the run has earned.
@@ -636,7 +784,7 @@ class ProcessDashboardComputer:
         if stats is None:
             return self._recent_chart(metric, by_rank, None)
 
-        mode = self._run_policy.mode_for(stats.span_s, window_span_s)
+        mode = self._run_policy.mode_for(stats.span_s, recent_window_s)
         if mode != "retained":
             return self._recent_chart(metric, by_rank, stats.span_s)
 
@@ -668,19 +816,21 @@ class ProcessDashboardComputer:
             values.append(roll_avg)
             peaks.append(roll_max)
 
+        built = tuple(
+            RankTrace(
+                global_rank=rank_id,
+                timestamps=tuple(rolled[rank_id][0]),
+                values=tuple(rolled[rank_id][1]),
+                peaks=tuple(rolled[rank_id][2]),
+            )
+            for rank_id in sorted(rolled)
+        )
         chart = RankChart(
             mode="retained",
             window_s=plan.window_s,
             span_s=stats.span_s,
-            traces=tuple(
-                RankTrace(
-                    global_rank=rank_id,
-                    timestamps=tuple(rolled[rank_id][0]),
-                    values=tuple(rolled[rank_id][1]),
-                    peaks=tuple(rolled[rank_id][2]),
-                )
-                for rank_id in sorted(rolled)
-            ),
+            traces=built,
+            total=_total_trace(built),
         )
         self._run_cache[metric] = chart
         self._run_cache_at[metric] = now
@@ -694,8 +844,9 @@ class ProcessDashboardComputer:
         by_rank: Dict[int, List[Any]],
     ) -> ProcessDashboardPayload:
         """Attach the per-rank charts, in whichever mode the run warrants."""
-        window_span = _window_span(payload.history)
-        cpu_chart, rss_chart = self._rank_charts(conn, window_span, by_rank)
+        cpu_chart, rss_chart = self._rank_charts(
+            conn, RECENT_WINDOW_S, by_rank
+        )
         return replace(
             payload, cpu_capacity_chart=cpu_chart, rss_chart=rss_chart
         )
@@ -755,14 +906,6 @@ def _entry_from_row(row: Any) -> ProcessHistoryEntry:
         ram_total_bytes=float(row["ram_total"] or 0.0),
         gpu=gpu,
     )
-
-
-def _window_span(window: Sequence[ProcessHistoryEntry]) -> float:
-    """Wall-clock seconds the recent window covers."""
-    stamps = [e.ts for e in window if e.ts is not None]
-    if len(stamps) < 2:
-        return 0.0
-    return max(0.0, max(stamps) - min(stamps))
 
 
 def _build_chart(window: Sequence[ProcessHistoryEntry]) -> ChartSeries:

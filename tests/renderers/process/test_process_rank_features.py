@@ -28,19 +28,28 @@ def payload(db, **kw):
     return ProcessDashboardComputer(db_path=db.path, **kw).compute()
 
 
-def _run(db, *, ranks=4, samples=120, cores=8, hot_rank=None, dies=None):
+def _run(
+    db,
+    *,
+    ranks=4,
+    samples=120,
+    cadence_s=2.0,
+    cores=8,
+    hot_rank=None,
+    dies=None,
+):
     """A multi-rank run. ``hot_rank`` burns CPU; ``dies`` stops early."""
     for seq in range(1, samples + 1):
         for rank in range(ranks):
             if dies is not None and rank == dies[0] and seq > dies[1]:
                 continue
             db.insert(
-                recv_ts_ns=int((1_700_000_000 + seq * 2) * 1e9),
+                recv_ts_ns=int((1_700_000_000 + seq * cadence_s) * 1e9),
                 rank=rank,
                 global_rank=rank,
                 node_rank=0,
                 seq=seq,
-                sample_ts_s=1_700_000_000.0 + seq * 2,
+                sample_ts_s=1_700_000_000.0 + seq * cadence_s,
                 cpu_percent=(700.0 if rank == hot_rank else 200.0),
                 cpu_logical_core_count=cores,
                 ram_used_bytes=(2.0 + rank * 0.5) * GB,
@@ -215,7 +224,9 @@ def test_the_recent_view_moves_between_ticks(process_db):
         db_path=process_db.path, sampler_interval_s=2.0
     )
     first = computer.compute().rss_chart
-    _run(process_db, ranks=2, samples=40)
+    # Stay below the 60 s recent window plus its transition margin; this
+    # test is about live refresh, not the switch to retained history.
+    _run(process_db, ranks=2, samples=30)
     second = computer.compute().rss_chart
 
     assert first.mode == second.mode == "recent"
@@ -237,6 +248,34 @@ def test_a_long_run_switches_to_the_retained_view(process_db):
     assert chart.is_retained is True
     assert chart.window_s is not None
     assert len(chart.traces) == 2
+
+
+@pytest.mark.parametrize(
+    ("cadence_s", "duration_s", "expected_mode"),
+    (
+        (0.5, 60.0, "recent"),
+        (2.0, 60.0, "recent"),
+        (0.5, 80.0, "retained"),
+        (2.0, 80.0, "retained"),
+    ),
+)
+def test_chart_mode_depends_on_duration_not_sample_count(
+    process_db, cadence_s, duration_s, expected_mode
+):
+    """Equal-duration runs choose one mode at every sampling cadence."""
+    samples = int(duration_s / cadence_s) + 1
+    _run(
+        process_db,
+        ranks=2,
+        samples=samples,
+        cadence_s=cadence_s,
+    )
+
+    chart = payload(
+        process_db, sampler_interval_s=cadence_s
+    ).cpu_capacity_chart
+
+    assert chart.mode == expected_mode
 
 
 def test_the_mode_is_stated_never_inferred_from_an_empty_field(process_db):
@@ -280,3 +319,265 @@ def test_the_fields_the_card_already_reads_are_unchanged(process_db):
     assert out.window_len > 0
     assert out.gpu_available is True
     assert out.chart is not None and out.chart.ram_percent.values
+
+
+# --- the rows auto-open trigger -----------------------------------------
+def test_the_trigger_stays_armed_off_until_every_rank_has_allocated(
+    process_db,
+):
+    """Ranks reach their first CUDA allocation seconds to minutes apart.
+
+    An unarmed trigger reads that ordinary ramp as total imbalance, so the
+    rows would fly open on the first ticks of a healthy run.
+    """
+    computer = ProcessDashboardComputer(
+        db_path=process_db.path, sampler_interval_s=2.0
+    )
+    ramping = (
+        RankSnapshot(global_rank=0, gpu_reserved_p50_bytes=8.0 * GB),
+        RankSnapshot(global_rank=1, gpu_reserved_p50_bytes=None),
+    )
+    assert computer._rows_trigger(ramping, 99.0) is False
+
+
+def test_the_trigger_fires_once_a_held_spread_is_large(process_db):
+    computer = ProcessDashboardComputer(
+        db_path=process_db.path, sampler_interval_s=2.0
+    )
+    held = (
+        RankSnapshot(global_rank=0, gpu_reserved_p50_bytes=8.0 * GB),
+        RankSnapshot(global_rank=1, gpu_reserved_p50_bytes=4.0 * GB),
+    )
+    assert computer._rows_trigger(held, 50.0) is True
+    assert computer._rows_trigger(held, 1.0) is False
+    assert computer._rows_trigger(held, None) is False
+
+
+def test_a_spread_run_ships_the_trigger_on(process_db):
+    """End to end. The shared fixture is deliberately uneven.
+
+    Its ranks reserve 6, 8, 10 and 12 GB, a 50% spread, which is the case
+    the rows exist to answer.
+    """
+    _run(process_db, ranks=4, samples=30)
+    out = payload(process_db, sampler_interval_s=2.0)
+    assert out.reserved_imbalance_percent == pytest.approx(50.0)
+    assert out.rows_open is True
+
+
+def test_an_even_run_leaves_the_rows_shut(process_db):
+    """Every rank holding the same reserved bytes has nothing to show."""
+    for seq in range(1, 31):
+        for rank in range(4):
+            process_db.insert(
+                recv_ts_ns=int((1_700_000_000 + seq * 2) * 1e9),
+                rank=rank,
+                global_rank=rank,
+                node_rank=0,
+                seq=seq,
+                sample_ts_s=1_700_000_000.0 + seq * 2,
+                cpu_percent=200.0,
+                cpu_logical_core_count=8,
+                ram_used_bytes=2.0 * GB,
+                ram_total_bytes=64.0 * GB,
+                gpu_available=1,
+                gpu_device_index=rank,
+                gpu_mem_used_bytes=4.0 * GB,
+                gpu_mem_reserved_bytes=6.0 * GB,
+                gpu_mem_total_bytes=40.0 * GB,
+            )
+
+    out = payload(process_db, sampler_interval_s=2.0)
+    assert out.reserved_imbalance_percent == pytest.approx(0.0)
+    assert out.rows_open is False
+
+
+# --- the one rule the section follows (review of #417) -------------------
+def test_the_recent_window_is_a_duration_not_a_sample_count(process_db):
+    """A hundred samples is a different span at every sampling rate.
+
+    At a 2 s cadence it is over three minutes; at 0.5 s it is under one.
+    A card that says "recent 60s" has to mean 60 seconds on both, or two
+    runs cannot be compared and the label is not true of either.
+    """
+    from traceml_ai.renderers.process.dashboard_compute import (
+        RECENT_WINDOW_S,
+    )
+
+    # 200 samples at 0.5 s: 100 s of history, of which 60 s is in window.
+    for seq in range(1, 201):
+        process_db.insert(
+            recv_ts_ns=int((1_700_000_000 + seq * 0.5) * 1e9),
+            rank=0,
+            global_rank=0,
+            node_rank=0,
+            seq=seq,
+            sample_ts_s=1_700_000_000.0 + seq * 0.5,
+            cpu_percent=200.0,
+            cpu_logical_core_count=8,
+            ram_used_bytes=2.0 * GB,
+            ram_total_bytes=64.0 * GB,
+        )
+
+    computer = ProcessDashboardComputer(
+        db_path=process_db.path, sampler_interval_s=0.5
+    )
+    with computer._db.connect() as conn:
+        newest = computer._db.newest_sample_ts(conn)
+        rows = computer._db.fetch_recent_rank_window(
+            conn, window_s=RECENT_WINDOW_S, newest_ts=newest
+        )
+    stamps = [r["sample_ts_s"] for r in rows]
+    span = max(stamps) - min(stamps)
+    assert span <= RECENT_WINDOW_S
+    # A sample-count window would have taken all 200 rows, i.e. 100 s.
+    assert len(rows) < 200
+    assert span > RECENT_WINDOW_S / 2
+
+
+def test_the_rss_tile_shows_the_median_not_the_newest_sample(process_db):
+    """Teardown makes the newest sample unrepresentative.
+
+    The last rows of a finished run land after the process released its
+    memory, so a tile reading the newest value showed a collapsed number
+    beside a chart still drawn at the run's real level.
+    """
+    for seq in range(1, 31):
+        # Steady at 8 GB, then one teardown sample at 1 GB.
+        used = 1.0 * GB if seq == 30 else 8.0 * GB
+        process_db.insert(
+            recv_ts_ns=int((1_700_000_000 + seq * 2) * 1e9),
+            rank=0,
+            global_rank=0,
+            node_rank=0,
+            seq=seq,
+            sample_ts_s=1_700_000_000.0 + seq * 2,
+            cpu_percent=200.0,
+            cpu_logical_core_count=8,
+            ram_used_bytes=used,
+            ram_total_bytes=64.0 * GB,
+        )
+
+    rss = payload(process_db, sampler_interval_s=2.0).rss_worst
+    assert rss is not None
+    assert rss.now == pytest.approx(8.0 * GB)
+
+
+def test_reserved_selects_on_each_rank_s_peak_not_its_newest(process_db):
+    """The tile asks which rank came closest to filling its card.
+
+    That is a high-water mark. Rank 1 peaks higher than rank 0 but ends
+    lower, so selecting on the newest sample would name the wrong rank.
+    """
+    for seq in range(1, 21):
+        for rank, reserved in (
+            (0, 8.0 * GB),
+            (1, 30.0 * GB if seq < 15 else 2.0 * GB),
+        ):
+            process_db.insert(
+                recv_ts_ns=int((1_700_000_000 + seq * 2) * 1e9),
+                rank=rank,
+                global_rank=rank,
+                node_rank=0,
+                seq=seq,
+                sample_ts_s=1_700_000_000.0 + seq * 2,
+                cpu_percent=200.0,
+                cpu_logical_core_count=8,
+                ram_used_bytes=2.0 * GB,
+                ram_total_bytes=64.0 * GB,
+                gpu_available=1,
+                gpu_device_index=rank,
+                gpu_mem_used_bytes=1.0 * GB,
+                gpu_mem_reserved_bytes=reserved,
+                gpu_mem_total_bytes=40.0 * GB,
+            )
+
+    out = payload(process_db, sampler_interval_s=2.0)
+    assert out.gpu_reserved is not None
+    assert out.gpu_reserved.worst_rank == 1
+    assert out.gpu_reserved.now == pytest.approx(30.0 * GB)
+
+
+def test_allocated_and_reserved_come_from_the_same_rank_and_row(process_db):
+    """Two GPU tiles describe one device at one least-headroom sample."""
+    for seq in range(1, 21):
+        for rank in range(3):
+            reserved, alloc = {
+                0: (5.0 * GB, 1.0 * GB),
+                1: (
+                    30.0 * GB if seq in (10, 15) else 10.0 * GB,
+                    (
+                        24.0 * GB
+                        if seq == 15
+                        else (22.0 * GB if seq == 10 else 3.0 * GB)
+                    ),
+                ),
+                2: (6.0 * GB, 2.0 * GB),
+            }[rank]
+            process_db.insert(
+                recv_ts_ns=int((1_700_000_000 + seq * 2) * 1e9),
+                rank=rank,
+                global_rank=rank,
+                node_rank=0,
+                seq=seq,
+                sample_ts_s=1_700_000_000.0 + seq * 2,
+                cpu_percent=200.0,
+                cpu_logical_core_count=8,
+                ram_used_bytes=2.0 * GB,
+                ram_total_bytes=64.0 * GB,
+                gpu_available=1,
+                gpu_device_index=rank,
+                gpu_mem_used_bytes=alloc,
+                gpu_mem_reserved_bytes=reserved,
+                gpu_mem_total_bytes=40.0 * GB,
+            )
+
+    out = payload(process_db, sampler_interval_s=2.0)
+    assert out.gpu_reserved.worst_rank == 1
+    assert out.gpu_reserved.now == pytest.approx(30.0 * GB)
+    assert out.gpu_allocated is not None
+    assert out.gpu_allocated.worst_rank == 1
+    # R1's median allocation is 3 GB. The allocated tile instead uses the
+    # exact row chosen for reserved; of equal peaks, the newest row wins.
+    assert out.gpu_allocated.now == pytest.approx(24.0 * GB)
+    assert out.gpu_allocated.total == out.gpu_reserved.total
+
+
+def test_the_total_sums_ranks_on_their_own_clocks(process_db):
+    """Ranks do not share a sample clock, so index-wise addition is wrong.
+
+    Each rank's last known value is carried forward to every timestamp in
+    the union and the sum is taken there, which is what a step function
+    does between samples.
+    """
+    # Two ranks, deliberately offset: rank 1 samples one second later.
+    for seq in range(1, 21):
+        for rank, offset, cpu in ((0, 0.0, 200.0), (1, 1.0, 400.0)):
+            process_db.insert(
+                recv_ts_ns=int((1_700_000_000 + seq * 2 + offset) * 1e9),
+                rank=rank,
+                global_rank=rank,
+                node_rank=0,
+                seq=seq,
+                sample_ts_s=1_700_000_000.0 + seq * 2 + offset,
+                cpu_percent=cpu,
+                cpu_logical_core_count=8,
+                ram_used_bytes=2.0 * GB,
+                ram_total_bytes=64.0 * GB,
+            )
+
+    chart = payload(process_db, sampler_interval_s=2.0).cpu_capacity_chart
+    assert chart.total is not None
+    # The union of two offset clocks has more points than either rank.
+    assert len(chart.total.timestamps) > max(
+        len(t.timestamps) for t in chart.traces
+    )
+    # 200% and 400% of 8 cores is 25% and 50% of the host, so 75% together.
+    assert max(chart.total.values) == pytest.approx(75.0, abs=0.5)
+
+
+def test_a_single_rank_has_no_total(process_db):
+    """A total identical to the only line is noise, not information."""
+    _run(process_db, ranks=1, samples=20)
+    chart = payload(process_db, sampler_interval_s=2.0).cpu_capacity_chart
+    assert chart.total is None
