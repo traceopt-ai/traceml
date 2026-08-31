@@ -16,6 +16,7 @@ import sys
 import threading
 import time
 from collections import deque
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, BinaryIO, Callable, Iterable, Optional
 
@@ -29,6 +30,36 @@ DEFAULT_TCP_READY_TIMEOUT_SEC = 15.0
 DEFAULT_SHUTDOWN_TIMEOUT_SEC = 5.0
 DEFAULT_STDERR_TAIL_BYTES = 64 * 1024
 INTERRUPTED_EXIT_CODE = 130
+
+
+@dataclass(frozen=True)
+class TrainingOutcome:
+    """The result directly observed from the supervised training process.
+
+    A negative ``subprocess`` return code identifies a POSIX signal.  Keep the
+    raw value for accurate reporting and convert it only at the CLI boundary.
+    A torchrun-reported worker failure is normally a positive exit code and is
+    deliberately not reclassified by inspecting its output.
+    """
+
+    returncode: int
+
+    @property
+    def signal_name(self) -> Optional[str]:
+        """Return the directly observed POSIX signal name, when available."""
+        if _IS_WINDOWS or self.returncode >= 0:
+            return None
+        try:
+            return signal.Signals(-self.returncode).name
+        except ValueError:
+            return None
+
+    @property
+    def cli_exit_code(self) -> int:
+        """Return the conventional shell exit code for this outcome."""
+        if not _IS_WINDOWS and self.returncode < 0:
+            return 128 - self.returncode
+        return self.returncode
 
 
 class StderrTailCapture:
