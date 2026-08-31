@@ -223,6 +223,13 @@ class SystemRollups:
     # rather than in the card, which is where a rule that selects entities
     # by a derived threshold belongs.
     odd_gpus: Tuple[int, ...] = ()
+    # The lowest and highest representative utilisation, or None. Named so
+    # there is one definition of "the spread across GPUs" rather than this
+    # one and gpu_delta both living unnamed on the same card.
+    util_range: Optional[Tuple[float, float]] = None
+    # Whether the spread has earned opening the per-GPU rows. A threshold
+    # against a measurement is a severity call, so it is decided here.
+    rows_over: bool = False
 
     @property
     def gpus_unreported(self) -> bool:
@@ -272,11 +279,97 @@ class SystemRollups:
             if value is not None:
                 out[key] = value.to_dict()
         out["gpus"] = [g.to_dict() for g in self.gpus]
+        out["odd_gpus"] = list(self.odd_gpus)
+        out["util_range"] = self.util_range
+        out["rows_over"] = self.rows_over
         if self.ctx is not None:
             out["ctx"] = self.ctx.to_dict()
         if self.status is not None:
             out["status"] = self.status
         return out
+
+    @classmethod
+    def from_dict(cls, raw: Dict[str, Any]) -> "SystemRollups":
+        """Adapt the compute layer's rollup mapping."""
+        if not raw:
+            return cls()
+
+        def stat(key: str) -> Optional[Stat]:
+            block = raw.get(key)
+            if not block:
+                return None
+            return Stat(
+                now=block.get("now"),
+                p50=block.get("p50"),
+                p95=block.get("p95"),
+            )
+
+        ram = raw.get("ram") or None
+        mem = raw.get("gpu_mem") or None
+        temp = raw.get("temp") or None
+        power = raw.get("gpu_power") or None
+        ctx = raw.get("ctx") or None
+        span = raw.get("util_range")
+        return cls(
+            gpu_available=bool(raw.get("gpu_available")),
+            cpu=stat("cpu"),
+            gpu_util=stat("gpu_util"),
+            gpu_delta=stat("gpu_delta"),
+            ram=(
+                RamStat(
+                    now=ram["now"],
+                    p95=ram.get("p95"),
+                    total=ram["total"],
+                    headroom=ram.get("headroom", 0.0),
+                )
+                if ram
+                else None
+            ),
+            gpu_mem=(
+                GpuMemStat(
+                    now=mem["now"],
+                    p95=mem.get("p95"),
+                    headroom=mem.get("headroom", 0.0),
+                    total=mem.get("total"),
+                )
+                if mem
+                else None
+            ),
+            temp=(
+                TempStat(
+                    now=temp.get("now"),
+                    p95=temp.get("p95"),
+                    status=temp.get("status"),
+                )
+                if temp
+                else None
+            ),
+            gpu_power=(
+                PowerStat(
+                    now=power.get("now"),
+                    p50=power.get("p50"),
+                    limit=power.get("limit"),
+                    floor=power.get("floor"),
+                )
+                if power
+                else None
+            ),
+            gpus=gpu_rows_from_dicts(raw.get("gpus") or []),
+            ctx=(
+                RunContext(
+                    world_size=int(ctx.get("world_size") or 0),
+                    gpu_count=int(ctx.get("gpu_count") or 0),
+                    hostname=str(ctx.get("hostname") or ""),
+                    system_node=ctx.get("system_node"),
+                )
+                if ctx
+                else None
+            ),
+            status=raw.get("status"),
+            odd_gpus=tuple(raw.get("odd_gpus") or ()),
+            util_range=(tuple(span) if span else None),
+            rows_over=bool(raw.get("rows_over")),
+        )
 
 
 @dataclass(frozen=True)
@@ -289,6 +382,11 @@ class SystemSeries:
     gpu_power: Tuple[Optional[float], ...] = ()
     cpu_run: CpuRunSeries = field(default_factory=CpuRunSeries)
     gpu_power_run: Tuple[Dict[str, Any], ...] = ()
+    # Which view each chart is in. Both answered by one rule in the
+    # compute layer; the card used to answer them itself with two
+    # different rules and its charts could disagree.
+    cpu_run_whole: bool = False
+    power_run_whole: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -298,7 +396,30 @@ class SystemSeries:
             "gpu_power": list(self.gpu_power),
             "cpu_run": self.cpu_run.to_dict(),
             "gpu_power_run": [dict(b) for b in self.gpu_power_run],
+            "cpu_run_whole": self.cpu_run_whole,
+            "power_run_whole": self.power_run_whole,
         }
+
+    @classmethod
+    def from_dict(cls, raw: Dict[str, Any]) -> "SystemSeries":
+        """Adapt the compute layer's series mapping."""
+        run = raw.get("cpu_run") or {}
+        return cls(
+            x_time=tuple(raw.get("x_time") or ()),
+            cpu=tuple(raw.get("cpu") or ()),
+            gpu_avg=tuple(raw.get("gpu_avg") or ()),
+            gpu_power=tuple(raw.get("gpu_power") or ()),
+            cpu_run=CpuRunSeries(
+                t=tuple(run.get("t") or ()),
+                avg=tuple(run.get("avg") or ()),
+                max=tuple(run.get("max") or ()),
+                span_s=float(run.get("span_s") or 0.0),
+                window_s=float(run.get("window_s") or 0.0),
+            ),
+            gpu_power_run=tuple(raw.get("gpu_power_run") or ()),
+            cpu_run_whole=bool(raw.get("cpu_run_whole")),
+            power_run_whole=bool(raw.get("power_run_whole")),
+        )
 
 
 @dataclass(frozen=True)

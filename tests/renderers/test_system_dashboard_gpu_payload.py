@@ -99,7 +99,13 @@ def _write(
 
 
 def _payload(path: Path) -> Dict[str, Any]:
-    return SystemDashboardComputer(str(path)).compute(window_n=100)
+    """The payload as a mapping.
+
+    `compute()` returns the typed payload now. These tests describe the
+    SHAPE the card is handed, which `to_dict` still renders exactly, so
+    they assert against it rather than being rewritten field by field.
+    """
+    return SystemDashboardComputer(str(path)).compute(window_n=100).to_dict()
 
 
 def test_one_busy_of_four_reads_average_with_full_spread(
@@ -384,7 +390,7 @@ def test_cpu_only_run_does_not_read_gpu_power_history(
         fail_if_called,
     )
     out = computer.compute(window_n=100)
-    assert out["series"]["gpu_power_run"] == []
+    assert out.series.gpu_power_run == ()
 
 
 def test_rows_without_a_hostname_are_not_a_node(tmp_path: Path) -> None:

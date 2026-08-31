@@ -9,12 +9,17 @@
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import numpy as np
 
-from .common import SystemDashboardPayload
+from .dashboard_models import (
+    SystemDashboardPayload,
+    SystemRollups,
+    SystemSeries,
+)
 from .repository import SystemRepository
 
 # Whole-run charts add value only after the run outgrows the recent window.
@@ -80,6 +85,28 @@ def _empty_dashboard_series() -> Dict[str, Any]:
 # points" of the CPU history and merely "non-empty" of the power history,
 # so its two charts could disagree about which view they were showing.
 _MIN_WHOLE_RUN_POINTS = 2
+
+
+def _typed(
+    *,
+    window_len: int,
+    gpu_available: bool,
+    rollups: Dict[str, Any],
+    series: Dict[str, Any],
+) -> SystemDashboardPayload:
+    """Wrap the compute layer's mappings in the payload's own types.
+
+    The mappings are built as dicts here because that is how the readers
+    and the numpy work naturally produce them; the types are the contract
+    the card reads, and the models own the adaptation so the shape is
+    described in one place.
+    """
+    return SystemDashboardPayload(
+        window_len=window_len,
+        gpu_available=gpu_available,
+        rollups=SystemRollups.from_dict(rollups),
+        series=SystemSeries.from_dict(series),
+    )
 
 
 def _has_whole_run(entries: Any) -> bool:
@@ -188,7 +215,7 @@ class SystemDashboardComputer:
         except Exception as e:
             return self._return_stale(f"STALE (exception: {type(e).__name__})")
 
-        if out.get("window_len", 0) == 0 and self._last_ok is not None:
+        if out.window_len == 0 and self._last_ok is not None:
             return self._return_stale("STALE (empty window)")
 
         self._last_ok = out
@@ -457,7 +484,7 @@ class SystemDashboardComputer:
 
         x_time = [self._format_time_iso(ts) for ts in ts_hist.tolist()]
 
-        return SystemDashboardPayload(
+        return _typed(
             window_len=len(samples),
             gpu_available=gpu_available,
             rollups=rollups,
@@ -486,7 +513,7 @@ class SystemDashboardComputer:
                     power_run if gpu_available else []
                 ),
             },
-        ).to_dict()
+        )
 
     @staticmethod
     def _pick_node(samples: List[Any]) -> Dict[str, Any]:
@@ -600,11 +627,11 @@ class SystemDashboardComputer:
         except Exception:
             return ""
 
-    def _return_stale(self, msg: str) -> Dict[str, Any]:
-        """
-        Return the last known good payload when it is still within TTL.
+    def _return_stale(self, msg: str) -> SystemDashboardPayload:
+        """The last good payload while it is still within TTL.
 
-        Adds a human-readable status string into `rollups["status"]`.
+        Carries a human-readable status so the card can say the numbers
+        are held over rather than drawing them as current.
         """
         now = time.time()
         if self._last_ok is not None:
@@ -613,32 +640,21 @@ class SystemDashboardComputer:
                 or (now - self._last_ok_ts) <= self._stale_ttl_s
             ):
                 cached = self._last_ok
-                rollups = dict(cached.get("rollups", {}))
-                rollups["status"] = msg
-                return {
-                    "window_len": cached.get("window_len", 0),
-                    "gpu_available": cached.get("gpu_available", False),
-                    "rollups": rollups,
-                    "series": cached.get(
-                        "series",
-                        _empty_dashboard_series(),
-                    ),
-                }
+                return replace(
+                    cached,
+                    rollups=replace(cached.rollups, status=msg),
+                )
 
-        return {
-            "window_len": 0,
-            "gpu_available": False,
-            "rollups": {"status": "No fresh system data"},
-            "series": _empty_dashboard_series(),
-        }
-
-    def _empty_payload(self) -> Dict[str, Any]:
-        """
-        Return an empty dashboard payload with the full expected schema.
-        """
         return SystemDashboardPayload(
+            rollups=SystemRollups(status="No fresh system data"),
+            series=SystemSeries.from_dict(_empty_dashboard_series()),
+        )
+
+    def _empty_payload(self) -> SystemDashboardPayload:
+        """An empty payload carrying the full expected schema."""
+        return _typed(
             window_len=0,
             gpu_available=False,
             rollups={},
             series=_empty_dashboard_series(),
-        ).to_dict()
+        )

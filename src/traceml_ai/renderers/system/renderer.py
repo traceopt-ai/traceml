@@ -27,6 +27,7 @@ from traceml_ai.renderers.base_renderer import BaseRenderer
 from traceml_ai.utils.formatting import fmt_mem_new, fmt_percent
 
 from .computer import SystemMetricsComputer
+from .dashboard_models import SystemDashboardPayload
 
 
 class SystemRenderer(BaseRenderer):
@@ -201,7 +202,7 @@ class SystemRenderer(BaseRenderer):
             width=panel_width,
         )
 
-    def get_dashboard_renderable(self) -> Dict[str, Any]:
+    def get_dashboard_renderable(self) -> SystemDashboardPayload:
         """
         Return a compact dashboard payload.
 

@@ -165,5 +165,5 @@ def test_both_charts_answer_the_whole_run_question_the_same_way():
 def test_a_short_run_puts_neither_chart_in_the_whole_run_view(process_free_db):
     """End to end: the flags travel on the payload and agree."""
     out = process_free_db
-    assert out["series"]["cpu_run_whole"] is False
-    assert out["series"]["power_run_whole"] is False
+    assert out.series.cpu_run_whole is False
+    assert out.series.power_run_whole is False
