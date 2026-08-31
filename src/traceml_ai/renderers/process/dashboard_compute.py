@@ -59,11 +59,11 @@ from .repository import ProcessRepository
 # section applied to its own history slice on 0.3.7.
 DASHBOARD_WINDOW = 100
 
-# Samples per rank in the recent-window view.
 # The recent window the tiles describe, as a DURATION. A sample count
 # means a different span at every sampling rate, so two runs sampling at
 # different cadences could not be compared and the card could not say what
-# period it was summarising.
+# period it was summarising. The same duration drives both the repository
+# read and the recent-to-retained chart transition.
 RECENT_WINDOW_S = 60.0
 
 # A rolling mean over minutes cannot visibly change between two ticks, so
@@ -709,13 +709,13 @@ class ProcessDashboardComputer:
     def _rank_charts(
         self,
         conn: Any,
-        window_span_s: float,
+        recent_window_s: float,
         by_rank: Dict[int, List[Any]],
     ) -> Tuple[RankChart, RankChart]:
         """Per-rank CPU and RSS, over the window or over the whole run."""
         return (
-            self._one_chart(conn, "cpu", window_span_s, by_rank),
-            self._one_chart(conn, "rss", window_span_s, by_rank),
+            self._one_chart(conn, "cpu", recent_window_s, by_rank),
+            self._one_chart(conn, "rss", recent_window_s, by_rank),
         )
 
     def _recent_chart(
@@ -765,7 +765,7 @@ class ProcessDashboardComputer:
         self,
         conn: Any,
         metric: str,
-        window_span_s: float,
+        recent_window_s: float,
         by_rank: Dict[int, List[Any]],
     ) -> RankChart:
         """One chart, in whichever mode the run has earned.
@@ -784,7 +784,7 @@ class ProcessDashboardComputer:
         if stats is None:
             return self._recent_chart(metric, by_rank, None)
 
-        mode = self._run_policy.mode_for(stats.span_s, window_span_s)
+        mode = self._run_policy.mode_for(stats.span_s, recent_window_s)
         if mode != "retained":
             return self._recent_chart(metric, by_rank, stats.span_s)
 
@@ -844,8 +844,9 @@ class ProcessDashboardComputer:
         by_rank: Dict[int, List[Any]],
     ) -> ProcessDashboardPayload:
         """Attach the per-rank charts, in whichever mode the run warrants."""
-        window_span = _window_span(payload.history)
-        cpu_chart, rss_chart = self._rank_charts(conn, window_span, by_rank)
+        cpu_chart, rss_chart = self._rank_charts(
+            conn, RECENT_WINDOW_S, by_rank
+        )
         return replace(
             payload, cpu_capacity_chart=cpu_chart, rss_chart=rss_chart
         )
@@ -905,14 +906,6 @@ def _entry_from_row(row: Any) -> ProcessHistoryEntry:
         ram_total_bytes=float(row["ram_total"] or 0.0),
         gpu=gpu,
     )
-
-
-def _window_span(window: Sequence[ProcessHistoryEntry]) -> float:
-    """Wall-clock seconds the recent window covers."""
-    stamps = [e.ts for e in window if e.ts is not None]
-    if len(stamps) < 2:
-        return 0.0
-    return max(0.0, max(stamps) - min(stamps))
 
 
 def _build_chart(window: Sequence[ProcessHistoryEntry]) -> ChartSeries:

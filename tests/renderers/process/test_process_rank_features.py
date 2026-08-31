@@ -28,19 +28,28 @@ def payload(db, **kw):
     return ProcessDashboardComputer(db_path=db.path, **kw).compute()
 
 
-def _run(db, *, ranks=4, samples=120, cores=8, hot_rank=None, dies=None):
+def _run(
+    db,
+    *,
+    ranks=4,
+    samples=120,
+    cadence_s=2.0,
+    cores=8,
+    hot_rank=None,
+    dies=None,
+):
     """A multi-rank run. ``hot_rank`` burns CPU; ``dies`` stops early."""
     for seq in range(1, samples + 1):
         for rank in range(ranks):
             if dies is not None and rank == dies[0] and seq > dies[1]:
                 continue
             db.insert(
-                recv_ts_ns=int((1_700_000_000 + seq * 2) * 1e9),
+                recv_ts_ns=int((1_700_000_000 + seq * cadence_s) * 1e9),
                 rank=rank,
                 global_rank=rank,
                 node_rank=0,
                 seq=seq,
-                sample_ts_s=1_700_000_000.0 + seq * 2,
+                sample_ts_s=1_700_000_000.0 + seq * cadence_s,
                 cpu_percent=(700.0 if rank == hot_rank else 200.0),
                 cpu_logical_core_count=cores,
                 ram_used_bytes=(2.0 + rank * 0.5) * GB,
@@ -215,7 +224,9 @@ def test_the_recent_view_moves_between_ticks(process_db):
         db_path=process_db.path, sampler_interval_s=2.0
     )
     first = computer.compute().rss_chart
-    _run(process_db, ranks=2, samples=40)
+    # Stay below the 60 s recent window plus its transition margin; this
+    # test is about live refresh, not the switch to retained history.
+    _run(process_db, ranks=2, samples=30)
     second = computer.compute().rss_chart
 
     assert first.mode == second.mode == "recent"
@@ -237,6 +248,34 @@ def test_a_long_run_switches_to_the_retained_view(process_db):
     assert chart.is_retained is True
     assert chart.window_s is not None
     assert len(chart.traces) == 2
+
+
+@pytest.mark.parametrize(
+    ("cadence_s", "duration_s", "expected_mode"),
+    (
+        (0.5, 60.0, "recent"),
+        (2.0, 60.0, "recent"),
+        (0.5, 80.0, "retained"),
+        (2.0, 80.0, "retained"),
+    ),
+)
+def test_chart_mode_depends_on_duration_not_sample_count(
+    process_db, cadence_s, duration_s, expected_mode
+):
+    """Equal-duration runs choose one mode at every sampling cadence."""
+    samples = int(duration_s / cadence_s) + 1
+    _run(
+        process_db,
+        ranks=2,
+        samples=samples,
+        cadence_s=cadence_s,
+    )
+
+    chart = payload(
+        process_db, sampler_interval_s=cadence_s
+    ).cpu_capacity_chart
+
+    assert chart.mode == expected_mode
 
 
 def test_the_mode_is_stated_never_inferred_from_an_empty_field(process_db):
