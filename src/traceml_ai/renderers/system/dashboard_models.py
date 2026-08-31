@@ -1,0 +1,352 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
+"""The contract between System compute and the System card.
+
+The payload was four keys, two of which were `Dict[str, Any]`. Everything
+inside them was reachable only by string, so the card asked questions like
+"is `mem_total` missing?" to work out facts the compute layer already knew,
+and answered some of them differently. Naming the fields is what stops
+that: a question with one answer has one place to ask it.
+
+``to_dict`` reproduces the previous dict exactly, key for key. Two tests
+assert the series by equality on degraded paths, and several more read the
+payload as nested dicts, so the shape is a contract until the card is
+migrated across.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple
+
+
+@dataclass(frozen=True)
+class Stat:
+    """A level with the percentiles that say whether it is typical."""
+
+    now: Optional[float] = None
+    p50: Optional[float] = None
+    p95: Optional[float] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        out: Dict[str, Any] = {"now": self.now}
+        if self.p50 is not None:
+            out["p50"] = self.p50
+        out["p95"] = self.p95
+        return out
+
+
+@dataclass(frozen=True)
+class RamStat:
+    """Host memory, carrying the capacity that makes the level readable."""
+
+    now: float
+    p95: Optional[float]
+    total: float
+    headroom: float
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "now": self.now,
+            "p95": self.p95,
+            "total": self.total,
+            "headroom": self.headroom,
+        }
+
+
+@dataclass(frozen=True)
+class GpuMemStat:
+    """Device memory on the GPU holding the most, with its own capacity.
+
+    ``total`` is the capacity of the GPU reported in ``now``, not a sum
+    across devices, so the tile can read "used of total" about one card
+    rather than about an imaginary merged one.
+    """
+
+    now: float
+    p95: Optional[float]
+    headroom: float
+    total: Optional[float]
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "now": self.now,
+            "p95": self.p95,
+            "headroom": self.headroom,
+            "total": self.total,
+        }
+
+
+@dataclass(frozen=True)
+class TempStat:
+    """Temperature, and the engine's verdict on it.
+
+    ``status`` is the diagnosis engine's word. The card prints it and does
+    not restate it in its own vocabulary.
+    """
+
+    now: Optional[float] = None
+    p95: Optional[float] = None
+    status: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"now": self.now, "p95": self.p95, "status": self.status}
+
+
+@dataclass(frozen=True)
+class PowerStat:
+    """Board power, always the busiest GPU rather than a sum.
+
+    ``floor`` is the lowest reading over the whole run when that history
+    was aggregated, and over the recent window when it was not.
+    """
+
+    now: Optional[float] = None
+    p50: Optional[float] = None
+    limit: Optional[float] = None
+    floor: Optional[float] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "now": self.now,
+            "p50": self.p50,
+            "limit": self.limit,
+            "floor": self.floor,
+        }
+
+
+@dataclass(frozen=True)
+class GpuRow:
+    """One GPU's newest values, or its slot with nothing in it.
+
+    A GPU that vanishes from the newest tick keeps its row with ``None``
+    values rather than disappearing, so the row count never silently
+    drops.
+
+    ``reported`` is the compute layer's answer to "has this device told us
+    anything", and it is on the row so the card never has to infer it. The
+    card used to infer it, with a different rule, and the two disagreed
+    about a GPU that reported a power limit but no memory total.
+    """
+
+    gpu_idx: int
+    util_now: Optional[float] = None
+    util_p50: Optional[float] = None
+    mem_used: Optional[float] = None
+    mem_total: Optional[float] = None
+    temp: Optional[float] = None
+    power: Optional[float] = None
+    power_limit: Optional[float] = None
+    reported: bool = False
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "gpu_idx": self.gpu_idx,
+            "util_now": self.util_now,
+            "util_p50": self.util_p50,
+            "mem_used": self.mem_used,
+            "mem_total": self.mem_total,
+            "temp": self.temp,
+            "power": self.power,
+            "power_limit": self.power_limit,
+            "reported": self.reported,
+        }
+
+
+@dataclass(frozen=True)
+class RunContext:
+    """Which machine and which slice of the job this payload describes."""
+
+    world_size: int = 0
+    gpu_count: int = 0
+    hostname: str = ""
+    system_node: Optional[int] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "world_size": self.world_size,
+            "gpu_count": self.gpu_count,
+            "hostname": self.hostname,
+            "system_node": self.system_node,
+        }
+
+
+@dataclass(frozen=True)
+class CpuRunSeries:
+    """Host CPU over the whole run, rolled and decimated to fit a chart."""
+
+    t: Tuple[float, ...] = ()
+    avg: Tuple[float, ...] = ()
+    max: Tuple[float, ...] = ()
+    span_s: float = 0.0
+    window_s: float = 0.0
+
+    @property
+    def is_populated(self) -> bool:
+        """Whether the whole-run view has anything to draw.
+
+        Stated here so the card stops deciding it, which it did with two
+        different rules for its two charts.
+        """
+        return len(self.t) > 2
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "t": list(self.t),
+            "avg": list(self.avg),
+            "max": list(self.max),
+            "span_s": self.span_s,
+            "window_s": self.window_s,
+        }
+
+
+@dataclass(frozen=True)
+class SystemRollups:
+    """Every level the card shows, already decided."""
+
+    gpu_available: bool = False
+    cpu: Optional[Stat] = None
+    ram: Optional[RamStat] = None
+    gpu_util: Optional[Stat] = None
+    gpu_delta: Optional[Stat] = None
+    gpu_mem: Optional[GpuMemStat] = None
+    temp: Optional[TempStat] = None
+    gpu_power: Optional[PowerStat] = None
+    gpus: Tuple[GpuRow, ...] = ()
+    ctx: Optional[RunContext] = None
+    status: Optional[str] = None
+    # GPUs whose utilisation puts them in the smaller group. Decided here
+    # rather than in the card, which is where a rule that selects entities
+    # by a derived threshold belongs.
+    odd_gpus: Tuple[int, ...] = ()
+
+    @property
+    def gpus_unreported(self) -> bool:
+        """Whether every GPU present has told us nothing.
+
+        One rule, answered once. The card asked a different question of
+        the same rows and could disagree with this.
+        """
+        return bool(self.gpus) and not any(g.reported for g in self.gpus)
+
+    @property
+    def is_empty(self) -> bool:
+        """Whether nothing was computed, as opposed to computed as zero."""
+        return (
+            not self.gpus
+            and self.ctx is None
+            and self.status is None
+            and all(
+                v is None
+                for v in (
+                    self.cpu,
+                    self.ram,
+                    self.gpu_util,
+                    self.gpu_delta,
+                    self.gpu_mem,
+                    self.temp,
+                    self.gpu_power,
+                )
+            )
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        # The empty payload carries an empty mapping rather than a shell of
+        # null-valued keys, and two tests assert that by equality.
+        if self.is_empty:
+            return {}
+        out: Dict[str, Any] = {"gpu_available": self.gpu_available}
+        for key, value in (
+            ("cpu", self.cpu),
+            ("ram", self.ram),
+            ("gpu_util", self.gpu_util),
+            ("gpu_delta", self.gpu_delta),
+            ("gpu_mem", self.gpu_mem),
+            ("temp", self.temp),
+            ("gpu_power", self.gpu_power),
+        ):
+            if value is not None:
+                out[key] = value.to_dict()
+        out["gpus"] = [g.to_dict() for g in self.gpus]
+        if self.ctx is not None:
+            out["ctx"] = self.ctx.to_dict()
+        if self.status is not None:
+            out["status"] = self.status
+        return out
+
+
+@dataclass(frozen=True)
+class SystemSeries:
+    """The lines the card draws, over the window and over the run."""
+
+    x_time: Tuple[str, ...] = ()
+    cpu: Tuple[Optional[float], ...] = ()
+    gpu_avg: Tuple[Optional[float], ...] = ()
+    gpu_power: Tuple[Optional[float], ...] = ()
+    cpu_run: CpuRunSeries = field(default_factory=CpuRunSeries)
+    gpu_power_run: Tuple[Dict[str, Any], ...] = ()
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "x_time": list(self.x_time),
+            "cpu": list(self.cpu),
+            "gpu_avg": list(self.gpu_avg),
+            "gpu_power": list(self.gpu_power),
+            "cpu_run": self.cpu_run.to_dict(),
+            "gpu_power_run": [dict(b) for b in self.gpu_power_run],
+        }
+
+
+@dataclass(frozen=True)
+class SystemDashboardPayload:
+    """Everything the System card needs, and nothing it has to derive."""
+
+    window_len: int = 0
+    gpu_available: bool = False
+    rollups: SystemRollups = field(default_factory=SystemRollups)
+    series: SystemSeries = field(default_factory=SystemSeries)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "window_len": self.window_len,
+            "gpu_available": self.gpu_available,
+            "rollups": self.rollups.to_dict(),
+            "series": self.series.to_dict(),
+        }
+
+
+__all__ = [
+    "CpuRunSeries",
+    "GpuMemStat",
+    "GpuRow",
+    "PowerStat",
+    "RamStat",
+    "RunContext",
+    "Stat",
+    "SystemDashboardPayload",
+    "SystemRollups",
+    "SystemSeries",
+    "TempStat",
+]
+
+
+def gpu_rows_from_dicts(rows: List[Dict[str, Any]]) -> Tuple[GpuRow, ...]:
+    """Adapt the compute layer's row dicts while it still emits them."""
+    return tuple(
+        GpuRow(
+            gpu_idx=int(r.get("gpu_idx", 0)),
+            util_now=r.get("util_now"),
+            util_p50=r.get("util_p50"),
+            mem_used=r.get("mem_used"),
+            mem_total=r.get("mem_total"),
+            temp=r.get("temp"),
+            power=r.get("power"),
+            power_limit=r.get("power_limit"),
+            reported=bool(r.get("reported", False)),
+        )
+        for r in rows
+    )

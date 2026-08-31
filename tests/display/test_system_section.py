@@ -146,6 +146,7 @@ def _gpus():
             "temp": 54.0,
             "power": 68.0,
             "power_limit": 70.0,
+            "reported": True,
         },
         {
             "gpu_idx": 1,
@@ -156,6 +157,7 @@ def _gpus():
             "temp": 41.0,
             "power": 33.0,
             "power_limit": 70.0,
+            "reported": True,
         },
     ]
 
@@ -512,6 +514,7 @@ def test_section_builds_and_updates_without_a_browser() -> None:
             "temp": None,
             "power": None,
             "power_limit": None,
+            "reported": False,
         }
         for i in range(2)
     ]
@@ -604,6 +607,7 @@ def test_every_tile_keeps_a_qualifier_line() -> None:
                         "temp": 48.0,
                         "power": 66.0,
                         "power_limit": 70.0,
+                        "reported": True,
                     }
                     for i in range(n_gpus)
                 ],

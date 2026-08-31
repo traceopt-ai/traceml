@@ -137,6 +137,12 @@ def test_one_busy_of_four_reads_average_with_full_spread(
         "temp": 54.0,
         "power": 68.0,
         "power_limit": LIMIT,
+        # Added deliberately. The card used to work out whether a device
+        # had reported by testing which of its fields were None, using a
+        # rule that disagreed with the computer's about a GPU carrying a
+        # power limit and no memory total. The computer states it here so
+        # there is one answer rather than two.
+        "reported": True,
     }
     assert gpus[3]["util_p50"] == 0.0
     assert gpus[3]["power"] == 33.0

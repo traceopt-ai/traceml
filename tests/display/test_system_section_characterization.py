@@ -40,6 +40,7 @@ def _gpu(idx: int, **kw):
         "util_now": None,
         "mem_total": None,
         "power": None,
+        "reported": False,
     }
     row.update(kw)
     return row
@@ -90,22 +91,29 @@ def test_a_gpu_with_no_utilisation_at_all_is_not_in_either_group():
 
 
 # --- the two definitions of "never reported" -----------------------------
-def test_the_card_calls_a_gpu_unreported_only_when_both_fields_are_absent():
-    """The card's rule is `mem_total is None AND power is None`.
+def test_the_card_asks_the_computer_whether_a_gpu_reported():
+    """Updated deliberately: the computer's rule replaced the card's.
 
-    The compute layer answers the same question with OR over `mem_total`
-    and `power_limit_w`. The two therefore disagree about a GPU that
-    reports one field and not the other, and this test pins the card's
-    side of that disagreement so moving the rule has to confront it.
+    The card used to derive this itself, asking whether `mem_total` and
+    `power` were both absent. That is stricter than the computer's rule,
+    which asks whether `mem_total` or `power_limit_w` is present, so the
+    two disagreed about a GPU carrying a power limit and no memory total.
+    The computer decides what a metric means, so its answer is the one
+    that survives and the card now reads the flag.
+
+    The consequence is visible: a row with no values but `reported` true
+    is a device that spoke and had nothing to say, and it no longer makes
+    the card announce that the whole GPU sample is missing.
     """
-    both_absent = [_gpu(0), _gpu(1)]
-    assert system_section.gpus_unreported(both_absent) is True
+    none_reported = [_gpu(0), _gpu(1)]
+    assert system_section.gpus_unreported(none_reported) is True
 
-    power_only = [_gpu(0, power=42.0), _gpu(1, power=41.0)]
-    assert system_section.gpus_unreported(power_only) is False
+    one_reported = [_gpu(0, reported=True), _gpu(1)]
+    assert system_section.gpus_unreported(one_reported) is False
 
-    mem_only = [_gpu(0, mem_total=16.0e9)]
-    assert system_section.gpus_unreported(mem_only) is False
+    # The case the two rules disagreed about: values absent, device present.
+    valueless_but_present = [_gpu(0, reported=True)]
+    assert system_section.gpus_unreported(valueless_but_present) is False
 
 
 def test_no_gpus_at_all_is_not_the_same_as_unreported():

@@ -442,11 +442,17 @@ class SystemDashboardComputer:
         out: List[Dict[str, Any]] = []
         for idx in sorted(set(util_hist) | set(power_hist)):
             g = latest_rows.get(idx)
-            if g is not None and not _gpu_reported(g):
+            reported = g is not None and _gpu_reported(g)
+            if not reported:
                 g = None  # the sampler's all-zero fallback: unreported
             out.append(
                 {
                     "gpu_idx": idx,
+                    # Stated, not inferred. The card used to work this out
+                    # from which fields were None, with a rule that
+                    # disagreed with this one about a GPU reporting a
+                    # power limit but no memory total.
+                    "reported": reported,
                     "util_now": (
                         _opt_float(g["util"]) if g is not None else None
                     ),

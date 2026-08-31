@@ -202,16 +202,14 @@ def gpus_unreported(gpus: List[Dict[str, Any]]) -> bool:
     is absence rather than a GPU sitting at zero, and the card must not
     draw it as a measurement.
 
-    Named rather than inlined so the rule can be pinned by a test. Note it
-    is not the same rule the compute layer uses: this asks for mem_total
-    AND power both absent, while the computer asks for mem_total OR
-    power_limit_w present. A GPU reporting one and not the other is
-    "reported" to one of them and "unreported" to the other.
+    Reads the computer's ``reported`` flag rather than re-deriving the
+    answer. The card used to test whether ``mem_total`` and ``power`` were
+    both absent, which is a stricter rule than the computer's (``mem_total``
+    or ``power_limit_w`` present), so the two disagreed about a GPU that
+    carried a power limit and no memory total. The computer decides what a
+    metric means; this asks it.
     """
-    return bool(gpus) and all(
-        gpu.get("mem_total") is None and gpu.get("power") is None
-        for gpu in gpus
-    )
+    return bool(gpus) and not any(gpu.get("reported") for gpu in gpus)
 
 
 def odd_ones_out(gpus: List[Dict[str, Any]]) -> set:
