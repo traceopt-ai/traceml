@@ -18,6 +18,7 @@ import traceml_ai.launcher.commands as launcher_commands
 from traceml_ai.launcher.cli import build_parser
 from traceml_ai.launcher.commands import (
     _dashboard_access_box,
+    _derive_final_telemetry,
     _launch_defaults_for_topology,
     _require_dashboard_dependencies,
     _resolve_serve_settings,
@@ -33,11 +34,15 @@ from traceml_ai.launcher.launch_config import (
 from traceml_ai.launcher.manifest import (
     collect_existing_artifacts,
     load_json_or_warn,
+    read_current_finalization_reason,
     update_run_manifest,
     write_run_manifest,
 )
 from traceml_ai.launcher.process import TrainingOutcome
-from traceml_ai.runtime.settings import DEFAULT_FINALIZE_TIMEOUT_SEC
+from traceml_ai.runtime.settings import (
+    DEFAULT_FINALIZE_TIMEOUT_SEC,
+    resolve_on_missing_aggregator,
+)
 from traceml_ai.telemetry.retention import DEFAULT_HISTORY_RETENTION_S
 
 
@@ -67,6 +72,35 @@ def test_serve_is_a_public_command() -> None:
     assert args.aggregator_host == "10.0.0.9"
     assert args.aggregator_bind_host == "0.0.0.0"
     assert args.aggregator_port == 40000
+
+
+def test_run_and_watch_accept_missing_aggregator_policy() -> None:
+    parser = build_parser()
+
+    run_args = parser.parse_args(
+        ["run", "train.py", "--on-missing-aggregator", "warn"]
+    )
+    watch_args = parser.parse_args(["watch", "train.py"])
+
+    assert run_args.on_missing_aggregator == "warn"
+    assert watch_args.on_missing_aggregator is None
+
+
+@pytest.mark.parametrize("default", ["raise", "warn"])
+def test_shared_missing_aggregator_resolver_uses_caller_default(
+    monkeypatch, default
+) -> None:
+    monkeypatch.delenv("TRACEML_ON_MISSING_AGGREGATOR", raising=False)
+    assert resolve_on_missing_aggregator(None, default=default) == default
+
+    monkeypatch.setenv("TRACEML_ON_MISSING_AGGREGATOR", "warn")
+    assert resolve_on_missing_aggregator(None, default=default) == "warn"
+    assert resolve_on_missing_aggregator("raise", default=default) == "raise"
+
+
+def test_shared_missing_aggregator_resolver_rejects_invalid_value() -> None:
+    with pytest.raises(ValueError, match="must be 'raise' or 'warn'"):
+        resolve_on_missing_aggregator("continue", default="raise")
 
 
 def test_serve_maps_flags_into_aggregator_settings(monkeypatch) -> None:
@@ -652,11 +686,199 @@ def test_started_training_result_is_authoritative(
         launcher_commands.launch_process(str(script), args)
 
     assert exc.value.code == TrainingOutcome(train_rc).cli_exit_code
-    final_line = capsys.readouterr().err.splitlines()[-1]
+    stderr_lines = capsys.readouterr().err.splitlines()
+    final_line = stderr_lines[-1]
     expected_status = "completed successfully" if train_rc == 0 else "failed"
     assert f"Training {expected_status}" in final_line
+    assert stderr_lines[-2].startswith("[TraceML] Telemetry ")
     if train_rc != 0:
         assert "torchrun exited with code 1" in final_line
+    if (
+        train_rc == 0
+        and aggregator_rc == 0
+        and not finalization_fails
+        and mode == "summary"
+    ):
+        final_update = replacements["update_run_manifest"].call_args_list[-1]
+        assert final_update.kwargs["status"] == "completed"
+        assert final_update.kwargs["telemetry_status"] == "failed"
+        assert final_update.kwargs["telemetry_reason"] == "summary_missing"
+
+
+@pytest.mark.parametrize(
+    ("failure", "reason"),
+    [
+        ("spawn", "aggregator_spawn_failed"),
+        ("readiness", "aggregator_not_ready"),
+    ],
+)
+def test_strict_aggregator_failure_does_not_start_training(
+    monkeypatch, tmp_path, failure, reason
+) -> None:
+    script = tmp_path / "train.py"
+    script.write_text("print('train')\n", encoding="utf-8")
+    args = build_parser().parse_args(
+        ["run", str(script), "--logs-dir", str(tmp_path / "logs")]
+    )
+    start_training = Mock()
+    update_manifest = Mock()
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(launcher_commands, "install_shutdown_handlers", Mock())
+    aggregator = Mock(pid=10, returncode=7)
+    aggregator.poll.return_value = 7
+    start_aggregator = Mock(return_value=aggregator)
+    if failure == "spawn":
+        start_aggregator.side_effect = FileNotFoundError("aggregator missing")
+    monkeypatch.setattr(
+        launcher_commands, "start_aggregator_process", start_aggregator
+    )
+    monkeypatch.setattr(
+        launcher_commands, "wait_for_tcp_listen", Mock(return_value=False)
+    )
+    monkeypatch.setattr(
+        launcher_commands, "start_training_process", start_training
+    )
+    monkeypatch.setattr(
+        launcher_commands, "write_code_manifest", Mock(return_value=None)
+    )
+    monkeypatch.setattr(
+        launcher_commands,
+        "write_run_manifest",
+        Mock(return_value=tmp_path / "manifest.json"),
+    )
+    monkeypatch.setattr(
+        launcher_commands, "update_run_manifest", update_manifest
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        launch_process(str(script), args)
+
+    assert exc.value.code == 1
+    start_training.assert_not_called()
+    assert update_manifest.call_args.kwargs["status"] == "failed"
+    assert update_manifest.call_args.kwargs["telemetry_status"] == (
+        "unavailable"
+    )
+    assert update_manifest.call_args.kwargs["telemetry_reason"] == reason
+
+
+@pytest.mark.parametrize("owner", [True, False])
+def test_warn_policy_starts_supervised_training_without_telemetry(
+    monkeypatch, tmp_path, owner
+) -> None:
+    script = tmp_path / "train.py"
+    script.write_text("print('train')\n", encoding="utf-8")
+    cli = [
+        "run",
+        str(script),
+        "--mode",
+        "cli",
+        "--logs-dir",
+        str(tmp_path / "logs"),
+        "--run-name",
+        "warn-run",
+        "--on-missing-aggregator",
+        "warn",
+    ]
+    if not owner:
+        cli.extend(["--nnodes", "2", "--node-rank", "1"])
+    args = build_parser().parse_args(cli)
+
+    events = []
+    aggregator = Mock(pid=10, returncode=7)
+    aggregator.poll.return_value = 7
+    training = Mock()
+    training.poll.return_value = 0
+
+    def _stop_aggregator(*_args, **_kwargs):
+        events.append("stop")
+
+    def _start_training(*, train_cmd, env, cwd, capture_stderr):
+        events.append("train")
+        assert env["TRACEML_DISABLED"] == "1"
+        return training
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(launcher_commands, "install_shutdown_handlers", Mock())
+    start_aggregator = Mock(return_value=aggregator)
+    monkeypatch.setattr(
+        launcher_commands, "start_aggregator_process", start_aggregator
+    )
+    monkeypatch.setattr(
+        launcher_commands, "wait_for_tcp_listen", Mock(return_value=False)
+    )
+    monkeypatch.setattr(
+        launcher_commands, "start_training_process", _start_training
+    )
+    monkeypatch.setattr(
+        launcher_commands, "terminate_process_group", _stop_aggregator
+    )
+    monkeypatch.setattr(
+        launcher_commands, "write_code_manifest", Mock(return_value=None)
+    )
+    monkeypatch.setattr(
+        launcher_commands,
+        "write_run_manifest",
+        Mock(return_value=tmp_path / "manifest.json"),
+    )
+    monkeypatch.setattr(launcher_commands, "update_run_manifest", Mock())
+
+    with pytest.raises(SystemExit) as exc:
+        launch_process(str(script), args)
+
+    assert exc.value.code == 0
+    if owner:
+        assert events == ["stop", "train"]
+        start_aggregator.assert_called_once()
+    else:
+        assert events == ["train"]
+        start_aggregator.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("inputs", "expected"),
+    [
+        (
+            {
+                "telemetry_available": False,
+                "startup_reason": "aggregator_not_ready",
+            },
+            ("unavailable", "aggregator_not_ready", None),
+        ),
+        (
+            {"finalization_reason": "finalization_failed"},
+            ("failed", "finalization_failed", None),
+        ),
+        (
+            {"summary_required": True, "summary_exists": False},
+            ("failed", "summary_missing", None),
+        ),
+        (
+            {"aggregator_exited_early": True, "aggregator_exit_code": 4},
+            ("degraded", "aggregator_exited_early", 4),
+        ),
+        (
+            {"finalization_reason": "finalization_warning"},
+            ("degraded", "finalization_warning", None),
+        ),
+        (
+            {"aggregator_exit_code": 0},
+            ("complete", None, 0),
+        ),
+    ],
+)
+def test_final_telemetry_precedence(inputs, expected) -> None:
+    defaults = {
+        "telemetry_available": True,
+        "startup_reason": None,
+        "aggregator_exited_early": False,
+        "aggregator_exit_code": None,
+        "finalization_reason": None,
+        "summary_required": False,
+        "summary_exists": True,
+    }
+    assert _derive_final_telemetry(**{**defaults, **inputs}) == expected
 
 
 @pytest.mark.parametrize("value", ["0", "-1m", "bad", "nan", "inf"])
@@ -857,16 +1079,23 @@ def test_run_manifest_write_and_update_merge_correctly(tmp_path) -> None:
         history_retention_s=DEFAULT_HISTORY_RETENTION_S,
         finalize_timeout_sec=DEFAULT_FINALIZE_TIMEOUT_SEC,
         status="starting",
+        telemetry_status="starting",
         launch_cwd=str(tmp_path),
     )
     update_run_manifest(
         manifest_path,
         status="completed",
         artifacts={"summary_card_json": "summary.json"},
+        telemetry_status="degraded",
+        telemetry_reason="finalization_warning",
+        aggregator_exit_code=3,
     )
 
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert payload["status"] == "completed"
+    assert payload["telemetry_status"] == "degraded"
+    assert payload["telemetry_reason"] == "finalization_warning"
+    assert payload["aggregator_exit_code"] == 3
     assert payload["session_id"] == "session"
     assert payload["run"]["run_name"] == "session"
     assert payload["run"]["session_id"] == "session"
@@ -881,6 +1110,56 @@ def test_run_manifest_write_and_update_merge_correctly(tmp_path) -> None:
     )
     assert payload["paths"]["run_root"] == str(session_root.resolve())
     assert payload["artifacts"]["summary_card_json"] == "summary.json"
+
+    update_run_manifest(manifest_path, telemetry_status="complete")
+    completed = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert completed["telemetry_status"] == "complete"
+    assert "telemetry_reason" not in completed
+    assert "aggregator_exit_code" not in completed
+
+
+def test_finalization_evidence_ignores_stale_and_malformed_files(
+    tmp_path,
+) -> None:
+    aggregator_dir = tmp_path / "aggregator"
+    aggregator_dir.mkdir()
+    warning_path = aggregator_dir / "finalization_warning.json"
+    error_path = aggregator_dir / "finalization_error.json"
+    started_at = "2026-08-31T10:00:00+00:00"
+
+    warning_path.write_text(
+        json.dumps({"completed_at": "2026-08-31T09:59:59+00:00"}),
+        encoding="utf-8",
+    )
+    error_path.write_text("{malformed", encoding="utf-8")
+    assert (
+        read_current_finalization_reason(
+            aggregator_dir, aggregator_started_at=started_at
+        )
+        is None
+    )
+
+    warning_path.write_text(
+        json.dumps({"completed_at": "2026-08-31T10:00:01+00:00"}),
+        encoding="utf-8",
+    )
+    assert (
+        read_current_finalization_reason(
+            aggregator_dir, aggregator_started_at=started_at
+        )
+        == "finalization_warning"
+    )
+
+    error_path.write_text(
+        json.dumps({"completed_at": "2026-08-31T10:00:02+00:00"}),
+        encoding="utf-8",
+    )
+    assert (
+        read_current_finalization_reason(
+            aggregator_dir, aggregator_started_at=started_at
+        )
+        == "finalization_failed"
+    )
 
 
 def test_load_json_or_warn_preserves_corrupt_manifest(tmp_path) -> None:

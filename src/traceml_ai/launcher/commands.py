@@ -27,6 +27,7 @@ from traceml_ai.launcher.launch_config import (
 )
 from traceml_ai.launcher.manifest import (
     collect_existing_artifacts,
+    read_current_finalization_reason,
     update_run_manifest,
     utc_now_iso,
     write_code_manifest,
@@ -49,6 +50,7 @@ from traceml_ai.runtime.session import get_session_id
 from traceml_ai.runtime.settings import (
     DEFAULT_FINALIZE_TIMEOUT_SEC,
     DEFAULT_UI_MODE,
+    resolve_on_missing_aggregator,
 )
 from traceml_ai.utils.msgpack_codec import Decoder as MsgpackDecoder
 from traceml_ai.utils.torch_support import torch_available
@@ -173,6 +175,79 @@ def _run_noncritical_launcher_step(
             f"[TraceML] WARNING: {description}: {exc}",
             file=sys.stderr,
         )
+
+
+def _resolve_cli_missing_aggregator_policy(args: argparse.Namespace) -> str:
+    """Resolve the CLI policy, whose frontend default is strict."""
+    try:
+        return resolve_on_missing_aggregator(
+            getattr(args, "on_missing_aggregator", None),
+            default="raise",
+        )
+    except ValueError as exc:
+        raise SystemExit(f"[TraceML] ERROR: {exc}") from exc
+
+
+def _derive_final_telemetry(
+    *,
+    telemetry_available: bool,
+    startup_reason: Optional[str],
+    aggregator_exited_early: bool,
+    aggregator_exit_code: Optional[int],
+    finalization_reason: Optional[str],
+    summary_required: bool,
+    summary_exists: bool,
+) -> tuple[str, Optional[str], Optional[int]]:
+    """Derive one final telemetry fact using the documented precedence."""
+    if not telemetry_available:
+        return "unavailable", startup_reason, aggregator_exit_code
+    if finalization_reason == "finalization_failed" or (
+        not aggregator_exited_early and aggregator_exit_code not in (0, None)
+    ):
+        return "failed", "finalization_failed", aggregator_exit_code
+    if summary_required and not summary_exists:
+        return "failed", "summary_missing", aggregator_exit_code
+    if aggregator_exited_early:
+        return "degraded", "aggregator_exited_early", aggregator_exit_code
+    if finalization_reason == "finalization_warning":
+        return "degraded", "finalization_warning", aggregator_exit_code
+    return "complete", None, aggregator_exit_code
+
+
+def _print_telemetry_footer(
+    status: str,
+    reason: Optional[str],
+    aggregator_exit_code: Optional[int],
+) -> None:
+    """Print one factual telemetry line before the final training line."""
+    if status == "complete":
+        message = "Telemetry complete."
+    elif reason == "aggregator_spawn_failed":
+        message = "Telemetry unavailable: aggregator could not start."
+    elif reason == "aggregator_not_ready":
+        message = "Telemetry unavailable: aggregator was not reachable."
+    elif reason == "aggregator_exited_early":
+        suffix = (
+            f" (exit code {aggregator_exit_code})"
+            if aggregator_exit_code is not None
+            else ""
+        )
+        message = f"Telemetry degraded: aggregator exited early{suffix}."
+    elif reason == "summary_missing":
+        message = "Telemetry failed: final summary was not produced."
+    elif reason == "finalization_warning":
+        message = "Telemetry degraded: finalization completed with warnings."
+    elif reason == "finalization_failed":
+        suffix = (
+            f" (exit code {aggregator_exit_code})"
+            if aggregator_exit_code is not None
+            else ""
+        )
+        message = f"Telemetry failed during finalization{suffix}."
+    else:
+        message = f"Telemetry {status}."
+
+    print(f"[TraceML] {message}", file=sys.stderr, flush=True)
 
 
 def _is_torchrun_command(command: list[str]) -> bool:
@@ -307,6 +382,8 @@ def validate_launch_args(args: argparse.Namespace) -> None:
         _require_torch_launcher_support(torchrun_cfg)
         return
 
+    _resolve_cli_missing_aggregator_policy(args)
+
     try:
         launch_cfg = DistributedLaunchConfig.from_args(args)
     except ValueError as exc:
@@ -365,6 +442,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
             launch_context=launch_context,
         )
 
+    missing_aggregator_policy = _resolve_cli_missing_aggregator_policy(args)
     launch_cfg = DistributedLaunchConfig.from_args(args)
     torchrun_cfg = launch_cfg.torchrun
 
@@ -525,6 +603,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         history_retention_s=float(cfg["history_retention"]),
         finalize_timeout_sec=float(env["TRACEML_FINALIZE_TIMEOUT_SEC"]),
         status="starting",
+        telemetry_status="starting",
         launch_cwd=execution_cwd,
         aggregator_dir=aggregator_dir,
         db_path=db_path,
@@ -550,6 +629,11 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
 
     agg_proc: Optional[subprocess.Popen] = None
     train_proc: Optional[subprocess.Popen] = None
+    aggregator_started_at: Optional[str] = None
+    aggregator_exit_code: Optional[int] = None
+    aggregator_exited_early = False
+    telemetry_available = False
+    telemetry_startup_reason: Optional[str] = None
 
     install_shutdown_handlers(
         lambda: (train_proc, agg_proc), manifest_path=manifest_path
@@ -562,22 +646,23 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
             f"(connect={aggregator_cfg.connect_host}, "
             f"ui={cfg['mode']}, profile={env['TRACEML_PROFILE']})"
         )
+        aggregator_started_at = utc_now_iso()
         try:
             agg_proc = start_aggregator_process(env=env, cwd=execution_cwd)
-        except FileNotFoundError as exc:
-            _log_launcher_exception("aggregator entrypoint was not found", exc)
-            print(f"[TraceML] ERROR: {exc}", file=sys.stderr)
-            update_run_manifest(manifest_path, status="failed")
-            raise SystemExit(1)
-
-        print(f"[TraceML] Aggregator PID: {agg_proc.pid}")
-
-        ready = wait_for_tcp_listen(
-            host=aggregator_cfg.connect_host,
-            port=aggregator_cfg.port,
-            proc=agg_proc,
-            timeout_sec=DEFAULT_TCP_READY_TIMEOUT_SEC,
-        )
+        except OSError as exc:
+            _log_launcher_exception("aggregator process could not start", exc)
+            ready = False
+            telemetry_startup_reason = "aggregator_spawn_failed"
+        else:
+            print(f"[TraceML] Aggregator PID: {agg_proc.pid}")
+            ready = wait_for_tcp_listen(
+                host=aggregator_cfg.connect_host,
+                port=aggregator_cfg.port,
+                proc=agg_proc,
+                timeout_sec=DEFAULT_TCP_READY_TIMEOUT_SEC,
+            )
+            if not ready:
+                telemetry_startup_reason = "aggregator_not_ready"
     else:
         print(
             "[TraceML] Waiting for aggregator on "
@@ -589,22 +674,59 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
             port=aggregator_cfg.port,
             timeout_sec=DEFAULT_TCP_READY_TIMEOUT_SEC,
         )
+        if not ready:
+            telemetry_startup_reason = "aggregator_not_ready"
 
     if not ready:
-        rc = agg_proc.poll() if agg_proc is not None else None
-        print(
-            "[TraceML] ERROR: aggregator was not reachable at "
-            f"{aggregator_cfg.connect_host}:{aggregator_cfg.port} "
-            f"(exit={rc}). See output above for details.",
-            file=sys.stderr,
+        aggregator_exit_code = (
+            agg_proc.poll() if agg_proc is not None else None
         )
         if agg_proc is not None:
             terminate_process_group(agg_proc, timeout_sec=3.0)
-        update_run_manifest(manifest_path, status="failed")
-        raise SystemExit(1)
+            aggregator_exit_code = agg_proc.returncode
+            agg_proc = None
 
-    print("[TraceML] Aggregator ready.")
-    update_run_manifest(manifest_path, status="running")
+        if missing_aggregator_policy == "raise":
+            _run_noncritical_launcher_step(
+                "failed to record unavailable telemetry status",
+                lambda: update_run_manifest(
+                    manifest_path,
+                    status="failed",
+                    telemetry_status="unavailable",
+                    telemetry_reason=telemetry_startup_reason,
+                    aggregator_exit_code=aggregator_exit_code,
+                ),
+            )
+            print(
+                "[TraceML] ERROR: aggregator was not available; training was "
+                "not started. Use --on-missing-aggregator=warn to continue "
+                "without telemetry.",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+
+        print(
+            "[TraceML] WARNING: aggregator was not available; training will "
+            "continue without TraceML telemetry.",
+            file=sys.stderr,
+        )
+        env["TRACEML_DISABLED"] = "1"
+    else:
+        telemetry_available = True
+        print("[TraceML] Aggregator ready.")
+
+    _run_noncritical_launcher_step(
+        "failed to record the running telemetry status",
+        lambda: update_run_manifest(
+            manifest_path,
+            status="running",
+            telemetry_status=(
+                "running" if telemetry_available else "unavailable"
+            ),
+            telemetry_reason=telemetry_startup_reason,
+            aggregator_exit_code=aggregator_exit_code,
+        ),
+    )
 
     train_proc = start_training_process(
         train_cmd=train_cmd,
@@ -623,7 +745,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     stderr_capture = (
         start_stderr_tail_capture(train_proc) if capture_stderr else None
     )
-    if owns_aggregator and cfg["mode"] == "dashboard":
+    if owns_aggregator and telemetry_available and cfg["mode"] == "dashboard":
         print(_dashboard_access_box(int(cfg["dashboard_port"])))
 
     while True:
@@ -659,8 +781,33 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                         ),
                     ),
                 )
+                aggregator_exit_code = agg_proc.returncode
 
             final_status = "completed" if train_rc == 0 else "failed"
+            telemetry_status: Optional[str] = None
+            telemetry_reason: Optional[str] = None
+            if owns_aggregator:
+                finalization_reason = None
+                if telemetry_available and aggregator_started_at is not None:
+                    finalization_reason = read_current_finalization_reason(
+                        aggregator_dir,
+                        aggregator_started_at=aggregator_started_at,
+                    )
+                telemetry_status, telemetry_reason, aggregator_exit_code = (
+                    _derive_final_telemetry(
+                        telemetry_available=telemetry_available,
+                        startup_reason=telemetry_startup_reason,
+                        aggregator_exited_early=aggregator_exited_early,
+                        aggregator_exit_code=aggregator_exit_code,
+                        finalization_reason=finalization_reason,
+                        summary_required=(
+                            cfg["mode"] == "summary" and cfg["history_enabled"]
+                        ),
+                        summary_exists=(
+                            session_root / "final_summary.json"
+                        ).is_file(),
+                    )
+                )
             _run_noncritical_launcher_step(
                 "failed to finalize the run manifest",
                 lambda: update_run_manifest(
@@ -669,25 +816,16 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                     artifacts=collect_existing_artifacts(
                         db_path, session_root=session_root
                     ),
+                    telemetry_status=telemetry_status,
+                    telemetry_reason=telemetry_reason,
+                    aggregator_exit_code=aggregator_exit_code,
                 ),
             )
-            if (
-                train_rc == 0
-                and owns_aggregator
-                and cfg["mode"] == "summary"
-                and cfg["history_enabled"]
-                and not (session_root / "final_summary.json").is_file()
-            ):
-                print(
-                    "[TraceML] WARNING: training finished successfully, but "
-                    "TraceML did not produce final_summary.json.",
-                    file=sys.stderr,
-                )
-            if agg_proc is not None and agg_proc.returncode not in (0, None):
-                print(
-                    "[TraceML] WARNING: aggregator finalization exited "
-                    f"with code {agg_proc.returncode}.",
-                    file=sys.stderr,
+            if owns_aggregator and telemetry_status is not None:
+                _print_telemetry_footer(
+                    telemetry_status,
+                    telemetry_reason,
+                    aggregator_exit_code,
                 )
             _exit_with_training_outcome(
                 outcome,
@@ -696,6 +834,8 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
 
         if agg_proc is not None and agg_proc.poll() is not None:
             agg_rc = agg_proc.returncode
+            aggregator_exited_early = True
+            aggregator_exit_code = agg_rc
             print(
                 f"[TraceML] WARNING: aggregator exited early (code={agg_rc}). "
                 "Training will continue without TraceML telemetry.",
@@ -705,11 +845,9 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                 "failed to record degraded telemetry status",
                 lambda: update_run_manifest(
                     manifest_path,
-                    extra={
-                        "telemetry_status": "degraded",
-                        "aggregator_exited_early": True,
-                        "aggregator_exit_code": agg_rc,
-                    },
+                    telemetry_status="degraded",
+                    telemetry_reason="aggregator_exited_early",
+                    aggregator_exit_code=agg_rc,
                 ),
             )
             agg_proc = None

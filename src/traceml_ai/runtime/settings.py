@@ -15,6 +15,7 @@ This module defines the shared configuration dataclasses used by:
 
 """
 
+import os
 from dataclasses import dataclass
 from typing import Optional
 
@@ -27,6 +28,28 @@ DEFAULT_INTERVAL_SEC = 2.0
 # Summary is the safe, topology-independent display default. Live CLI and
 # dashboard rendering remain explicit opt-ins.
 DEFAULT_UI_MODE = "summary"
+MISSING_AGGREGATOR_POLICIES = ("raise", "warn")
+
+
+def resolve_on_missing_aggregator(
+    value: Optional[str],
+    *,
+    default: str,
+) -> str:
+    """Resolve explicit value, environment, then the frontend default."""
+    resolved = value
+    if resolved is None:
+        resolved = os.environ.get("TRACEML_ON_MISSING_AGGREGATOR")
+    if resolved is None:
+        resolved = default
+
+    normalized = str(resolved).strip().lower()
+    if normalized not in MISSING_AGGREGATOR_POLICIES:
+        raise ValueError(
+            "on_missing_aggregator must be 'raise' or 'warn', got "
+            f"{normalized!r}."
+        )
+    return normalized
 
 
 @dataclass(frozen=True)

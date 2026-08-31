@@ -169,8 +169,8 @@ distributed jobs can raise that end-of-run budget with
 `--finalize-timeout-sec <seconds>`.
 
 In `--mode=summary`, if training finishes but TraceML cannot produce
-`final_summary.json`, `traceml run` exits non-zero, so a silently missing
-summary fails loudly instead of passing. The
+`final_summary.json`, the manifest and terminal footer report telemetry as
+failed. The training process still determines the command exit code. The
 [Distributed Training guide](distributed-training.md) explains timeout tuning
 for larger jobs.
 

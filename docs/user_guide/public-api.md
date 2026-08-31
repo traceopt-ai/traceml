@@ -166,6 +166,20 @@ non-aggregator node needs the reachable node-0 address above.
 
 ### Missing-aggregator behavior
 
+`traceml run` and `traceml watch` are strict by default: if their aggregator
+cannot start or become ready, training is not launched. To explicitly continue
+under the normal supervised launcher without telemetry, use:
+
+```bash
+traceml run train.py --on-missing-aggregator=warn
+```
+
+The CLI policy resolves as the explicit flag,
+`TRACEML_ON_MISSING_AGGREGATOR`, then `raise`. A startup failure is recorded as
+`telemetry_status="unavailable"`; once training starts, a later telemetry or
+finalization failure is reported separately and does not replace the training
+exit code.
+
 If the aggregator cannot be reached, `traceml.init(...)` retries for its
 bounded timeout, writes one stderr warning, and continues with tracing disabled
 as a no-op. This is the default `warn` policy; it does not stop training.

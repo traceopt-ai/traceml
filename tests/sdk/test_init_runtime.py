@@ -335,14 +335,16 @@ def test_init_raises_when_aggregator_unreachable_and_strict(
     ],
 )
 def test_missing_aggregator_policy_precedence(
-    initialization, monkeypatch, env_value, explicit_value, expected
+    monkeypatch, env_value, explicit_value, expected
 ):
+    from traceml_ai.runtime.settings import resolve_on_missing_aggregator
+
     monkeypatch.delenv("TRACEML_ON_MISSING_AGGREGATOR", raising=False)
     if env_value is not None:
         monkeypatch.setenv("TRACEML_ON_MISSING_AGGREGATOR", env_value)
 
     assert (
-        initialization._resolve_on_missing_aggregator(explicit_value)
+        resolve_on_missing_aggregator(explicit_value, default="warn")
         == expected
     )
 
