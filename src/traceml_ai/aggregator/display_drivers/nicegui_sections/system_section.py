@@ -209,23 +209,6 @@ def sparkline_svg(
     )
 
 
-def gpus_unreported(gpus: Sequence[GpuRow]) -> bool:
-    """Whether every GPU present sent nothing but the zero fallback.
-
-    The sampler emits an all-zero row when it cannot read a device, which
-    is absence rather than a GPU sitting at zero, and the card must not
-    draw it as a measurement.
-
-    Reads the computer's ``reported`` flag rather than re-deriving the
-    answer. The card used to test whether ``mem_total`` and ``power`` were
-    both absent, which is a stricter rule than the computer's (``mem_total``
-    or ``power_limit_w`` present), so the two disagreed about a GPU that
-    carried a power limit and no memory total. The computer decides what a
-    metric means; this asks it.
-    """
-    return bool(gpus) and not any(gpu.reported for gpu in gpus)
-
-
 def odd_ones_out(roll: SystemRollups) -> set:
     """GPU indices the computer marked as the smaller utilisation group.
 

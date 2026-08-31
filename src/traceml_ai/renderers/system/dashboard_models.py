@@ -12,10 +12,11 @@ inside them was reachable only by string, so the card asked questions like
 and answered some of them differently. Naming the fields is what stops
 that: a question with one answer has one place to ask it.
 
-``to_dict`` reproduces the previous dict exactly, key for key. Two tests
-assert the series by equality on degraded paths, and several more read the
-payload as nested dicts, so the shape is a contract until the card is
-migrated across.
+These types are the whole contract. There is no ``to_dict`` alongside
+them: a second rendering of the same payload is a second place for the
+shape to drift, and the card, the driver and the tests all read the types.
+``from_dict`` remains because the compute layer still assembles mappings
+internally, and adapting them in one place is what keeps that private.
 """
 
 from __future__ import annotations
@@ -32,13 +33,6 @@ class Stat:
     p50: Optional[float] = None
     p95: Optional[float] = None
 
-    def to_dict(self) -> Dict[str, Any]:
-        out: Dict[str, Any] = {"now": self.now}
-        if self.p50 is not None:
-            out["p50"] = self.p50
-        out["p95"] = self.p95
-        return out
-
 
 @dataclass(frozen=True)
 class RamStat:
@@ -48,14 +42,6 @@ class RamStat:
     p95: Optional[float]
     total: float
     headroom: float
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "now": self.now,
-            "p95": self.p95,
-            "total": self.total,
-            "headroom": self.headroom,
-        }
 
 
 @dataclass(frozen=True)
@@ -72,14 +58,6 @@ class GpuMemStat:
     headroom: float
     total: Optional[float]
 
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "now": self.now,
-            "p95": self.p95,
-            "headroom": self.headroom,
-            "total": self.total,
-        }
-
 
 @dataclass(frozen=True)
 class TempStat:
@@ -92,9 +70,6 @@ class TempStat:
     now: Optional[float] = None
     p95: Optional[float] = None
     status: Optional[str] = None
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {"now": self.now, "p95": self.p95, "status": self.status}
 
 
 @dataclass(frozen=True)
@@ -109,14 +84,6 @@ class PowerStat:
     p50: Optional[float] = None
     limit: Optional[float] = None
     floor: Optional[float] = None
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "now": self.now,
-            "p50": self.p50,
-            "limit": self.limit,
-            "floor": self.floor,
-        }
 
 
 @dataclass(frozen=True)
@@ -143,19 +110,6 @@ class GpuRow:
     power_limit: Optional[float] = None
     reported: bool = False
 
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "gpu_idx": self.gpu_idx,
-            "util_now": self.util_now,
-            "util_p50": self.util_p50,
-            "mem_used": self.mem_used,
-            "mem_total": self.mem_total,
-            "temp": self.temp,
-            "power": self.power,
-            "power_limit": self.power_limit,
-            "reported": self.reported,
-        }
-
 
 @dataclass(frozen=True)
 class RunContext:
@@ -168,14 +122,6 @@ class RunContext:
     # were seen in the window, and its name. A mapping rather than an
     # index because the card needs all three to say "node 0 of 2".
     system_node: Optional[Dict[str, Any]] = None
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "world_size": self.world_size,
-            "gpu_count": self.gpu_count,
-            "hostname": self.hostname,
-            "system_node": self.system_node,
-        }
 
 
 @dataclass(frozen=True)
@@ -193,15 +139,6 @@ class CpuRunSeries:
     max: Tuple[float, ...] = ()
     span_s: float = 0.0
     window_s: float = 0.0
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "t": list(self.t),
-            "avg": list(self.avg),
-            "max": list(self.max),
-            "span_s": self.span_s,
-            "window_s": self.window_s,
-        }
 
 
 @dataclass(frozen=True)
@@ -233,60 +170,20 @@ class SystemRollups:
 
     @property
     def gpus_unreported(self) -> bool:
-        """Whether every GPU present has told us nothing.
+        """Whether every GPU present sent nothing but the zero fallback.
 
-        One rule, answered once. The card asked a different question of
-        the same rows and could disagree with this.
+        The sampler emits an all-zero row when it cannot read a device,
+        which is absence rather than a GPU sitting at zero, and the card
+        must not draw it as a measurement.
+
+        Reads the computer's ``reported`` flag rather than re-deriving the
+        answer. The card used to test whether ``mem_total`` and ``power``
+        were both absent, a stricter rule than the computer's (``mem_total``
+        or ``power_limit_w`` present), so the two disagreed about a GPU
+        carrying a power limit and no memory total. This is the only place
+        the question is answered.
         """
         return bool(self.gpus) and not any(g.reported for g in self.gpus)
-
-    @property
-    def is_empty(self) -> bool:
-        """Whether nothing was computed, as opposed to computed as zero."""
-        return (
-            not self.gpus
-            and self.ctx is None
-            and self.status is None
-            and all(
-                v is None
-                for v in (
-                    self.cpu,
-                    self.ram,
-                    self.gpu_util,
-                    self.gpu_delta,
-                    self.gpu_mem,
-                    self.temp,
-                    self.gpu_power,
-                )
-            )
-        )
-
-    def to_dict(self) -> Dict[str, Any]:
-        # The empty payload carries an empty mapping rather than a shell of
-        # null-valued keys, and two tests assert that by equality.
-        if self.is_empty:
-            return {}
-        out: Dict[str, Any] = {"gpu_available": self.gpu_available}
-        for key, value in (
-            ("cpu", self.cpu),
-            ("ram", self.ram),
-            ("gpu_util", self.gpu_util),
-            ("gpu_delta", self.gpu_delta),
-            ("gpu_mem", self.gpu_mem),
-            ("temp", self.temp),
-            ("gpu_power", self.gpu_power),
-        ):
-            if value is not None:
-                out[key] = value.to_dict()
-        out["gpus"] = [g.to_dict() for g in self.gpus]
-        out["odd_gpus"] = list(self.odd_gpus)
-        out["util_range"] = self.util_range
-        out["rows_over"] = self.rows_over
-        if self.ctx is not None:
-            out["ctx"] = self.ctx.to_dict()
-        if self.status is not None:
-            out["status"] = self.status
-        return out
 
     @classmethod
     def from_dict(cls, raw: Dict[str, Any]) -> "SystemRollups":
@@ -379,7 +276,10 @@ class SystemSeries:
     x_time: Tuple[str, ...] = ()
     cpu: Tuple[Optional[float], ...] = ()
     gpu_avg: Tuple[Optional[float], ...] = ()
-    gpu_power: Tuple[Optional[float], ...] = ()
+    # Per-GPU power over the window: one entry per device, each
+    # {"gpu_idx", "values"}. Not a flat series, which is what the
+    # annotation used to claim.
+    gpu_power: Tuple[Dict[str, Any], ...] = ()
     cpu_run: CpuRunSeries = field(default_factory=CpuRunSeries)
     gpu_power_run: Tuple[Dict[str, Any], ...] = ()
     # Which view each chart is in. Both answered by one rule in the
@@ -387,18 +287,6 @@ class SystemSeries:
     # different rules and its charts could disagree.
     cpu_run_whole: bool = False
     power_run_whole: bool = False
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "x_time": list(self.x_time),
-            "cpu": list(self.cpu),
-            "gpu_avg": list(self.gpu_avg),
-            "gpu_power": list(self.gpu_power),
-            "cpu_run": self.cpu_run.to_dict(),
-            "gpu_power_run": [dict(b) for b in self.gpu_power_run],
-            "cpu_run_whole": self.cpu_run_whole,
-            "power_run_whole": self.power_run_whole,
-        }
 
     @classmethod
     def from_dict(cls, raw: Dict[str, Any]) -> "SystemSeries":
@@ -430,14 +318,6 @@ class SystemDashboardPayload:
     gpu_available: bool = False
     rollups: SystemRollups = field(default_factory=SystemRollups)
     series: SystemSeries = field(default_factory=SystemSeries)
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "window_len": self.window_len,
-            "gpu_available": self.gpu_available,
-            "rollups": self.rollups.to_dict(),
-            "series": self.series.to_dict(),
-        }
 
 
 __all__ = [

@@ -28,9 +28,6 @@ import pytest
 
 pytest.importorskip("nicegui")
 
-from traceml_ai.aggregator.display_drivers.nicegui_sections import (  # noqa: E402
-    system_section,
-)
 from traceml_ai.renderers.system import dashboard_compute  # noqa: E402
 
 
@@ -58,7 +55,8 @@ def _gpu(idx: int, **kw):
     `_odd_gpus` reads mappings because that is what it is handed inside
     the compute layer; `gpus_unreported` reads the typed rows the card
     receives. `_typed_gpu` below bridges the two for the tests that need
-    the card's side.
+    the card's side, and `_unreported` asks the payload, which is where
+    the card asks it.
     """
     row = {
         "gpu_idx": idx,
@@ -78,6 +76,13 @@ def _typed_gpu(idx: int, **kw):
     )
 
     return gpu_rows_from_dicts([_gpu(idx, **kw)])[0]
+
+
+def _unreported(rows) -> bool:
+    """The card's answer, asked where the card asks it: the payload."""
+    from traceml_ai.renderers.system.dashboard_models import SystemRollups
+
+    return SystemRollups(gpus=tuple(rows)).gpus_unreported
 
 
 # --- the outlier split, now owned by the compute layer -------------------
@@ -142,18 +147,18 @@ def test_the_card_asks_the_computer_whether_a_gpu_reported():
     the card announce that the whole GPU sample is missing.
     """
     none_reported = [_typed_gpu(0), _typed_gpu(1)]
-    assert system_section.gpus_unreported(none_reported) is True
+    assert _unreported(none_reported) is True
 
     one_reported = [_typed_gpu(0, reported=True), _typed_gpu(1)]
-    assert system_section.gpus_unreported(one_reported) is False
+    assert _unreported(one_reported) is False
 
     # The case the two rules disagreed about: values absent, device present.
     valueless_but_present = [_typed_gpu(0, reported=True)]
-    assert system_section.gpus_unreported(valueless_but_present) is False
+    assert _unreported(valueless_but_present) is False
 
 
 def test_no_gpus_at_all_is_not_the_same_as_unreported():
-    assert system_section.gpus_unreported([]) is False
+    assert _unreported([]) is False
 
 
 # --- one rule for "is this the whole-run view" ---------------------------
