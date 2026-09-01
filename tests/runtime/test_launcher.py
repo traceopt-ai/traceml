@@ -35,6 +35,7 @@ from traceml_ai.launcher.manifest import (
     collect_existing_artifacts,
     is_current_summary_artifact,
     load_json_or_warn,
+    node_artifact_dir,
     read_current_finalization_reason,
     update_run_manifest,
     write_run_manifest,
@@ -85,6 +86,18 @@ def test_run_and_watch_accept_missing_aggregator_policy() -> None:
 
     assert run_args.on_missing_aggregator == "warn"
     assert watch_args.on_missing_aggregator is None
+
+
+def test_capture_stderr_help_uses_node_scoped_path(capsys) -> None:
+    parser = build_parser()
+
+    with pytest.raises(SystemExit) as exc_info:
+        parser.parse_args(["run", "--help"])
+
+    help_text = "".join(capsys.readouterr().out.split())
+    assert exc_info.value.code == 0
+    assert "nodes/node_<node-rank>/crash_stderr.log" in help_text
+    assert "logs/<run-name>/crash_stderr.log" not in help_text
 
 
 @pytest.mark.parametrize("default", ["raise", "warn"])
@@ -791,14 +804,16 @@ def test_strict_aggregator_failure_does_not_start_training(
     else:
         assert "(exit=" not in stderr
     start_training.assert_not_called()
-    assert update_manifest.call_args.kwargs["status"] == "failed"
-    assert update_manifest.call_args.kwargs["telemetry_status"] == (
-        "unavailable" if owner else None
-    )
     if owner:
+        assert update_manifest.call_args.kwargs["status"] == "failed"
+        assert (
+            update_manifest.call_args.kwargs["telemetry_status"]
+            == "unavailable"
+        )
         assert update_manifest.call_args.kwargs["telemetry_reason"] == reason
     else:
         start_aggregator.assert_not_called()
+        update_manifest.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -821,6 +836,7 @@ def test_launcher_scopes_telemetry_health_to_aggregator_owner(
         "warn-run",
         "--on-missing-aggregator",
         "warn",
+        "--capture-stderr",
     ]
     if not owner:
         cli.extend(["--nnodes", "2", "--node-rank", "1"])
@@ -831,6 +847,7 @@ def test_launcher_scopes_telemetry_health_to_aggregator_owner(
     aggregator.poll.return_value = 7
     training = Mock()
     training.poll.return_value = 0
+    stderr_capture = Mock()
 
     def _stop_aggregator(*_args, **_kwargs):
         events.append("stop")
@@ -841,7 +858,12 @@ def test_launcher_scopes_telemetry_health_to_aggregator_owner(
         return training
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(launcher_commands, "install_shutdown_handlers", Mock())
+    install_shutdown_handlers = Mock()
+    monkeypatch.setattr(
+        launcher_commands,
+        "install_shutdown_handlers",
+        install_shutdown_handlers,
+    )
     start_aggregator = Mock(return_value=aggregator)
     monkeypatch.setattr(
         launcher_commands, "start_aggregator_process", start_aggregator
@@ -853,10 +875,16 @@ def test_launcher_scopes_telemetry_health_to_aggregator_owner(
         launcher_commands, "start_training_process", _start_training
     )
     monkeypatch.setattr(
-        launcher_commands, "terminate_process_group", _stop_aggregator
+        launcher_commands,
+        "start_stderr_tail_capture",
+        Mock(return_value=stderr_capture),
     )
     monkeypatch.setattr(
-        launcher_commands, "write_code_manifest", Mock(return_value=None)
+        launcher_commands, "terminate_process_group", _stop_aggregator
+    )
+    write_code_manifest = Mock(return_value=None)
+    monkeypatch.setattr(
+        launcher_commands, "write_code_manifest", write_code_manifest
     )
     write_manifest = Mock(return_value=tmp_path / "manifest.json")
     update_manifest = Mock()
@@ -871,24 +899,41 @@ def test_launcher_scopes_telemetry_health_to_aggregator_owner(
         launch_process(str(script), args)
 
     assert exc.value.code == 0
+    node_rank = 0 if owner else 1
+    stderr_capture.finish.assert_called_once_with(
+        tmp_path.resolve()
+        / "logs"
+        / "warn-run"
+        / "nodes"
+        / f"node_{node_rank}"
+        / "crash_stderr.log"
+    )
     if owner:
         assert events == ["stop", "train"]
         start_aggregator.assert_called_once()
-    else:
-        assert events == ["train"]
-        start_aggregator.assert_not_called()
-
-    initial_telemetry = write_manifest.call_args.kwargs["telemetry_status"]
-    reported_statuses = [
-        call.kwargs.get("telemetry_status")
-        for call in update_manifest.call_args_list
-    ]
-    if owner:
+        write_code_manifest.assert_called_once()
+        write_manifest.assert_called_once()
+        assert install_shutdown_handlers.call_args.kwargs["manifest_path"] == (
+            tmp_path / "manifest.json"
+        )
+        initial_telemetry = write_manifest.call_args.kwargs[
+            "telemetry_status"
+        ]
+        reported_statuses = [
+            call.kwargs.get("telemetry_status")
+            for call in update_manifest.call_args_list
+        ]
         assert initial_telemetry == "starting"
         assert "unavailable" in reported_statuses
     else:
-        assert initial_telemetry is None
-        assert set(reported_statuses) == {None}
+        assert events == ["train"]
+        start_aggregator.assert_not_called()
+        write_code_manifest.assert_not_called()
+        write_manifest.assert_not_called()
+        update_manifest.assert_not_called()
+        assert (
+            install_shutdown_handlers.call_args.kwargs["manifest_path"] is None
+        )
 
 
 @pytest.mark.parametrize(
@@ -1314,14 +1359,35 @@ def test_collect_existing_artifacts_only_returns_existing_files(
     }
 
 
+def test_node_artifact_directories_are_rank_scoped(tmp_path) -> None:
+    node_0 = node_artifact_dir(tmp_path, 0)
+    node_1 = node_artifact_dir(tmp_path, 1)
+
+    assert node_0 == tmp_path.resolve() / "nodes" / "node_0"
+    assert node_1 == tmp_path.resolve() / "nodes" / "node_1"
+    assert node_0 != node_1
+
+    node_0.mkdir(parents=True)
+    node_1.mkdir(parents=True)
+    node_0_stderr = node_0 / "crash_stderr.log"
+    node_1_stderr = node_1 / "crash_stderr.log"
+    node_0_stderr.write_text("node 0", encoding="utf-8")
+    node_1_stderr.write_text("node 1", encoding="utf-8")
+
+    assert node_0_stderr.read_text(encoding="utf-8") == "node 0"
+    assert node_1_stderr.read_text(encoding="utf-8") == "node 1"
+
+
 def test_collect_existing_artifacts_includes_stderr_tail(tmp_path) -> None:
     db_path = tmp_path / "aggregator" / "telemetry"
-    stderr_path = tmp_path / "crash_stderr.log"
+    stderr_path = node_artifact_dir(tmp_path, 0) / "crash_stderr.log"
+    stderr_path.parent.mkdir(parents=True)
     stderr_path.write_bytes(b"native crash details\n")
 
     artifacts = collect_existing_artifacts(
         db_path,
         session_root=tmp_path,
+        crash_stderr_path=stderr_path,
     )
 
     assert artifacts["crash_stderr_log"] == str(stderr_path)

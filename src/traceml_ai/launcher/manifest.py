@@ -27,6 +27,11 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def node_artifact_dir(session_root: Path, node_rank: int) -> Path:
+    """Return the collision-free artifact directory owned by one node."""
+    return Path(session_root).resolve() / "nodes" / f"node_{int(node_rank)}"
+
+
 def load_json_or_warn(path: Path) -> Dict[str, Any]:
     """Load JSON from disk, returning an empty dict for missing/bad files."""
     path = Path(path).resolve()
@@ -344,6 +349,7 @@ def update_run_manifest(
 def collect_existing_artifacts(
     db_path: Path,
     session_root: Optional[Path] = None,
+    crash_stderr_path: Optional[Path] = None,
 ) -> Dict[str, str]:
     """Return only launcher artifacts that currently exist on disk."""
     candidates = {
@@ -357,9 +363,8 @@ def collect_existing_artifacts(
         candidates["code_manifest"] = (
             Path(session_root).resolve() / "code_manifest.json"
         )
-        candidates["crash_stderr_log"] = (
-            Path(session_root).resolve() / "crash_stderr.log"
-        )
+    if crash_stderr_path is not None:
+        candidates["crash_stderr_log"] = Path(crash_stderr_path).resolve()
 
     return {
         name: str(path) for name, path in candidates.items() if path.exists()

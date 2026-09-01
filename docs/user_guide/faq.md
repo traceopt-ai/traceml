@@ -359,8 +359,9 @@ traceml run train.py --mode=summary --capture-stderr
 
 You can also set `TRACEML_CAPTURE_STDERR=1`. TraceML continues to print the
 child process's stderr to the terminal and stores only its last 64 KiB in
-`logs/<run-name>/crash_stderr.log` when the child exits. The file remains local
-and stderr capture is disabled by default.
+`logs/<run-name>/nodes/node_<node-rank>/crash_stderr.log` when the child exits.
+The node-scoped path prevents launchers from overwriting one another on shared
+filesystems. The file remains local and stderr capture is disabled by default.
 
 ---
 

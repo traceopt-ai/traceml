@@ -231,7 +231,8 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help=(
             "Tee child stderr to the console and retain its last 64 KiB in "
-            "logs/<run-name>/crash_stderr.log. Default: disabled."
+            "logs/<run-name>/nodes/node_<node-rank>/crash_stderr.log. "
+            "Default: disabled."
         ),
     )
 

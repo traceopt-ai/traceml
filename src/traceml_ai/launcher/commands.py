@@ -28,6 +28,7 @@ from traceml_ai.launcher.launch_config import (
 from traceml_ai.launcher.manifest import (
     collect_existing_artifacts,
     is_current_summary_artifact,
+    node_artifact_dir,
     read_current_finalization_reason,
     update_run_manifest,
     utc_now_iso,
@@ -155,12 +156,12 @@ def _stderr_capture_enabled(
 
 
 def _finish_stderr_capture(
-    capture: Optional[StderrTailCapture], session_root: Path
+    capture: Optional[StderrTailCapture], output_path: Path
 ) -> None:
     """Persist an optional stderr tail without affecting the training result."""
     if capture is None:
         return
-    capture.finish(session_root / "crash_stderr.log")
+    capture.finish(output_path)
 
 
 def _run_noncritical_launcher_step(
@@ -527,6 +528,8 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     _require_dashboard_dependencies(str(cfg["mode"]))
 
     owns_aggregator = aggregator_cfg.is_owner(node_rank=torchrun_cfg.node_rank)
+    # Root run metadata has one writer even when every node has a launcher.
+    is_root_writer = torchrun_cfg.node_rank == 0
 
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
@@ -582,42 +585,45 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     session_root = Path(cfg["logs_dir"]).resolve() / session_id
     aggregator_dir = session_root / "aggregator"
     db_path = aggregator_dir / "telemetry"
+    node_dir = node_artifact_dir(session_root, torchrun_cfg.node_rank)
+    crash_stderr_path = node_dir / "crash_stderr.log"
 
-    code_manifest_path = write_code_manifest(
-        session_root=session_root,
-        script_path=script_path,
-    )
-
-    manifest_path = write_run_manifest(
-        session_root=session_root,
-        session_id=session_id,
-        run=run_identity.to_manifest(),
-        script_path=script_path,
-        profile=env["TRACEML_PROFILE"],
-        ui_mode=cfg["mode"],
-        logs_dir=cfg["logs_dir"],
-        aggregator_host=aggregator_cfg.connect_host,
-        aggregator_bind_host=aggregator_cfg.bind_host,
-        aggregator_port=aggregator_cfg.port,
-        nnodes=torchrun_cfg.nnodes,
-        node_rank=torchrun_cfg.node_rank,
-        master_addr=torchrun_cfg.master_addr,
-        master_port=torchrun_cfg.master_port,
-        nproc_per_node=torchrun_cfg.nproc_per_node,
-        history_enabled=cfg["history_enabled"],
-        history_retention_s=float(cfg["history_retention"]),
-        finalize_timeout_sec=float(env["TRACEML_FINALIZE_TIMEOUT_SEC"]),
-        status="starting",
-        telemetry_status="starting" if owns_aggregator else None,
-        launch_cwd=execution_cwd,
-        aggregator_dir=aggregator_dir,
-        db_path=db_path,
-        extra=(
-            {"artifacts": {"code_manifest": str(code_manifest_path)}}
-            if code_manifest_path is not None
-            else None
-        ),
-    )
+    manifest_path: Optional[Path] = None
+    if is_root_writer:
+        code_manifest_path = write_code_manifest(
+            session_root=session_root,
+            script_path=script_path,
+        )
+        manifest_path = write_run_manifest(
+            session_root=session_root,
+            session_id=session_id,
+            run=run_identity.to_manifest(),
+            script_path=script_path,
+            profile=env["TRACEML_PROFILE"],
+            ui_mode=cfg["mode"],
+            logs_dir=cfg["logs_dir"],
+            aggregator_host=aggregator_cfg.connect_host,
+            aggregator_bind_host=aggregator_cfg.bind_host,
+            aggregator_port=aggregator_cfg.port,
+            nnodes=torchrun_cfg.nnodes,
+            node_rank=torchrun_cfg.node_rank,
+            master_addr=torchrun_cfg.master_addr,
+            master_port=torchrun_cfg.master_port,
+            nproc_per_node=torchrun_cfg.nproc_per_node,
+            history_enabled=cfg["history_enabled"],
+            history_retention_s=float(cfg["history_retention"]),
+            finalize_timeout_sec=float(env["TRACEML_FINALIZE_TIMEOUT_SEC"]),
+            status="starting",
+            telemetry_status="starting" if owns_aggregator else None,
+            launch_cwd=execution_cwd,
+            aggregator_dir=aggregator_dir,
+            db_path=db_path,
+            extra=(
+                {"artifacts": {"code_manifest": str(code_manifest_path)}}
+                if code_manifest_path is not None
+                else None
+            ),
+        )
 
     traceml_root = Path(__file__).resolve().parents[1]
     runner_path = str(traceml_root / "runtime" / "executor.py")
@@ -692,18 +698,19 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
             agg_proc = None
 
         if missing_aggregator_policy == "raise":
-            _run_noncritical_launcher_step(
-                "failed to record unavailable telemetry status",
-                lambda: update_run_manifest(
-                    manifest_path,
-                    status="failed",
-                    telemetry_status=(
-                        "unavailable" if owns_aggregator else None
+            if manifest_path is not None:
+                _run_noncritical_launcher_step(
+                    "failed to record unavailable telemetry status",
+                    lambda: update_run_manifest(
+                        manifest_path,
+                        status="failed",
+                        telemetry_status=(
+                            "unavailable" if owns_aggregator else None
+                        ),
+                        telemetry_reason=telemetry_startup_reason,
+                        aggregator_exit_code=aggregator_exit_code,
                     ),
-                    telemetry_reason=telemetry_startup_reason,
-                    aggregator_exit_code=aggregator_exit_code,
-                ),
-            )
+                )
             exit_detail = (
                 f" (exit={aggregator_exit_code})"
                 if aggregator_exit_code is not None
@@ -730,20 +737,21 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         telemetry_available = True
         print("[TraceML] Aggregator ready.")
 
-    _run_noncritical_launcher_step(
-        "failed to record the running telemetry status",
-        lambda: update_run_manifest(
-            manifest_path,
-            status="running",
-            telemetry_status=(
-                ("running" if telemetry_available else "unavailable")
-                if owns_aggregator
-                else None
+    if manifest_path is not None:
+        _run_noncritical_launcher_step(
+            "failed to record the running telemetry status",
+            lambda: update_run_manifest(
+                manifest_path,
+                status="running",
+                telemetry_status=(
+                    ("running" if telemetry_available else "unavailable")
+                    if owns_aggregator
+                    else None
+                ),
+                telemetry_reason=telemetry_startup_reason,
+                aggregator_exit_code=aggregator_exit_code,
             ),
-            telemetry_reason=telemetry_startup_reason,
-            aggregator_exit_code=aggregator_exit_code,
-        ),
-    )
+        )
 
     train_proc = start_training_process(
         train_cmd=train_cmd,
@@ -751,7 +759,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         cwd=execution_cwd,
         capture_stderr=capture_stderr,
     )
-    if owns_aggregator:
+    if manifest_path is not None:
         _run_noncritical_launcher_step(
             "failed to record the training start time",
             lambda: update_run_manifest(
@@ -769,7 +777,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         train_rc = train_proc.poll()
         if train_rc is not None:
             outcome = TrainingOutcome(train_rc)
-            if owns_aggregator:
+            if manifest_path is not None:
                 _run_noncritical_launcher_step(
                     "failed to record the training end time",
                     lambda: update_run_manifest(
@@ -781,7 +789,9 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                 )
             _run_noncritical_launcher_step(
                 "failed to finish stderr capture",
-                lambda: _finish_stderr_capture(stderr_capture, session_root),
+                lambda: _finish_stderr_capture(
+                    stderr_capture, crash_stderr_path
+                ),
             )
             if agg_proc is not None:
                 print(
@@ -829,19 +839,22 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                         ),
                     )
                 )
-            _run_noncritical_launcher_step(
-                "failed to finalize the run manifest",
-                lambda: update_run_manifest(
-                    manifest_path,
-                    status=final_status,
-                    artifacts=collect_existing_artifacts(
-                        db_path, session_root=session_root
+            if manifest_path is not None:
+                _run_noncritical_launcher_step(
+                    "failed to finalize the run manifest",
+                    lambda: update_run_manifest(
+                        manifest_path,
+                        status=final_status,
+                        artifacts=collect_existing_artifacts(
+                            db_path,
+                            session_root=session_root,
+                            crash_stderr_path=crash_stderr_path,
+                        ),
+                        telemetry_status=telemetry_status,
+                        telemetry_reason=telemetry_reason,
+                        aggregator_exit_code=aggregator_exit_code,
                     ),
-                    telemetry_status=telemetry_status,
-                    telemetry_reason=telemetry_reason,
-                    aggregator_exit_code=aggregator_exit_code,
-                ),
-            )
+                )
             if owns_aggregator and telemetry_status is not None:
                 _print_telemetry_footer(
                     telemetry_status,
@@ -862,15 +875,16 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                 "Training will continue without TraceML telemetry.",
                 file=sys.stderr,
             )
-            _run_noncritical_launcher_step(
-                "failed to record degraded telemetry status",
-                lambda: update_run_manifest(
-                    manifest_path,
-                    telemetry_status="degraded",
-                    telemetry_reason="aggregator_exited_early",
-                    aggregator_exit_code=agg_rc,
-                ),
-            )
+            if manifest_path is not None:
+                _run_noncritical_launcher_step(
+                    "failed to record degraded telemetry status",
+                    lambda: update_run_manifest(
+                        manifest_path,
+                        telemetry_status="degraded",
+                        telemetry_reason="aggregator_exited_early",
+                        aggregator_exit_code=agg_rc,
+                    ),
+                )
             agg_proc = None
 
         time.sleep(1.0)
