@@ -141,6 +141,7 @@ def test_forced_termination_reaps_the_direct_child(monkeypatch) -> None:
         process_mod.os,
         "killpg",
         lambda _pid, signum: signals.append(signum),
+        raising=False,
     )
 
     class ReapedAfterKill:
