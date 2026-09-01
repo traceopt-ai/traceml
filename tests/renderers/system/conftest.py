@@ -73,6 +73,7 @@ def system_db(tmp_path: Path) -> Callable[..., str]:
         hostnames: Sequence[str] = ("box",),
         gaps: Mapping[int, float] = {},
         start_ts: float = 1000.0,
+        null_ts_before: int = 0,
     ) -> str:
         row_id = 0
         conn = sqlite3.connect(path)
@@ -98,6 +99,18 @@ def system_db(tmp_path: Path) -> Callable[..., str]:
                         ram_used_bytes=2.0 * GB,
                         ram_total_bytes=16.0 * GB,
                         gpu_samples=list(gpus(seq)) if gpus else (),
+                    )
+            if null_ts_before:
+                # `sample_ts_s` is nullable in the writer's schema, so a row
+                # can carry telemetry and no clock. Real cause: a sampler
+                # that reports before its first clock read.
+                # Both tables carry their own clock, and a sample that
+                # reported without one has children in the same state.
+                for table in ("system_samples", "system_gpu_samples"):
+                    conn.execute(
+                        f"UPDATE {table} SET sample_ts_s = NULL "
+                        "WHERE seq < ?",
+                        (int(null_ts_before),),
                     )
             conn.commit()
         finally:

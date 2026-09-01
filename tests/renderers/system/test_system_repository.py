@@ -365,3 +365,76 @@ def test_one_swallow_is_a_capability_fallback_not_a_defect(system_db):
     with open(source, encoding="utf-8") as handle:
         text = handle.read()
     assert "Window functions need SQLite >= 3.25" in text
+
+
+# --- NULL sample timestamps (#418) ---------------------------------------
+def test_a_null_timestamp_row_is_not_a_sample(system_db):
+    """`sample_ts_s` is nullable, and a row without a clock is not usable.
+
+    Reproduced before it was fixed: with 30 such rows the CPU read raised
+    `TypeError` out of `float(r[0])`. It is masked below a threshold, which
+    is why nothing caught it. SQLite sorts NULLs first and the read already
+    drops the first `preceding_rows` as an incomplete window, so the crash
+    only appears once the NULL count exceeds that prefix, and the prefix
+    itself moves with the cadence.
+
+    `TypeError` is not `sqlite3.Error`, so it escaped the reader's own
+    handler and reached `compute()`, where the whole-run chart silently
+    vanished and the card fell back to the recent view with no reason
+    given.
+    """
+    path = system_db(ticks=200, cadence_s=2.0, null_ts_before=30)
+    repo = _repo(path)
+    with repo.connect() as conn:
+        stats = repo.cpu_run_stats(conn)
+        assert stats is not None
+        # The count must describe rows that can be placed on a clock, or
+        # the cadence derived from it is wrong for every one of them.
+        assert stats.sample_count == 170
+        _stats, rows = _cpu_run(repo, conn)
+    assert rows
+    assert all(ts is not None for ts, _a, _m in rows)
+
+
+def test_a_null_timestamp_row_is_not_a_power_sample(system_db):
+    """The same rule on the GPU path, which has the same nullable column."""
+    path = system_db(
+        ticks=200,
+        cadence_s=2.0,
+        gpus=lambda seq: [gpu(0)],
+        null_ts_before=30,
+    )
+    repo = _repo(path)
+    with repo.connect() as conn:
+        stats = repo.gpu_power_run_stats(conn)
+        assert stats is not None
+        assert stats.sample_count == 170
+        _stats, out = _power_run(repo, conn)
+    assert out
+    assert all(ts is not None for ts in out[0]["t"])
+
+
+def test_one_unclocked_row_does_not_erase_the_whole_run_chart(system_db):
+    """The costly half of #418, and the half the issue did not describe.
+
+    The issue reported a crash, which needs more unclocked rows than the
+    read's dropped prefix. The common case is one, and it never crashed:
+    `float(r["sample_ts_s"] or 0.0)` in the compute layer turned a missing
+    clock into epoch 1970, so the recent window appeared to span 54 years,
+    the run could never outgrow it, and the whole-run chart silently
+    vanished with the card falling back to the recent view.
+
+    Silent and wrong is worse than loud and wrong, and one row is far more
+    likely than thirty.
+    """
+    from traceml_ai.renderers.system.dashboard_compute import (
+        SystemDashboardComputer,
+    )
+
+    path = system_db(ticks=200, cadence_s=2.0, null_ts_before=1)
+    out = SystemDashboardComputer(path).compute(window_n=100)
+
+    assert out.series.cpu_run_mode == "retained"
+    assert len(out.series.cpu_run.t) > 2
+    # And no drawn timestamp is the empty string the 1970 value formatted to.
+    assert all(x for x in out.series.x_time)
