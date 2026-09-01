@@ -704,10 +704,18 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                     aggregator_exit_code=aggregator_exit_code,
                 ),
             )
+            exit_detail = (
+                f" (exit={aggregator_exit_code})"
+                if aggregator_exit_code is not None
+                else ""
+            )
             print(
-                "[TraceML] ERROR: aggregator was not available; training was "
-                "not started. Use --on-missing-aggregator=warn to continue "
-                "without telemetry.",
+                "[TraceML] ERROR: aggregator was not reachable at "
+                f"{aggregator_cfg.connect_host}:{aggregator_cfg.port}"
+                f"{exit_detail}; training was not started. Use "
+                "--on-missing-aggregator=warn or "
+                "TRACEML_ON_MISSING_AGGREGATOR=warn to continue without "
+                "telemetry.",
                 file=sys.stderr,
             )
             raise SystemExit(1)

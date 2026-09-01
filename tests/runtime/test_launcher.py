@@ -728,11 +728,20 @@ def test_started_training_result_is_authoritative(
     ],
 )
 def test_strict_aggregator_failure_does_not_start_training(
-    monkeypatch, tmp_path, failure, reason, owner
+    monkeypatch, tmp_path, capsys, failure, reason, owner
 ) -> None:
     script = tmp_path / "train.py"
     script.write_text("print('train')\n", encoding="utf-8")
-    cli = ["run", str(script), "--logs-dir", str(tmp_path / "logs")]
+    cli = [
+        "run",
+        str(script),
+        "--logs-dir",
+        str(tmp_path / "logs"),
+        "--aggregator-host",
+        "telemetry.internal",
+        "--aggregator-port",
+        "43170",
+    ]
     if not owner:
         cli.extend(
             ["--nnodes", "2", "--node-rank", "1", "--run-name", "strict-run"]
@@ -773,6 +782,14 @@ def test_strict_aggregator_failure_does_not_start_training(
         launch_process(str(script), args)
 
     assert exc.value.code == 1
+    stderr = capsys.readouterr().err
+    assert "aggregator was not reachable at telemetry.internal:43170" in stderr
+    assert "--on-missing-aggregator=warn" in stderr
+    assert "TRACEML_ON_MISSING_AGGREGATOR=warn" in stderr
+    if failure == "readiness" and owner:
+        assert "(exit=7)" in stderr
+    else:
+        assert "(exit=" not in stderr
     start_training.assert_not_called()
     assert update_manifest.call_args.kwargs["status"] == "failed"
     assert update_manifest.call_args.kwargs["telemetry_status"] == (
