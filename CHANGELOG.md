@@ -7,6 +7,8 @@ which carry the full historical notes for versions predating this file.
 
 ## [Unreleased]
 
+- Root `system_manifest.json` writes now come only from global rank 0, avoiding
+  nondeterministic node ownership on shared filesystems.
 - **Breaking:** Opt-in `--capture-stderr` output moved for both single-node and
   multi-node runs from `logs/<run-name>/crash_stderr.log` to
   `logs/<run-name>/nodes/node_<node-rank>/crash_stderr.log`, preventing
