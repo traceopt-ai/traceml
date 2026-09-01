@@ -280,6 +280,13 @@ def terminate_process_group(
             except Exception:
                 pass
 
+    # Reap the direct child after forced termination so callers can rely on
+    # ``returncode`` instead of mistaking an unreaped process for a clean exit.
+    try:
+        proc.wait(timeout=min(timeout_sec, DEFAULT_SHUTDOWN_TIMEOUT_SEC))
+    except Exception:
+        pass
+
 
 def wait_for_tcp_listen(
     host: str,

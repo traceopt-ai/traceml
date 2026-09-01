@@ -7,6 +7,7 @@ from threading import Lock
 from typing import Any, Literal, Optional
 
 from traceml_ai.runtime.arming import _set_tracing_armed, is_tracing_armed
+from traceml_ai.runtime.settings import resolve_on_missing_aggregator
 
 TraceMLInitMode = Literal["auto", "manual", "selective"]
 
@@ -342,24 +343,6 @@ def _resolve_runtime_settings(
     )
 
 
-def _resolve_on_missing_aggregator(value: Optional[str]) -> str:
-    """Resolve the missing-aggregator policy: explicit arg > env > 'warn'."""
-    import os
-
-    resolved = (
-        value
-        if value is not None
-        else os.environ.get("TRACEML_ON_MISSING_AGGREGATOR")
-    ) or "warn"
-    resolved = str(resolved).strip().lower()
-    if resolved not in ("warn", "raise"):
-        raise ValueError(
-            "on_missing_aggregator must be 'warn' or 'raise', got "
-            f"{resolved!r}."
-        )
-    return resolved
-
-
 def _start_runtime_for_init(
     *,
     ui_mode: Optional[str],
@@ -557,6 +540,11 @@ def init(
             _INIT_CONFIG = disabled_config
             return disabled_config
 
+    missing_aggregator_policy = resolve_on_missing_aggregator(
+        on_missing_aggregator,
+        default="warn",
+    )
+
     requested = _build_config(
         mode=mode,
         patch_dataloader=patch_dataloader,
@@ -597,10 +585,7 @@ def init(
             # installing no patches. Opt into hard failure with
             # on_missing_aggregator='raise' (e.g. CI that wants misconfigured
             # telemetry to fail the run).
-            if (
-                _resolve_on_missing_aggregator(on_missing_aggregator)
-                == "raise"
-            ):
+            if missing_aggregator_policy == "raise":
                 raise
             import sys
 
@@ -616,10 +601,7 @@ def init(
         try:
             _apply_requested_patches(requested)
         except RuntimeError as exc:
-            if (
-                _resolve_on_missing_aggregator(on_missing_aggregator)
-                == "raise"
-            ):
+            if missing_aggregator_policy == "raise":
                 _stop_runtime_for_init()
                 raise
             import sys
