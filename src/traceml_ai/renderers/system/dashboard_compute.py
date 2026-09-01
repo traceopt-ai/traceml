@@ -15,15 +15,20 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
+from traceml_ai.renderers.shared.freshness import CachedPayloadTTL
+from traceml_ai.renderers.shared.run_series import (
+    DEFAULT_RUN_SERIES_POLICY,
+    RunSeriesPolicy,
+    SeriesMode,
+    plan_run_series,
+)
+
 from .dashboard_models import (
     SystemDashboardPayload,
     SystemRollups,
     SystemSeries,
 )
-from .repository import SystemRepository
-
-# Whole-run charts add value only after the run outgrows the recent window.
-_RUN_VIEW_FACTOR = 1.2
+from .repository import RunStats, SystemRepository
 
 
 def _opt_float(value: Any) -> Optional[float]:
@@ -75,16 +80,9 @@ def _empty_dashboard_series() -> Dict[str, Any]:
             "window_s": 0.0,
         },
         "gpu_power_run": [],
-        "cpu_run_whole": False,
-        "power_run_whole": False,
+        "cpu_run_mode": "recent",
+        "power_run_mode": "recent",
     }
-
-
-# A whole-run line needs more than two points to say anything about a
-# trend. One rule, applied to both series: the card used to ask ">2
-# points" of the CPU history and merely "non-empty" of the power history,
-# so its two charts could disagree about which view they were showing.
-_MIN_WHOLE_RUN_POINTS = 2
 
 
 def _typed(
@@ -109,14 +107,9 @@ def _typed(
     )
 
 
-def _has_whole_run(entries: Any) -> bool:
-    """Whether a whole-run series has enough shape to draw."""
-    if isinstance(entries, dict):
-        return len(entries.get("t") or ()) > _MIN_WHOLE_RUN_POINTS
-    longest = 0
-    for entry in entries or ():
-        longest = max(longest, len(entry.get("t") or ()))
-    return longest > _MIN_WHOLE_RUN_POINTS
+def _empty_cpu_run() -> Dict[str, Any]:
+    """The whole-run CPU shape with nothing in it."""
+    return {"t": [], "avg": [], "max": [], "span_s": 0.0, "window_s": 0.0}
 
 
 def _gpu_medians(gpus: List[Dict[str, Any]]) -> List[tuple]:
@@ -193,13 +186,16 @@ class SystemDashboardComputer:
         db_path: str,
         node_rank: Optional[int] = None,
         stale_ttl_s: Optional[float] = 30.0,
+        run_series_policy: RunSeriesPolicy = DEFAULT_RUN_SERIES_POLICY,
     ) -> None:
         self._db = SystemRepository(db_path=db_path, node_rank=node_rank)
         self._last_ok: Optional[SystemDashboardPayload] = None
         self._last_ok_ts: float = 0.0
-        self._stale_ttl_s: Optional[float] = (
-            float(stale_ttl_s) if stale_ttl_s is not None else None
-        )
+        # Whether a cached payload may still answer says the DATABASE could
+        # not be read; it never says the host is healthy. The shared type
+        # keeps those two ideas from sharing one number, as they did here.
+        self._cache_ttl = CachedPayloadTTL(ttl_s=stale_ttl_s)
+        self._run_policy = run_series_policy
 
     def compute(self, window_n: int = 100) -> SystemDashboardPayload:
         """
@@ -381,19 +377,22 @@ class SystemDashboardComputer:
             else None
         )
         window_span = max(float(ts_hist[-1] - ts_hist[0]), 0.0)
-        min_run_span = window_span * _RUN_VIEW_FACTOR
-        cpu_run = self._db.fetch_cpu_run_history(
-            conn,
-            hostname=host,
-            min_span_s=min_run_span,
+        cpu_stats = self._db.cpu_run_stats(conn, hostname=host)
+        cpu_mode = self._mode_for(cpu_stats, window_span)
+        cpu_run = (
+            self._cpu_run_series(conn, cpu_stats, host)
+            if cpu_mode == "retained"
+            else _empty_cpu_run()
         )
-        power_run = (
-            self._db.fetch_gpu_power_run_history(
-                conn,
-                hostname=host,
-                min_span_s=min_run_span,
-            )
+        power_stats = (
+            self._db.gpu_power_run_stats(conn, hostname=host)
             if gpu_available
+            else None
+        )
+        power_mode = self._mode_for(power_stats, window_span)
+        power_run = (
+            self._power_run_series(conn, power_stats, host)
+            if power_mode == "retained"
             else []
         )
         run_power_floor = min(
@@ -506,13 +505,96 @@ class SystemDashboardComputer:
                 "cpu_run": cpu_run,
                 "gpu_power_run": power_run if gpu_available else [],
                 # Which view each chart is in, decided once here rather
-                # than twice in the card with two different rules.
-                "cpu_run_whole": _has_whole_run(cpu_run),
-                "power_run_whole": _has_whole_run(
-                    power_run if gpu_available else []
-                ),
+                # than twice in the card with two different rules, and
+                # named in the shared vocabulary both blocks now use.
+                "cpu_run_mode": cpu_mode,
+                "power_run_mode": power_mode if gpu_available else "recent",
             },
         )
+
+    def _mode_for(
+        self, stats: Optional[RunStats], window_span_s: float
+    ) -> SeriesMode:
+        """Whether a chart describes the window or the whole run.
+
+        The 1.2x factor that keeps a chart near the boundary from flipping
+        every tick used to be `_RUN_VIEW_FACTOR` here, a local copy of the
+        shared policy's `retained_factor`. Same number, one owner now.
+        """
+        if stats is None:
+            return "recent"
+        return self._run_policy.mode_for(stats.span_s, window_span_s)
+
+    def _cpu_run_series(
+        self,
+        conn: Any,
+        stats: Optional[RunStats],
+        host: Optional[str],
+    ) -> Dict[str, Any]:
+        """Whole-run host CPU, planned by the shared policy."""
+        if stats is None:
+            return _empty_cpu_run()
+        plan = plan_run_series(
+            span_s=stats.span_s,
+            sample_count=stats.sample_count,
+            policy=self._run_policy,
+        )
+        if plan is None:
+            return _empty_cpu_run()
+        rows = self._db.fetch_cpu_run(conn, plan, hostname=host)
+        if not rows:
+            return _empty_cpu_run()
+        return {
+            "t": [r[0] for r in rows],
+            "avg": [r[1] for r in rows],
+            "max": [r[2] for r in rows],
+            "span_s": stats.span_s,
+            "window_s": plan.window_s,
+        }
+
+    def _power_run_series(
+        self,
+        conn: Any,
+        stats: Optional[RunStats],
+        host: Optional[str],
+    ) -> List[Dict[str, Any]]:
+        """Whole-run per-GPU power, bucketed at the rolling window's width.
+
+        This path buckets rather than rolls, so only the window duration
+        carries over from the shared policy; there is no stride or point
+        budget to apply, and the bucket count is therefore still unbounded.
+        See the follow-up issue.
+        """
+        if stats is None:
+            return []
+        width = self._run_policy.window_for(stats.span_s)
+        rows = self._db.fetch_gpu_power_run(
+            conn,
+            width_s=width,
+            first_ts=stats.first_ts,
+            hostname=host,
+        )
+        by_gpu: Dict[int, Dict[str, Any]] = {}
+        for gpu_idx, ts, avg, low, high in rows:
+            entry = by_gpu.setdefault(
+                gpu_idx,
+                {
+                    "gpu_idx": gpu_idx,
+                    "t": [],
+                    "avg": [],
+                    "min": [],
+                    "max": [],
+                },
+            )
+            entry["t"].append(ts)
+            entry["avg"].append(avg)
+            entry["min"].append(low)
+            entry["max"].append(high)
+        out = [by_gpu[i] for i in sorted(by_gpu)]
+        for entry in out:
+            entry["span_s"] = stats.span_s
+            entry["window_s"] = width
+        return out
 
     @staticmethod
     def _pick_node(samples: List[Any]) -> Dict[str, Any]:
@@ -634,10 +716,7 @@ class SystemDashboardComputer:
         """
         now = time.time()
         if self._last_ok is not None:
-            if (
-                self._stale_ttl_s is None
-                or (now - self._last_ok_ts) <= self._stale_ttl_s
-            ):
+            if self._cache_ttl.may_reuse(now - self._last_ok_ts):
                 cached = self._last_ok
                 return replace(
                     cached,

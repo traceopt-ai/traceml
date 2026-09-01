@@ -4,28 +4,16 @@
 # you may not use this file except in compliance with the License.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Shared models and SQLite helpers for system telemetry."""
+"""The CLI snapshot contract for system telemetry.
+
+The rolling-window ladder and the point budget used to live here as a
+second copy of the numbers `renderers/shared/run_series.py` already owns.
+They were deleted in part 5b; `RunSeriesPolicy.window_for` is the one
+definition now, and the System repository reads a plan built from it.
+"""
 
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
-
-# Whole-run CPU history uses a duration-based rolling window before sampling.
-# The duration keeps the aggregation consistent across sampling cadences.
-_ROLL_MIN_S = 30.0
-_ROLL_MAX_S = 300.0
-_ROLL_FRACTION = 50.0  # about a fiftieth of the run
-_MAX_RUN_POINTS = 120
-
-
-def choose_window_s(span_s: float) -> float:
-    """The rolling window for a run of ``span_s`` seconds, in round steps."""
-    if span_s <= 0:
-        return _ROLL_MIN_S
-    raw = max(_ROLL_MIN_S, min(_ROLL_MAX_S, span_s / _ROLL_FRACTION))
-    for step in (30.0, 60.0, 120.0, 300.0):
-        if raw <= step:
-            return step
-    return _ROLL_MAX_S
 
 
 @dataclass(frozen=True)

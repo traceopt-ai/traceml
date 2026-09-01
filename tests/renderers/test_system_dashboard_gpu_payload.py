@@ -368,9 +368,12 @@ def test_cpu_only_run_does_not_read_gpu_power_history(
     def fail_if_called(*args, **kwargs):
         raise AssertionError("CPU-only runs must not query GPU power history")
 
+    # 5b renamed this read. #421 deliberately left the name alone so this
+    # spy kept binding; renaming it here is the stated change, and the spy
+    # now watches the FIRST GPU-power read rather than the second.
     monkeypatch.setattr(
         computer._db,
-        "fetch_gpu_power_run_history",
+        "gpu_power_run_stats",
         fail_if_called,
     )
     out = computer.compute(window_n=100)

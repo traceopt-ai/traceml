@@ -163,27 +163,35 @@ def test_no_gpus_at_all_is_not_the_same_as_unreported():
 
 # --- one rule for "is this the whole-run view" ---------------------------
 def test_both_charts_answer_the_whole_run_question_the_same_way():
-    """The card asked two different questions and could disagree.
+    """One rule for both charts, and 5b changed where it looks.
 
-    It tested `len(t) > 2` of the CPU history and merely non-empty of the
-    power history, so on a run with one or two power buckets the power
-    chart claimed the whole-run view while the CPU chart did not, and the
-    pair stopped sharing a clock.
+    The card first asked `len(t) > 2` of the CPU history and merely
+    non-empty of the power history, so on a run with one or two power
+    buckets the two charts claimed different views and stopped sharing a
+    clock. 5a-ii gave both the same rule, `_has_whole_run`, which counted
+    the points that came BACK: the mode depended on the query result.
+
+    5b decides before reading. `RunSeriesPolicy.mode_for` compares the
+    run's span against the recent window, and the fetch follows the
+    decision instead of the decision following the fetch. Causality runs
+    one way, and a chart cannot be in a mode its own data disagrees with.
     """
-    two_points = {"t": [1.0, 2.0], "avg": [1.0, 2.0]}
-    three_points = {"t": [1.0, 2.0, 3.0], "avg": [1.0, 2.0, 3.0]}
-    assert dashboard_compute._has_whole_run(two_points) is False
-    assert dashboard_compute._has_whole_run(three_points) is True
+    from traceml_ai.renderers.shared.run_series import (
+        DEFAULT_RUN_SERIES_POLICY as policy,
+    )
 
-    # The bucket list form answers the same question the same way.
-    assert dashboard_compute._has_whole_run([{"t": [1.0, 2.0]}]) is False
-    assert dashboard_compute._has_whole_run([{"t": [1.0, 2.0, 3.0]}]) is True
-    assert dashboard_compute._has_whole_run([]) is False
-    assert dashboard_compute._has_whole_run({}) is False
+    # A run inside the window is the window's to describe.
+    assert policy.mode_for(60.0, 60.0) == "recent"
+    # And it must outgrow it by the hysteresis factor, not by a hair, so a
+    # chart at the boundary does not flip back and forth every tick.
+    assert policy.mode_for(70.0, 60.0) == "recent"
+    assert policy.mode_for(80.0, 60.0) == "retained"
+    # A window of zero spans nothing to compare against.
+    assert policy.mode_for(600.0, 0.0) == "recent"
 
 
 def test_a_short_run_puts_neither_chart_in_the_whole_run_view(process_free_db):
-    """End to end: the flags travel on the payload and agree."""
+    """End to end: the mode travels on the payload and both agree."""
     out = process_free_db
-    assert out.series.cpu_run_whole is False
-    assert out.series.power_run_whole is False
+    assert out.series.cpu_run_mode == "recent"
+    assert out.series.power_run_mode == "recent"

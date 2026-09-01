@@ -60,7 +60,7 @@ def gpu_color(index: int) -> str:
 def format_window(window_s: float) -> str:
     """The rolling window in words: '30 s', '2 min'.
 
-    The payload picks round windows (see ``choose_window_s``) so this reads
+    The payload picks round windows (``RunSeriesPolicy.window_for``) so it reads
     as a duration a person recognises.
     """
     if not window_s or window_s <= 0:
@@ -836,8 +836,8 @@ def update_system_section(panel: Dict[str, Any], data: Any) -> None:
     # Read, not decided. The card asked ">2 points" of one series and
     # "non-empty" of the other, so its two charts could disagree about
     # which view they were showing.
-    cpu_whole = series.cpu_run_whole
-    power_whole = series.power_run_whole
+    cpu_whole = series.cpu_run_mode == "retained"
+    power_whole = series.power_run_mode == "retained"
     # Whole-run charts share one clock so vertical comparisons align.
     aligned = (
         shared_run_axis(cpu_run_t, power_run)
