@@ -145,7 +145,6 @@ class CpuRunSeries:
 class SystemRollups:
     """Every level the card shows, already decided."""
 
-    gpu_available: bool = False
     cpu: Optional[Stat] = None
     ram: Optional[RamStat] = None
     gpu_util: Optional[Stat] = None
@@ -208,7 +207,6 @@ class SystemRollups:
         ctx = raw.get("ctx") or None
         span = raw.get("util_range")
         return cls(
-            gpu_available=bool(raw.get("gpu_available")),
             cpu=stat("cpu"),
             gpu_util=stat("gpu_util"),
             gpu_delta=stat("gpu_delta"),

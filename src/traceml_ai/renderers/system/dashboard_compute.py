@@ -411,7 +411,6 @@ class SystemDashboardComputer:
         )
 
         rollups = {
-            "gpu_available": gpu_available,
             "cpu": {
                 "now": float(cpu_hist[-1]),
                 "p50": cpu_p50,

@@ -307,7 +307,6 @@ def test_whole_run_charts_share_one_clock_axis() -> None:
         "window_len": 2,
         "gpu_available": True,
         "rollups": {
-            "gpu_available": True,
             "cpu": {"now": 30.0, "p50": 32.0, "p95": 44.0},
             "ram": {"now": 9.0 * GB, "total": 200.0 * GB},
             "gpu_util": {"now": 99.0, "p50": 99.0, "p95": 99.0},
@@ -406,7 +405,6 @@ def test_power_chart_draws_limit_and_floor_reference_lines() -> None:
             "window_len": 2,
             "gpu_available": True,
             "rollups": {
-                "gpu_available": True,
                 "cpu": {"now": 9.0, "p50": 8.0, "p95": 12.0},
                 "ram": {"now": 9.0 * GB, "total": 200.0 * GB},
                 "gpu_util": {"now": 25.0, "p50": 25.0, "p95": 25.0},
@@ -467,7 +465,6 @@ def test_section_builds_and_updates_without_a_browser() -> None:
         "window_len": 2,
         "gpu_available": True,
         "rollups": {
-            "gpu_available": True,
             "cpu": {"now": 9.0, "p50": 8.0, "p95": 12.0},
             "ram": {"now": 9.0 * GB, "total": 200.0 * GB},
             "gpu_util": {"now": 0.0, "p50": 25.0, "p95": 25.0},
@@ -589,7 +586,6 @@ def test_section_builds_and_updates_without_a_browser() -> None:
                 "window_len": 1,
                 "gpu_available": False,
                 "rollups": {
-                    "gpu_available": False,
                     "cpu": {"now": 3.0, "p50": 3.0},
                     "ram": {"now": 1.0 * GB, "total": 16.0 * GB},
                     "gpu_power": {"now": None, "p50": None, "limit": None},
@@ -650,7 +646,6 @@ def test_every_tile_keeps_a_qualifier_line() -> None:
             "window_len": 2,
             "gpu_available": True,
             "rollups": {
-                "gpu_available": True,
                 "cpu": {"now": 9.0, "p50": 8.0},
                 "ram": {"now": 9.0 * GB, "total": 200.0 * GB},
                 "gpu_util": {"now": 99.0, "p50": 99.0},

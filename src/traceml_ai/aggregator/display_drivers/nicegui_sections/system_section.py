@@ -809,7 +809,7 @@ def update_system_section(panel: Dict[str, Any], data: Any) -> None:
         return
     roll = data.rollups
     series = data.series
-    gpu_on = bool(data.gpu_available or roll.gpu_available)
+    gpu_on = data.gpu_available
     has_data = bool(data.window_len)
     _set_gpu_visible(panel, gpu_on)
 
