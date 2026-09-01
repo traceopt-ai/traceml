@@ -27,6 +27,7 @@ from traceml_ai.launcher.launch_config import (
 )
 from traceml_ai.launcher.manifest import (
     collect_existing_artifacts,
+    is_current_summary_artifact,
     read_current_finalization_reason,
     update_run_manifest,
     utc_now_iso,
@@ -804,8 +805,12 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                             cfg["mode"] == "summary" and cfg["history_enabled"]
                         ),
                         summary_exists=(
-                            session_root / "final_summary.json"
-                        ).is_file(),
+                            aggregator_started_at is not None
+                            and is_current_summary_artifact(
+                                session_root / "final_summary.json",
+                                aggregator_started_at=aggregator_started_at,
+                            )
+                        ),
                     )
                 )
             _run_noncritical_launcher_step(

@@ -33,6 +33,7 @@ from traceml_ai.launcher.launch_config import (
 )
 from traceml_ai.launcher.manifest import (
     collect_existing_artifacts,
+    is_current_summary_artifact,
     load_json_or_warn,
     read_current_finalization_reason,
     update_run_manifest,
@@ -1172,6 +1173,33 @@ def test_finalization_evidence_ignores_stale_and_malformed_files(
             aggregator_dir, aggregator_started_at=started_at
         )
         == "finalization_failed"
+    )
+
+
+@pytest.mark.parametrize(
+    ("contents", "expected"),
+    [
+        (None, False),
+        ("{malformed", False),
+        ({"generated_at": "2026-08-31T09:59:59+00:00"}, False),
+        ({"generated_at": "2026-08-31T10:00:01+00:00"}, True),
+    ],
+)
+def test_summary_evidence_requires_current_generation(
+    tmp_path, contents, expected
+) -> None:
+    summary_path = tmp_path / "final_summary.json"
+    if isinstance(contents, dict):
+        summary_path.write_text(json.dumps(contents), encoding="utf-8")
+    elif contents is not None:
+        summary_path.write_text(contents, encoding="utf-8")
+
+    assert (
+        is_current_summary_artifact(
+            summary_path,
+            aggregator_started_at="2026-08-31T10:00:00+00:00",
+        )
+        is expected
     )
 
 
