@@ -9,6 +9,7 @@ grandchild, and asserts the grandchild is gone after teardown.
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -130,6 +131,45 @@ def test_windows_branch_falls_back_when_taskkill_is_unavailable(
     process_mod.terminate_process_group(StillRunning(), timeout_sec=0.01)
 
     assert terminated == ["terminate", "kill"]
+
+
+def test_forced_termination_reaps_the_direct_child(monkeypatch) -> None:
+    """The forced path must populate returncode before returning."""
+    monkeypatch.setattr(process_mod, "_IS_WINDOWS", False)
+    signals: list[int] = []
+    monkeypatch.setattr(
+        process_mod.os,
+        "killpg",
+        lambda _pid, signum: signals.append(signum),
+    )
+
+    class ReapedAfterKill:
+        pid = 4321
+        returncode = None
+        wait_calls = 0
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, timeout=None):
+            self.wait_calls += 1
+            if self.wait_calls == 1:
+                raise subprocess.TimeoutExpired("cmd", timeout)
+            self.returncode = -signal.SIGKILL
+            return self.returncode
+
+        def terminate(self):
+            raise AssertionError("killpg should handle termination")
+
+        def kill(self):
+            raise AssertionError("killpg should handle termination")
+
+    proc = ReapedAfterKill()
+    process_mod.terminate_process_group(proc, timeout_sec=0.01)
+
+    assert signals == [signal.SIGTERM, signal.SIGKILL]
+    assert proc.wait_calls == 2
+    assert proc.returncode == -signal.SIGKILL
 
 
 def test_terminate_process_group_reaps_a_grandchild() -> None:
