@@ -306,6 +306,17 @@ def update_run_manifest(
     if status is not None:
         manifest["status"] = str(status)
 
+    if status == "interrupted" and manifest.get("telemetry_status") in {
+        "starting",
+        "running",
+    }:
+        _set_telemetry_fields(
+            manifest,
+            telemetry_status="degraded",
+            telemetry_reason=None,
+            aggregator_exit_code=None,
+        )
+
     manifest["updated_at"] = utc_now_iso()
 
     if artifacts:

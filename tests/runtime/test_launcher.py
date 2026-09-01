@@ -1165,6 +1165,43 @@ def test_run_manifest_write_and_update_merge_correctly(tmp_path) -> None:
     assert "aggregator_exit_code" not in completed
 
 
+@pytest.mark.parametrize(
+    ("initial", "expected"),
+    [
+        (None, None),
+        ("starting", "degraded"),
+        ("running", "degraded"),
+        ("unavailable", "unavailable"),
+        ("degraded", "degraded"),
+        ("failed", "failed"),
+        ("complete", "complete"),
+    ],
+)
+def test_interruption_terminalizes_only_transient_telemetry(
+    tmp_path, initial, expected
+) -> None:
+    manifest_path = tmp_path / "manifest.json"
+    payload = {"status": "running"}
+    if initial is not None:
+        payload["telemetry_status"] = initial
+    if initial in {"starting", "running"}:
+        payload["telemetry_reason"] = "stale"
+        payload["aggregator_exit_code"] = 7
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    update_run_manifest(manifest_path, status="interrupted")
+
+    interrupted = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert interrupted["status"] == "interrupted"
+    if expected is None:
+        assert "telemetry_status" not in interrupted
+    else:
+        assert interrupted["telemetry_status"] == expected
+    if initial in {"starting", "running"}:
+        assert "telemetry_reason" not in interrupted
+        assert "aggregator_exit_code" not in interrupted
+
+
 def test_finalization_evidence_ignores_stale_and_malformed_files(
     tmp_path,
 ) -> None:
