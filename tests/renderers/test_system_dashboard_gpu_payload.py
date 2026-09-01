@@ -630,6 +630,12 @@ def test_an_unreported_gpu_does_not_drag_the_average_down(tmp_path: Path):
     assert roll.gpu_util.p50 == 100.0
     assert roll.gpu_delta.p95 == 0.0
     assert roll.rows_over is False
+    # The count is the MEAN's denominator, not the number of devices that
+    # reported. gpu1 reported, so it is live, but its util is absent, so
+    # the mean covers three. A label saying "avg of 4 GPUs" over three
+    # readings is the same defect this test exists to prevent, and every
+    # assertion above passes with that label.
+    assert roll.util_gpu_count == 3
 
 
 def test_the_nvml_zero_fallback_is_not_an_idle_gpu(tmp_path: Path):
@@ -667,7 +673,7 @@ def test_the_nvml_zero_fallback_is_not_an_idle_gpu(tmp_path: Path):
     assert roll.gpu_delta.p95 == 0.0
     assert roll.rows_over is False
     # The tile must not claim to average devices it did not read.
-    assert roll.gpus_reporting == 3
+    assert roll.util_gpu_count == 3
 
 
 def test_all_reporting_leaves_the_count_at_the_device_count(tmp_path: Path):
@@ -680,5 +686,92 @@ def test_all_reporting_leaves_the_count_at_the_device_count(tmp_path: Path):
         ],
     )
     roll = _payload(db).rollups
-    assert roll.gpus_reporting == 4
+    assert roll.util_gpu_count == 4
     assert roll.gpu_util.p50 == 100.0
+
+
+def test_a_host_where_no_gpu_reports_has_no_average_to_show(tmp_path: Path):
+    """Trigger (b) at full scale, which had no coverage at all.
+
+    NVML fails host-wide and every row is the all-zero fallback. The mean
+    then covers nothing. A tile reading 0% would be a measurement that no
+    device made, so the payload states a count of zero and the card reads
+    n/a rather than inventing an idle host.
+    """
+    db = tmp_path / "all-failed.db"
+    zero = {
+        "gpu_idx": 0,
+        "util": 0.0,
+        "mem_used_bytes": 0.0,
+        "mem_total_bytes": 0.0,
+        "temperature_c": 0.0,
+        "power_usage_w": 0.0,
+        "power_limit_w": 0.0,
+    }
+    _write(db, lambda seq: [dict(zero, gpu_idx=i) for i in range(4)])
+    roll = _payload(db).rollups
+
+    assert roll.util_gpu_count == 0
+    assert roll.gpus_unreported is True
+    assert all(not g.reported for g in roll.gpus)
+
+
+def test_memory_pairs_stay_with_their_own_device(tmp_path: Path):
+    """The rewired headroom path, which nothing asserted.
+
+    `gpu_mem_worst` and its total must come from ONE device, and headroom
+    needs both halves of that device. A device holding the most memory on
+    a smaller card is the case that separates a per-device pairing from a
+    cross-device one.
+    """
+    db = tmp_path / "mem-pairs.db"
+
+    def rows(seq: int):
+        return [
+            _gpu(0, 100.0, 66.0, temp=45.0, mem_used=6.0 * GB),
+            # more used, smaller card: worst on used, and its OWN total
+            _gpu(1, 100.0, 66.0, temp=45.0, mem_used=7.0 * GB),
+        ]
+
+    _write(db, rows)
+    for entry in [r for r in _payload(db).rollups.gpus if r.gpu_idx == 1]:
+        assert entry.mem_used == 7.0 * GB
+    mem = _payload(db).rollups.gpu_mem
+    assert mem is not None
+    assert mem.now == 7.0 * GB
+    assert mem.total == 16.1 * GB
+
+
+def test_a_gpu_that_goes_quiet_midway_only_leaves_its_own_ticks(tmp_path):
+    """Mixed reporting across ticks: every tick averages its own reporters.
+
+    Each of the ten earlier tests holds all ticks identical, so nothing
+    covered a device that reports for part of a window and not the rest.
+    """
+    db = tmp_path / "midway.db"
+    zero = {
+        "gpu_idx": 1,
+        "util": 0.0,
+        "mem_used_bytes": 0.0,
+        "mem_total_bytes": 0.0,
+        "temperature_c": 0.0,
+        "power_usage_w": 0.0,
+        "power_limit_w": 0.0,
+    }
+
+    def rows(seq: int):
+        out = [
+            _gpu(i, 100.0, 66.0, temp=45.0, mem_used=6.3 * GB)
+            for i in range(4)
+        ]
+        if seq >= TICKS // 2:
+            out[1] = dict(zero)
+        return out
+
+    _write(db, rows)
+    roll = _payload(db).rollups
+    # The mean never dips: the ticks gpu1 missed averaged the other three.
+    assert roll.gpu_util.p50 == 100.0
+    assert roll.gpu_delta.p95 == 0.0
+    # The newest tick is one of the ones it missed.
+    assert roll.util_gpu_count == 3

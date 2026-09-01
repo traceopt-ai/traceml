@@ -278,10 +278,13 @@ class SystemDashboardComputer:
         gpu_mem_headroom_min = np.zeros(n, dtype=np.float64)
         temp_max = np.zeros(n, dtype=np.float64)
         gpu_mem_worst_total = 0.0
-        # Devices that reported in the newest tick. The util
-        # tile averages these, so its qualifier must count them
-        # rather than the devices the host has.
-        gpus_reporting = 0
+        # Devices behind the GPU UTIL mean in the newest tick, which is
+        # what the tile's qualifier counts. NOT the number of devices that
+        # reported: a device can report and still carry a NULL util
+        # column, in which case it is absent from this mean. The tile
+        # prints this number, so it has to be the mean's own denominator
+        # or the label repeats the defect it was added to remove.
+        util_gpu_count = 0
 
         # Per-GPU history keyed by gpu_idx, one slot per tick. A tick in
         # which a GPU has no row stays None: a gap in its trace, not a 0.
@@ -308,8 +311,6 @@ class SystemDashboardComputer:
                 # down and manufactured an across-GPU spread, which is
                 # what opens the per-GPU rows.
                 live = [g for g in rows if _gpu_reported(g)]
-                if i == n - 1:
-                    gpus_reporting = len(live)
                 utils = [
                     v
                     for v in (_opt_float(g["util"]) for g in live)
@@ -328,6 +329,8 @@ class SystemDashboardComputer:
                     if v is not None
                 ]
 
+                if i == n - 1:
+                    util_gpu_count = len(utils)
                 if utils:
                     gpu_avg[i] = sum(utils) / float(len(utils))
                     gpu_delta[i] = max(utils) - min(utils)
@@ -507,7 +510,7 @@ class SystemDashboardComputer:
             ),
         }
 
-        rollups["gpus_reporting"] = gpus_reporting
+        rollups["util_gpu_count"] = util_gpu_count
         gpu_rows = rollups["gpus"]
         rollups["odd_gpus"] = _odd_gpus(gpu_rows)
         rollups["util_range"] = _util_range(gpu_rows)
