@@ -93,7 +93,7 @@ def format_gb_pair(used_bytes: Any, total_bytes: Any) -> Tuple[str, str]:
 
 
 def disclosure_text(
-    gpus: List[Dict[str, Any]],
+    gpus: Sequence[GpuRow],
     roll: SystemRollups,
     *,
     is_open: bool,

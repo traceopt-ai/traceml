@@ -31,6 +31,7 @@ from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section impor
     should_auto_open,
     sparkline_svg,
 )
+from traceml_ai.renderers.system.dashboard_models import GpuRow  # noqa: E402
 
 GB = 1e9
 
@@ -60,11 +61,11 @@ def test_disclosure_text_states_the_range_and_no_verdict() -> None:
     """
 
     def g(idx, util):
-        return {"gpu_idx": idx, "util_p50": util, "util_now": util}
+        return GpuRow(gpu_idx=idx, util_p50=util, util_now=util)
 
     def roll(gpus):
         """The range now arrives on the payload; the card only formats it."""
-        values = [x["util_p50"] for x in gpus]
+        values = [x.util_p50 for x in gpus if x.util_p50 is not None]
         return as_rollups(
             {"util_range": (min(values), max(values)) if values else None}
         )
