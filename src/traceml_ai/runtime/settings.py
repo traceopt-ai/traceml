@@ -40,7 +40,10 @@ def resolve_on_missing_aggregator(
     resolved = value
     if resolved is None:
         resolved = os.environ.get("TRACEML_ON_MISSING_AGGREGATOR")
-    if resolved is None:
+    # An unset variable and one exported empty (``export VAR=``) both mean
+    # "not chosen", so both fall through to the frontend default rather than
+    # failing validation.
+    if resolved is None or not str(resolved).strip():
         resolved = default
 
     normalized = str(resolved).strip().lower()

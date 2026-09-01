@@ -98,6 +98,19 @@ def test_shared_missing_aggregator_resolver_uses_caller_default(
     assert resolve_on_missing_aggregator("raise", default=default) == "raise"
 
 
+@pytest.mark.parametrize("blank", ["", "   "])
+@pytest.mark.parametrize("default", ["raise", "warn"])
+def test_shared_missing_aggregator_resolver_treats_blank_as_unset(
+    monkeypatch, blank, default
+) -> None:
+    """An exported-but-empty variable means "not chosen", not "invalid"."""
+    monkeypatch.setenv("TRACEML_ON_MISSING_AGGREGATOR", blank)
+    assert resolve_on_missing_aggregator(None, default=default) == default
+
+    monkeypatch.delenv("TRACEML_ON_MISSING_AGGREGATOR", raising=False)
+    assert resolve_on_missing_aggregator(blank, default=default) == default
+
+
 def test_shared_missing_aggregator_resolver_rejects_invalid_value() -> None:
     with pytest.raises(ValueError, match="must be 'raise' or 'warn'"):
         resolve_on_missing_aggregator("continue", default="raise")
