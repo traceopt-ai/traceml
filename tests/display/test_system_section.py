@@ -709,11 +709,11 @@ def test_rolling_window_is_spelled_out_not_named() -> None:
         DEFAULT_RUN_SERIES_POLICY,
     )
 
-    choose_window_s = DEFAULT_RUN_SERIES_POLICY.window_for
+    window_for = DEFAULT_RUN_SERIES_POLICY.window_for
 
-    assert format_window(choose_window_s(96 * 60)) == "2 min"  # 96-min run
-    assert format_window(choose_window_s(178 * 60)) == "5 min"  # 3-hour
-    assert format_window(choose_window_s(23 * 60)) == "30 s"
-    assert format_window(choose_window_s(4 * 60)) == "30 s"  # the floor
-    assert format_window(choose_window_s(48 * 3600)) == "5 min"  # the cap
+    assert format_window(window_for(96 * 60)) == "2 min"  # 96-min run
+    assert format_window(window_for(178 * 60)) == "5 min"  # 3-hour
+    assert format_window(window_for(23 * 60)) == "30 s"
+    assert format_window(window_for(4 * 60)) == "30 s"  # the floor
+    assert format_window(window_for(48 * 3600)) == "5 min"  # the cap
     assert format_window(0.0) == ""
