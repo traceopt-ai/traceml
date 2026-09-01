@@ -115,7 +115,9 @@ def test_driver_feeds_context_layout_in_both_profiles(
     assert ctx["world_size"] == 2
     # The System payload no longer carries the strip's facts.
     system = driver.latest_data[SYSTEM_LAYOUT]
-    assert "ranks_reporting" not in system.get("rollups", {}).get("ctx", {})
+    # The System payload is typed now; its context carries only the fields
+    # the System block owns, and the strip's cross-rank count is not one.
+    assert not hasattr(system.rollups.ctx, "ranks_reporting")
 
 
 def test_update_context_section_consumes_the_context_payload() -> None:

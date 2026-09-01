@@ -9,12 +9,17 @@
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import numpy as np
 
-from .common import SystemDashboardPayload
+from .dashboard_models import (
+    SystemDashboardPayload,
+    SystemRollups,
+    SystemSeries,
+)
 from .repository import SystemRepository
 
 # Whole-run charts add value only after the run outgrows the recent window.
@@ -70,7 +75,114 @@ def _empty_dashboard_series() -> Dict[str, Any]:
             "window_s": 0.0,
         },
         "gpu_power_run": [],
+        "cpu_run_whole": False,
+        "power_run_whole": False,
     }
+
+
+# A whole-run line needs more than two points to say anything about a
+# trend. One rule, applied to both series: the card used to ask ">2
+# points" of the CPU history and merely "non-empty" of the power history,
+# so its two charts could disagree about which view they were showing.
+_MIN_WHOLE_RUN_POINTS = 2
+
+
+def _typed(
+    *,
+    window_len: int,
+    gpu_available: bool,
+    rollups: Dict[str, Any],
+    series: Dict[str, Any],
+) -> SystemDashboardPayload:
+    """Wrap the compute layer's mappings in the payload's own types.
+
+    The mappings are built as dicts here because that is how the readers
+    and the numpy work naturally produce them; the types are the contract
+    the card reads, and the models own the adaptation so the shape is
+    described in one place.
+    """
+    return SystemDashboardPayload(
+        window_len=window_len,
+        gpu_available=gpu_available,
+        rollups=SystemRollups.from_dict(rollups),
+        series=SystemSeries.from_dict(series),
+    )
+
+
+def _has_whole_run(entries: Any) -> bool:
+    """Whether a whole-run series has enough shape to draw."""
+    if isinstance(entries, dict):
+        return len(entries.get("t") or ()) > _MIN_WHOLE_RUN_POINTS
+    longest = 0
+    for entry in entries or ():
+        longest = max(longest, len(entry.get("t") or ()))
+    return longest > _MIN_WHOLE_RUN_POINTS
+
+
+def _gpu_medians(gpus: List[Dict[str, Any]]) -> List[tuple]:
+    """Each GPU's representative utilisation, as (index, value).
+
+    The window median where there is one, else the newest reading. One
+    definition, used by everything that asks about the spread across
+    devices, so two surfaces on the same card cannot answer differently.
+    """
+    out = []
+    for g in gpus:
+        value = g.get("util_p50")
+        if value is None:
+            value = g.get("util_now")
+        if value is not None:
+            out.append((int(g.get("gpu_idx", 0)), float(value)))
+    return out
+
+
+def _odd_gpus(gpus: List[Dict[str, Any]]) -> List[int]:
+    """The GPUs on the smaller side of the utilisation split.
+
+    Values split at the midpoint between the lowest and highest
+    representative utilisation; the smaller group is the one worth
+    pointing at, and a tie goes to the higher group.
+
+    Moved here from the card unchanged. It derives a threshold and then
+    selects entities by it, which is the shape of a diagnosis rule and not
+    of a drawing decision, so it belongs on this side of the boundary. Its
+    behaviour is deliberately preserved, including the consequence that on
+    a two-GPU host the groups always tie and the busier card is the one
+    marked.
+    """
+    pairs = _gpu_medians(gpus)
+    if len(pairs) < 2:
+        return []
+    low_value = min(v for _i, v in pairs)
+    high_value = max(v for _i, v in pairs)
+    if high_value <= low_value:
+        return []
+    mid = (high_value + low_value) / 2.0
+    high = [i for i, v in pairs if v > mid]
+    low = [i for i, v in pairs if v <= mid]
+    return sorted(high if len(high) <= len(low) else low)
+
+
+# Utilisation spread, in percentage points, at which the per-GPU rows
+# have earned opening themselves. A threshold against a measurement is a
+# severity judgement, so it lives here and not in the card.
+SPREAD_EXPAND_PTS = 20.0
+
+
+def _util_range(gpus: List[Dict[str, Any]]) -> Optional[tuple]:
+    """The lowest and highest representative utilisation, or None.
+
+    The card computed this itself for its disclosure header, which made it
+    a SECOND definition of "the spread across GPUs" living beside
+    ``gpu_delta``, and the two could disagree: one is the range of window
+    medians, the other the 95th percentile of per-tick max minus min.
+    Both are legitimate; having two of them unnamed on one card was not.
+    """
+    pairs = _gpu_medians(gpus)
+    if not pairs:
+        return None
+    values = [v for _i, v in pairs]
+    return (min(values), max(values))
 
 
 class SystemDashboardComputer:
@@ -83,13 +195,13 @@ class SystemDashboardComputer:
         stale_ttl_s: Optional[float] = 30.0,
     ) -> None:
         self._db = SystemRepository(db_path=db_path, node_rank=node_rank)
-        self._last_ok: Optional[Dict[str, Any]] = None
+        self._last_ok: Optional[SystemDashboardPayload] = None
         self._last_ok_ts: float = 0.0
         self._stale_ttl_s: Optional[float] = (
             float(stale_ttl_s) if stale_ttl_s is not None else None
         )
 
-    def compute(self, window_n: int = 100) -> Dict[str, Any]:
+    def compute(self, window_n: int = 100) -> SystemDashboardPayload:
         """
         Compute dashboard rollups plus short series over the latest window.
 
@@ -103,14 +215,14 @@ class SystemDashboardComputer:
         except Exception as e:
             return self._return_stale(f"STALE (exception: {type(e).__name__})")
 
-        if out.get("window_len", 0) == 0 and self._last_ok is not None:
+        if out.window_len == 0 and self._last_ok is not None:
             return self._return_stale("STALE (empty window)")
 
         self._last_ok = out
         self._last_ok_ts = time.time()
         return out
 
-    def _compute_impl(self, conn, window_n: int) -> Dict[str, Any]:
+    def _compute_impl(self, conn, window_n: int) -> SystemDashboardPayload:
         """
         Compute the dashboard payload from recent SQLite rows.
 
@@ -299,7 +411,6 @@ class SystemDashboardComputer:
         )
 
         rollups = {
-            "gpu_available": gpu_available,
             "cpu": {
                 "now": float(cpu_hist[-1]),
                 "p50": cpu_p50,
@@ -354,6 +465,14 @@ class SystemDashboardComputer:
             ),
         }
 
+        gpu_rows = rollups["gpus"]
+        rollups["odd_gpus"] = _odd_gpus(gpu_rows)
+        rollups["util_range"] = _util_range(gpu_rows)
+        spread = (rollups.get("gpu_delta") or {}).get("p95")
+        rollups["rows_over"] = (
+            spread is not None and float(spread) > SPREAD_EXPAND_PTS
+        )
+
         rollups["ctx"] = {
             "world_size": int(last["world_size"] or 0),
             "gpu_count": int(last["gpu_count"] or 0),
@@ -364,7 +483,7 @@ class SystemDashboardComputer:
 
         x_time = [self._format_time_iso(ts) for ts in ts_hist.tolist()]
 
-        return SystemDashboardPayload(
+        return _typed(
             window_len=len(samples),
             gpu_available=gpu_available,
             rollups=rollups,
@@ -386,8 +505,14 @@ class SystemDashboardComputer:
                 # the host is doing now, these say what it has done.
                 "cpu_run": cpu_run,
                 "gpu_power_run": power_run if gpu_available else [],
+                # Which view each chart is in, decided once here rather
+                # than twice in the card with two different rules.
+                "cpu_run_whole": _has_whole_run(cpu_run),
+                "power_run_whole": _has_whole_run(
+                    power_run if gpu_available else []
+                ),
             },
-        ).to_dict()
+        )
 
     @staticmethod
     def _pick_node(samples: List[Any]) -> Dict[str, Any]:
@@ -442,11 +567,17 @@ class SystemDashboardComputer:
         out: List[Dict[str, Any]] = []
         for idx in sorted(set(util_hist) | set(power_hist)):
             g = latest_rows.get(idx)
-            if g is not None and not _gpu_reported(g):
+            reported = g is not None and _gpu_reported(g)
+            if not reported:
                 g = None  # the sampler's all-zero fallback: unreported
             out.append(
                 {
                     "gpu_idx": idx,
+                    # Stated, not inferred. The card used to work this out
+                    # from which fields were None, with a rule that
+                    # disagreed with this one about a GPU reporting a
+                    # power limit but no memory total.
+                    "reported": reported,
                     "util_now": (
                         _opt_float(g["util"]) if g is not None else None
                     ),
@@ -495,11 +626,11 @@ class SystemDashboardComputer:
         except Exception:
             return ""
 
-    def _return_stale(self, msg: str) -> Dict[str, Any]:
-        """
-        Return the last known good payload when it is still within TTL.
+    def _return_stale(self, msg: str) -> SystemDashboardPayload:
+        """The last good payload while it is still within TTL.
 
-        Adds a human-readable status string into `rollups["status"]`.
+        Carries a human-readable status so the card can say the numbers
+        are held over rather than drawing them as current.
         """
         now = time.time()
         if self._last_ok is not None:
@@ -508,32 +639,21 @@ class SystemDashboardComputer:
                 or (now - self._last_ok_ts) <= self._stale_ttl_s
             ):
                 cached = self._last_ok
-                rollups = dict(cached.get("rollups", {}))
-                rollups["status"] = msg
-                return {
-                    "window_len": cached.get("window_len", 0),
-                    "gpu_available": cached.get("gpu_available", False),
-                    "rollups": rollups,
-                    "series": cached.get(
-                        "series",
-                        _empty_dashboard_series(),
-                    ),
-                }
+                return replace(
+                    cached,
+                    rollups=replace(cached.rollups, status=msg),
+                )
 
-        return {
-            "window_len": 0,
-            "gpu_available": False,
-            "rollups": {"status": "No fresh system data"},
-            "series": _empty_dashboard_series(),
-        }
-
-    def _empty_payload(self) -> Dict[str, Any]:
-        """
-        Return an empty dashboard payload with the full expected schema.
-        """
         return SystemDashboardPayload(
+            rollups=SystemRollups(status="No fresh system data"),
+            series=SystemSeries.from_dict(_empty_dashboard_series()),
+        )
+
+    def _empty_payload(self) -> SystemDashboardPayload:
+        """An empty payload carrying the full expected schema."""
+        return _typed(
             window_len=0,
             gpu_available=False,
             rollups={},
             series=_empty_dashboard_series(),
-        ).to_dict()
+        )

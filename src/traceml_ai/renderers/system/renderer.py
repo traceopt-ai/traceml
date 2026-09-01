@@ -9,7 +9,7 @@ System renderer.
 
 Presentation logic for system-level telemetry:
 - CLI rendering (Rich)
-- Dashboard payload (dict)
+- Dashboard payload (typed)
 - Summary logging (optional)
 
 All metric computation is delegated to SystemMetricsComputer.
@@ -27,6 +27,7 @@ from traceml_ai.renderers.base_renderer import BaseRenderer
 from traceml_ai.utils.formatting import fmt_mem_new, fmt_percent
 
 from .computer import SystemMetricsComputer
+from .dashboard_models import SystemDashboardPayload
 
 
 class SystemRenderer(BaseRenderer):
@@ -49,7 +50,9 @@ class SystemRenderer(BaseRenderer):
     def _compute_cli(self) -> Dict[str, Any]:
         return self._computer.compute_cli()
 
-    def _compute_dashboard(self, window_n: int = 100) -> Dict[str, Any]:
+    def _compute_dashboard(
+        self, window_n: int = 100
+    ) -> SystemDashboardPayload:
         return self._computer.compute_dashboard(window_n=window_n)
 
     def get_panel_renderable(self) -> Panel:
@@ -201,7 +204,7 @@ class SystemRenderer(BaseRenderer):
             width=panel_width,
         )
 
-    def get_dashboard_renderable(self) -> Dict[str, Any]:
+    def get_dashboard_renderable(self) -> SystemDashboardPayload:
         """
         Return a compact dashboard payload.
 

@@ -67,23 +67,3 @@ class SystemCLISnapshot:
             "gpu_mem_headroom_min": self.gpu_mem_headroom_min,
             "gpu_mem_headroom_min_idx": self.gpu_mem_headroom_min_idx,
         }
-
-
-@dataclass(frozen=True)
-class SystemDashboardPayload:
-    """Dashboard payload for system telemetry."""
-
-    window_len: int
-    gpu_available: bool
-    rollups: Dict[str, Any]
-    # Series includes both flat sample arrays and structured whole-run
-    # histories, so its values are intentionally heterogeneous.
-    series: Dict[str, Any]
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "window_len": self.window_len,
-            "gpu_available": self.gpu_available,
-            "rollups": self.rollups,
-            "series": self.series,
-        }

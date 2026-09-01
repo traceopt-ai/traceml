@@ -17,6 +17,7 @@ from typing import Any, Dict, Optional
 
 from .cli_compute import SystemCLIComputer
 from .dashboard_compute import SystemDashboardComputer
+from .dashboard_models import SystemDashboardPayload
 
 
 class SystemMetricsComputer:
@@ -56,7 +57,7 @@ class SystemMetricsComputer:
         """
         return self._cli.compute()
 
-    def compute_dashboard(self, window_n: int = 100) -> Dict[str, Any]:
+    def compute_dashboard(self, window_n: int = 100) -> SystemDashboardPayload:
         """
         Compute dashboard rollups and short history series.
         """

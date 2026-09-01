@@ -29,6 +29,12 @@ from tests.sqlite_fixtures import (
 from traceml_ai.renderers.system.dashboard_compute import (
     SystemDashboardComputer,
 )
+from traceml_ai.renderers.system.dashboard_models import (
+    CpuRunSeries,
+    GpuRow,
+    PowerStat,
+    SystemDashboardPayload,
+)
 
 GB = 1e9
 TICKS = 20
@@ -98,7 +104,13 @@ def _write(
             )
 
 
-def _payload(path: Path) -> Dict[str, Any]:
+def _payload(path: Path) -> SystemDashboardPayload:
+    """The payload the card is handed.
+
+    Read through the types, not through a mapping: a field that is absent
+    is a construction error here rather than a missing key discovered at
+    render time, which is the whole point of the payload being typed.
+    """
     return SystemDashboardComputer(str(path)).compute(window_n=100)
 
 
@@ -108,56 +120,62 @@ def test_one_busy_of_four_reads_average_with_full_spread(
     db = tmp_path / "b.db"
     _write(db, lambda seq: _one_busy_of_four())
     out = _payload(db)
-    roll = out["rollups"]
+    roll = out.rollups
 
     # The headline stays the across-GPU average (25) and the spread that
     # opens the per-GPU rows reads the full 100 points.
-    assert roll["gpu_util"]["p50"] == 25.0
-    assert roll["gpu_delta"]["p95"] == 100.0
+    assert roll.gpu_util.p50 == 25.0
+    assert roll.gpu_delta.p95 == 100.0
 
     # Every aggregate cell is the max GPU, never a sum.
-    assert roll["gpu_power"] == {
-        "now": 68.0,
-        "p50": 68.0,
-        "limit": LIMIT,
-        "floor": 33.0,  # the idle GPUs' draw, the run's lowest
-    }
-    assert roll["gpu_mem"]["now"] == 6.67 * GB
-    assert roll["gpu_mem"]["total"] == 16.1 * GB
-    assert roll["temp"]["now"] == 54.0
+    assert roll.gpu_power == PowerStat(
+        now=68.0,
+        p50=68.0,
+        limit=LIMIT,
+        floor=33.0,  # the idle GPUs' draw, the run's lowest
+    )
+    assert roll.gpu_mem.now == 6.67 * GB
+    assert roll.gpu_mem.total == 16.1 * GB
+    assert roll.temp.now == 54.0
 
-    gpus = roll["gpus"]
-    assert [g["gpu_idx"] for g in gpus] == [0, 1, 2, 3]
-    assert gpus[0] == {
-        "gpu_idx": 0,
-        "util_now": 100.0,
-        "util_p50": 100.0,
-        "mem_used": 6.67 * GB,
-        "mem_total": 16.1 * GB,
-        "temp": 54.0,
-        "power": 68.0,
-        "power_limit": LIMIT,
-    }
-    assert gpus[3]["util_p50"] == 0.0
-    assert gpus[3]["power"] == 33.0
+    gpus = roll.gpus
+    assert [g.gpu_idx for g in gpus] == [0, 1, 2, 3]
+    assert gpus[0] == GpuRow(
+        gpu_idx=0,
+        util_now=100.0,
+        util_p50=100.0,
+        mem_used=6.67 * GB,
+        mem_total=16.1 * GB,
+        temp=54.0,
+        power=68.0,
+        power_limit=LIMIT,
+        # Added deliberately. The card used to work out whether a device
+        # had reported by testing which of its fields were None, using a
+        # rule that disagreed with the computer's about a GPU carrying a
+        # power limit and no memory total. The computer states it here so
+        # there is one answer rather than two.
+        reported=True,
+    )
+    assert gpus[3].util_p50 == 0.0
+    assert gpus[3].power == 33.0
 
-    power = out["series"]["gpu_power"]
+    power = out.series.gpu_power
     assert [p["gpu_idx"] for p in power] == [0, 1, 2, 3]
     assert power[0]["values"] == [68.0] * TICKS
     assert power[1]["values"] == [33.0] * TICKS
-    assert len(out["series"]["x_time"]) == TICKS
-    assert out["series"]["cpu_run"]["t"] == []
-    assert out["series"]["gpu_power_run"] == []
+    assert len(out.series.x_time) == TICKS
+    assert out.series.cpu_run.t == ()
+    assert out.series.gpu_power_run == ()
 
 
 def test_all_busy_reads_zero_spread(tmp_path: Path) -> None:
     db = tmp_path / "a.db"
     _write(db, lambda seq: _all_busy())
-    roll = _payload(db)["rollups"]
-    assert roll["gpu_util"]["p50"] == 100.0
-    assert roll["gpu_delta"]["p95"] == 0.0
-    assert roll["gpu_power"]["now"] == 69.0  # max GPU (gpu3), not 270
-    assert roll["temp"]["now"] == 56.0
+    roll = _payload(db).rollups
+    assert roll.gpu_util.p50 == 100.0
+    assert roll.gpu_delta.p95 == 0.0
+    assert roll.gpu_power.now == 69.0  # max GPU (gpu3), not 270
+    assert roll.temp.now == 56.0
 
 
 def test_missing_gpu_row_is_a_gap_not_a_zero(tmp_path: Path) -> None:
@@ -169,44 +187,34 @@ def test_missing_gpu_row_is_a_gap_not_a_zero(tmp_path: Path) -> None:
 
     _write(db, rows)
     out = _payload(db)
-    gpu3 = out["series"]["gpu_power"][3]["values"]
+    gpu3 = out.series.gpu_power[3]["values"]
     assert len(gpu3) == TICKS
     assert gpu3[10] is None
     assert gpu3[9] == 69.0
     # The rows still list every GPU seen in the window.
-    assert [g["gpu_idx"] for g in out["rollups"]["gpus"]] == [0, 1, 2, 3]
+    assert [g.gpu_idx for g in out.rollups.gpus] == [0, 1, 2, 3]
 
 
 def test_no_gpu_payload_carries_empty_gpu_lists(tmp_path: Path) -> None:
     db = tmp_path / "c.db"
     _write(db, lambda seq: (), gpu_available=False)
     out = _payload(db)
-    assert out["gpu_available"] is False
-    assert out["rollups"]["gpus"] == []
-    assert out["rollups"]["gpu_power"] == {
-        "now": None,
-        "p50": None,
-        "limit": None,
-        "floor": None,
-    }
-    assert out["series"]["gpu_power"] == []
-    assert out["series"]["cpu"] == [8.0] * TICKS
+    assert out.gpu_available is False
+    assert out.rollups.gpus == ()
+    assert out.rollups.gpu_power == PowerStat()
+    assert out.series.gpu_power == ()
+    assert list(out.series.cpu) == [8.0] * TICKS
 
 
 def test_unreported_power_stays_none(tmp_path: Path) -> None:
     db = tmp_path / "p.db"
     _write(db, lambda seq: _one_busy_of_four(power=False))
     out = _payload(db)
-    assert out["rollups"]["gpu_power"] == {
-        "now": None,
-        "p50": None,
-        "limit": None,
-        "floor": None,
-    }
-    assert out["rollups"]["gpus"][0]["power"] is None
-    assert out["series"]["gpu_power"][0]["values"] == [None] * TICKS
+    assert out.rollups.gpu_power == PowerStat()
+    assert out.rollups.gpus[0].power is None
+    assert out.series.gpu_power[0]["values"] == [None] * TICKS
     # Utilisation is unaffected by a missing power column.
-    assert out["rollups"]["gpu_util"]["p50"] == 25.0
+    assert out.rollups.gpu_util.p50 == 25.0
 
 
 def test_empty_database_payload_keeps_the_schema(tmp_path: Path) -> None:
@@ -214,32 +222,20 @@ def test_empty_database_payload_keeps_the_schema(tmp_path: Path) -> None:
     with sqlite_database(db, init_summary_schema):
         pass
     out = _payload(db)
-    assert out["window_len"] == 0
-    assert out["series"]["gpu_power"] == []
-    assert out["series"]["cpu_run"] == {
-        "t": [],
-        "avg": [],
-        "max": [],
-        "span_s": 0.0,
-        "window_s": 0.0,
-    }
-    assert out["series"]["gpu_power_run"] == []
+    assert out.window_len == 0
+    assert out.series.gpu_power == ()
+    assert out.series.cpu_run == CpuRunSeries()
+    assert out.series.gpu_power_run == ()
 
 
 def test_failed_first_read_keeps_the_series_schema(tmp_path: Path) -> None:
     db = tmp_path / "missing" / "run.db"
     out = _payload(db)
 
-    assert out["window_len"] == 0
-    assert out["rollups"]["status"] == "No fresh system data"
-    assert out["series"]["cpu_run"] == {
-        "t": [],
-        "avg": [],
-        "max": [],
-        "span_s": 0.0,
-        "window_s": 0.0,
-    }
-    assert out["series"]["gpu_power_run"] == []
+    assert out.window_len == 0
+    assert out.rollups.status == "No fresh system data"
+    assert out.series.cpu_run == CpuRunSeries()
+    assert out.series.gpu_power_run == ()
 
 
 def test_two_node_window_shows_the_leader_node_only(tmp_path: Path) -> None:
@@ -271,20 +267,20 @@ def test_two_node_window_shows_the_leader_node_only(tmp_path: Path) -> None:
                     ],
                 )
     out = _payload(db)
-    roll = out["rollups"]
-    assert roll["ctx"]["system_node"] == {
+    roll = out.rollups
+    assert roll.ctx.system_node == {
         "hostname": "node-a",
         "node_rank": 0,
         "nodes_in_window": 2,
     }
     # Node 0's own window, not a zig-zag between the two hosts.
-    assert set(out["series"]["cpu"]) == {10.0}
-    assert roll["cpu"]["p50"] == 10.0
-    assert roll["gpu_util"]["p50"] == 100.0
-    assert [g["gpu_idx"] for g in roll["gpus"]] == [0]
-    assert roll["gpus"][0]["power"] == 66.0
-    assert out["series"]["gpu_power"][0]["values"] == [66.0] * TICKS
-    assert len(out["series"]["x_time"]) == TICKS
+    assert set(out.series.cpu) == {10.0}
+    assert roll.cpu.p50 == 10.0
+    assert roll.gpu_util.p50 == 100.0
+    assert [g.gpu_idx for g in roll.gpus] == [0]
+    assert roll.gpus[0].power == 66.0
+    assert out.series.gpu_power[0]["values"] == [66.0] * TICKS
+    assert len(out.series.x_time) == TICKS
 
 
 def test_null_util_and_temp_stay_none_not_zero(tmp_path: Path) -> None:
@@ -301,11 +297,11 @@ def test_null_util_and_temp_stay_none_not_zero(tmp_path: Path) -> None:
 
     _write(db, rows)
     out = _payload(db)
-    g1 = out["rollups"]["gpus"][1]
-    assert g1["util_now"] is None
-    assert g1["temp"] is None
-    assert g1["power"] == 67.0  # still reported
-    assert g1["util_p50"] == 100.0  # the median ignores the unreported ticks
+    g1 = out.rollups.gpus[1]
+    assert g1.util_now is None
+    assert g1.temp is None
+    assert g1.power == 67.0  # still reported
+    assert g1.util_p50 == 100.0  # the median ignores the unreported ticks
 
 
 def test_sampler_zero_fallback_tick_is_unreported(tmp_path: Path) -> None:
@@ -331,17 +327,17 @@ def test_sampler_zero_fallback_tick_is_unreported(tmp_path: Path) -> None:
 
     _write(db, rows)
     out = _payload(db)
-    roll = out["rollups"]
+    roll = out.rollups
     # The limit is a constant seen earlier in the window: it stays.
-    assert roll["gpu_power"]["limit"] == LIMIT
-    assert roll["gpu_power"]["now"] is None
-    assert roll["gpu_power"]["floor"] == 66.0
-    for g in roll["gpus"]:
-        assert g["power"] is None and g["power_limit"] is None
-        assert g["mem_total"] is None and g["temp"] is None
-        assert g["util_p50"] == 100.0
-    assert out["series"]["gpu_power"][0]["values"][-1] is None
-    assert out["series"]["gpu_power"][0]["values"][-2] == 66.0
+    assert roll.gpu_power.limit == LIMIT
+    assert roll.gpu_power.now is None
+    assert roll.gpu_power.floor == 66.0
+    for g in roll.gpus:
+        assert g.power is None and g.power_limit is None
+        assert g.mem_total is None and g.temp is None
+        assert g.util_p50 == 100.0
+    assert out.series.gpu_power[0]["values"][-1] is None
+    assert out.series.gpu_power[0]["values"][-2] == 66.0
 
 
 def test_reported_zero_power_remains_in_whole_run_history(
@@ -357,8 +353,8 @@ def test_reported_zero_power_remains_in_whole_run_history(
     )
 
     out = _payload(db)
-    assert out["rollups"]["gpu_power"]["floor"] == 0.0
-    assert set(out["series"]["gpu_power_run"][0]["min"]) == {0.0}
+    assert out.rollups.gpu_power.floor == 0.0
+    assert set(out.series.gpu_power_run[0]["min"]) == {0.0}
 
 
 def test_cpu_only_run_does_not_read_gpu_power_history(
@@ -378,7 +374,7 @@ def test_cpu_only_run_does_not_read_gpu_power_history(
         fail_if_called,
     )
     out = computer.compute(window_n=100)
-    assert out["series"]["gpu_power_run"] == []
+    assert out.series.gpu_power_run == ()
 
 
 def test_rows_without_a_hostname_are_not_a_node(tmp_path: Path) -> None:
@@ -404,8 +400,8 @@ def test_rows_without_a_hostname_are_not_a_node(tmp_path: Path) -> None:
                 gpu_samples=_all_busy(),
             )
     out = _payload(db)
-    assert out["window_len"] == TICKS
-    assert out["rollups"]["ctx"]["system_node"] == {
+    assert out.window_len == TICKS
+    assert out.rollups.ctx.system_node == {
         "hostname": "box",
         "node_rank": 0,
         "nodes_in_window": 1,
@@ -449,19 +445,19 @@ def test_whole_run_series_are_decimated_and_keep_peaks(tmp_path: Path) -> None:
             )
     out = _payload(db)
 
-    run = out["series"]["cpu_run"]
-    assert 2 < len(run["t"]) <= 181  # decimated, not one point per sample
-    assert len(run["avg"]) == len(run["t"]) == len(run["max"])
-    assert run["span_s"] == pytest.approx(2.0 * (ticks - 1))
+    run = out.series.cpu_run
+    assert 2 < len(run.t) <= 181  # decimated, not one point per sample
+    assert len(run.avg) == len(run.t) == len(run.max)
+    assert run.span_s == pytest.approx(2.0 * (ticks - 1))
     # The drift survives. Measured against the run's floor, not slice 0:
     # the spike at tick 0 lands inside the first slice and lifts its mean.
-    assert run["avg"][-1] > min(run["avg"]) + 20
-    assert max(run["max"]) >= 95.0  # and so do the spikes
+    assert run.avg[-1] > min(run.avg) + 20
+    assert max(run.max) >= 95.0  # and so do the spikes
     # The rolling mean never reaches the spike: it is smoothed away
     # there and preserved in "max", which is the point of carrying both.
-    assert max(run["avg"]) < 95.0
+    assert max(run.avg) < 95.0
 
-    power = out["series"]["gpu_power_run"]
+    power = out.series.gpu_power_run
     assert [p["gpu_idx"] for p in power] == [0]
     e = power[0]
     assert 2 < len(e["t"]) <= 181
@@ -490,9 +486,9 @@ def test_cpu_whole_run_series_honors_point_cap(tmp_path: Path) -> None:
                 gpu_samples=(),
             )
 
-    run = _payload(db)["series"]["cpu_run"]
-    assert 2 < len(run["t"]) <= 120
-    assert len(run["t"]) == len(run["avg"]) == len(run["max"])
+    run = _payload(db).series.cpu_run
+    assert 2 < len(run.t) <= 120
+    assert len(run.t) == len(run.avg) == len(run.max)
 
 
 def test_cpu_whole_run_keeps_all_eligible_points_under_cap(
@@ -517,11 +513,11 @@ def test_cpu_whole_run_keeps_all_eligible_points_under_cap(
                 gpu_samples=(),
             )
 
-    run = _payload(db)["series"]["cpu_run"]
+    run = _payload(db).series.cpu_run
     # A 30-second rolling window at a 2-second cadence excludes the first
     # 14 samples. The remaining 116 fit under the cap and should all survive.
-    assert len(run["t"]) == 116
-    assert len(run["t"]) == len(run["avg"]) == len(run["max"])
+    assert len(run.t) == 116
+    assert len(run.t) == len(run.avg) == len(run.max)
 
 
 def test_whole_run_series_follow_the_node_scope(tmp_path: Path) -> None:
@@ -555,6 +551,6 @@ def test_whole_run_series_follow_the_node_scope(tmp_path: Path) -> None:
                     ],
                 )
     out = _payload(db)
-    assert out["rollups"]["ctx"]["system_node"]["hostname"] == "node-a"
+    assert out.rollups.ctx.system_node["hostname"] == "node-a"
     # node-a alone: never blended with node-b's 90%
-    assert max(out["series"]["cpu_run"]["max"]) == pytest.approx(10.0)
+    assert max(out.series.cpu_run.max) == pytest.approx(10.0)

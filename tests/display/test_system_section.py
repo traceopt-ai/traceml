@@ -31,6 +31,7 @@ from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section impor
     should_auto_open,
     sparkline_svg,
 )
+from traceml_ai.renderers.system.dashboard_models import GpuRow  # noqa: E402
 
 GB = 1e9
 
@@ -60,33 +61,41 @@ def test_disclosure_text_states_the_range_and_no_verdict() -> None:
     """
 
     def g(idx, util):
-        return {"gpu_idx": idx, "util_p50": util, "util_now": util}
+        return GpuRow(gpu_idx=idx, util_p50=util, util_now=util)
+
+    def roll(gpus):
+        """The range now arrives on the payload; the card only formats it."""
+        values = [x.util_p50 for x in gpus if x.util_p50 is not None]
+        return as_rollups(
+            {"util_range": (min(values), max(values)) if values else None}
+        )
 
     one_busy = [g(0, 100), g(1, 0), g(2, 0), g(3, 0)]
     all_busy = [g(i, 99) for i in range(4)]
     ramp = [g(0, 100), g(1, 60), g(2, 55), g(3, 40)]
 
-    assert disclosure_text(one_busy, is_open=True) == (
+    assert disclosure_text(one_busy, roll(one_busy), is_open=True) == (
         "4 GPUs · util 0 to 100% · click to close"
     )
-    assert disclosure_text(one_busy, is_open=False) == (
+    assert disclosure_text(one_busy, roll(one_busy), is_open=False) == (
         "4 GPUs · util 0 to 100% · click to open"
     )
-    assert disclosure_text(ramp, is_open=True) == (
+    assert disclosure_text(ramp, roll(ramp), is_open=True) == (
         "4 GPUs · util 40 to 100% · click to close"
     )
-    assert disclosure_text(all_busy, is_open=False) == (
+    assert disclosure_text(all_busy, roll(all_busy), is_open=False) == (
         "4 GPUs · util 99 to 99% · click to open"
     )
     # One GPU has no range to speak of, and no rows worth naming.
     assert (
-        disclosure_text([g(0, 99)], is_open=False) == "1 GPU · click to open"
+        disclosure_text([g(0, 99)], roll([g(0, 99)]), is_open=False)
+        == "1 GPU · click to open"
     )
-    assert disclosure_text([], is_open=False) == ""
+    assert disclosure_text([], as_rollups({}), is_open=False) == ""
     # No word anywhere claims a verdict the engine owns.
     for text in (
-        disclosure_text(one_busy, is_open=True),
-        disclosure_text(all_busy, is_open=False),
+        disclosure_text(one_busy, roll(one_busy), is_open=True),
+        disclosure_text(all_busy, roll(all_busy), is_open=False),
     ):
         for word in ("idle", "busy", "alike", "uneven", "low", "healthy"):
             assert word not in text
@@ -135,6 +144,41 @@ def test_sparkline_is_inline_svg_with_gaps_dropped() -> None:
     assert sparkline_svg([None, None], gpu_color(1)) == ""
 
 
+def as_payload(raw: dict):
+    """The dict fixtures below, as the typed payload the card now takes.
+
+    The fixtures stay mappings because they are more readable that way and
+    because they describe the SHAPE the compute layer produces. The models
+    own the adaptation, so this is the same path production takes.
+    """
+    from traceml_ai.renderers.system.dashboard_models import (
+        SystemDashboardPayload,
+        SystemRollups,
+        SystemSeries,
+    )
+
+    return SystemDashboardPayload(
+        window_len=raw.get("window_len", 0),
+        gpu_available=bool(raw.get("gpu_available")),
+        rollups=SystemRollups.from_dict(raw.get("rollups") or {}),
+        series=SystemSeries.from_dict(raw.get("series") or {}),
+    )
+
+
+def _ctx(raw: dict):
+    """One ctx mapping, typed."""
+    from traceml_ai.renderers.system.dashboard_models import RunContext
+
+    return RunContext(system_node=raw.get("system_node"))
+
+
+def as_rollups(raw: dict):
+    """One rollups mapping, typed."""
+    from traceml_ai.renderers.system.dashboard_models import SystemRollups
+
+    return SystemRollups.from_dict(raw)
+
+
 def _gpus():
     return [
         {
@@ -146,6 +190,7 @@ def _gpus():
             "temp": 54.0,
             "power": 68.0,
             "power_limit": 70.0,
+            "reported": True,
         },
         {
             "gpu_idx": 1,
@@ -156,6 +201,7 @@ def _gpus():
             "temp": 41.0,
             "power": 33.0,
             "power_limit": 70.0,
+            "reported": True,
         },
     ]
 
@@ -165,7 +211,11 @@ def test_rows_table_reads_per_gpu_and_tints_only_the_busy_row() -> None:
         {"gpu_idx": 0, "values": [66.0, 68.0]},
         {"gpu_idx": 1, "values": [33.0, 33.0]},
     ]
-    html = rows_html(_gpus(), series, spread=100.0)
+    html = rows_html(
+        as_rollups({"gpus": _gpus()}).gpus,
+        series,
+        as_rollups({"rows_over": True, "odd_gpus": [0]}),
+    )
     assert "gpu0" in html and "gpu1" in html
     assert "6.67 / 16.1" in html and "0.47 / 16.1" in html
     assert "68 / 70" in html and "33 / 70" in html
@@ -177,7 +227,11 @@ def test_rows_table_reads_per_gpu_and_tints_only_the_busy_row() -> None:
         in html
     )
     # ...and none when every GPU reads the same.
-    calm = rows_html(_gpus(), series, spread=0.0)
+    calm = rows_html(
+        as_rollups({"gpus": _gpus()}).gpus,
+        series,
+        as_rollups({"rows_over": False}),
+    )
     assert "tml-mark" not in calm
     # No verdict words anywhere on the block.
     for word in ("Hot", "Warm", "HIGH", "verdict"):
@@ -185,19 +239,18 @@ def test_rows_table_reads_per_gpu_and_tints_only_the_busy_row() -> None:
 
 
 def test_tint_marks_the_odd_ones_out() -> None:
-    def g(i, u):
-        return {"gpu_idx": i, "util_p50": u, "util_now": u}
+    """The card reads the marked set; the rule itself lives in compute.
 
-    # 1 busy of 4: the busy GPU is the anomaly.
-    assert odd_ones_out([g(0, 100), g(1, 0), g(2, 0), g(3, 0)]) == {0}
-    # 3 busy of 4 (a starved or dead rank): the idle GPU is the anomaly,
-    # not the first busy row.
-    assert odd_ones_out([g(0, 100), g(1, 100), g(2, 100), g(3, 0)]) == {3}
-    # 2 and 2: ties go to the busy side.
-    assert odd_ones_out([g(0, 100), g(1, 0), g(2, 100), g(3, 0)]) == {0, 2}
-    # Nothing to mark when every GPU reads the same, or only one reports.
-    assert odd_ones_out([g(0, 100), g(1, 100)]) == set()
-    assert odd_ones_out([g(0, 100), {"gpu_idx": 1}]) == set()
+    These cases moved with it and are asserted unchanged against
+    `_odd_gpus` in tests/display/test_system_section_characterization.py.
+    What is checked here is that the card marks what it is handed and
+    invents nothing.
+    """
+    assert odd_ones_out(as_rollups({"odd_gpus": [0]})) == {0}
+    assert odd_ones_out(as_rollups({"odd_gpus": [3]})) == {3}
+    assert odd_ones_out(as_rollups({"odd_gpus": [0, 2]})) == {0, 2}
+    assert odd_ones_out(as_rollups({"odd_gpus": []})) == set()
+    assert odd_ones_out(as_rollups({})) == set()
 
 
 def test_no_gpu_colour_is_the_limit_red() -> None:
@@ -224,7 +277,7 @@ def test_rows_table_shows_absence_not_zero() -> None:
             "power_limit": None,
         }
     )
-    html = rows_html(gpus, [], spread=None)
+    html = rows_html(as_rollups({"gpus": gpus}).gpus, [], as_rollups({}))
     assert "gpu1" in html
     assert "n/a" in html
     assert "0 / 0" not in html
@@ -255,7 +308,6 @@ def test_whole_run_charts_share_one_clock_axis() -> None:
         "window_len": 2,
         "gpu_available": True,
         "rollups": {
-            "gpu_available": True,
             "cpu": {"now": 30.0, "p50": 32.0, "p95": 44.0},
             "ram": {"now": 9.0 * GB, "total": 200.0 * GB},
             "gpu_util": {"now": 99.0, "p50": 99.0, "p95": 99.0},
@@ -279,6 +331,10 @@ def test_whole_run_charts_share_one_clock_axis() -> None:
             "cpu": [30.0, 31.0],
             "gpu_avg": [99.0, 99.0],
             "gpu_power": [{"gpu_idx": 0, "values": [66.0, 68.0]}],
+            # Both flags are computed now, so a hand-built payload states
+            # which view each chart is in rather than the card inferring it.
+            "cpu_run_whole": True,
+            "power_run_whole": True,
             "cpu_run": {
                 "t": cpu_t,
                 "avg": [30.0] * 40,
@@ -299,7 +355,7 @@ def test_whole_run_charts_share_one_clock_axis() -> None:
             ],
         },
     }
-    update_system_section(panel, payload)
+    update_system_section(panel, as_payload(payload))
     cpu_axis = panel["cpu_chart"].options["xAxis"]
     pwr_axis = panel["power_chart"].options["xAxis"]
     assert (cpu_axis["min"], cpu_axis["max"]) == (
@@ -350,7 +406,6 @@ def test_power_chart_draws_limit_and_floor_reference_lines() -> None:
             "window_len": 2,
             "gpu_available": True,
             "rollups": {
-                "gpu_available": True,
                 "cpu": {"now": 9.0, "p50": 8.0, "p95": 12.0},
                 "ram": {"now": 9.0 * GB, "total": 200.0 * GB},
                 "gpu_util": {"now": 25.0, "p50": 25.0, "p95": 25.0},
@@ -371,7 +426,7 @@ def test_power_chart_draws_limit_and_floor_reference_lines() -> None:
                 "gpu_power": [{"gpu_idx": 0, "values": [66.0, 68.0]}],
             },
         }
-        update_system_section(panel, payload)
+        update_system_section(panel, as_payload(payload))
         mark = panel["power_chart"].options["series"][0]["markLine"]
         _last_refs.clear()
         _last_refs.update(mark)
@@ -411,11 +466,15 @@ def test_section_builds_and_updates_without_a_browser() -> None:
         "window_len": 2,
         "gpu_available": True,
         "rollups": {
-            "gpu_available": True,
             "cpu": {"now": 9.0, "p50": 8.0, "p95": 12.0},
             "ram": {"now": 9.0 * GB, "total": 200.0 * GB},
             "gpu_util": {"now": 0.0, "p50": 25.0, "p95": 25.0},
             "gpu_delta": {"now": 0.0, "p95": 100.0},
+            # The computer decides both of these now, so a hand-built
+            # payload has to carry its answers rather than let the card
+            # re-derive them from the rows.
+            "rows_over": True,
+            "util_range": (0.0, 100.0),
             "gpu_mem": {"now": 6.67 * GB, "total": 16.1 * GB},
             "temp": {"now": 54.0, "status": "OK"},
             "gpu_power": {"now": 68.0, "p50": 67.0, "limit": 70.0},
@@ -435,7 +494,7 @@ def test_section_builds_and_updates_without_a_browser() -> None:
             ],
         },
     }
-    update_system_section(panel, payload)
+    update_system_section(panel, as_payload(payload))
     # The util tile is the window median, not the raw last tick (0).
     assert "25" in panel["tiles"]["util"].content
     assert "0<" not in panel["tiles"]["util"].content
@@ -476,7 +535,7 @@ def test_section_builds_and_updates_without_a_browser() -> None:
     sent = []
     panel["cpu_chart"].update = lambda: sent.append("cpu")
     panel["power_chart"].update = lambda: sent.append("power")
-    update_system_section(panel, payload)
+    update_system_section(panel, as_payload(payload))
     assert panel["rows"].value is False
     assert panel["rows_hint"].text == "2 GPUs · util 0 to 100% · click to open"
     assert sent == []
@@ -490,7 +549,7 @@ def test_section_builds_and_updates_without_a_browser() -> None:
     later["series"]["x_time"] = payload["series"]["x_time"][:1] + [
         "2026-08-21T10:03:22+00:00"
     ]
-    update_system_section(panel, later)
+    update_system_section(panel, as_payload(later))
     # (option mutations also notify the element, so count kinds not calls)
     assert set(sent) == {"cpu", "power"}
     assert panel["power_chart"].options["series"][0]["markLine"] == {
@@ -512,33 +571,35 @@ def test_section_builds_and_updates_without_a_browser() -> None:
             "temp": None,
             "power": None,
             "power_limit": None,
+            "reported": False,
         }
         for i in range(2)
     ]
-    update_system_section(panel, zeroed)
+    update_system_section(panel, as_payload(zeroed))
     assert panel["tiles"]["mem"].content == "n/a"
     assert panel["subs"]["temp"].text == "GPU sample unreported"
 
     # A CPU-only box hides the GPU tiles, the power chart and the rows.
     update_system_section(
         panel,
-        {
-            "window_len": 1,
-            "gpu_available": False,
-            "rollups": {
+        as_payload(
+            {
+                "window_len": 1,
                 "gpu_available": False,
-                "cpu": {"now": 3.0, "p50": 3.0},
-                "ram": {"now": 1.0 * GB, "total": 16.0 * GB},
-                "gpu_power": {"now": None, "p50": None, "limit": None},
-                "gpus": [],
-            },
-            "series": {
-                "x_time": ["2026-08-21T10:00:00+00:00"],
-                "cpu": [3.0],
-                "gpu_avg": [],
-                "gpu_power": [],
-            },
-        },
+                "rollups": {
+                    "cpu": {"now": 3.0, "p50": 3.0},
+                    "ram": {"now": 1.0 * GB, "total": 16.0 * GB},
+                    "gpu_power": {"now": None, "p50": None, "limit": None},
+                    "gpus": [],
+                },
+                "series": {
+                    "x_time": ["2026-08-21T10:00:00+00:00"],
+                    "cpu": [3.0],
+                    "gpu_avg": [],
+                    "gpu_power": [],
+                },
+            }
+        ),
     )
     assert panel["gpu_visible"] is False
     # The four tiles stay in place; the GPU ones read a dash and say why.
@@ -557,14 +618,14 @@ def test_header_names_the_node_when_others_were_dropped() -> None:
         node_scope_text,
     )
 
-    assert node_scope_text({}) == ""
+    assert node_scope_text(as_rollups({}).ctx) == ""
     one = {"hostname": "a", "node_rank": 0, "nodes_in_window": 1}
     two = {"hostname": "a", "node_rank": 0, "nodes_in_window": 2}
-    assert node_scope_text({"system_node": one}) == ""
-    assert node_scope_text({"system_node": two}) == "node 0 of 2"
+    assert node_scope_text(_ctx({"system_node": one})) == ""
+    assert node_scope_text(_ctx({"system_node": two})) == "node 0 of 2"
     # Only the System payload's own facts are read: a strip-style
     # node_count on the dict changes nothing.
-    assert node_scope_text({"system_node": one, "node_count": 2}) == ""
+    assert node_scope_text(_ctx({"system_node": one, "node_count": 2})) == ""
 
 
 def test_every_tile_keeps_a_qualifier_line() -> None:
@@ -586,7 +647,6 @@ def test_every_tile_keeps_a_qualifier_line() -> None:
             "window_len": 2,
             "gpu_available": True,
             "rollups": {
-                "gpu_available": True,
                 "cpu": {"now": 9.0, "p50": 8.0},
                 "ram": {"now": 9.0 * GB, "total": 200.0 * GB},
                 "gpu_util": {"now": 99.0, "p50": 99.0},
@@ -604,6 +664,7 @@ def test_every_tile_keeps_a_qualifier_line() -> None:
                         "temp": 48.0,
                         "power": 66.0,
                         "power_limit": 70.0,
+                        "reported": True,
                     }
                     for i in range(n_gpus)
                 ],
@@ -625,7 +686,7 @@ def test_every_tile_keeps_a_qualifier_line() -> None:
     for n in (1, 4):
         with ui.element("div"):
             panel = build_system_section()
-        update_system_section(panel, payload(n))
+        update_system_section(panel, as_payload(payload(n)))
         subs = {
             k: panel["subs"][k].text for k in ("util", "mem", "temp", "ram")
         }
