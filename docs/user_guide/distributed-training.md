@@ -52,6 +52,11 @@ port for TraceML telemetry, add `--aggregator-host=<host>` or
 For multi-node runs, node 0 binds the aggregator to `0.0.0.0` by default.
 Override that only when needed with `--aggregator-bind-host=<bind-host>`.
 
+Aggregator telemetry-health fields in `manifest.json` are owned by the node 0
+launcher, which owns the aggregator process and can observe its exit and
+finalization. Non-owner launchers do not infer final aggregator health from a
+startup TCP readiness check.
+
 `--session-id` remains accepted as a backward-compatible alias for
 `--run-name`.
 

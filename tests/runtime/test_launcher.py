@@ -720,20 +720,24 @@ def test_started_training_result_is_authoritative(
 
 
 @pytest.mark.parametrize(
-    ("failure", "reason"),
+    ("failure", "reason", "owner"),
     [
-        ("spawn", "aggregator_spawn_failed"),
-        ("readiness", "aggregator_not_ready"),
+        ("spawn", "aggregator_spawn_failed", True),
+        ("readiness", "aggregator_not_ready", True),
+        ("readiness", "aggregator_not_ready", False),
     ],
 )
 def test_strict_aggregator_failure_does_not_start_training(
-    monkeypatch, tmp_path, failure, reason
+    monkeypatch, tmp_path, failure, reason, owner
 ) -> None:
     script = tmp_path / "train.py"
     script.write_text("print('train')\n", encoding="utf-8")
-    args = build_parser().parse_args(
-        ["run", str(script), "--logs-dir", str(tmp_path / "logs")]
-    )
+    cli = ["run", str(script), "--logs-dir", str(tmp_path / "logs")]
+    if not owner:
+        cli.extend(
+            ["--nnodes", "2", "--node-rank", "1", "--run-name", "strict-run"]
+        )
+    args = build_parser().parse_args(cli)
     start_training = Mock()
     update_manifest = Mock()
 
@@ -772,14 +776,20 @@ def test_strict_aggregator_failure_does_not_start_training(
     start_training.assert_not_called()
     assert update_manifest.call_args.kwargs["status"] == "failed"
     assert update_manifest.call_args.kwargs["telemetry_status"] == (
-        "unavailable"
+        "unavailable" if owner else None
     )
-    assert update_manifest.call_args.kwargs["telemetry_reason"] == reason
+    if owner:
+        assert update_manifest.call_args.kwargs["telemetry_reason"] == reason
+    else:
+        start_aggregator.assert_not_called()
 
 
-@pytest.mark.parametrize("owner", [True, False])
-def test_warn_policy_starts_supervised_training_without_telemetry(
-    monkeypatch, tmp_path, owner
+@pytest.mark.parametrize(
+    ("owner", "ready"),
+    [(True, False), (False, False), (False, True)],
+)
+def test_launcher_scopes_telemetry_health_to_aggregator_owner(
+    monkeypatch, tmp_path, owner, ready
 ) -> None:
     script = tmp_path / "train.py"
     script.write_text("print('train')\n", encoding="utf-8")
@@ -810,7 +820,7 @@ def test_warn_policy_starts_supervised_training_without_telemetry(
 
     def _start_training(*, train_cmd, env, cwd, capture_stderr):
         events.append("train")
-        assert env["TRACEML_DISABLED"] == "1"
+        assert env["TRACEML_DISABLED"] == ("0" if ready else "1")
         return training
 
     monkeypatch.chdir(tmp_path)
@@ -820,7 +830,7 @@ def test_warn_policy_starts_supervised_training_without_telemetry(
         launcher_commands, "start_aggregator_process", start_aggregator
     )
     monkeypatch.setattr(
-        launcher_commands, "wait_for_tcp_listen", Mock(return_value=False)
+        launcher_commands, "wait_for_tcp_listen", Mock(return_value=ready)
     )
     monkeypatch.setattr(
         launcher_commands, "start_training_process", _start_training
@@ -831,12 +841,14 @@ def test_warn_policy_starts_supervised_training_without_telemetry(
     monkeypatch.setattr(
         launcher_commands, "write_code_manifest", Mock(return_value=None)
     )
+    write_manifest = Mock(return_value=tmp_path / "manifest.json")
+    update_manifest = Mock()
     monkeypatch.setattr(
-        launcher_commands,
-        "write_run_manifest",
-        Mock(return_value=tmp_path / "manifest.json"),
+        launcher_commands, "write_run_manifest", write_manifest
     )
-    monkeypatch.setattr(launcher_commands, "update_run_manifest", Mock())
+    monkeypatch.setattr(
+        launcher_commands, "update_run_manifest", update_manifest
+    )
 
     with pytest.raises(SystemExit) as exc:
         launch_process(str(script), args)
@@ -848,6 +860,18 @@ def test_warn_policy_starts_supervised_training_without_telemetry(
     else:
         assert events == ["train"]
         start_aggregator.assert_not_called()
+
+    initial_telemetry = write_manifest.call_args.kwargs["telemetry_status"]
+    reported_statuses = [
+        call.kwargs.get("telemetry_status")
+        for call in update_manifest.call_args_list
+    ]
+    if owner:
+        assert initial_telemetry == "starting"
+        assert "unavailable" in reported_statuses
+    else:
+        assert initial_telemetry is None
+        assert set(reported_statuses) == {None}
 
 
 @pytest.mark.parametrize(

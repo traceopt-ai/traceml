@@ -176,9 +176,10 @@ traceml run train.py --on-missing-aggregator=warn
 
 The CLI policy resolves as the explicit flag,
 `TRACEML_ON_MISSING_AGGREGATOR`, then `raise`. A startup failure is recorded as
-`telemetry_status="unavailable"`; once training starts, a later telemetry or
-finalization failure is reported separately and does not replace the training
-exit code.
+`telemetry_status="unavailable"` by the aggregator-owning launcher; once
+training starts, a later telemetry or finalization failure is reported
+separately and does not replace the training exit code. In multi-node runs,
+only the node 0 launcher reports final aggregator health.
 
 If the aggregator cannot be reached, `traceml.init(...)` retries for its
 bounded timeout, writes one stderr warning, and continues with tracing disabled

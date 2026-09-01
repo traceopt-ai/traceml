@@ -608,7 +608,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         history_retention_s=float(cfg["history_retention"]),
         finalize_timeout_sec=float(env["TRACEML_FINALIZE_TIMEOUT_SEC"]),
         status="starting",
-        telemetry_status="starting",
+        telemetry_status="starting" if owns_aggregator else None,
         launch_cwd=execution_cwd,
         aggregator_dir=aggregator_dir,
         db_path=db_path,
@@ -697,7 +697,9 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                 lambda: update_run_manifest(
                     manifest_path,
                     status="failed",
-                    telemetry_status="unavailable",
+                    telemetry_status=(
+                        "unavailable" if owns_aggregator else None
+                    ),
                     telemetry_reason=telemetry_startup_reason,
                     aggregator_exit_code=aggregator_exit_code,
                 ),
@@ -726,7 +728,9 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
             manifest_path,
             status="running",
             telemetry_status=(
-                "running" if telemetry_available else "unavailable"
+                ("running" if telemetry_available else "unavailable")
+                if owns_aggregator
+                else None
             ),
             telemetry_reason=telemetry_startup_reason,
             aggregator_exit_code=aggregator_exit_code,
