@@ -87,8 +87,12 @@ class SystemRenderer(BaseRenderer):
             )
         else:
             util_total = data.get("gpu_util_total")
+            # Divide by the devices the sum actually covers. Falling back
+            # to gpu_count averages a three-device sum over four when one
+            # GPU failed to report.
+            devices = data.get("gpu_util_devices") or data.get("gpu_count")
             avg = (
-                util_total / max(data["gpu_count"], 1)
+                util_total / max(int(devices or 0), 1)
                 if util_total is not None
                 else None
             )

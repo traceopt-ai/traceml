@@ -13,7 +13,7 @@ import time
 from typing import Any, Dict, Optional
 
 from .cli_cluster import CLI_CLUSTER_WINDOW_ROWS, SystemCLIClusterBuilder
-from .common import SystemCLISnapshot
+from .common import SystemCLISnapshot, gpu_reported
 from .repository import SystemRepository
 
 
@@ -99,18 +99,36 @@ class SystemCLIComputer:
             util_max: Optional[float] = None
             headroom_min: Optional[float] = None
             headroom_min_idx: Optional[int] = None
+            reporting = 0
 
             for idx, gpu in enumerate(gpu_rows):
-                util = float(gpu["util"] or 0.0)
+                if not gpu_reported(gpu):
+                    # The sampler's NVML-failure row. Its zeros are the
+                    # absence of a reading, and averaging them in reported
+                    # a healthy four-GPU host at 75% with a fabricated
+                    # 100-point skew. Same defect the dashboard carried.
+                    continue
                 mem_used = float(gpu["mem_used_bytes"] or 0.0)
                 mem_total = float(gpu["mem_total_bytes"] or 0.0)
 
-                util_total += util
                 mem_used_total += mem_used
                 mem_total_total += mem_total
 
-                util_min = util if util_min is None else min(util_min, util)
-                util_max = util if util_max is None else max(util_max, util)
+                # A reporting device can still carry a NULL util column,
+                # so the util mean counts READINGS, not devices. Same
+                # split the dashboard makes: reported is about the
+                # device, this is about the metric.
+                raw_util = gpu["util"]
+                util = None if raw_util is None else float(raw_util)
+                if util is not None:
+                    reporting += 1
+                    util_total += util
+                    util_min = (
+                        util if util_min is None else min(util_min, util)
+                    )
+                    util_max = (
+                        util if util_max is None else max(util_max, util)
+                    )
 
                 if mem_total > 0.0:
                     headroom = max(mem_total - mem_used, 0.0)
@@ -152,6 +170,7 @@ class SystemCLIComputer:
             gpu_available=bool(latest["gpu_available"] or False),
             gpu_count=int(latest["gpu_count"] or 0),
             gpu_util_total=util_total,
+            gpu_util_devices=reporting or None,
             gpu_util_skew=gpu_util_skew,
             gpu_mem_used=mem_used_total,
             gpu_mem_total=mem_total_total,
@@ -179,6 +198,7 @@ class SystemCLIComputer:
             ram_total=0.0,
             gpu_available=False,
             gpu_count=0,
+            gpu_util_devices=None,
             gpu_util_total=None,
             gpu_util_skew=None,
             gpu_mem_used=None,

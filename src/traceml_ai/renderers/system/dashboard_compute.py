@@ -23,6 +23,7 @@ from traceml_ai.renderers.shared.run_series import (
     plan_run_series,
 )
 
+from .common import gpu_reported as _gpu_reported
 from .dashboard_models import (
     SystemDashboardPayload,
     SystemRollups,
@@ -50,19 +51,6 @@ def _positive(value: Any) -> Optional[float]:
     """A capacity-like value: None unless it is a real positive number."""
     v = _opt_float(value)
     return v if v is not None and v > 0.0 else None
-
-
-def _gpu_reported(row: Any) -> bool:
-    """False for the sampler's exception fallback (an all-zero GPU row).
-
-    A real GPU always has a memory capacity and a board power limit; the
-    sampler writes zeros for every field when NVML fails on a device, and
-    those zeros must not render as 0 W, 0 C or 0 GB.
-    """
-    return (
-        _positive(row["mem_total_bytes"]) is not None
-        or _positive(row["power_limit_w"]) is not None
-    )
 
 
 def _empty_dashboard_series() -> Dict[str, Any]:

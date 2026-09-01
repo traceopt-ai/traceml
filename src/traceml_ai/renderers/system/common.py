@@ -16,6 +16,33 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 
+def positive(value: Any) -> Optional[float]:
+    """A number above zero, or None."""
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return out if out > 0.0 else None
+
+
+def gpu_reported(row: Any) -> bool:
+    """False for the sampler's exception fallback (an all-zero GPU row).
+
+    A real GPU always has a memory capacity and a board power limit; the
+    sampler writes zeros for every field when NVML fails on a device, and
+    those zeros must not be read as 0 W, 0 C or 0 GB.
+
+    Lives here rather than in one computer because BOTH System surfaces
+    aggregate the same rows: the dashboard and the terminal card. When it
+    existed in only one of them, the terminal card averaged a failed
+    device in as a real zero and reported a healthy four-GPU host at 75%.
+    """
+    return (
+        positive(row["mem_total_bytes"]) is not None
+        or positive(row["power_limit_w"]) is not None
+    )
+
+
 @dataclass(frozen=True)
 class SystemCLISnapshot:
     """Compact CLI snapshot for system telemetry."""
@@ -38,6 +65,11 @@ class SystemCLISnapshot:
     gpu_power_usage: Optional[float]
     gpu_power_limit: Optional[float]
 
+    # Devices the util total was summed over, which is NOT gpu_count when
+    # a device failed to report. Dividing a three-device sum by four is
+    # how a healthy four-GPU host comes to read 75%.
+    gpu_util_devices: Optional[int] = None
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "cpu": self.cpu,
@@ -46,6 +78,7 @@ class SystemCLISnapshot:
             "gpu_available": self.gpu_available,
             "gpu_count": self.gpu_count,
             "gpu_util_total": self.gpu_util_total,
+            "gpu_util_devices": self.gpu_util_devices,
             "gpu_mem_used": self.gpu_mem_used,
             "gpu_mem_total": self.gpu_mem_total,
             "gpu_temp_max": self.gpu_temp_max,
