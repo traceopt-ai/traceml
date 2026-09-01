@@ -596,9 +596,18 @@ def _update_system_tiles(
         _num(util.p50 if util else None), "%"
     )
     one_gpu = n_gpus == 1
-    panel["subs"]["util"].text = (
-        "1 GPU" if one_gpu else f"avg of {n_gpus} GPUs"
-    )
+    # The mean covers the devices that reported. Saying "avg of 4 GPUs"
+    # over three readings is the same lie the aggregate used to tell, so
+    # the count follows the data. "3/4" mirrors the strip's own
+    # "ranks 3/4 reporting" rather than inventing a second phrasing.
+    reporting = roll.gpus_reporting or n_gpus
+    if one_gpu:
+        util_sub = "1 GPU"
+    elif reporting < n_gpus:
+        util_sub = f"avg of {reporting}/{n_gpus} GPUs"
+    else:
+        util_sub = f"avg of {n_gpus} GPUs"
+    panel["subs"]["util"].text = util_sub
 
     if unreported:
         panel["tiles"]["mem"].content = NA

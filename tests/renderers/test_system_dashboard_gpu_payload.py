@@ -597,3 +597,88 @@ def test_whole_run_series_follow_the_node_scope(tmp_path: Path) -> None:
     assert out.rollups.ctx.system_node["hostname"] == "node-a"
     # node-a alone: never blended with node-b's 90%
     assert max(out.series.cpu_run.max) == pytest.approx(10.0)
+
+
+# --- an unreported GPU is not a measurement of zero -----------------------
+def test_an_unreported_gpu_does_not_drag_the_average_down(tmp_path: Path):
+    """Four GPUs pinned at 100%, one of them not reporting utilisation.
+
+    The aggregates used to substitute 0.0 for a missing reading, so the
+    headline tile read 75% on a fully busy host and the across-GPU spread
+    read 100 points where there was none. The spread is what opens the
+    per-GPU rows, so the card announced an imbalance and then printed
+    "util 100 to 100%" directly beside it, because that text is built on
+    the rollup path which already excluded the device.
+
+    Ten lines below the defect, the same loop builds the per-GPU histories
+    correctly: it asks `_gpu_reported` and stores None for a gap. This
+    makes the aggregates ask the same question.
+    """
+    db = tmp_path / "null-util.db"
+
+    def rows(seq: int):
+        out = [
+            _gpu(i, 100.0, 66.0, temp=45.0, mem_used=6.3 * GB)
+            for i in range(4)
+        ]
+        out[1]["util"] = None  # reporting device, absent metric
+        return out
+
+    _write(db, rows)
+    roll = _payload(db).rollups
+
+    assert roll.gpu_util.p50 == 100.0
+    assert roll.gpu_delta.p95 == 0.0
+    assert roll.rows_over is False
+
+
+def test_the_nvml_zero_fallback_is_not_an_idle_gpu(tmp_path: Path):
+    """The second way in, and the one the payload already knows about.
+
+    When NVML fails the sampler writes an all-zero row, so the value is a
+    real 0.0 and no `or 0.0` coercion is involved. Only `reported`
+    separates it from a genuinely idle device, and the payload carries
+    that flag correctly; the aggregates simply did not consult it.
+    """
+    db = tmp_path / "nvml.db"
+
+    def rows(seq: int):
+        out = [
+            _gpu(i, 100.0, 66.0, temp=45.0, mem_used=6.3 * GB)
+            for i in range(4)
+        ]
+        out[1] = {
+            "gpu_idx": 1,
+            "util": 0.0,
+            "mem_used_bytes": 0.0,
+            "mem_total_bytes": 0.0,
+            "temperature_c": 0.0,
+            "power_usage_w": 0.0,
+            "power_limit_w": 0.0,
+        }
+        return out
+
+    _write(db, rows)
+    out = _payload(db)
+    roll = out.rollups
+
+    assert [g.gpu_idx for g in roll.gpus if not g.reported] == [1]
+    assert roll.gpu_util.p50 == 100.0
+    assert roll.gpu_delta.p95 == 0.0
+    assert roll.rows_over is False
+    # The tile must not claim to average devices it did not read.
+    assert roll.gpus_reporting == 3
+
+
+def test_all_reporting_leaves_the_count_at_the_device_count(tmp_path: Path):
+    db = tmp_path / "healthy.db"
+    _write(
+        db,
+        lambda seq: [
+            _gpu(i, 100.0, 66.0, temp=45.0, mem_used=6.3 * GB)
+            for i in range(4)
+        ],
+    )
+    roll = _payload(db).rollups
+    assert roll.gpus_reporting == 4
+    assert roll.gpu_util.p50 == 100.0

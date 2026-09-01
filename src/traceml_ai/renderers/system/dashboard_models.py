@@ -173,6 +173,10 @@ class SystemRollups:
     # Whether the spread has earned opening the per-GPU rows. A threshold
     # against a measurement is a severity call, so it is decided here.
     rows_over: bool = False
+    # Devices that reported in the newest tick. The util tile is a mean
+    # over these, so a card that prints "avg of N GPUs" has to count them
+    # and not the devices the host happens to have.
+    gpus_reporting: int = 0
 
     @property
     def gpus_unreported(self) -> bool:
@@ -271,6 +275,7 @@ class SystemRollups:
             odd_gpus=tuple(raw.get("odd_gpus") or ()),
             util_range=(tuple(span) if span else None),
             rows_over=bool(raw.get("rows_over")),
+            gpus_reporting=int(raw.get("gpus_reporting") or 0),
         )
 
 

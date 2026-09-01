@@ -278,6 +278,10 @@ class SystemDashboardComputer:
         gpu_mem_headroom_min = np.zeros(n, dtype=np.float64)
         temp_max = np.zeros(n, dtype=np.float64)
         gpu_mem_worst_total = 0.0
+        # Devices that reported in the newest tick. The util
+        # tile averages these, so its qualifier must count them
+        # rather than the devices the host has.
+        gpus_reporting = 0
 
         # Per-GPU history keyed by gpu_idx, one slot per tick. A tick in
         # which a GPU has no row stays None: a gap in its trace, not a 0.
@@ -297,18 +301,48 @@ class SystemDashboardComputer:
             rows = gpu_rows_by_key.get(key, [])
 
             if rows:
-                utils = [float(g["util"] or 0.0) for g in rows]
-                mem_useds = [float(g["mem_used_bytes"] or 0.0) for g in rows]
-                mem_totals = [float(g["mem_total_bytes"] or 0.0) for g in rows]
-                temps = [float(g["temperature_c"] or 0.0) for g in rows]
-
-                gpu_avg[i] = sum(utils) / float(len(utils))
-                gpu_delta[i] = max(utils) - min(utils)
-                gpu_mem_worst[i] = max(mem_useds)
-                temp_max[i] = max(temps)
+                # The aggregates describe the devices that REPORTED, for
+                # the same reason the per-GPU histories below store None
+                # rather than 0: an unread device is an absence, not a
+                # measurement of zero. Substituting 0.0 pulled the mean
+                # down and manufactured an across-GPU spread, which is
+                # what opens the per-GPU rows.
+                live = [g for g in rows if _gpu_reported(g)]
                 if i == n - 1:
-                    worst = max(range(len(rows)), key=lambda j: mem_useds[j])
-                    gpu_mem_worst_total = mem_totals[worst]
+                    gpus_reporting = len(live)
+                utils = [
+                    v
+                    for v in (_opt_float(g["util"]) for g in live)
+                    if v is not None
+                ]
+                mem_pairs = [
+                    (used, _opt_float(g["mem_total_bytes"]))
+                    for g, used in (
+                        (g, _opt_float(g["mem_used_bytes"])) for g in live
+                    )
+                    if used is not None
+                ]
+                temps = [
+                    v
+                    for v in (_opt_float(g["temperature_c"]) for g in live)
+                    if v is not None
+                ]
+
+                if utils:
+                    gpu_avg[i] = sum(utils) / float(len(utils))
+                    gpu_delta[i] = max(utils) - min(utils)
+                if mem_pairs:
+                    worst_used, worst_total = max(
+                        mem_pairs, key=lambda pair: pair[0]
+                    )
+                    gpu_mem_worst[i] = worst_used
+                    if i == n - 1:
+                        gpu_mem_worst_total = worst_total or 0.0
+                if temps:
+                    temp_max[i] = max(temps)
+                if i == n - 1:
+                    # Every row, reported or not: the per-GPU rows keep a
+                    # slot for a silent device and mark it themselves.
                     latest_rows = {int(g["gpu_idx"]): g for g in rows}
 
                 powers = []
@@ -330,10 +364,12 @@ class SystemDashboardComputer:
                         power_limit = limit
                 power_max_hist[i] = max(powers) if powers else None
 
+                # Headroom needs both halves from the same device, and a
+                # device that did not report has neither.
                 headrooms = [
-                    max(mt - mu, 0.0)
-                    for mu, mt in zip(mem_useds, mem_totals)
-                    if mt > 0.0
+                    max(total - used, 0.0)
+                    for used, total in mem_pairs
+                    if total is not None and total > 0.0
                 ]
                 gpu_mem_headroom_min[i] = min(headrooms) if headrooms else 0.0
             else:
@@ -471,6 +507,7 @@ class SystemDashboardComputer:
             ),
         }
 
+        rollups["gpus_reporting"] = gpus_reporting
         gpu_rows = rollups["gpus"]
         rollups["odd_gpus"] = _odd_gpus(gpu_rows)
         rollups["util_range"] = _util_range(gpu_rows)
