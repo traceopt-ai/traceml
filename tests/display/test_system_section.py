@@ -333,8 +333,8 @@ def test_whole_run_charts_share_one_clock_axis() -> None:
             "gpu_power": [{"gpu_idx": 0, "values": [66.0, 68.0]}],
             # Both flags are computed now, so a hand-built payload states
             # which view each chart is in rather than the card inferring it.
-            "cpu_run_whole": True,
-            "power_run_whole": True,
+            "cpu_run_mode": "retained",
+            "power_run_mode": "retained",
             "cpu_run": {
                 "t": cpu_t,
                 "avg": [30.0] * 40,
@@ -705,11 +705,15 @@ def test_rolling_window_is_spelled_out_not_named() -> None:
     "rolling 2 min" needs no glossary; "per slice" made a reader ask what a
     slice was, and disjoint slices did not smooth a fast oscillation anyway.
     """
-    from traceml_ai.renderers.system.common import choose_window_s
+    from traceml_ai.renderers.shared.run_series import (
+        DEFAULT_RUN_SERIES_POLICY,
+    )
 
-    assert format_window(choose_window_s(96 * 60)) == "2 min"  # 96-min run
-    assert format_window(choose_window_s(178 * 60)) == "5 min"  # 3-hour
-    assert format_window(choose_window_s(23 * 60)) == "30 s"
-    assert format_window(choose_window_s(4 * 60)) == "30 s"  # the floor
-    assert format_window(choose_window_s(48 * 3600)) == "5 min"  # the cap
+    window_for = DEFAULT_RUN_SERIES_POLICY.window_for
+
+    assert format_window(window_for(96 * 60)) == "2 min"  # 96-min run
+    assert format_window(window_for(178 * 60)) == "5 min"  # 3-hour
+    assert format_window(window_for(23 * 60)) == "30 s"
+    assert format_window(window_for(4 * 60)) == "30 s"  # the floor
+    assert format_window(window_for(48 * 3600)) == "5 min"  # the cap
     assert format_window(0.0) == ""

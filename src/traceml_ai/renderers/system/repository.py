@@ -11,20 +11,46 @@ part shape the Process block already has: this file reads, the compute
 layer judges, the card draws. Splitting them is what makes it possible to
 say where a number was decided.
 
-The class keeps its method names. Two of them are pinned by tests that
-reach in and replace one, so renaming here would be a silent break rather
-than a rename.
+The whole-run reads take a ``RunSeriesPlan`` rather than deciding the
+window themselves: choosing how much history a chart shows is a dashboard
+decision, and this file exists so that decision is visibly somewhere else.
 """
 
 import sqlite3
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-from .common import choose_window_s
+from traceml_ai.renderers.shared.run_series import RunSeriesPlan
 
-# Points a whole-run chart may carry before it is decimated. The window
-# ladder itself stays in common.py, which the display tests import it from
-# by name.
-_MAX_RUN_POINTS = 120
+# An all-zero capacity row is the sampler's NVML failure fallback, not a
+# real 0 W observation. One predicate, applied by every query that reads
+# power, so the span a chart covers and the values it draws agree about
+# which rows exist.
+_GPU_REPORTED_SQL = """
+    power_usage_w IS NOT NULL
+    AND (
+        COALESCE(mem_total_bytes, 0) > 0
+        OR COALESCE(power_limit_w, 0) > 0
+    )
+"""
+
+
+@dataclass(frozen=True)
+class RunStats:
+    """The shape of one history, for planning a read of it.
+
+    Mirrors ``renderers/process/repository.RunStats``. System has no
+    per-rank counts because its dashboard is single-node by construction:
+    the computer picks one host and every read is filtered to it.
+    """
+
+    first_ts: float
+    last_ts: float
+    sample_count: int
+
+    @property
+    def span_s(self) -> float:
+        return max(0.0, self.last_ts - self.first_ts)
 
 
 class SystemRepository:
@@ -128,27 +154,8 @@ class SystemRepository:
         """
         return conn.execute(sql, (*bound, int(limit))).fetchall()
 
-    def fetch_cpu_run_history(
-        self,
-        conn: sqlite3.Connection,
-        hostname: Optional[str] = None,
-        min_span_s: float = 0.0,
-    ) -> Dict[str, Any]:
-        """Whole-run host CPU as rolling values sampled to a bounded series.
-
-        The window series answers "what is CPU doing now"; this answers
-        "what has it done over the run". SQL computes a rolling mean and
-        maximum, then samples the result so the payload remains bounded.
-
-        Aggregation is skipped when the run does not exceed ``min_span_s``.
-        """
-        empty: Dict[str, Any] = {
-            "t": [],
-            "avg": [],
-            "max": [],
-            "span_s": 0.0,
-            "window_s": 0.0,
-        }
+    def _run_scope(self, hostname: Optional[str]) -> Tuple[str, List[Any]]:
+        """The node filter every whole-run read shares."""
         where_sql, params = self.node_rank_filter()
         bound: List[Any] = list(params)
         if hostname is not None:
@@ -158,46 +165,43 @@ class SystemRepository:
                 else "WHERE hostname IS ?"
             )
             bound.append(str(hostname))
+        return where_sql, bound
+
+    def cpu_run_stats(
+        self, conn: sqlite3.Connection, hostname: Optional[str] = None
+    ) -> Optional[RunStats]:
+        """The shape of the whole-run CPU history, for planning a read."""
+        where_sql, bound = self._run_scope(hostname)
         try:
             row = conn.execute(
-                f"SELECT MIN(sample_ts_s), MAX(sample_ts_s) FROM "
-                f"system_samples {where_sql}",
+                "SELECT MIN(sample_ts_s), MAX(sample_ts_s), COUNT(*) "
+                f"FROM system_samples {where_sql}",
                 tuple(bound),
             ).fetchone()
         except sqlite3.Error:
-            return empty
+            return None
         if not row or row[0] is None or row[1] is None:
-            return empty
-        first, last = float(row[0]), float(row[1])
-        span = last - first
-        # The recent window already represents short runs; avoid their
-        # rolling-history query until a whole-run view adds information.
-        if span <= max(0.0, float(min_span_s)):
-            return empty
-        window_s = choose_window_s(span)
-        count = 0
-        try:
-            row = conn.execute(
-                f"SELECT COUNT(*) FROM system_samples {where_sql}",
-                tuple(bound),
-            ).fetchone()
-            count = int(row[0]) if row else 0
-        except sqlite3.Error:
-            return empty
-        if count < 2:
-            return empty
-        cadence = span / max(count - 1, 1)
-        preceding = max(1, int(round(window_s / max(cadence, 1e-6))) - 1)
-        # The first ``preceding`` samples are valid telemetry, but they do not
-        # yet cover a complete rolling window and are excluded by the query
-        # below. Calculate the stride from only the remaining chart-eligible
-        # points: this guarantees the 120-point limit without unnecessarily
-        # discarding detail when the eligible series already fits.
-        eligible_count = max(0, count - preceding)
-        stride = max(
-            1,
-            (eligible_count + _MAX_RUN_POINTS - 1) // _MAX_RUN_POINTS,
+            return None
+        return RunStats(
+            first_ts=float(row[0]),
+            last_ts=float(row[1]),
+            sample_count=int(row[2] or 0),
         )
+
+    def fetch_cpu_run(
+        self,
+        conn: sqlite3.Connection,
+        plan: RunSeriesPlan,
+        hostname: Optional[str] = None,
+    ) -> List[Tuple[float, float, float]]:
+        """Whole-run host CPU, rolled and decimated by ``plan``.
+
+        The frame comes from the plan, so on SQLite 3.28 and later this is
+        a RANGE window measured in seconds rather than a count of rows. The
+        two agree only when sampling is perfectly regular; across a gap the
+        row frame reaches further back in wall clock than the label claims.
+        """
+        where_sql, bound = self._run_scope(hostname)
         try:
             rows = conn.execute(
                 f"""
@@ -212,114 +216,88 @@ class SystemRepository:
                     {'AND' if where_sql else 'WHERE'} cpu_percent IS NOT NULL
                     WINDOW w AS (
                         ORDER BY sample_ts_s
-                        ROWS BETWEEN {preceding} PRECEDING AND CURRENT ROW
+                        {plan.frame_clause()}
                     )
                 )
                 SELECT t, a, m FROM rolled
-                WHERE rn % ? = 0 AND rn > {preceding}
+                WHERE rn % ? = 0 AND rn > ?
                 ORDER BY t ASC
                 """,
-                (*bound, stride),
+                (*bound, int(plan.stride), int(plan.preceding_rows)),
             ).fetchall()
         except sqlite3.Error:
             # Window functions need SQLite >= 3.25; without them the whole
             # run view is simply unavailable and the window view stands.
-            return empty
-        return {
-            "t": [float(r[0]) for r in rows],
-            "avg": [float(r[1]) for r in rows],
-            "max": [float(r[2]) for r in rows],
-            "span_s": span,
-            "window_s": window_s,
-        }
+            return []
+        return [(float(r[0]), float(r[1]), float(r[2])) for r in rows]
 
-    def fetch_gpu_power_run_history(
-        self,
-        conn: sqlite3.Connection,
-        hostname: Optional[str] = None,
-        min_span_s: float = 0.0,
-    ) -> List[Dict[str, Any]]:
-        """Whole-run per-GPU power grouped into fixed-duration buckets.
-
-        Each bucket carries mean, minimum and maximum power. The dashboard
-        draws the mean and minimum; the maximum remains available to callers.
-
-        Aggregation is skipped when the run does not exceed ``min_span_s``.
-        """
-        where_sql, params = self.node_rank_filter()
-        bound: List[Any] = list(params)
-        if hostname is not None:
-            where_sql = (
-                f"{where_sql} AND hostname IS ?"
-                if where_sql
-                else "WHERE hostname IS ?"
-            )
-            bound.append(str(hostname))
-        # An all-zero capacity row is the sampler's NVML failure fallback,
-        # not a real 0 W observation.
-        reported_sql = """
-            power_usage_w IS NOT NULL
-            AND (
-                COALESCE(mem_total_bytes, 0) > 0
-                OR COALESCE(power_limit_w, 0) > 0
-            )
-        """
+    def gpu_power_run_stats(
+        self, conn: sqlite3.Connection, hostname: Optional[str] = None
+    ) -> Optional[RunStats]:
+        """The shape of the whole-run power history, over reported rows."""
+        where_sql, bound = self._run_scope(hostname)
         try:
             row = conn.execute(
-                f"SELECT MIN(sample_ts_s), MAX(sample_ts_s) FROM "
+                "SELECT MIN(sample_ts_s), MAX(sample_ts_s), COUNT(*) FROM "
                 f"system_gpu_samples {where_sql} "
-                f"{'AND' if where_sql else 'WHERE'} {reported_sql}",
+                f"{'AND' if where_sql else 'WHERE'} {_GPU_REPORTED_SQL}",
                 tuple(bound),
             ).fetchone()
         except sqlite3.Error:
-            return []
+            return None
         if not row or row[0] is None or row[1] is None:
-            return []
-        first, last = float(row[0]), float(row[1])
-        span = last - first
-        if span <= max(0.0, float(min_span_s)):
-            return []
-        width = choose_window_s(span)
+            return None
+        return RunStats(
+            first_ts=float(row[0]),
+            last_ts=float(row[1]),
+            sample_count=int(row[2] or 0),
+        )
+
+    def fetch_gpu_power_run(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        width_s: float,
+        first_ts: float,
+        hostname: Optional[str] = None,
+    ) -> List[Tuple[int, float, float, float, float]]:
+        """Whole-run per-GPU power in fixed-duration buckets.
+
+        This path BUCKETS rather than rolls, so it takes a bucket width
+        rather than a ``RunSeriesPlan``: there is no stride, cadence or
+        point budget for the shared planner to supply. The width is the
+        same duration the rolling charts use, which is the only part of
+        the plan that applies here.
+        """
+        where_sql, bound = self._run_scope(hostname)
         try:
-            rows = conn.execute(
-                f"""
-                SELECT
-                    gpu_idx,
-                    MIN(sample_ts_s),
-                    AVG(power_usage_w),
-                    MIN(power_usage_w),
-                    MAX(power_usage_w)
-                FROM system_gpu_samples
-                {where_sql}
-                {'AND' if where_sql else 'WHERE'} {reported_sql}
-                GROUP BY gpu_idx, CAST((sample_ts_s - ?) / ? AS INTEGER)
-                ORDER BY gpu_idx ASC, 2 ASC
-                """,
-                (*bound, first, width),
-            ).fetchall()
+            return [
+                (
+                    int(r[0]),
+                    float(r[1]),
+                    float(r[2]),
+                    float(r[3]),
+                    float(r[4]),
+                )
+                for r in conn.execute(
+                    f"""
+                    SELECT
+                        gpu_idx,
+                        MIN(sample_ts_s),
+                        AVG(power_usage_w),
+                        MIN(power_usage_w),
+                        MAX(power_usage_w)
+                    FROM system_gpu_samples
+                    {where_sql}
+                    {'AND' if where_sql else 'WHERE'} {_GPU_REPORTED_SQL}
+                    GROUP BY gpu_idx, CAST((sample_ts_s - ?) / ? AS INTEGER)
+                    ORDER BY gpu_idx ASC, 2 ASC
+                    """,
+                    (*bound, float(first_ts), float(width_s)),
+                ).fetchall()
+            ]
         except sqlite3.Error:
             return []
-        by_gpu: Dict[int, Dict[str, Any]] = {}
-        for gpu_idx, ts, avg, mn, mx in rows:
-            e = by_gpu.setdefault(
-                int(gpu_idx),
-                {
-                    "gpu_idx": int(gpu_idx),
-                    "t": [],
-                    "avg": [],
-                    "min": [],
-                    "max": [],
-                },
-            )
-            e["t"].append(float(ts))
-            e["avg"].append(float(avg))
-            e["min"].append(float(mn))
-            e["max"].append(float(mx))
-        out = [by_gpu[i] for i in sorted(by_gpu)]
-        for e in out:
-            e["span_s"] = span
-            e["window_s"] = width
-        return out
 
     def fetch_gpu_rows_for_sample(
         self,

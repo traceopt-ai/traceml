@@ -368,13 +368,56 @@ def test_cpu_only_run_does_not_read_gpu_power_history(
     def fail_if_called(*args, **kwargs):
         raise AssertionError("CPU-only runs must not query GPU power history")
 
+    # 5b renamed this read. #421 deliberately left the name alone so this
+    # spy kept binding; renaming it here is the stated change, and the spy
+    # now watches the FIRST GPU-power read rather than the second.
     monkeypatch.setattr(
         computer._db,
-        "fetch_gpu_power_run_history",
+        "gpu_power_run_stats",
         fail_if_called,
     )
     out = computer.compute(window_n=100)
     assert out.series.gpu_power_run == ()
+
+
+def test_empty_retained_cpu_read_falls_back_to_recent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = tmp_path / "cpu-retained-unavailable.db"
+    _write(db, lambda seq: (), gpu_available=False, ticks=130)
+    computer = SystemDashboardComputer(str(db))
+    monkeypatch.setattr(
+        computer._db,
+        "fetch_cpu_run",
+        lambda *_args, **_kwargs: [],
+    )
+
+    out = computer.compute(window_n=100)
+
+    assert out.series.cpu_run_mode == "recent"
+    assert out.series.cpu_run == CpuRunSeries()
+    assert len(out.series.cpu) == 100
+
+
+def test_empty_retained_power_read_falls_back_to_recent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = tmp_path / "power-retained-unavailable.db"
+    _write(db, lambda seq: _all_busy(), ticks=130)
+    computer = SystemDashboardComputer(str(db))
+    monkeypatch.setattr(
+        computer._db,
+        "fetch_gpu_power_run",
+        lambda *_args, **_kwargs: [],
+    )
+
+    out = computer.compute(window_n=100)
+
+    assert out.series.power_run_mode == "recent"
+    assert out.series.gpu_power_run == ()
+    assert out.series.gpu_power
 
 
 def test_rows_without_a_hostname_are_not_a_node(tmp_path: Path) -> None:

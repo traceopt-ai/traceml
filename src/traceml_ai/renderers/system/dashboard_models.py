@@ -24,6 +24,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
+from traceml_ai.renderers.shared.run_series import SeriesMode
+
+
+def _mode(value: Any) -> SeriesMode:
+    """A series mode, defaulting to the view that needs no history."""
+    return "retained" if value == "retained" else "recent"
+
 
 @dataclass(frozen=True)
 class Stat:
@@ -129,8 +136,8 @@ class CpuRunSeries:
     """Host CPU over the whole run, rolled and decimated to fit a chart.
 
     Whether this series has earned the whole-run view is NOT asked here.
-    ``_has_whole_run`` in the compute layer decides it for both charts and
-    the answer travels as ``SystemSeries.cpu_run_whole``. A second copy of
+    ``ProcessDashboardComputer``'s policy decides it for both charts and
+    the answer travels as ``SystemSeries.cpu_run_mode``. A second copy of
     that rule on this class is how the card came to hold two of them.
     """
 
@@ -283,8 +290,8 @@ class SystemSeries:
     # Which view each chart is in. Both answered by one rule in the
     # compute layer; the card used to answer them itself with two
     # different rules and its charts could disagree.
-    cpu_run_whole: bool = False
-    power_run_whole: bool = False
+    cpu_run_mode: SeriesMode = "recent"
+    power_run_mode: SeriesMode = "recent"
 
     @classmethod
     def from_dict(cls, raw: Dict[str, Any]) -> "SystemSeries":
@@ -303,8 +310,8 @@ class SystemSeries:
                 window_s=float(run.get("window_s") or 0.0),
             ),
             gpu_power_run=tuple(raw.get("gpu_power_run") or ()),
-            cpu_run_whole=bool(raw.get("cpu_run_whole")),
-            power_run_whole=bool(raw.get("power_run_whole")),
+            cpu_run_mode=_mode(raw.get("cpu_run_mode")),
+            power_run_mode=_mode(raw.get("power_run_mode")),
         )
 
 
