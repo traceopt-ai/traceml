@@ -384,6 +384,11 @@ class SystemDashboardComputer:
             if cpu_mode == "retained"
             else _empty_cpu_run()
         )
+        # A retained read may be unavailable (for example on an older SQLite
+        # engine). The payload states the view it can actually draw, while the
+        # policy above still decides whether the retained read is attempted.
+        if cpu_mode == "retained" and not cpu_run.get("t"):
+            cpu_mode = "recent"
         power_stats = (
             self._db.gpu_power_run_stats(conn, hostname=host)
             if gpu_available
@@ -395,6 +400,8 @@ class SystemDashboardComputer:
             if power_mode == "retained"
             else []
         )
+        if power_mode == "retained" and not power_run:
+            power_mode = "recent"
         run_power_floor = min(
             (v for e in power_run for v in (e.get("min") or [])),
             default=None,
