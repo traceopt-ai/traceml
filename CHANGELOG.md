@@ -7,6 +7,9 @@ which carry the full historical notes for versions predating this file.
 
 ## [Unreleased]
 
+- Opt-in `--capture-stderr` output now uses
+  `nodes/node_<node-rank>/crash_stderr.log`, preventing multi-node launchers
+  from overwriting a shared root file.
 - **Breaking:** `--summary-window-rows` and
   `TRACEML_SUMMARY_WINDOW_ROWS` were removed. Use
   `--history-retention`, `history_retention`, or

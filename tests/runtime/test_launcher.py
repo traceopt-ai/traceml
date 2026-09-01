@@ -916,9 +916,7 @@ def test_launcher_scopes_telemetry_health_to_aggregator_owner(
         assert install_shutdown_handlers.call_args.kwargs["manifest_path"] == (
             tmp_path / "manifest.json"
         )
-        initial_telemetry = write_manifest.call_args.kwargs[
-            "telemetry_status"
-        ]
+        initial_telemetry = write_manifest.call_args.kwargs["telemetry_status"]
         reported_statuses = [
             call.kwargs.get("telemetry_status")
             for call in update_manifest.call_args_list
@@ -1359,7 +1357,7 @@ def test_collect_existing_artifacts_only_returns_existing_files(
     }
 
 
-def test_node_artifact_directories_are_rank_scoped(tmp_path) -> None:
+def test_node_artifact_directories_are_node_scoped(tmp_path) -> None:
     node_0 = node_artifact_dir(tmp_path, 0)
     node_1 = node_artifact_dir(tmp_path, 1)
 
