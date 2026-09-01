@@ -206,10 +206,14 @@ def _derive_final_telemetry(
         not aggregator_exited_early and aggregator_exit_code not in (0, None)
     ):
         return "failed", "finalization_failed", aggregator_exit_code
+    if aggregator_exited_early:
+        # Report the known crash, not the missing summary it caused.
+        status = (
+            "failed" if summary_required and not summary_exists else "degraded"
+        )
+        return status, "aggregator_exited_early", aggregator_exit_code
     if summary_required and not summary_exists:
         return "failed", "summary_missing", aggregator_exit_code
-    if aggregator_exited_early:
-        return "degraded", "aggregator_exited_early", aggregator_exit_code
     if finalization_reason == "finalization_warning":
         return "degraded", "finalization_warning", aggregator_exit_code
     return "complete", None, aggregator_exit_code

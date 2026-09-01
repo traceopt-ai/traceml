@@ -869,6 +869,15 @@ def test_warn_policy_starts_supervised_training_without_telemetry(
             ("failed", "summary_missing", None),
         ),
         (
+            {
+                "aggregator_exited_early": True,
+                "aggregator_exit_code": 4,
+                "summary_required": True,
+                "summary_exists": False,
+            },
+            ("failed", "aggregator_exited_early", 4),
+        ),
+        (
             {"aggregator_exited_early": True, "aggregator_exit_code": 4},
             ("degraded", "aggregator_exited_early", 4),
         ),
