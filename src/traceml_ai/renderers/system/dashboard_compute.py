@@ -195,13 +195,13 @@ class SystemDashboardComputer:
         stale_ttl_s: Optional[float] = 30.0,
     ) -> None:
         self._db = SystemRepository(db_path=db_path, node_rank=node_rank)
-        self._last_ok: Optional[Dict[str, Any]] = None
+        self._last_ok: Optional[SystemDashboardPayload] = None
         self._last_ok_ts: float = 0.0
         self._stale_ttl_s: Optional[float] = (
             float(stale_ttl_s) if stale_ttl_s is not None else None
         )
 
-    def compute(self, window_n: int = 100) -> Dict[str, Any]:
+    def compute(self, window_n: int = 100) -> SystemDashboardPayload:
         """
         Compute dashboard rollups plus short series over the latest window.
 
@@ -222,7 +222,7 @@ class SystemDashboardComputer:
         self._last_ok_ts = time.time()
         return out
 
-    def _compute_impl(self, conn, window_n: int) -> Dict[str, Any]:
+    def _compute_impl(self, conn, window_n: int) -> SystemDashboardPayload:
         """
         Compute the dashboard payload from recent SQLite rows.
 
