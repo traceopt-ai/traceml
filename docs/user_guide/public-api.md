@@ -181,6 +181,12 @@ training starts, a later telemetry or finalization failure is reported
 separately and does not replace the training exit code. In multi-node runs,
 only the node 0 launcher reports final aggregator health.
 
+After training starts, the aggregator-owning launcher prints one telemetry
+health line to stderr immediately before the final training result, including
+`[TraceML] Telemetry complete.` on a healthy run. This footer reports telemetry
+health only and never changes the training exit code. Non-owner nodes do not
+print an authoritative final telemetry footer.
+
 If the aggregator cannot be reached, `traceml.init(...)` retries for its
 bounded timeout, writes one stderr warning, and continues with tracing disabled
 as a no-op. This is the default `warn` policy; it does not stop training.

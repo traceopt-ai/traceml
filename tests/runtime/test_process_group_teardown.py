@@ -136,6 +136,8 @@ def test_windows_branch_falls_back_when_taskkill_is_unavailable(
 def test_forced_termination_reaps_the_direct_child(monkeypatch) -> None:
     """The forced path must populate returncode before returning."""
     monkeypatch.setattr(process_mod, "_IS_WINDOWS", False)
+    sigkill = getattr(signal, "SIGKILL", 9)
+    monkeypatch.setattr(process_mod.signal, "SIGKILL", sigkill, raising=False)
     signals: list[int] = []
     monkeypatch.setattr(
         process_mod.os,
@@ -156,7 +158,7 @@ def test_forced_termination_reaps_the_direct_child(monkeypatch) -> None:
             self.wait_calls += 1
             if self.wait_calls == 1:
                 raise subprocess.TimeoutExpired("cmd", timeout)
-            self.returncode = -signal.SIGKILL
+            self.returncode = -sigkill
             return self.returncode
 
         def terminate(self):
@@ -168,9 +170,9 @@ def test_forced_termination_reaps_the_direct_child(monkeypatch) -> None:
     proc = ReapedAfterKill()
     process_mod.terminate_process_group(proc, timeout_sec=0.01)
 
-    assert signals == [signal.SIGTERM, signal.SIGKILL]
+    assert signals == [signal.SIGTERM, sigkill]
     assert proc.wait_calls == 2
-    assert proc.returncode == -signal.SIGKILL
+    assert proc.returncode == -sigkill
 
 
 def test_terminate_process_group_reaps_a_grandchild() -> None:
