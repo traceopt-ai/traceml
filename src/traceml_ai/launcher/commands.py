@@ -529,7 +529,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
 
     owns_aggregator = aggregator_cfg.is_owner(node_rank=torchrun_cfg.node_rank)
     # Root run metadata has one writer even when every node has a launcher.
-    is_root_writer = torchrun_cfg.node_rank == 0
+    is_root_writer = owns_aggregator
 
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
