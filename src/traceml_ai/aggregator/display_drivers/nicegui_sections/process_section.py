@@ -122,9 +122,9 @@ def build_process_section() -> Dict[str, Any]:
                 panel[value_key] = ui.label("").style(
                     f"{_MONO} font-size:14px; font-weight:600;"
                 )
-            panel[chart_key] = ui.echart(charting.multi_line_options(unit)).style(
-                "height:92px; width:100%;"
-            )
+            panel[chart_key] = ui.echart(
+                charting.multi_line_options(unit)
+            ).style("height:92px; width:100%;")
 
         expansion = (
             ui.expansion()
