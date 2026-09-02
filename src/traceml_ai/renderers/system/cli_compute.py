@@ -13,12 +13,7 @@ import time
 from typing import Any, Dict, Optional
 
 from .cli_cluster import CLI_CLUSTER_WINDOW_ROWS, SystemCLIClusterBuilder
-from .common import (
-    SystemCLISnapshot,
-    gpu_reported,
-    positive,
-    reading,
-)
+from .common import SystemCLISnapshot, gpu_reported, positive, reading
 from .repository import SystemRepository
 
 
