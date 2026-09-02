@@ -13,7 +13,12 @@ import time
 from typing import Any, Dict, Optional
 
 from .cli_cluster import CLI_CLUSTER_WINDOW_ROWS, SystemCLIClusterBuilder
-from .common import SystemCLISnapshot, gpu_reported
+from .common import (
+    SystemCLISnapshot,
+    gpu_reported,
+    positive,
+    reading,
+)
 from .repository import SystemRepository
 
 
@@ -89,11 +94,18 @@ class SystemCLIComputer:
         reporting = 0
         if gpu_rows:
             util_total = 0.0
+            # Each metric counts its own readings. A device can report a
+            # memory total and no temperature, so one count for the whole
+            # row would call a metric measured because a sibling was.
             mem_used_total = 0.0
+            mem_used_seen = 0
             mem_total_total = 0.0
-            temp_max = 0.0
+            mem_total_seen = 0
+            temp_max: Optional[float] = None
             power_total = 0.0
+            power_seen = 0
             power_limit_total = 0.0
+            power_limit_seen = 0
             gpu_util_skew: Optional[float]
 
             util_min: Optional[float] = None
@@ -107,11 +119,15 @@ class SystemCLIComputer:
                     # a healthy four-GPU host at 75% with a fabricated
                     # 100-point skew. Same defect the dashboard carried.
                     continue
-                mem_used = float(gpu["mem_used_bytes"] or 0.0)
-                mem_total = float(gpu["mem_total_bytes"] or 0.0)
+                mem_used = reading(gpu["mem_used_bytes"])
+                mem_total = reading(gpu["mem_total_bytes"])
 
-                mem_used_total += mem_used
-                mem_total_total += mem_total
+                if mem_used is not None:
+                    mem_used_total += mem_used
+                    mem_used_seen += 1
+                if mem_total is not None:
+                    mem_total_total += mem_total
+                    mem_total_seen += 1
 
                 # A reporting device can still carry a NULL util column,
                 # so the util mean counts READINGS, not devices. Same
@@ -129,7 +145,15 @@ class SystemCLIComputer:
                         util if util_max is None else max(util_max, util)
                     )
 
-                if mem_total > 0.0:
+                # Free memory is the gap between two readings, so it
+                # needs both. With the level unread this reported the
+                # whole card free, which points the wrong way about
+                # pressure.
+                if (
+                    mem_total is not None
+                    and mem_total > 0.0
+                    and mem_used is not None
+                ):
                     headroom = max(mem_total - mem_used, 0.0)
                     if headroom_min is None or headroom < headroom_min:
                         headroom_min = headroom
@@ -139,12 +163,20 @@ class SystemCLIComputer:
                             else idx
                         )
 
-                temp_val = float(gpu["temperature_c"] or 0.0)
-                if temp_val > temp_max:
+                temp_val = reading(gpu["temperature_c"])
+                if temp_val is not None and (
+                    temp_max is None or temp_val > temp_max
+                ):
                     temp_max = temp_val
 
-                power_total += float(gpu["power_usage_w"] or 0.0)
-                power_limit_total += float(gpu["power_limit_w"] or 0.0)
+                power = reading(gpu["power_usage_w"])
+                if power is not None:
+                    power_total += power
+                    power_seen += 1
+                limit = reading(gpu["power_limit_w"])
+                if limit is not None:
+                    power_limit_total += limit
+                    power_limit_seen += 1
 
             gpu_util_skew = (
                 util_max - util_min
@@ -154,18 +186,25 @@ class SystemCLIComputer:
         else:
             util_total = None
             mem_used_total = None
+            mem_used_seen = 0
             mem_total_total = None
+            mem_total_seen = 0
             temp_max = None
             power_total = None
+            power_seen = 0
             power_limit_total = None
+            power_limit_seen = 0
             gpu_util_skew = None
             headroom_min = None
             headroom_min_idx = None
 
         return SystemCLISnapshot(
-            cpu=float(latest["cpu_percent"] or 0.0),
-            ram_used=float(latest["ram_used_bytes"] or 0.0),
-            ram_total=float(latest["ram_total_bytes"] or 0.0),
+            # A host that did not report is not a host at rest. These are
+            # readings, so an absent one stays absent and the card says
+            # N/A rather than 0%.
+            cpu=reading(latest["cpu_percent"]),
+            ram_used=reading(latest["ram_used_bytes"]),
+            ram_total=positive(latest["ram_total_bytes"]),
             gpu_available=bool(latest["gpu_available"] or False),
             gpu_count=int(latest["gpu_count"] or 0),
             # An empty sum is not a measured 0% utilisation. Keep the
@@ -175,13 +214,16 @@ class SystemCLIComputer:
             gpu_util_avg=(util_total / reporting if reporting else None),
             gpu_util_devices=reporting,
             gpu_util_skew=gpu_util_skew,
-            gpu_mem_used=mem_used_total,
-            gpu_mem_total=mem_total_total,
+            # A sum over no readings is not a measurement of zero. Each
+            # of these abstains on its own count, because the metrics go
+            # missing independently.
+            gpu_mem_used=mem_used_total if mem_used_seen else None,
+            gpu_mem_total=mem_total_total if mem_total_seen else None,
             gpu_mem_headroom_min=headroom_min,
             gpu_mem_headroom_min_idx=headroom_min_idx,
             gpu_temp_max=temp_max,
-            gpu_power_usage=power_total,
-            gpu_power_limit=power_limit_total,
+            gpu_power_usage=power_total if power_seen else None,
+            gpu_power_limit=power_limit_total if power_limit_seen else None,
         ).to_dict()
 
     def _return_stale(self) -> Dict[str, Any]:

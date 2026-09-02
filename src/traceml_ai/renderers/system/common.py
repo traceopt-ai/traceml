@@ -25,6 +25,25 @@ def positive(value: Any) -> Optional[float]:
     return out if out > 0.0 else None
 
 
+def reading(value: Any) -> Optional[float]:
+    """A measurement, or None when there was not one.
+
+    A NULL column is the sampler saying it could not read the metric. The
+    difference from ``positive`` is that 0.0 is a real reading here: a
+    device can genuinely sit at 0% or 0 W, and only absence is None.
+
+    Lives here for the same reason ``gpu_reported`` does: both System
+    surfaces read the same rows, and a coercion applied on one of them is
+    half an answer.
+    """
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def gpu_reported(row: Any) -> bool:
     """Whether a GPU row contains a positive hardware-capacity signal.
 
@@ -47,9 +66,12 @@ def gpu_reported(row: Any) -> bool:
 class SystemCLISnapshot:
     """Compact CLI snapshot for system telemetry."""
 
-    cpu: float
-    ram_used: float
-    ram_total: float
+    # Host readings, absent when the sampler could not take them. 0.0 is
+    # a level a machine can genuinely be at, so it cannot also mean
+    # "not measured".
+    cpu: Optional[float]
+    ram_used: Optional[float]
+    ram_total: Optional[float]
 
     gpu_available: bool
     gpu_count: int
