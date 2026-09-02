@@ -95,6 +95,52 @@ def _typed(
     )
 
 
+def _nan_pct(values: Any, q: float) -> float:
+    """A percentile over the ticks that were measured.
+
+    A window in which nothing was measured has no percentile. It returns
+    0.0 rather than None, which is NOT a defence of that value: it is the
+    pre-existing shape of every rollup field, and making the all-absent
+    case abstain means giving the tiles an n/a path. Tracked separately;
+    this function narrows the defect to the all-absent window rather than
+    every window containing one blind tick.
+    """
+    if values.size == 0 or bool(np.all(np.isnan(values))):
+        return 0.0
+    return float(np.nanpercentile(values, q))
+
+
+def _last_measured_index(values: Any) -> Optional[int]:
+    """Index of the newest measured tick, or None if there is none."""
+    listed = values.tolist()
+    for i in range(len(listed) - 1, -1, -1):
+        if listed[i] == listed[i]:  # not NaN
+            return i
+    return None
+
+
+def _last_measured(values: Any) -> float:
+    """The newest measured value, skipping absent ticks."""
+    for value in reversed(values.tolist()):
+        if value == value:  # not NaN
+            return float(value)
+    return 0.0
+
+
+def _paired_total(levels: Any, totals: Any) -> float:
+    """The capacity belonging to the tick the level was read from."""
+    i = _last_measured_index(levels)
+    if i is None:
+        return 0.0
+    total = totals.tolist()[i]
+    return float(total) if total == total else 0.0
+
+
+def _gap_list(values: Any) -> List[Optional[float]]:
+    """A series where an absent tick is a gap rather than a zero."""
+    return [None if v != v else float(v) for v in values.tolist()]
+
+
 def _empty_cpu_run() -> Dict[str, Any]:
     """The whole-run CPU shape with nothing in it."""
     return {"t": [], "avg": [], "max": [], "span_s": 0.0, "window_s": 0.0}
@@ -239,12 +285,15 @@ class SystemDashboardComputer:
             [float(r["sample_ts_s"] or 0.0) for r in samples],
             dtype=np.float64,
         )
+        # NaN for a missing reading, for the same reason the GPU arrays
+        # below use it: `cpu_percent` is nullable, and a coerced zero is
+        # both drawn as a real 0% and folded into the window percentile.
         cpu_hist = np.array(
-            [float(r["cpu_percent"] or 0.0) for r in samples],
+            [_opt_float(r["cpu_percent"]) for r in samples],
             dtype=np.float64,
         )
         ram_used_hist = np.array(
-            [float(r["ram_used_bytes"] or 0.0) for r in samples],
+            [_opt_float(r["ram_used_bytes"]) for r in samples],
             dtype=np.float64,
         )
         ram_total = float(last["ram_total_bytes"] or 0.0)
@@ -260,12 +309,21 @@ class SystemDashboardComputer:
         gpu_rows_by_key = self._db.group_gpu_rows_by_global_rank_seq(gpu_rows)
 
         n = len(samples)
-        gpu_avg = np.zeros(n, dtype=np.float64)
-        gpu_delta = np.zeros(n, dtype=np.float64)
-        gpu_mem_worst = np.zeros(n, dtype=np.float64)
-        gpu_mem_headroom_min = np.zeros(n, dtype=np.float64)
-        temp_max = np.zeros(n, dtype=np.float64)
-        gpu_mem_worst_total = 0.0
+        # NaN, not zero: a tick in which nothing reported is an absence,
+        # and a zero here is drawn as a real 0% and folded into the window
+        # percentiles. Same rule the per-GPU histories below follow with
+        # None, and the same rule the per-device aggregates follow.
+        gpu_avg = np.full(n, np.nan, dtype=np.float64)
+        gpu_delta = np.full(n, np.nan, dtype=np.float64)
+        gpu_mem_worst = np.full(n, np.nan, dtype=np.float64)
+        # The capacity of the device in gpu_mem_worst, per tick.
+        # Kept per tick so the level and the capacity it is
+        # measured against can be read from the SAME moment; a
+        # level that skips back past a blind tick while its
+        # capacity does not describes two different instants.
+        gpu_mem_total_hist = np.full(n, np.nan, dtype=np.float64)
+        gpu_mem_headroom_min = np.full(n, np.nan, dtype=np.float64)
+        temp_max = np.full(n, np.nan, dtype=np.float64)
         # Util readings in the newest tick. This distinguishes a measured
         # zero from no current reading; it does not describe coverage of
         # the window median shown by the tile. A device can report and
@@ -325,8 +383,8 @@ class SystemDashboardComputer:
                         mem_pairs, key=lambda pair: pair[0]
                     )
                     gpu_mem_worst[i] = worst_used
-                    if i == n - 1:
-                        gpu_mem_worst_total = worst_total or 0.0
+                    if worst_total is not None:
+                        gpu_mem_total_hist[i] = worst_total
                 if temps:
                     temp_max[i] = max(temps)
                 if i == n - 1:
@@ -360,38 +418,28 @@ class SystemDashboardComputer:
                     for used, total in mem_pairs
                     if total is not None and total > 0.0
                 ]
-                gpu_mem_headroom_min[i] = min(headrooms) if headrooms else 0.0
+                if headrooms:
+                    gpu_mem_headroom_min[i] = min(headrooms)
             else:
-                gpu_avg[i] = 0.0
-                gpu_delta[i] = 0.0
-                gpu_mem_worst[i] = 0.0
-                gpu_mem_headroom_min[i] = 0.0
-                temp_max[i] = 0.0
+                # No rows for this tick at all: leave every slot absent,
+                # which is what the pre-fill already says.
+                pass
 
-        cpu_p50 = float(np.percentile(cpu_hist, 50)) if cpu_hist.size else 0.0
-        cpu_p95 = float(np.percentile(cpu_hist, 95)) if cpu_hist.size else 0.0
+        cpu_p50 = _nan_pct(cpu_hist, 50)
+        cpu_p95 = _nan_pct(cpu_hist, 95)
 
-        ram_p95 = (
-            float(np.percentile(ram_used_hist, 95))
-            if ram_used_hist.size
-            else 0.0
-        )
+        ram_p95 = _nan_pct(ram_used_hist, 95)
 
-        gpu_p50 = float(np.percentile(gpu_avg, 50)) if gpu_avg.size else 0.0
-        gpu_p95 = float(np.percentile(gpu_avg, 95)) if gpu_avg.size else 0.0
+        # nanpercentile, not percentile: a blind tick must not be counted
+        # as a measured zero when the window is summarised. All-NaN means
+        # nothing was measured at all, which is 0.0 as it was before.
+        gpu_p50 = _nan_pct(gpu_avg, 50)
+        gpu_p95 = _nan_pct(gpu_avg, 95)
+        delta_p95 = _nan_pct(gpu_delta, 95)
+        mem_p95 = _nan_pct(gpu_mem_worst, 95)
+        temp_p95 = _nan_pct(temp_max, 95)
 
-        delta_p95 = (
-            float(np.percentile(gpu_delta, 95)) if gpu_delta.size else 0.0
-        )
-
-        mem_p95 = (
-            float(np.percentile(gpu_mem_worst, 95))
-            if gpu_mem_worst.size
-            else 0.0
-        )
-        temp_p95 = float(np.percentile(temp_max, 95)) if temp_max.size else 0.0
-
-        temp_now = float(temp_max[-1]) if temp_max.size else 0.0
+        temp_now = _last_measured(temp_max)
         temp_status = (
             "Hot" if temp_now >= 85 else "Warm" if temp_now >= 80 else "OK"
         )
@@ -443,32 +491,34 @@ class SystemDashboardComputer:
 
         rollups = {
             "cpu": {
-                "now": float(cpu_hist[-1]),
+                "now": _last_measured(cpu_hist),
                 "p50": cpu_p50,
                 "p95": cpu_p95,
             },
             "ram": {
-                "now": float(ram_used_hist[-1]),
+                "now": _last_measured(ram_used_hist),
                 "p95": ram_p95,
                 "total": ram_total,
-                "headroom": max(ram_total - float(ram_used_hist[-1]), 0.0),
+                "headroom": max(
+                    ram_total - _last_measured(ram_used_hist), 0.0
+                ),
             },
             "gpu_util": {
-                "now": float(gpu_avg[-1]),
+                "now": _last_measured(gpu_avg),
                 "p50": gpu_p50,
                 "p95": gpu_p95,
             },
             "gpu_delta": {
-                "now": float(gpu_delta[-1]),
+                "now": _last_measured(gpu_delta),
                 "p95": delta_p95,
             },
             "gpu_mem": {
-                "now": float(gpu_mem_worst[-1]),
+                "now": _last_measured(gpu_mem_worst),
                 "p95": mem_p95,
-                "headroom": float(gpu_mem_headroom_min[-1]),
+                "headroom": _last_measured(gpu_mem_headroom_min),
                 # Capacity of the GPU shown in "now" (the max-used one),
                 # so the tile can read "used / total".
-                "total": gpu_mem_worst_total,
+                "total": _paired_total(gpu_mem_worst, gpu_mem_total_hist),
             },
             "temp": {
                 "now": temp_now,
@@ -521,10 +571,8 @@ class SystemDashboardComputer:
             rollups=rollups,
             series={
                 "x_time": x_time,
-                "cpu": cpu_hist.astype(float).tolist(),
-                "gpu_avg": (
-                    gpu_avg.astype(float).tolist() if gpu_available else []
-                ),
+                "cpu": _gap_list(cpu_hist),
+                "gpu_avg": (_gap_list(gpu_avg) if gpu_available else []),
                 "gpu_power": (
                     [
                         {"gpu_idx": idx, "values": power_hist[idx]}

@@ -778,3 +778,190 @@ def test_a_gpu_that_goes_quiet_midway_only_leaves_its_own_ticks(tmp_path):
     assert roll.gpu_delta.p95 == 0.0
     # The newest tick is one of the ones it missed.
     assert roll.util_gpu_count == 3
+
+
+# --- a tick where nothing reported is a gap, not a zero (#430) -----------
+def test_a_tick_where_no_gpu_reported_is_a_gap_in_the_chart(tmp_path: Path):
+    """A transient host-wide NVML failure is an absence, not 0% util.
+
+    #432 stopped a single unreported DEVICE being averaged in as a real
+    zero. This is the same idea one level up: a tick in which NO device
+    reported left its slot at the pre-filled 0.0, so the chart drew a
+    utilisation point, a memory point and a temperature point for a
+    moment nothing was measured.
+
+    The correct convention already exists four lines away in the same
+    loop, where the per-GPU power history stores None for a gap.
+    """
+    db = tmp_path / "blind-tick.db"
+    zero = {
+        "gpu_idx": 0,
+        "util": 0.0,
+        "mem_used_bytes": 0.0,
+        "mem_total_bytes": 0.0,
+        "temperature_c": 0.0,
+        "power_usage_w": 0.0,
+        "power_limit_w": 0.0,
+    }
+
+    def rows(seq: int):
+        if seq == TICKS // 2:
+            return [dict(zero, gpu_idx=i) for i in range(4)]
+        return [
+            _gpu(i, 100.0, 66.0, temp=45.0, mem_used=6.3 * GB)
+            for i in range(4)
+        ]
+
+    _write(db, rows)
+    out = _payload(db)
+
+    series = list(out.series.gpu_avg)
+    assert series[TICKS // 2] is None
+    assert all(v == 100.0 for i, v in enumerate(series) if i != TICKS // 2)
+
+
+def test_a_blind_tick_does_not_drag_the_window_statistics(tmp_path: Path):
+    """The tile summarises what was measured, not what was not.
+
+    A zero in the array is not only drawn, it is also fed to the window
+    percentiles, so repeated blind ticks pull the headline number down on
+    a host that never left 100%.
+    """
+    db = tmp_path / "blind-many.db"
+    zero = {
+        "gpu_idx": 0,
+        "util": 0.0,
+        "mem_used_bytes": 0.0,
+        "mem_total_bytes": 0.0,
+        "temperature_c": 0.0,
+        "power_usage_w": 0.0,
+        "power_limit_w": 0.0,
+    }
+
+    def rows(seq: int):
+        # Half the window blind, so the median moves if the blind ticks
+        # are counted: ten zeros and ten hundreds median to 50.
+        if seq % 2 == 0:
+            return [dict(zero, gpu_idx=i) for i in range(4)]
+        return [
+            _gpu(i, 100.0, 66.0, temp=45.0, mem_used=6.3 * GB)
+            for i in range(4)
+        ]
+
+    _write(db, rows)
+    roll = _payload(db).rollups
+    assert roll.gpu_util.p50 == 100.0
+    assert roll.gpu_delta.p95 == 0.0
+    assert roll.temp.p95 == 45.0
+
+
+def test_missing_host_readings_are_not_counted_as_zero(tmp_path: Path):
+    """Missing CPU and RAM readings stay absent from host rollups.
+
+    `cpu_percent` is nullable, and the window was built with
+    `float(x or 0.0)`, so a missing reading entered the percentile as a
+    measured 0%. A host sitting at a steady 80% with half its rows
+    lacking the reading showed 40% on the tile: the exact arithmetic of
+    counting absences as zeros. RAM follows the same rule.
+    """
+    import sqlite3
+
+    from tests.sqlite_fixtures import init_summary_schema, insert_system_sample
+    from traceml_ai.renderers.system.dashboard_compute import (
+        SystemDashboardComputer,
+    )
+
+    db = tmp_path / "null-cpu.db"
+    conn = sqlite3.connect(db)
+    init_summary_schema(conn)
+    for seq in range(20):
+        insert_system_sample(
+            conn,
+            row_id=seq + 1,
+            rank=0,
+            ts=1000.0 + 2.0 * seq,
+            gpu_available=False,
+            gpu_count=0,
+            seq=seq,
+            cpu_percent=80.0,
+            ram_used_bytes=8.0 * GB,
+            ram_total_bytes=16.0 * GB,
+        )
+    conn.commit()
+    conn.execute(
+        "UPDATE system_samples SET cpu_percent = NULL WHERE seq % 2 = 0"
+    )
+    # Leave the newest RAM reading absent to cover both the percentile and
+    # the newest-measured value used to derive headroom.
+    conn.execute(
+        "UPDATE system_samples SET ram_used_bytes = NULL WHERE seq % 2 = 1"
+    )
+    conn.commit()
+    conn.close()
+
+    out = SystemDashboardComputer(str(db)).compute(window_n=100)
+    assert out.rollups.cpu.p50 == 80.0
+    assert out.rollups.cpu.p95 == 80.0
+    # And the chart shows the gaps rather than drawing them at zero.
+    assert list(out.series.cpu).count(None) == 10
+    assert out.rollups.ram is not None
+    assert out.rollups.ram.now == 8.0 * GB
+    assert out.rollups.ram.p95 == 8.0 * GB
+    assert out.rollups.ram.headroom == 8.0 * GB
+
+
+def test_memory_and_its_capacity_come_from_the_same_tick(tmp_path: Path):
+    """A level and the capacity it is measured against must be one moment.
+
+    Skipping backwards past a blind tick for the value while leaving the
+    capacity at the newest tick pairs two different moments, and when the
+    newest tick is blind the capacity is zero, so the tile silently drops
+    its denominator and renders a bare number.
+    """
+    db = tmp_path / "paired.db"
+    zero = {
+        "gpu_idx": 0,
+        "util": 0.0,
+        "mem_used_bytes": 0.0,
+        "mem_total_bytes": 0.0,
+        "temperature_c": 0.0,
+        "power_usage_w": 0.0,
+        "power_limit_w": 0.0,
+    }
+
+    def rows(seq: int):
+        if seq == TICKS - 1:  # the NEWEST tick is blind
+            return [dict(zero, gpu_idx=i) for i in range(4)]
+        return [
+            _gpu(i, 100.0, 66.0, temp=45.0, mem_used=6.3 * GB)
+            for i in range(4)
+        ]
+
+    _write(db, rows)
+    mem = _payload(db).rollups.gpu_mem
+    assert mem is not None
+    assert mem.now == 6.3 * GB
+    assert mem.total == 16.1 * GB
+
+
+def test_a_tick_with_no_gpu_rows_at_all_is_also_a_gap(tmp_path: Path):
+    """The branch the all-zero fixtures do not reach.
+
+    A row that is present and unreadable takes the reported-ness filter;
+    a tick with NO rows takes a different branch entirely. Both must leave
+    the slot absent, and only the first was covered.
+    """
+    db = tmp_path / "norows.db"
+
+    def rows(seq: int):
+        if seq == TICKS // 2:
+            return ()
+        return [
+            _gpu(i, 100.0, 66.0, temp=45.0, mem_used=6.3 * GB)
+            for i in range(4)
+        ]
+
+    _write(db, rows)
+    out = _payload(db)
+    assert list(out.series.gpu_avg)[TICKS // 2] is None
+    assert out.rollups.gpu_util.p50 == 100.0
