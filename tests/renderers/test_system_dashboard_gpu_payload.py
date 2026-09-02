@@ -965,3 +965,117 @@ def test_a_tick_with_no_gpu_rows_at_all_is_also_a_gap(tmp_path: Path):
     out = _payload(db)
     assert list(out.series.gpu_avg)[TICKS // 2] is None
     assert out.rollups.gpu_util.p50 == 100.0
+
+
+def _all_null_host(path: Path, *, gpu_available: bool) -> None:
+    """A window in which the host reported no CPU and no RAM at all."""
+    _write(path, lambda seq: (), gpu_available=gpu_available)
+    with sqlite_database(path, init_summary_schema) as conn:
+        conn.execute("UPDATE system_samples SET cpu_percent = NULL")
+        conn.execute("UPDATE system_samples SET ram_used_bytes = NULL")
+        conn.commit()
+
+
+def test_a_window_with_no_host_readings_abstains(tmp_path: Path) -> None:
+    """No CPU or RAM reading at all is not a host sitting idle.
+
+    Every tick absent used to collapse to 0.0, which the card renders as a
+    real measurement: the CPU label read "0%" and the RAM tile read
+    "0.0 / 200 GB". Both describe a machine doing nothing, which is the
+    opposite of what an unmeasured window means.
+    """
+    db = tmp_path / "host-absent.db"
+    _all_null_host(db, gpu_available=False)
+
+    roll = _payload(db).rollups
+
+    assert roll.cpu is not None
+    assert roll.cpu.now is None
+    assert roll.cpu.p50 is None
+    assert roll.cpu.p95 is None
+    assert roll.ram is not None
+    assert roll.ram.now is None
+    assert roll.ram.p95 is None
+    # Headroom is derived from a level nothing measured, so it has no value
+    # either. A zero here would read as a full machine.
+    assert roll.ram.headroom is None
+
+
+def _live_devices_no_metrics(path: Path) -> None:
+    """Devices that report their capacity but none of their metrics.
+
+    This is the case the per-device work does NOT cover: ``mem_total_bytes``
+    and ``power_limit_w`` are present, so every device is reported and
+    ``gpus_unreported`` is False, while every metric column is NULL.
+    """
+
+    def rows(_seq):
+        return [
+            {
+                "gpu_idx": i,
+                "util": None,
+                "mem_used_bytes": None,
+                "mem_total_bytes": 16.1 * GB,
+                "temperature_c": None,
+                "power_usage_w": None,
+                "power_limit_w": LIMIT,
+            }
+            for i in range(4)
+        ]
+
+    _write(path, rows)
+
+
+def test_live_devices_with_no_metrics_abstain(tmp_path: Path) -> None:
+    """A reported device with an unread metric still has no measurement.
+
+    The reported-ness guard the card already has is about the DEVICE. It
+    does not fire here, because these devices do report: they carry a
+    memory total and a power limit. Only the utilisation tile was covered,
+    because only utilisation carries a count. Memory read "0.0 GB" on four
+    live cards and temperature read "0 degrees".
+    """
+    db = tmp_path / "live-no-metrics.db"
+    _live_devices_no_metrics(db)
+
+    roll = _payload(db).rollups
+
+    assert roll.gpus_unreported is False  # the guard genuinely does not fire
+    assert roll.gpu_mem is not None
+    assert roll.gpu_mem.now is None
+    assert roll.gpu_mem.p95 is None
+    # No measured level means no tick to read a paired capacity from.
+    assert roll.gpu_mem.total is None
+    assert roll.gpu_mem.headroom is None
+    assert roll.temp is not None
+    assert roll.temp.now is None
+    assert roll.temp.p95 is None
+    # A verdict computed from no temperature is not a verdict.
+    assert roll.temp.status is None
+    assert roll.gpu_util is not None
+    assert roll.gpu_util.p50 is None
+
+
+def test_a_partly_measured_window_still_reports(tmp_path: Path) -> None:
+    """Abstention is for the all-absent window, not for any absence.
+
+    The narrower behaviour is the point: one measured tick is enough for a
+    percentile and for a newest-value read, and this is what separates this
+    change from suppressing the whole card whenever a sample goes missing.
+    """
+    db = tmp_path / "partly.db"
+    _all_null_host(db, gpu_available=False)
+    with sqlite_database(db, init_summary_schema) as conn:
+        conn.execute(
+            "UPDATE system_samples SET cpu_percent = 80.0, "
+            "ram_used_bytes = ? WHERE seq = ?",
+            (9.0 * GB, TICKS - 1),
+        )
+        conn.commit()
+
+    roll = _payload(db).rollups
+
+    assert roll.cpu.now == 80.0
+    assert roll.cpu.p50 == 80.0
+    assert roll.ram.now == 9.0 * GB
+    assert roll.ram.headroom == 191.0 * GB

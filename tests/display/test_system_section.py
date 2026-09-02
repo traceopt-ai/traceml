@@ -14,6 +14,8 @@ and nothing on the block carries a verdict word.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 pytest.importorskip("nicegui")
@@ -750,3 +752,86 @@ def test_a_small_real_reading_is_not_printed_as_zero() -> None:
     assert system_section.format_gb_pair(6.3e9, 16.1e9)[0] == "6.3"
     # Absence remains distinct from every measured value.
     assert system_section.format_gb_pair(None, 16.1e9)[0] == "n/a"
+
+
+def _tile_number(content: str) -> str:
+    """A tile's value with its unit markup stripped off.
+
+    ``theme.kval`` wraps the unit in its own span, and a unit can carry a
+    digit (the GPU rows do). The value is what must not be a number when
+    nothing was measured.
+    """
+    return re.sub(r"<span class='kunit'>.*?</span>", "", content)
+
+
+def test_tiles_abstain_when_the_payload_carries_no_measurement() -> None:
+    """Every tile says n/a when its field is absent.
+
+    A freeze test, and deliberately one: this path is already correct and
+    the change that accompanies it is in the compute layer, which used to
+    send 0.0 where it now sends None. Pinning the card here is what makes
+    that change safe to state as a fix rather than a swap of one wrong
+    value for another.
+
+    The devices are reported: they carry a memory total and a power limit.
+    That is the case the per-device guard does not cover, because the
+    guard asks whether the DEVICE said anything, not whether the metric
+    did.
+    """
+    from nicegui import ui
+
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section import (  # noqa: E501
+        build_system_section,
+        update_system_section,
+    )
+
+    with ui.element("div"):
+        panel = build_system_section()
+    payload = {
+        "window_len": 20,
+        "gpu_available": True,
+        "rollups": {
+            "cpu": {"now": None, "p50": None, "p95": None},
+            "ram": {"now": None, "p95": None, "total": None, "headroom": None},
+            "gpu_util": {"now": None, "p50": None, "p95": None},
+            "gpu_delta": {"now": None, "p95": None},
+            "gpu_mem": {
+                "now": None,
+                "p95": None,
+                "headroom": None,
+                "total": None,
+            },
+            "temp": {"now": None, "p95": None, "status": None},
+            "gpu_power": {
+                "now": None,
+                "p50": None,
+                "limit": None,
+                "floor": None,
+            },
+            "gpus": [
+                {
+                    "gpu_idx": i,
+                    "mem_total": 16.1 * GB,
+                    "power_limit": 70.0,
+                    "reported": True,
+                }
+                for i in range(4)
+            ],
+            "ctx": {"gpu_count": 4},
+            "util_gpu_count": 0,
+        },
+        "series": {"x_time": [], "cpu": [], "gpu_avg": []},
+    }
+
+    update_system_section(panel, as_payload(payload))
+
+    # The invariant is that no tile shows a number, not the exact string:
+    # the temperature tile keeps its unit beside the marker ("n/a °C")
+    # while the byte tiles drop theirs, which is a pre-existing difference
+    # in this card and not what this test is pinning.
+    for key in ("ram", "util", "mem", "temp"):
+        content = panel["tiles"][key].content
+        assert "n/a" in content, key
+        assert not re.search(r"\d", _tile_number(content)), key
+    # Not "0%", which is what a measured idle host reads.
+    assert panel["cpu_value"].text == ""
