@@ -55,6 +55,9 @@ class SystemCLISnapshot:
     gpu_count: int
 
     gpu_util_total: Optional[float]
+    # The display-ready mean over `gpu_util_devices`. Compute owns this
+    # arithmetic; renderers only format the result.
+    gpu_util_avg: Optional[float]
     gpu_util_skew: Optional[float]
     gpu_mem_used: Optional[float]
     gpu_mem_total: Optional[float]
@@ -79,6 +82,7 @@ class SystemCLISnapshot:
             "gpu_available": self.gpu_available,
             "gpu_count": self.gpu_count,
             "gpu_util_total": self.gpu_util_total,
+            "gpu_util_avg": self.gpu_util_avg,
             "gpu_util_devices": self.gpu_util_devices,
             "gpu_mem_used": self.gpu_mem_used,
             "gpu_mem_total": self.gpu_mem_total,

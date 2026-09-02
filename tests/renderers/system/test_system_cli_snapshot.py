@@ -14,8 +14,6 @@ this package, so a fix that lands in one of them is half a fix.
 
 from __future__ import annotations
 
-from typing import Optional
-
 from rich.console import Console
 
 from tests.renderers.system.conftest import gpu
@@ -33,17 +31,6 @@ NVML_FAILED = {
 }
 
 
-def _avg(snapshot) -> Optional[float]:
-    """The average the terminal renderer prints, computed its way."""
-    devices = snapshot.get("gpu_util_devices")
-    if devices is None:
-        devices = snapshot.get("gpu_count")
-    total = snapshot.get("gpu_util_total")
-    if total is None or int(devices or 0) <= 0:
-        return None
-    return total / int(devices)
-
-
 def _render_text(path: str) -> str:
     console = Console(record=True, width=100, color_system=None)
     console.print(SystemRenderer(path).get_panel_renderable())
@@ -53,7 +40,7 @@ def _render_text(path: str) -> str:
 def test_four_busy_gpus_average_to_full(system_db):
     path = system_db(ticks=20, gpus=lambda seq: [gpu(i) for i in range(4)])
     out = SystemCLIComputer(path).compute()
-    assert _avg(out) == 100.0
+    assert out["gpu_util_avg"] == 100.0
     assert out["gpu_util_skew"] == 0.0
 
 
@@ -68,7 +55,7 @@ def test_an_nvml_failed_gpu_is_not_averaged_in(system_db):
     )
     out = SystemCLIComputer(path).compute()
     assert out["gpu_util_devices"] == 3
-    assert _avg(out) == 100.0
+    assert out["gpu_util_avg"] == 100.0
     assert out["gpu_util_skew"] == 0.0
     # Power is a sum over the same rows and must drop the failed device
     # rather than adding its 0 W.
@@ -87,7 +74,7 @@ def test_a_null_util_column_is_not_a_zero_reading(system_db):
     )
     out = SystemCLIComputer(path).compute()
     assert out["gpu_util_devices"] == 3
-    assert _avg(out) == 100.0
+    assert out["gpu_util_avg"] == 100.0
     assert out["gpu_util_skew"] == 0.0
 
 
@@ -101,6 +88,7 @@ def test_no_util_readings_render_as_unavailable(system_db):
     out = SystemCLIComputer(path).compute()
     assert out["gpu_util_devices"] == 0
     assert out["gpu_util_total"] is None
+    assert out["gpu_util_avg"] is None
 
     text = _render_text(path)
     assert "GPU UTIL N/A" in text

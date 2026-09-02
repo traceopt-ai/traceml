@@ -172,6 +172,7 @@ class SystemCLIComputer:
             # count at zero and the value absent so presentation can say
             # N/A without reinterpreting telemetry.
             gpu_util_total=util_total if reporting else None,
+            gpu_util_avg=(util_total / reporting if reporting else None),
             gpu_util_devices=reporting,
             gpu_util_skew=gpu_util_skew,
             gpu_mem_used=mem_used_total,
@@ -202,6 +203,7 @@ class SystemCLIComputer:
             gpu_count=0,
             gpu_util_devices=None,
             gpu_util_total=None,
+            gpu_util_avg=None,
             gpu_util_skew=None,
             gpu_mem_used=None,
             gpu_mem_total=None,
