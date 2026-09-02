@@ -122,7 +122,7 @@ def build_process_section() -> Dict[str, Any]:
                 panel[value_key] = ui.label("").style(
                     f"{_MONO} font-size:14px; font-weight:600;"
                 )
-            panel[chart_key] = ui.echart(theme.multi_line_options(unit)).style(
+            panel[chart_key] = ui.echart(charting.multi_line_options(unit)).style(
                 "height:92px; width:100%;"
             )
 
@@ -271,7 +271,7 @@ def _rank_series(
         # Drawn first so the rank lines sit on top of it, and in the ink
         # colour rather than a rank colour: it is not a rank, and giving it
         # one would make it look like the fifth GPU.
-        total = theme.line_series(
+        total = charting.line_series(
             "Total",
             theme.INK,
             [
@@ -284,7 +284,7 @@ def _rank_series(
         )
         series.append(total)
     for trace in chart.traces:
-        line = theme.line_series(
+        line = charting.line_series(
             f"R{int(trace.global_rank)}",
             charting.rank_color(int(trace.global_rank)),
             [

@@ -23,12 +23,13 @@ import pytest
 pytest.importorskip("nicegui")
 
 from traceml_ai.aggregator.display_drivers.nicegui_sections import (  # noqa: E402
+    charting,
     theme,
 )
 
 
 def test_a_span_chart_carries_axes_a_tooltip_and_one_colour():
-    out = theme.span_line_options("#2563eb", "%")
+    out = charting.span_line_options("#2563eb", "%")
     assert sorted(out) == [
         "animationDuration",
         "backgroundColor",
@@ -51,7 +52,7 @@ def test_a_span_chart_carries_axes_a_tooltip_and_one_colour():
 
 
 def test_a_multi_line_chart_has_no_single_colour_and_starts_empty():
-    out = theme.multi_line_options(" W")
+    out = charting.multi_line_options(" W")
     # No single colour: each series carries its own, so ranks and devices
     # keep a stable identity across ticks.
     assert "color" not in out
@@ -71,8 +72,8 @@ def test_the_two_chart_kinds_share_a_clock_but_not_a_y_axis():
     a real drift inside one pixel, which is a defect this series already
     fixed once on the RSS chart.
     """
-    span = theme.span_line_options("#2563eb", "%")
-    multi = theme.multi_line_options("%")
+    span = charting.span_line_options("#2563eb", "%")
+    multi = charting.multi_line_options("%")
     assert span["xAxis"] == multi["xAxis"]
     assert span["tooltip"]["trigger"] == multi["tooltip"]["trigger"]
 
@@ -81,7 +82,7 @@ def test_the_two_chart_kinds_share_a_clock_but_not_a_y_axis():
 
 
 def test_a_line_carries_its_name_colour_and_data():
-    s = theme.line_series("cpu", "#2563eb", [1.0, 2.0, None])
+    s = charting.line_series("cpu", "#2563eb", [1.0, 2.0, None])
     assert s["name"] == "cpu"
     assert s["type"] == "line"
     assert s["data"] == [1.0, 2.0, None]
@@ -92,20 +93,20 @@ def test_a_line_carries_its_name_colour_and_data():
 
 def test_a_gap_in_a_line_stays_a_gap():
     """None must survive into the series, or an absence draws as zero."""
-    s = theme.line_series("rss", "#FF8C00", [1.0, None, 3.0])
+    s = charting.line_series("rss", "#FF8C00", [1.0, None, 3.0])
     assert s["data"][1] is None
 
 
 def test_line_width_is_adjustable_and_defaulted():
-    assert theme.line_series("a", "#000", [])["lineStyle"]["width"] == 1.6
+    assert charting.line_series("a", "#000", [])["lineStyle"]["width"] == 1.6
     assert (
-        theme.line_series("a", "#000", [], width=2.4)["lineStyle"]["width"]
+        charting.line_series("a", "#000", [], width=2.4)["lineStyle"]["width"]
         == 2.4
     )
 
 
 def test_reference_lines_carry_a_label_a_colour_and_a_position():
-    out = theme.mark_lines([(70.0, "70 W limit", "#c00", "insideEndTop")])
+    out = charting.mark_lines([(70.0, "70 W limit", "#c00", "insideEndTop")])
     data = out["data"]
     assert len(data) == 1
     assert data[0]["yAxis"] == 70.0
@@ -113,7 +114,7 @@ def test_reference_lines_carry_a_label_a_colour_and_a_position():
 
 
 def test_no_reference_lines_is_an_empty_set_not_a_missing_key():
-    assert theme.mark_lines([])["data"] == []
+    assert charting.mark_lines([])["data"] == []
 
 
 def test_a_tile_value_and_unit_render_together():

@@ -6,7 +6,9 @@
 
 """Shaping a chart: axes, ranges, per-rank series, sparklines.
 
-``theme`` owns the look (palette, fonts, the base ECharts option dicts).
+``theme`` owns the look: palette, fonts, CSS. The ECharts option dicts
+moved here in part 6 of #403, because building one is chart construction
+rather than styling.
 This module owns the arithmetic of fitting a chart to its data: what the
 y range should be for a given kind of signal, how a time axis is pinned and
 labelled, and how one series per rank is built.
@@ -23,6 +25,10 @@ return option fragments.
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+# The palette stays in theme; a chart builder borrows from it
+# rather than keeping a second copy of the brand colours.
+from .theme import BORDER, INK
 
 # One colour per rank, shared by the charts and the rows' chips so a line
 # and a row are recognisably the same rank. Red is not among them: on this
@@ -188,7 +194,193 @@ def shared_span(*traces: Sequence[Any]) -> Optional[Tuple[float, float]]:
     return (newest, max(newest - min(starts), 1.0))
 
 
+_GRID = "rgba(17,24,39,0.05)"
+_AXIS = "rgba(17,24,39,0.14)"
+_TXT = "#9aa3af"
+
+
+def _area(c1: str, c2: str) -> Dict[str, Any]:
+    return {
+        "type": "linear",
+        "x": 0,
+        "y": 0,
+        "x2": 0,
+        "y2": 1,
+        "colorStops": [
+            {"offset": 0, "color": c1},
+            {"offset": 0.85, "color": c2},
+            {"offset": 1, "color": "rgba(255,255,255,0)"},
+        ],
+    }
+
+
+def _span_axis() -> Dict[str, Any]:
+    """Seconds-before-newest x axis; the section sets min/interval/labels."""
+    return {
+        "type": "value",
+        "min": -1,
+        "max": 0,
+        "interval": 1,
+        # No tick labels: the window is named once in the chart's label row.
+        "axisLabel": {"show": False},
+        "axisLine": {"lineStyle": {"color": _AXIS, "opacity": 0.5}},
+        "axisTick": {"show": False},
+        "splitLine": {"show": False},
+    }
+
+
+def _value_axis(unit: str, *, zero: bool) -> Dict[str, Any]:
+    ax: Dict[str, Any] = {
+        "type": "value",
+        "splitNumber": 2,
+        "axisLabel": {
+            "color": _TXT,
+            "fontFamily": "Geist Mono",
+            "fontSize": 10,
+            ":formatter": f"v=>v+'{unit}'",
+        },
+        "axisLine": {"show": False},
+        "axisTick": {"show": False},
+        "splitLine": {"lineStyle": {"color": _GRID}},
+    }
+    if zero:
+        ax["min"] = 0
+    return ax
+
+
+_SPAN_POINTER_LABEL = (
+    "p=>{const s=Math.round(-p.value);return s<1?'now':"
+    "(s<120?s+' s ago':Math.floor(s/60)+' min '+(s%60)+' s ago');}"
+)
+
+
+def _tooltip(unit: str) -> Dict[str, Any]:
+    return {
+        "trigger": "axis",
+        "backgroundColor": "rgba(255,253,250,0.97)",
+        "borderColor": BORDER,
+        "textStyle": {
+            "color": INK,
+            "fontFamily": "Geist Mono",
+            "fontSize": 11,
+        },
+        "axisPointer": {
+            "type": "line",
+            "lineStyle": {"color": _AXIS, "type": "dashed"},
+            "label": {
+                "backgroundColor": INK,
+                "fontFamily": "Geist Mono",
+                "fontSize": 10,
+                ":formatter": _SPAN_POINTER_LABEL,
+            },
+        },
+        ":valueFormatter": f"v=>(v==null?'-':Math.round(v)+'{unit}')",
+    }
+
+
+def line_series(
+    name: str, col: str, data: List[Any], *, width: float = 1.6
+) -> Dict[str, Any]:
+    """One plain line (no area, no end label) for a multi-trace chart."""
+    return {
+        "name": name,
+        "type": "line",
+        "smooth": True,
+        "showSymbol": False,
+        "lineStyle": {"width": width, "color": col},
+        "itemStyle": {"color": col},
+        "data": data,
+    }
+
+
+def mark_lines(entries: List[Any]) -> Dict[str, Any]:
+    """Several horizontal reference lines on one series.
+
+    Each entry is (y, label, colour, position); ECharts takes them as
+    markLine data with per-item style, so one series can carry a limit and
+    a floor. Give two lines different positions: a label anchored at the
+    same end as its neighbour collides with it, and a long one anchored at
+    the right end is cut off by the card edge.
+    """
+    return {
+        "silent": True,
+        "symbol": "none",
+        "animation": False,
+        "data": [
+            {
+                "yAxis": y,
+                "lineStyle": {"color": col, "type": "dashed", "width": 1},
+                "label": {
+                    "show": True,
+                    "position": pos,
+                    "formatter": label,
+                    "color": col,
+                    "fontFamily": "Geist Mono",
+                    "fontSize": 10,
+                },
+            }
+            for y, label, col, pos in entries
+        ],
+    }
+
+
+def span_line_options(col: str, unit: str) -> Dict[str, Any]:
+    """Small zero-anchored single series over a window-span x axis."""
+    return {
+        "backgroundColor": "transparent",
+        "animationDuration": 300,
+        "color": [col],
+        "grid": {
+            "left": 4,
+            # room for the last clock label, which is centred on the axis
+            # maximum and would otherwise be cut in half by the card edge
+            "right": 26,
+            "top": 8,
+            "bottom": 4,
+            "containLabel": True,
+        },
+        "tooltip": _tooltip(unit),
+        "xAxis": _span_axis(),
+        "yAxis": _value_axis(unit, zero=True),
+        "series": [
+            {
+                **line_series("", col, []),
+                "areaStyle": {
+                    "color": _area(
+                        "rgba(37,99,235,0.14)", "rgba(37,99,235,0.03)"
+                    )
+                },
+            }
+        ],
+    }
+
+
+def multi_line_options(unit: str) -> Dict[str, Any]:
+    """Several plain traces over a window-span x axis (one per GPU)."""
+    return {
+        "backgroundColor": "transparent",
+        "animationDuration": 300,
+        "grid": {
+            "left": 4,
+            # room for the last clock label, which is centred on the axis
+            # maximum and would otherwise be cut in half by the card edge
+            "right": 26,
+            "top": 10,
+            "bottom": 4,
+            "containLabel": True,
+        },
+        "tooltip": _tooltip(unit),
+        "xAxis": _span_axis(),
+        "yAxis": _value_axis(unit, zero=False),
+        "series": [],
+    }
+
+
 __all__ = [
+    "multi_line_options",
+    "span_line_options",
+    "mark_lines",
+    "line_series",
     "RANK_COLORS",
     "apply_span_axis",
     "capacity_axis_max",
