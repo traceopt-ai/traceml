@@ -596,22 +596,20 @@ def _update_system_tiles(
         _num(util.p50 if util else None), "%"
     )
     one_gpu = n_gpus == 1
-    # The mean covers the devices that reported. Saying "avg of 4 GPUs"
-    # over three readings is the same lie the aggregate used to tell, so
-    # the count follows the data. "3/4" mirrors the strip's own
-    # "ranks 3/4 reporting" rather than inventing a second phrasing.
-    counted = roll.util_gpu_count
-    if unreported or counted == 0:
+    # The tile is a window median; this count describes only the latest tick.
+    # Label that scope explicitly so it is not mistaken for window coverage.
+    latest_count = roll.util_gpu_count
+    if unreported or latest_count == 0:
         # Nothing was read, so there is no mean to qualify. The tile said
         # 0% here, which is a measurement, and no device measured it.
         panel["tiles"]["util"].content = NA
         util_sub = "GPU sample unreported"
     elif one_gpu:
         util_sub = "1 GPU"
-    elif counted is not None and counted < n_gpus:
-        util_sub = f"avg of {counted}/{n_gpus} GPUs"
+    elif latest_count is not None:
+        util_sub = f"latest: {latest_count}/{n_gpus} reporting"
     else:
-        util_sub = f"avg of {n_gpus} GPUs"
+        util_sub = "avg of reporting GPUs"
     panel["subs"]["util"].text = util_sub
 
     if unreported:

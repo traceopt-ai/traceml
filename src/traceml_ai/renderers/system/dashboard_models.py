@@ -173,13 +173,11 @@ class SystemRollups:
     # Whether the spread has earned opening the per-GPU rows. A threshold
     # against a measurement is a severity call, so it is decided here.
     rows_over: bool = False
-    # Devices behind the GPU UTIL mean in the newest tick, which is what
-    # the tile's qualifier counts. A device that reported but had a NULL
-    # util column is NOT in this number, because it is not in the mean.
-    # Optional, and the None matters: a payload that never carried this
-    # field is not the same as a tick where nothing was read. Collapsing
-    # the two is how "no devices reported" and "old payload" end up
-    # rendering identically.
+    # Util readings in the newest tick. This gates the tile's unavailable
+    # state; it is not presented as coverage for the window median. A
+    # device with a NULL util column is absent from this number even when
+    # its other metrics reported. None preserves payload compatibility;
+    # zero explicitly means no current util reading.
     util_gpu_count: Optional[int] = None
 
     @property

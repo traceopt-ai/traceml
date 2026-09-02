@@ -266,12 +266,10 @@ class SystemDashboardComputer:
         gpu_mem_headroom_min = np.zeros(n, dtype=np.float64)
         temp_max = np.zeros(n, dtype=np.float64)
         gpu_mem_worst_total = 0.0
-        # Devices behind the GPU UTIL mean in the newest tick, which is
-        # what the tile's qualifier counts. NOT the number of devices that
-        # reported: a device can report and still carry a NULL util
-        # column, in which case it is absent from this mean. The tile
-        # prints this number, so it has to be the mean's own denominator
-        # or the label repeats the defect it was added to remove.
+        # Util readings in the newest tick. This distinguishes a measured
+        # zero from no current reading; it does not describe coverage of
+        # the window median shown by the tile. A device can report and
+        # still carry a NULL util column, so count readings, not devices.
         util_gpu_count = 0
 
         # Per-GPU history keyed by gpu_idx, one slot per tick. A tick in

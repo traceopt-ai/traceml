@@ -650,6 +650,9 @@ def test_every_tile_keeps_a_qualifier_line() -> None:
                 "cpu": {"now": 9.0, "p50": 8.0},
                 "ram": {"now": 9.0 * GB, "total": 200.0 * GB},
                 "gpu_util": {"now": 99.0, "p50": 99.0},
+                # The four-GPU case deliberately has one missing reading so
+                # the qualifier's newest-tick scope remains explicit.
+                "util_gpu_count": 1 if n_gpus == 1 else 3,
                 "gpu_delta": {"now": 0.0, "p95": 0.0},
                 "gpu_mem": {"now": 6.3 * GB, "total": 16.1 * GB},
                 "temp": {"now": 48.0},
@@ -695,7 +698,7 @@ def test_every_tile_keeps_a_qualifier_line() -> None:
             assert subs["util"] == "1 GPU" and subs["temp"] == "1 GPU"
             assert subs["mem"] == "used / total"
         else:
-            assert subs["util"] == "avg of 4 GPUs"
+            assert subs["util"] == "latest: 3/4 reporting"
             assert subs["mem"] == "max GPU" and subs["temp"] == "max GPU"
 
 
