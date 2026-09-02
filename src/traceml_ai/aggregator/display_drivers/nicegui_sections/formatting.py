@@ -27,6 +27,29 @@ NA = "n/a"
 _BYTES_PER_GB = float(1024**3)
 
 
+def gb_si(value: Any) -> Optional[float]:
+    """Bytes as decimal gigabytes (10^9), or ``None``.
+
+    Distinct from :func:`gb`, which divides by 1024**3. The System card
+    has always used this one and the Process card the other, so the same
+    device renders 7.4% apart on one page depending on the card. Keeping
+    both under names that say which is which is deliberate: collapsing
+    them would move a user-visible number inside a file move. The
+    unification is tracked separately.
+    """
+    if value is None:
+        return None
+    try:
+        return float(value) / 1e9
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError is in the list because the helper this replaced
+        # caught everything: an integer too large for a float returned
+        # None rather than crashing the card. SQLite cannot produce one
+        # (INTEGER is 64-bit), but the equivalence should not depend on
+        # that.
+        return None
+
+
 def gb(value: Any) -> Optional[float]:
     """Bytes as gigabytes, or ``None`` when the value is not a number."""
     if value is None:
@@ -130,6 +153,7 @@ __all__ = [
     "NA",
     "format_age",
     "format_gb_pair",
+    "gb_si",
     "format_percent",
     "format_span",
     "format_window",

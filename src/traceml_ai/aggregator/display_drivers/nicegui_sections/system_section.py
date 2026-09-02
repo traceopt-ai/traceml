@@ -31,7 +31,8 @@ from traceml_ai.renderers.system.dashboard_models import (
     SystemSeries,
 )
 
-from . import theme
+from . import charting, theme
+from .formatting import gb_si
 
 # Window-p95 GPU utilisation spread (max - min, percentage points) that
 # automatically opens the per-GPU rows.
@@ -81,11 +82,11 @@ def format_span(seconds: Optional[float]) -> str:
 
 def format_gb_pair(used_bytes: Any, total_bytes: Any) -> Tuple[str, str]:
     """A level against its capacity: ('6.3', '/ 16.1 GB')."""
-    used = theme.gb(used_bytes) if used_bytes is not None else None
+    used = gb_si(used_bytes) if used_bytes is not None else None
     if used is None:
         return (NA, "")
     num = f"{used:.1f}"
-    total = theme.gb(total_bytes) if total_bytes is not None else None
+    total = gb_si(total_bytes) if total_bytes is not None else None
     if total is None or total <= 0:
         return (num, "GB")
     total_s = f"{total:.0f}" if total >= 100 else f"{total:.1f}"
@@ -264,9 +265,9 @@ def rows_html(
         color = gpu_color(idx)
         used, total = g.mem_used, g.mem_total
         if used is not None and total:
-            mem = f"{theme.gb(used):.2f} / {theme.gb(total):.1f}"
+            mem = f"{gb_si(used):.2f} / {gb_si(total):.1f}"
         elif used is not None:
-            mem = f"{theme.gb(used):.2f}"
+            mem = f"{gb_si(used):.2f}"
         else:
             mem = NA
         power, limit = g.power, g.power_limit
@@ -426,7 +427,7 @@ def build_system_section() -> Dict[str, Any]:
                 f"{_MONO} font-size:13px; font-weight:600; color:var(--ink);"
             )
         panel["cpu_chart"] = ui.echart(
-            theme.span_line_options(theme.C_CPU, "%")
+            charting.span_line_options(theme.C_CPU, "%")
         ).style("height:92px; width:100%;")
 
         panel["power_head"] = (
@@ -438,9 +439,9 @@ def build_system_section() -> Dict[str, Any]:
             panel["power_label"] = ui.label("gpu power · per GPU").classes(
                 "estlabel"
             )
-        panel["power_chart"] = ui.echart(theme.multi_line_options(" W")).style(
-            "height:150px; width:100%;"
-        )
+        panel["power_chart"] = ui.echart(
+            charting.multi_line_options(" W")
+        ).style("height:150px; width:100%;")
         # Same slot, same height, when there is no GPU: the card keeps its
         # shape on every host instead of shrinking around a missing chart.
         panel["power_placeholder"] = ui.label("no GPU reported").style(
@@ -678,7 +679,7 @@ def _update_power_chart(
         for item in run:
             index = int(item.get("gpu_idx", 0))
             xs = [timestamp - newest for timestamp in item["t"]]
-            floor_line = theme.line_series(
+            floor_line = charting.line_series(
                 f"gpu{index} floor",
                 gpu_color(index),
                 [[x, value] for x, value in zip(xs, item.get("min") or [])],
@@ -688,7 +689,7 @@ def _update_power_chart(
             floor_line["tooltip"] = {"show": False}
             lines.append(floor_line)
             lines.append(
-                theme.line_series(
+                charting.line_series(
                     f"gpu{index}",
                     gpu_color(index),
                     [[x, value] for x, value in zip(xs, item["avg"])],
@@ -696,7 +697,7 @@ def _update_power_chart(
             )
     else:
         lines = [
-            theme.line_series(
+            charting.line_series(
                 f"gpu{int(item.get('gpu_idx', 0))}",
                 gpu_color(int(item.get("gpu_idx", 0))),
                 [
@@ -735,7 +736,9 @@ def _update_power_chart(
             )
         # ECharts merges options, so an explicit empty markLine clears old
         # reference lines when a later payload no longer reports them.
-        lines[0]["markLine"] = theme.mark_lines(refs) if refs else {"data": []}
+        lines[0]["markLine"] = (
+            charting.mark_lines(refs) if refs else {"data": []}
+        )
 
     chart.options["series"] = lines
     bounds_source = (
