@@ -430,8 +430,8 @@ class SystemDashboardComputer:
         ram_p95 = _nan_pct(ram_used_hist, 95)
 
         # nanpercentile, not percentile: a blind tick must not be counted
-        # as a measured zero when the window is summarised. All-NaN means
-        # nothing was measured at all, which is 0.0 as it was before.
+        # as a measured zero when the window is summarised, and a window
+        # with no measured tick at all has no percentile to state.
         gpu_p50 = _nan_pct(gpu_avg, 50)
         gpu_p95 = _nan_pct(gpu_avg, 95)
         delta_p95 = _nan_pct(gpu_delta, 95)
@@ -439,8 +439,10 @@ class SystemDashboardComputer:
         temp_p95 = _nan_pct(temp_max, 95)
 
         temp_now = _last_measured(temp_max)
-        # A verdict needs a reading. With no temperature there is nothing
-        # to be OK about, and "OK" is the answer a reader trusts most.
+        # A verdict needs a reading. With no temperature there is
+        # nothing to be OK about. Nothing renders this field today, so
+        # the change is not visible; it is here because a derived
+        # judgment must not outlive the measurement it came from.
         temp_status = (
             None
             if temp_now is None

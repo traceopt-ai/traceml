@@ -68,3 +68,21 @@ def test_a_cluster_with_no_cpu_readings_abstains(system_db):
     assert out["view"] == "cluster"
     assert out["metrics"]["cpu"]["median"] is None
     assert out["metrics"]["cpu"]["worst"] is None
+
+
+def test_a_node_genuinely_at_zero_stays_in_the_rollup(system_db):
+    """The other direction, on the cluster path.
+
+    A node really can sit at 0% CPU, and that reading has to survive the
+    same code that drops an absent one. Confusing the two this way round
+    would hide an idle node instead of inventing one.
+    """
+    path = system_db(ticks=5, cpu=lambda seq: 0.0, hostnames=("a", "b"))
+
+    out = SystemCLIComputer(path).compute()
+
+    assert out["view"] == "cluster"
+    cpu = out["metrics"]["cpu"]
+    assert cpu["median"] == 0.0
+    assert cpu["worst"] == 0.0
+    assert cpu["worst_node"] is not None
