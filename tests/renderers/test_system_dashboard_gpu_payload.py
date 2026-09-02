@@ -1082,3 +1082,35 @@ def test_a_partly_measured_window_still_reports(tmp_path: Path) -> None:
     assert roll.cpu.p50 == 80.0
     assert roll.ram.now == 9.0 * GB
     assert roll.ram.headroom == 191.0 * GB
+
+
+def test_a_genuine_zero_reading_is_reported_as_zero(tmp_path: Path) -> None:
+    """The same invariant on the dashboard payload.
+
+    Absence and zero must stay distinct in BOTH directions. Every value
+    is deliberately 0 here: a device really can sit at 0% drawing no
+    power, and turning that into an abstention would hide a real
+    measurement, which is worse than the defect being fixed.
+    """
+    db = tmp_path / "idle.db"
+
+    def rows(_seq):
+        return [_gpu(i, 0.0, 0.0, temp=0.0, mem_used=0.0) for i in range(4)]
+
+    _write(db, rows)
+    with sqlite_database(db, init_summary_schema) as conn:
+        conn.execute("UPDATE system_samples SET cpu_percent = 0.0")
+        conn.commit()
+
+    roll = _payload(db).rollups
+
+    assert roll.cpu.now == 0.0
+    assert roll.cpu.p50 == 0.0
+    assert roll.gpu_util.p50 == 0.0
+    assert roll.gpu_mem.now == 0.0
+    assert roll.temp.now == 0.0
+    # A verdict computed from a real 0 degrees is still a verdict.
+    assert roll.temp.status == "OK"
+    # The capacity pairs with a measured level, so it is present.
+    assert roll.gpu_mem.total == 16.1 * GB
+    assert roll.util_gpu_count == 4

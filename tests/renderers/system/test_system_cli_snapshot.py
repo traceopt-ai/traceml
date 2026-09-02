@@ -195,3 +195,37 @@ def test_a_partly_read_host_still_reports(system_db):
     assert out["gpu_temp_max"] == 45.0
     assert out["gpu_power_usage"] == 66.0
     assert out["gpu_mem_used"] == 6.3 * GB
+
+
+def test_a_genuine_zero_reading_is_reported_as_zero(system_db):
+    """The invariant that keeps this change from becoming suppression.
+
+    Every value here is deliberately 0, which is the whole point: a
+    device really can sit at 0% with no power draw, and that is a
+    measurement. If absence and zero are confused in the other
+    direction, this is the test that fails. The devices still carry
+    their capacities, because a card at rest reports what it is.
+    """
+    path = system_db(
+        ticks=5,
+        cpu=lambda seq: 0.0,
+        gpus=lambda seq: [
+            gpu(i, util=0.0, temp=0.0, power=0.0, mem_used=0.0)
+            for i in range(4)
+        ],
+    )
+
+    out = SystemCLIComputer(path).compute()
+
+    assert out["cpu"] == 0.0
+    assert out["gpu_util_avg"] == 0.0
+    assert out["gpu_util_devices"] == 4
+    assert out["gpu_mem_used"] == 0.0
+    assert out["gpu_temp_max"] == 0.0
+    assert out["gpu_power_usage"] == 0.0
+    # Nothing was used, so the whole card is free. That is a real
+    # headroom, unlike the one an unread level produces.
+    assert out["gpu_mem_headroom_min"] == 16.1 * GB
+
+    text = _render_text(path)
+    assert "N/A" not in text
