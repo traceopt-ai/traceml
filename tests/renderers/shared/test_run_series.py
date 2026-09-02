@@ -195,3 +195,53 @@ def test_a_hand_built_plan_with_corrupt_numbers_still_answers():
     )
     assert plan.preceding_rows == 1
     assert "nan" not in plan.frame_clause().lower()
+
+
+def test_bucket_width_caps_the_point_count_on_a_long_run():
+    """Past the window ceiling the bucket widens instead of multiplying.
+
+    `window_for` saturates at its 300 s ceiling, so a bucket per window
+    means the count is `span / 300` and rises linearly with run length
+    forever: 288 per GPU at 24 hours, 2016 at 7 days, against the 120
+    the CPU chart budgets.
+    """
+    policy = RunSeriesPolicy()
+
+    for span in (86_400.0, 172_800.0, 604_800.0):
+        width = policy.bucket_width_for(span)
+        assert span / width <= policy.max_points
+
+
+def test_bucket_width_leaves_short_runs_alone():
+    """A run whose window already fits the budget is not re-shaped.
+
+    The cap is a ceiling, not a replacement rule: below it the bucket is
+    still the rolling window, so the chart keeps the resolution it has
+    and the label a reader sees does not move.
+    """
+    policy = RunSeriesPolicy()
+
+    assert policy.bucket_width_for(3_600.0) == policy.window_for(3_600.0)
+    assert policy.bucket_width_for(21_600.0) == policy.window_for(21_600.0)
+    assert 3_600.0 / policy.bucket_width_for(3_600.0) == 30
+    assert 21_600.0 / policy.bucket_width_for(21_600.0) == 72
+
+
+def test_a_bucket_is_never_narrower_than_the_rolling_window():
+    """Widening only. The bucket cannot drop below the window.
+
+    A narrower bucket would give the whole-run chart finer resolution
+    than the live window it is supposed to summarise.
+    """
+    policy = RunSeriesPolicy()
+
+    for span in (0.0, 60.0, 3_600.0, 86_400.0, 604_800.0, 6_048_000.0):
+        assert policy.bucket_width_for(span) >= policy.window_for(span)
+
+
+def test_a_degenerate_span_still_yields_a_usable_width():
+    """No division by zero, and never a zero or negative width."""
+    policy = RunSeriesPolicy()
+
+    for span in (0.0, -1.0, float("nan"), float("inf")):
+        assert policy.bucket_width_for(span) > 0.0
