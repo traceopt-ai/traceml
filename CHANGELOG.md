@@ -7,6 +7,8 @@ which carry the full historical notes for versions predating this file.
 
 ## [Unreleased]
 
+- Added a byte-oriented subprocess-output drainer for future launcher-owned
+  stdout/stderr persistence; existing launcher behavior remains unchanged.
 - Root `system_manifest.json` writes now come only from global rank 0, avoiding
   nondeterministic node ownership on shared filesystems.
 - **Breaking:** Opt-in `--capture-stderr` output moved for both single-node and

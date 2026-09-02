@@ -1,0 +1,161 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
+from __future__ import annotations
+
+import io
+import subprocess
+import sys
+import threading
+import time
+from collections import deque
+from pathlib import Path
+
+from traceml_ai.launcher.process import (
+    DEFAULT_STDERR_TAIL_BYTES,
+    ProcessOutputDrainer,
+)
+
+
+class _ChunkStream:
+    def __init__(self, *chunks: bytes) -> None:
+        self._chunks = deque(chunks)
+        self.closed = False
+
+    def read(self, _size: int) -> bytes:
+        return self._chunks.popleft() if self._chunks else b""
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _FailingSink(io.BytesIO):
+    def __init__(self) -> None:
+        super().__init__()
+        self._writes = 0
+
+    def write(self, data: bytes) -> int:
+        self._writes += 1
+        if self._writes == 2:
+            raise OSError("disk unavailable")
+        return super().write(data)
+
+
+class _BlockingStream:
+    def __init__(self) -> None:
+        self._closed = threading.Event()
+
+    def read(self, _size: int) -> bytes:
+        self._closed.wait(timeout=30)
+        return b""
+
+    def close(self) -> None:
+        self._closed.set()
+
+
+def test_drains_flooded_streams_as_exact_separate_bytes(tmp_path) -> None:
+    stdout_chunk = b"\xffOUT\x00" * 128
+    stderr_chunk = b"\xfeERR\n" * 128
+    repeats = 1024
+    stdout_end = b"stdout-partial"
+    stderr_end = b"stderr-partial"
+    script = (
+        "import os\n"
+        "from threading import Thread\n"
+        f"stdout_chunk = {stdout_chunk!r}\n"
+        f"stderr_chunk = {stderr_chunk!r}\n"
+        f"repeats = {repeats}\n"
+        "def emit(fd, chunk, end):\n"
+        "    for _ in range(repeats):\n"
+        "        os.write(fd, chunk)\n"
+        "    os.write(fd, end)\n"
+        "threads = [\n"
+        f"    Thread(target=emit, args=(1, stdout_chunk, {stdout_end!r})),\n"
+        f"    Thread(target=emit, args=(2, stderr_chunk, {stderr_end!r})),\n"
+        "]\n"
+        "[thread.start() for thread in threads]\n"
+        "[thread.join() for thread in threads]\n"
+    )
+    stdout_path = tmp_path / "training.stdout.log"
+    stderr_path = tmp_path / "training.stderr.log"
+    stdout_mirror = io.BytesIO()
+    stderr_mirror = io.BytesIO()
+    expected_stdout = stdout_chunk * repeats + stdout_end
+    expected_stderr = stderr_chunk * repeats + stderr_end
+
+    proc = subprocess.Popen(
+        [sys.executable, "-c", script],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert proc.stdout is not None and proc.stderr is not None
+    output = ProcessOutputDrainer(
+        stdout=proc.stdout,
+        stderr=proc.stderr,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+        stdout_mirror=stdout_mirror,
+        stderr_mirror=stderr_mirror,
+    )
+
+    assert proc.wait(timeout=10) == 0
+    result = output.finish()
+
+    assert result.warning is None
+    assert result.stdout_path == stdout_path.resolve()
+    assert result.stderr_path == stderr_path.resolve()
+    assert stdout_path.read_bytes() == expected_stdout
+    assert stderr_path.read_bytes() == expected_stderr
+    assert stdout_mirror.getvalue() == expected_stdout
+    assert stderr_mirror.getvalue() == expected_stderr
+    assert result.stderr_tail == expected_stderr[-DEFAULT_STDERR_TAIL_BYTES:]
+    assert proc.stdout.closed and proc.stderr.closed
+
+
+def test_sink_failure_falls_back_and_keeps_draining(
+    monkeypatch, tmp_path
+) -> None:
+    source = _ChunkStream(b"one", b"two", b"three")
+    sink = _FailingSink()
+    fallback = io.BytesIO()
+    monkeypatch.setattr(Path, "open", lambda *_args, **_kwargs: sink)
+
+    output = ProcessOutputDrainer(
+        stderr=source,
+        stderr_path=tmp_path / "training.stderr.log",
+        stderr_fallback=fallback,
+        max_stderr_tail_bytes=8,
+    )
+    result = output.finish()
+
+    assert result.stderr_path is None
+    assert result.stderr_tail == b"twothree"
+    assert fallback.getvalue() == b"twothree"
+    assert result.warning is not None
+    assert result.warning.count("stderr output file write failed") == 1
+    assert source.closed
+
+
+def test_finish_is_bounded_and_idempotent(tmp_path) -> None:
+    source = _BlockingStream()
+    output = ProcessOutputDrainer(
+        stdout=source,
+        stdout_path=tmp_path / "training.stdout.log",
+    )
+
+    started = time.monotonic()
+    result = output.finish(timeout_sec=0.01)
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 0.5
+    assert result.stdout_path is None
+    assert result.warning is not None
+    assert "output drain timed out for stdout" in result.warning
+    assert output.finish() is result
+    assert not any(
+        thread.name == "traceml-process-stdout"
+        for thread in threading.enumerate()
+    )
