@@ -186,6 +186,15 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--on-missing-aggregator",
+        choices=["raise", "warn"],
+        default=None,
+        help=(
+            "Policy when the aggregator cannot start or become ready. "
+            "Default: raise. Use warn to continue with telemetry disabled."
+        ),
+    )
+    parser.add_argument(
         "--args",
         nargs=argparse.REMAINDER,
         help=(
@@ -222,7 +231,8 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help=(
             "Tee child stderr to the console and retain its last 64 KiB in "
-            "logs/<run-name>/crash_stderr.log. Default: disabled."
+            "logs/<run-name>/nodes/node_<node-rank>/crash_stderr.log. "
+            "Default: disabled."
         ),
     )
 

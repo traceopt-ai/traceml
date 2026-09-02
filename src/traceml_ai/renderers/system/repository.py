@@ -22,6 +22,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from traceml_ai.renderers.shared.run_series import RunSeriesPlan
 
+# A row without a clock cannot be placed on a chart or counted toward a
+# cadence. `sample_ts_s` is nullable in the writer's schema, so this is a
+# real state, not a defensive check: every time-series read requires it.
+_HAS_CLOCK_SQL = "sample_ts_s IS NOT NULL"
+
 # Current sampling failures contain NULL metrics; older traces may use an
 # all-zero placeholder. Neither is a real 0 W observation. Apply one
 # predicate to every power query so chart spans and values agree about
@@ -147,6 +152,7 @@ class SystemRepository:
                 SELECT *
                 FROM system_samples
                 {where_sql}
+                {'AND' if where_sql else 'WHERE'} {_HAS_CLOCK_SQL}
                 ORDER BY id DESC
                 LIMIT ?
             )
@@ -175,7 +181,8 @@ class SystemRepository:
         try:
             row = conn.execute(
                 "SELECT MIN(sample_ts_s), MAX(sample_ts_s), COUNT(*) "
-                f"FROM system_samples {where_sql}",
+                f"FROM system_samples {where_sql} "
+                f"{'AND' if where_sql else 'WHERE'} {_HAS_CLOCK_SQL}",
                 tuple(bound),
             ).fetchone()
         except sqlite3.Error:
@@ -214,6 +221,7 @@ class SystemRepository:
                     FROM system_samples
                     {where_sql}
                     {'AND' if where_sql else 'WHERE'} cpu_percent IS NOT NULL
+                      AND {_HAS_CLOCK_SQL}
                     WINDOW w AS (
                         ORDER BY sample_ts_s
                         {plan.frame_clause()}
@@ -240,7 +248,8 @@ class SystemRepository:
             row = conn.execute(
                 "SELECT MIN(sample_ts_s), MAX(sample_ts_s), COUNT(*) FROM "
                 f"system_gpu_samples {where_sql} "
-                f"{'AND' if where_sql else 'WHERE'} {_GPU_REPORTED_SQL}",
+                f"{'AND' if where_sql else 'WHERE'} {_GPU_REPORTED_SQL} "
+                f"AND {_HAS_CLOCK_SQL}",
                 tuple(bound),
             ).fetchone()
         except sqlite3.Error:
@@ -290,6 +299,7 @@ class SystemRepository:
                     FROM system_gpu_samples
                     {where_sql}
                     {'AND' if where_sql else 'WHERE'} {_GPU_REPORTED_SQL}
+                      AND {_HAS_CLOCK_SQL}
                     GROUP BY gpu_idx, CAST((sample_ts_s - ?) / ? AS INTEGER)
                     ORDER BY gpu_idx ASC, 2 ASC
                     """,

@@ -185,16 +185,19 @@ def write_system_manifest_if_missing(
     logger: Any,
 ) -> None:
     """
-    Write a backend-side system manifest once per session.
+    Write a backend-side system manifest once per session from global rank 0.
 
     Safe behavior
     -------------
     - never raises
+    - writes only from global rank 0
     - does nothing if session context is missing
     - does not overwrite an existing manifest
     """
     try:
         ctx = resolve_runtime_context()
+        if ctx.global_rank != 0:
+            return
         if not ctx.session_id or not str(ctx.logs_dir):
             logger.error(
                 "[TraceML] System manifest skipped: missing TRACEML_LOGS_DIR or TRACEML_SESSION_ID"

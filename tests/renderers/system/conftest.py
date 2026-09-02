@@ -73,6 +73,7 @@ def system_db(tmp_path: Path) -> Callable[..., str]:
         hostnames: Sequence[str] = ("box",),
         gaps: Mapping[int, float] = {},
         start_ts: float = 1000.0,
+        null_ts_before: int = 0,
     ) -> str:
         row_id = 0
         conn = sqlite3.connect(path)
@@ -98,6 +99,17 @@ def system_db(tmp_path: Path) -> Callable[..., str]:
                         ram_used_bytes=2.0 * GB,
                         ram_total_bytes=16.0 * GB,
                         gpu_samples=list(gpus(seq)) if gpus else (),
+                    )
+            if null_ts_before:
+                # The best-effort projection stores malformed or legacy
+                # telemetry without a usable `ts` as NULL. Both tables carry
+                # that projected clock, so a parent sample without one has
+                # GPU children in the same state.
+                for table in ("system_samples", "system_gpu_samples"):
+                    conn.execute(
+                        f"UPDATE {table} SET sample_ts_s = NULL "
+                        "WHERE seq < ?",
+                        (int(null_ts_before),),
                     )
             conn.commit()
         finally:
