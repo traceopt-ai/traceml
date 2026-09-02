@@ -48,13 +48,14 @@ def _gpu(
     *,
     temp: float,
     mem_used: float,
+    mem_total: float = 16.1 * GB,
     limit: Optional[float] = LIMIT,
 ) -> Dict[str, Any]:
     return {
         "gpu_idx": idx,
         "util": util,
         "mem_used_bytes": mem_used,
-        "mem_total_bytes": 16.1 * GB,
+        "mem_total_bytes": mem_total,
         "temperature_c": temp,
         "power_usage_w": power,
         "power_limit_w": limit,
@@ -304,9 +305,8 @@ def test_null_util_and_temp_stay_none_not_zero(tmp_path: Path) -> None:
     assert g1.util_p50 == 100.0  # the median ignores the unreported ticks
 
 
-def test_sampler_zero_fallback_tick_is_unreported(tmp_path: Path) -> None:
-    """The sampler writes all-zero GPU rows when NVML fails on a device;
-    those zeros are not a 0 W limit, 0 degrees or 0 GB."""
+def test_legacy_zero_placeholder_tick_is_unreported(tmp_path: Path) -> None:
+    """Older all-zero placeholders are not 0 W, 0 degrees, or 0 GB."""
     db = tmp_path / "z.db"
 
     def rows(seq: int):
@@ -597,3 +597,184 @@ def test_whole_run_series_follow_the_node_scope(tmp_path: Path) -> None:
     assert out.rollups.ctx.system_node["hostname"] == "node-a"
     # node-a alone: never blended with node-b's 90%
     assert max(out.series.cpu_run.max) == pytest.approx(10.0)
+
+
+# --- an unreported GPU is not a measurement of zero -----------------------
+def test_an_unreported_gpu_does_not_drag_the_average_down(tmp_path: Path):
+    """Four GPUs pinned at 100%, one of them not reporting utilisation.
+
+    The aggregates used to substitute 0.0 for a missing reading, so the
+    headline tile read 75% on a fully busy host and the across-GPU spread
+    read 100 points where there was none. The spread is what opens the
+    per-GPU rows, so the card announced an imbalance and then printed
+    "util 100 to 100%" directly beside it, because that text is built on
+    the rollup path which already excluded the device.
+
+    Ten lines below the defect, the same loop builds the per-GPU histories
+    correctly: it asks `_gpu_reported` and stores None for a gap. This
+    makes the aggregates ask the same question.
+    """
+    db = tmp_path / "null-util.db"
+
+    def rows(seq: int):
+        out = [
+            _gpu(i, 100.0, 66.0, temp=45.0, mem_used=6.3 * GB)
+            for i in range(4)
+        ]
+        out[1]["util"] = None  # reporting device, absent metric
+        return out
+
+    _write(db, rows)
+    roll = _payload(db).rollups
+
+    assert roll.gpu_util.p50 == 100.0
+    assert roll.gpu_delta.p95 == 0.0
+    assert roll.rows_over is False
+    # The count is the MEAN's denominator, not the number of devices that
+    # reported. gpu1 reported, so it is live, but its util is absent, so
+    # the mean covers three. A label saying "avg of 4 GPUs" over three
+    # readings is the same defect this test exists to prevent, and every
+    # assertion above passes with that label.
+    assert roll.util_gpu_count == 3
+
+
+def test_a_legacy_zero_placeholder_is_not_an_idle_gpu(tmp_path: Path):
+    """An older all-zero placeholder remains distinguishable from idle.
+
+    In traces recorded before sampling failures became NULL, the stored
+    values are real 0.0 values. Only ``reported`` separates such a row
+    from a genuinely idle device, and the payload must carry that fact to
+    the aggregates.
+    """
+    db = tmp_path / "nvml.db"
+
+    def rows(seq: int):
+        out = [
+            _gpu(i, 100.0, 66.0, temp=45.0, mem_used=6.3 * GB)
+            for i in range(4)
+        ]
+        out[1] = {
+            "gpu_idx": 1,
+            "util": 0.0,
+            "mem_used_bytes": 0.0,
+            "mem_total_bytes": 0.0,
+            "temperature_c": 0.0,
+            "power_usage_w": 0.0,
+            "power_limit_w": 0.0,
+        }
+        return out
+
+    _write(db, rows)
+    out = _payload(db)
+    roll = out.rollups
+
+    assert [g.gpu_idx for g in roll.gpus if not g.reported] == [1]
+    assert roll.gpu_util.p50 == 100.0
+    assert roll.gpu_delta.p95 == 0.0
+    assert roll.rows_over is False
+    # The tile must not claim to average devices it did not read.
+    assert roll.util_gpu_count == 3
+
+
+def test_all_reporting_leaves_the_count_at_the_device_count(tmp_path: Path):
+    db = tmp_path / "healthy.db"
+    _write(
+        db,
+        lambda seq: [
+            _gpu(i, 100.0, 66.0, temp=45.0, mem_used=6.3 * GB)
+            for i in range(4)
+        ],
+    )
+    roll = _payload(db).rollups
+    assert roll.util_gpu_count == 4
+    assert roll.gpu_util.p50 == 100.0
+
+
+def test_a_host_where_no_gpu_reports_has_no_average_to_show(tmp_path: Path):
+    """Trigger (b) at full scale, which had no coverage at all.
+
+    This fixture uses legacy all-zero placeholders for a host-wide failure.
+    The mean then covers nothing. A tile reading 0% would be a measurement
+    that no device made, so the payload states a count of zero and the card
+    reads n/a rather than inventing an idle host.
+    """
+    db = tmp_path / "all-failed.db"
+    zero = {
+        "gpu_idx": 0,
+        "util": 0.0,
+        "mem_used_bytes": 0.0,
+        "mem_total_bytes": 0.0,
+        "temperature_c": 0.0,
+        "power_usage_w": 0.0,
+        "power_limit_w": 0.0,
+    }
+    _write(db, lambda seq: [dict(zero, gpu_idx=i) for i in range(4)])
+    roll = _payload(db).rollups
+
+    assert roll.util_gpu_count == 0
+    assert roll.gpus_unreported is True
+    assert all(not g.reported for g in roll.gpus)
+
+
+def test_memory_pairs_stay_with_their_own_device(tmp_path: Path):
+    """Keep used memory paired with the reporting device's capacity."""
+    db = tmp_path / "mem-pairs.db"
+
+    def rows(seq: int):
+        return [
+            _gpu(0, 100.0, 66.0, temp=45.0, mem_used=6.0 * GB),
+            _gpu(
+                1,
+                100.0,
+                66.0,
+                temp=45.0,
+                mem_used=7.0 * GB,
+                mem_total=8.0 * GB,
+            ),
+        ]
+
+    _write(db, rows)
+    rollups = _payload(db).rollups
+    entry = next(row for row in rollups.gpus if row.gpu_idx == 1)
+    assert (entry.mem_used, entry.mem_total) == (7.0 * GB, 8.0 * GB)
+
+    mem = rollups.gpu_mem
+    assert mem is not None
+    assert mem.now == 7.0 * GB
+    assert mem.total == 8.0 * GB
+    assert mem.headroom == 1.0 * GB
+
+
+def test_a_gpu_that_goes_quiet_midway_only_leaves_its_own_ticks(tmp_path):
+    """Mixed reporting across ticks: every tick averages its own reporters.
+
+    Each of the ten earlier tests holds all ticks identical, so nothing
+    covered a device that reports for part of a window and not the rest.
+    """
+    db = tmp_path / "midway.db"
+    zero = {
+        "gpu_idx": 1,
+        "util": 0.0,
+        "mem_used_bytes": 0.0,
+        "mem_total_bytes": 0.0,
+        "temperature_c": 0.0,
+        "power_usage_w": 0.0,
+        "power_limit_w": 0.0,
+    }
+
+    def rows(seq: int):
+        out = [
+            _gpu(i, 100.0, 66.0, temp=45.0, mem_used=6.3 * GB)
+            for i in range(4)
+        ]
+        if seq >= TICKS // 2:
+            out[1] = dict(zero)
+        return out
+
+    _write(db, rows)
+    roll = _payload(db).rollups
+    # The mean never dips: the ticks gpu1 missed averaged the other three.
+    assert roll.gpu_util.p50 == 100.0
+    assert roll.gpu_delta.p95 == 0.0
+    # The newest tick is one of the ones it missed.
+    assert roll.util_gpu_count == 3

@@ -23,6 +23,7 @@ from traceml_ai.renderers.shared.run_series import (
     plan_run_series,
 )
 
+from .common import gpu_reported as _gpu_reported
 from .dashboard_models import (
     SystemDashboardPayload,
     SystemRollups,
@@ -50,19 +51,6 @@ def _positive(value: Any) -> Optional[float]:
     """A capacity-like value: None unless it is a real positive number."""
     v = _opt_float(value)
     return v if v is not None and v > 0.0 else None
-
-
-def _gpu_reported(row: Any) -> bool:
-    """False for the sampler's exception fallback (an all-zero GPU row).
-
-    A real GPU always has a memory capacity and a board power limit; the
-    sampler writes zeros for every field when NVML fails on a device, and
-    those zeros must not render as 0 W, 0 C or 0 GB.
-    """
-    return (
-        _positive(row["mem_total_bytes"]) is not None
-        or _positive(row["power_limit_w"]) is not None
-    )
 
 
 def _empty_dashboard_series() -> Dict[str, Any]:
@@ -278,6 +266,11 @@ class SystemDashboardComputer:
         gpu_mem_headroom_min = np.zeros(n, dtype=np.float64)
         temp_max = np.zeros(n, dtype=np.float64)
         gpu_mem_worst_total = 0.0
+        # Util readings in the newest tick. This distinguishes a measured
+        # zero from no current reading; it does not describe coverage of
+        # the window median shown by the tile. A device can report and
+        # still carry a NULL util column, so count readings, not devices.
+        util_gpu_count = 0
 
         # Per-GPU history keyed by gpu_idx, one slot per tick. A tick in
         # which a GPU has no row stays None: a gap in its trace, not a 0.
@@ -297,18 +290,48 @@ class SystemDashboardComputer:
             rows = gpu_rows_by_key.get(key, [])
 
             if rows:
-                utils = [float(g["util"] or 0.0) for g in rows]
-                mem_useds = [float(g["mem_used_bytes"] or 0.0) for g in rows]
-                mem_totals = [float(g["mem_total_bytes"] or 0.0) for g in rows]
-                temps = [float(g["temperature_c"] or 0.0) for g in rows]
+                # The aggregates describe the devices that REPORTED, for
+                # the same reason the per-GPU histories below store None
+                # rather than 0: an unread device is an absence, not a
+                # measurement of zero. Substituting 0.0 pulled the mean
+                # down and manufactured an across-GPU spread, which is
+                # what opens the per-GPU rows.
+                live = [g for g in rows if _gpu_reported(g)]
+                utils = [
+                    v
+                    for v in (_opt_float(g["util"]) for g in live)
+                    if v is not None
+                ]
+                mem_pairs = [
+                    (used, _opt_float(g["mem_total_bytes"]))
+                    for g, used in (
+                        (g, _opt_float(g["mem_used_bytes"])) for g in live
+                    )
+                    if used is not None
+                ]
+                temps = [
+                    v
+                    for v in (_opt_float(g["temperature_c"]) for g in live)
+                    if v is not None
+                ]
 
-                gpu_avg[i] = sum(utils) / float(len(utils))
-                gpu_delta[i] = max(utils) - min(utils)
-                gpu_mem_worst[i] = max(mem_useds)
-                temp_max[i] = max(temps)
                 if i == n - 1:
-                    worst = max(range(len(rows)), key=lambda j: mem_useds[j])
-                    gpu_mem_worst_total = mem_totals[worst]
+                    util_gpu_count = len(utils)
+                if utils:
+                    gpu_avg[i] = sum(utils) / float(len(utils))
+                    gpu_delta[i] = max(utils) - min(utils)
+                if mem_pairs:
+                    worst_used, worst_total = max(
+                        mem_pairs, key=lambda pair: pair[0]
+                    )
+                    gpu_mem_worst[i] = worst_used
+                    if i == n - 1:
+                        gpu_mem_worst_total = worst_total or 0.0
+                if temps:
+                    temp_max[i] = max(temps)
+                if i == n - 1:
+                    # Every row, reported or not: the per-GPU rows keep a
+                    # slot for a silent device and mark it themselves.
                     latest_rows = {int(g["gpu_idx"]): g for g in rows}
 
                 powers = []
@@ -330,10 +353,12 @@ class SystemDashboardComputer:
                         power_limit = limit
                 power_max_hist[i] = max(powers) if powers else None
 
+                # Headroom needs both halves from the same device, and a
+                # device that did not report has neither.
                 headrooms = [
-                    max(mt - mu, 0.0)
-                    for mu, mt in zip(mem_useds, mem_totals)
-                    if mt > 0.0
+                    max(total - used, 0.0)
+                    for used, total in mem_pairs
+                    if total is not None and total > 0.0
                 ]
                 gpu_mem_headroom_min[i] = min(headrooms) if headrooms else 0.0
             else:
@@ -471,6 +496,7 @@ class SystemDashboardComputer:
             ),
         }
 
+        rollups["util_gpu_count"] = util_gpu_count
         gpu_rows = rollups["gpus"]
         rollups["odd_gpus"] = _odd_gpus(gpu_rows)
         rollups["util_range"] = _util_range(gpu_rows)
@@ -658,7 +684,7 @@ class SystemDashboardComputer:
             g = latest_rows.get(idx)
             reported = g is not None and _gpu_reported(g)
             if not reported:
-                g = None  # the sampler's all-zero fallback: unreported
+                g = None  # Normalize unavailable and legacy-zero rows.
             out.append(
                 {
                     "gpu_idx": idx,

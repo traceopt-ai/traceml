@@ -173,14 +173,21 @@ class SystemRollups:
     # Whether the spread has earned opening the per-GPU rows. A threshold
     # against a measurement is a severity call, so it is decided here.
     rows_over: bool = False
+    # Util readings in the newest tick. This gates the tile's unavailable
+    # state; it is not presented as coverage for the window median. A
+    # device with a NULL util column is absent from this number even when
+    # its other metrics reported. None preserves payload compatibility;
+    # zero explicitly means no current util reading.
+    util_gpu_count: Optional[int] = None
 
     @property
     def gpus_unreported(self) -> bool:
-        """Whether every GPU present sent nothing but the zero fallback.
+        """Whether every GPU present is represented by an unavailable row.
 
-        The sampler emits an all-zero row when it cannot read a device,
-        which is absence rather than a GPU sitting at zero, and the card
-        must not draw it as a measurement.
+        Current sampling failures contain unavailable values; older traces
+        may contain all-zero placeholders. Both represent absence rather
+        than a GPU sitting at zero, so the card must not draw either as a
+        measurement.
 
         Reads the computer's ``reported`` flag rather than re-deriving the
         answer. The card used to test whether ``mem_total`` and ``power``
@@ -271,6 +278,11 @@ class SystemRollups:
             odd_gpus=tuple(raw.get("odd_gpus") or ()),
             util_range=(tuple(span) if span else None),
             rows_over=bool(raw.get("rows_over")),
+            util_gpu_count=(
+                int(raw["util_gpu_count"])
+                if raw.get("util_gpu_count") is not None
+                else None
+            ),
         )
 
 

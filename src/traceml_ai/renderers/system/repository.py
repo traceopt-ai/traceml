@@ -27,10 +27,10 @@ from traceml_ai.renderers.shared.run_series import RunSeriesPlan
 # real state, not a defensive check: every time-series read requires it.
 _HAS_CLOCK_SQL = "sample_ts_s IS NOT NULL"
 
-# An all-zero capacity row is the sampler's NVML failure fallback, not a
-# real 0 W observation. One predicate, applied by every query that reads
-# power, so the span a chart covers and the values it draws agree about
-# which rows exist.
+# Current sampling failures contain NULL metrics; older traces may use an
+# all-zero placeholder. Neither is a real 0 W observation. Apply one
+# predicate to every power query so chart spans and values agree about
+# which rows contain measurements.
 _GPU_REPORTED_SQL = """
     power_usage_w IS NOT NULL
     AND (

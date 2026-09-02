@@ -86,12 +86,9 @@ class SystemRenderer(BaseRenderer):
                 "[bold green]GPU[/bold green]", "[red]Not available[/red]"
             )
         else:
-            util_total = data.get("gpu_util_total")
-            avg = (
-                util_total / max(data["gpu_count"], 1)
-                if util_total is not None
-                else None
-            )
+            # Metric meaning belongs to SystemCLIComputer. This layer only
+            # turns its optional average into terminal text.
+            avg = data.get("gpu_util_avg")
             util_str = fmt_percent(avg) if avg is not None else "N/A"
 
             grid.add_row(
