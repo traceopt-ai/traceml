@@ -41,7 +41,12 @@ def gb_si(value: Any) -> Optional[float]:
         return None
     try:
         return float(value) / 1e9
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError is in the list because the helper this replaced
+        # caught everything: an integer too large for a float returned
+        # None rather than crashing the card. SQLite cannot produce one
+        # (INTEGER is 64-bit), but the equivalence should not depend on
+        # that.
         return None
 
 

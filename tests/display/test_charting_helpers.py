@@ -24,7 +24,6 @@ pytest.importorskip("nicegui")
 
 from traceml_ai.aggregator.display_drivers.nicegui_sections import (  # noqa: E402
     charting,
-    theme,
 )
 
 
@@ -114,10 +113,51 @@ def test_reference_lines_carry_a_label_a_colour_and_a_position():
 
 
 def test_no_reference_lines_is_an_empty_set_not_a_missing_key():
-    assert charting.mark_lines([])["data"] == []
+    """The helper's own empty contract.
+
+    Note what this does NOT cover: the System card never calls it with an
+    empty list, it short-circuits to a bare ``{"data": []}`` literal that
+    omits the silent/symbol/animation keys this returns. Two shapes for
+    one empty case, improvised at the call site. Left alone here because
+    converging them would change a rendered option dict, which this
+    change is not allowed to do.
+    """
+    out = charting.mark_lines([])
+    assert out["data"] == []
+    assert out["silent"] is True
+    assert out["symbol"] == "none"
 
 
-def test_a_tile_value_and_unit_render_together():
-    assert "42" in theme.kval("42", "%")
-    assert "%" in theme.kval("42", "%")
-    assert "n/a" in theme.kval("n/a")
+def test_the_unit_reaches_both_the_axis_and_the_tooltip():
+    """The unit is threaded into two formatters, and neither is obvious.
+
+    A move that drops either leaves a chart whose numbers have no unit,
+    which reads as a smaller change than it is.
+    """
+    out = charting.span_line_options("#2563eb", " W")
+    assert " W" in out["yAxis"]["axisLabel"][":formatter"]
+    assert " W" in str(out["tooltip"])
+
+    multi = charting.multi_line_options("%")
+    assert "%" in multi["yAxis"]["axisLabel"][":formatter"]
+
+
+def test_a_reference_line_carries_its_colour_and_position():
+    """Beyond the value and the label, which were already pinned."""
+    out = charting.mark_lines(
+        [(70.0, "70 W limit", "#dc2626", "insideEndTop")]
+    )
+    entry = out["data"][0]
+    assert entry["lineStyle"]["color"] == "#dc2626"
+    assert entry["label"]["position"] == "insideEndTop"
+
+
+def test_two_reference_lines_both_survive():
+    """Only the single-entry case was covered."""
+    out = charting.mark_lines(
+        [
+            (70.0, "limit", "#dc2626", "insideEndTop"),
+            (33.0, "lowest seen", "#9aa3af", "insideStartBottom"),
+        ]
+    )
+    assert [e["yAxis"] for e in out["data"]] == [70.0, 33.0]
