@@ -650,16 +650,16 @@ class SystemDashboardComputer:
         stats: Optional[RunStats],
         host: Optional[str],
     ) -> List[Dict[str, Any]]:
-        """Whole-run per-GPU power, bucketed at the rolling window's width.
+        """Whole-run per-GPU power, bucketed to fit the point budget.
 
-        This path buckets rather than rolls, so only the window duration
-        carries over from the shared policy; there is no stride or point
-        budget to apply, and the bucket count is therefore still unbounded.
-        See the follow-up issue.
+        This path buckets rather than rolls, so the shared plan's stride
+        does not apply; the policy answers the bucket question directly
+        instead. Below the budget the bucket is the rolling window, above
+        it the bucket widens so the count stays bounded.
         """
         if stats is None:
             return []
-        width = self._run_policy.window_for(stats.span_s)
+        width = self._run_policy.bucket_width_for(stats.span_s)
         rows = self._db.fetch_gpu_power_run(
             conn,
             width_s=width,

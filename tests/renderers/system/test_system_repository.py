@@ -64,7 +64,7 @@ def _power_run(repo, conn, hostname=None):
     stats = repo.gpu_power_run_stats(conn, hostname=hostname)
     if stats is None:
         return None, []
-    width = DEFAULT_RUN_SERIES_POLICY.window_for(stats.span_s)
+    width = DEFAULT_RUN_SERIES_POLICY.bucket_width_for(stats.span_s)
     rows = repo.fetch_gpu_power_run(
         conn,
         width_s=width,
@@ -274,22 +274,50 @@ def test_power_history_buckets_per_gpu(system_db):
     assert stats.span_s == pytest.approx(2.0 * 599)
 
 
-def test_power_history_has_no_point_cap(system_db):
-    """Pinned as a known gap, deferred to its own issue.
+def test_power_history_is_capped_on_a_long_run(system_db):
+    """A long run widens its buckets instead of growing its point count.
 
-    The CPU chart budgets 120 points. This path buckets at one bucket per
-    `choose_window_s`, which saturates at 300 s, so bucket count grows
-    without bound: about 288 per GPU on a 24 hour run.
+    This used to be pinned at 288 buckets per GPU for 24 hours, because
+    the width saturated at the 300 s window ceiling and the count was
+    just `span / 300`. It rose linearly forever: 576 at 48 hours, 2016 at
+    seven days, and each entry carries four parallel arrays.
     """
     path = system_db(
         ticks=720, cadence_s=120.0, gpus=lambda seq: [gpu(0)]
     )  # a 24 hour run
     repo = _repo(path)
     with repo.connect() as conn:
-        _stats, out = _power_run(repo, conn)
-    # 86400 s of run at the 300 s window cap is 288 buckets, against the
-    # 120 the CPU chart budgets for. On an 8-GPU host that is ~2300 points.
-    assert len(out[0]["t"]) == 288
+        stats, out = _power_run(repo, conn)
+
+    budget = DEFAULT_RUN_SERIES_POLICY.max_points
+    # At most one bucket over the budget: the buckets are half-open, so
+    # the run's final instant opens one more. That is a bounded overshoot
+    # of exactly one, not the unbounded growth this replaces.
+    assert len(out[0]["t"]) <= budget + 1
+    assert len(out[0]["t"]) == 121
+    # The width did the work, and it is wider than the window ceiling.
+    assert stats is not None
+    width = DEFAULT_RUN_SERIES_POLICY.bucket_width_for(stats.span_s)
+    assert width > DEFAULT_RUN_SERIES_POLICY.roll_max_s
+
+
+def test_a_short_run_keeps_its_window_sized_buckets(system_db):
+    """The cap is a ceiling, not a reshaping. Below it nothing moves.
+
+    A two hour run's buckets are still the rolling window, so the chart
+    keeps the resolution it had and the "rolling N min" label a reader
+    sees does not change.
+    """
+    path = system_db(ticks=60, cadence_s=120.0, gpus=lambda seq: [gpu(0)])
+    repo = _repo(path)
+    with repo.connect() as conn:
+        stats, out = _power_run(repo, conn)
+
+    assert stats is not None
+    assert DEFAULT_RUN_SERIES_POLICY.bucket_width_for(
+        stats.span_s
+    ) == DEFAULT_RUN_SERIES_POLICY.window_for(stats.span_s)
+    assert len(out[0]["t"]) < DEFAULT_RUN_SERIES_POLICY.max_points
 
 
 def test_a_legacy_zero_placeholder_is_not_a_power_reading(system_db):
@@ -443,3 +471,33 @@ def test_one_unclocked_row_does_not_erase_the_whole_run_chart(system_db):
     assert len(out.series.cpu_run.t) > 2
     # And no drawn timestamp is the empty string the 1970 value formatted to.
     assert all(x for x in out.series.x_time)
+
+
+def test_a_dip_survives_the_cap_on_a_long_run(system_db):
+    """Why the buckets widen instead of the series being strided.
+
+    The chart is labelled "average and lowest". Widening keeps both words
+    true, because every point remains the real mean and the real floor of
+    one contiguous slice, so a momentary dip is still the minimum of the
+    slice that contains it. A strided series would sample every Nth
+    bucket and could not show a dip it never plotted.
+
+    One tick out of 720 drops to 11 W. It has to reach the floor line.
+    """
+
+    def rows(seq):
+        return [gpu(0, power=11.0 if seq == 431 else 66.0)]
+
+    path = system_db(ticks=720, cadence_s=120.0, gpus=rows)
+    repo = _repo(path)
+    with repo.connect() as conn:
+        _stats, out = _power_run(repo, conn)
+
+    assert min(out[0]["min"]) == 11.0
+    # One slice's floor, not the whole series collapsing to it: every
+    # other bucket still reports the steady 66 W.
+    assert sum(1 for v in out[0]["min"] if v == 11.0) == 1
+    assert set(out[0]["min"]) == {11.0, 66.0}
+    # And the dip is averaged INTO its slice rather than becoming it,
+    # which is the stated cost of widening.
+    assert 11.0 < min(out[0]["avg"]) < 66.0
