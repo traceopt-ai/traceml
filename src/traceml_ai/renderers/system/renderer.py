@@ -90,10 +90,14 @@ class SystemRenderer(BaseRenderer):
             # Divide by the devices the sum actually covers. Falling back
             # to gpu_count averages a three-device sum over four when one
             # GPU failed to report.
-            devices = data.get("gpu_util_devices") or data.get("gpu_count")
+            devices = data.get("gpu_util_devices")
+            if devices is None:
+                # Compatibility with snapshots produced before the
+                # denominator became part of the CLI payload.
+                devices = data.get("gpu_count")
             avg = (
-                util_total / max(int(devices or 0), 1)
-                if util_total is not None
+                util_total / int(devices)
+                if util_total is not None and int(devices or 0) > 0
                 else None
             )
             util_str = fmt_percent(avg) if avg is not None else "N/A"

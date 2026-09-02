@@ -86,6 +86,7 @@ class SystemCLIComputer:
             seq=latest["seq"],
         )
 
+        reporting = 0
         if gpu_rows:
             util_total = 0.0
             mem_used_total = 0.0
@@ -99,8 +100,6 @@ class SystemCLIComputer:
             util_max: Optional[float] = None
             headroom_min: Optional[float] = None
             headroom_min_idx: Optional[int] = None
-            reporting = 0
-
             for idx, gpu in enumerate(gpu_rows):
                 if not gpu_reported(gpu):
                     # The sampler's NVML-failure row. Its zeros are the
@@ -169,8 +168,11 @@ class SystemCLIComputer:
             ram_total=float(latest["ram_total_bytes"] or 0.0),
             gpu_available=bool(latest["gpu_available"] or False),
             gpu_count=int(latest["gpu_count"] or 0),
-            gpu_util_total=util_total,
-            gpu_util_devices=reporting or None,
+            # An empty sum is not a measured 0% utilisation. Keep the
+            # count at zero and the value absent so presentation can say
+            # N/A without reinterpreting telemetry.
+            gpu_util_total=util_total if reporting else None,
+            gpu_util_devices=reporting,
             gpu_util_skew=gpu_util_skew,
             gpu_mem_used=mem_used_total,
             gpu_mem_total=mem_total_total,

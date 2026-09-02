@@ -66,8 +66,9 @@ class SystemCLISnapshot:
     gpu_power_limit: Optional[float]
 
     # Devices the util total was summed over, which is NOT gpu_count when
-    # a device failed to report. Dividing a three-device sum by four is
-    # how a healthy four-GPU host comes to read 75%.
+    # a device failed to report. Zero means the current sample had no util
+    # readings; None preserves compatibility with payloads that predate
+    # this field.
     gpu_util_devices: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Any]:
