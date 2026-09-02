@@ -29,6 +29,7 @@ _CREATE_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
 DEFAULT_TCP_READY_TIMEOUT_SEC = 15.0
 DEFAULT_SHUTDOWN_TIMEOUT_SEC = 5.0
 DEFAULT_STDERR_TAIL_BYTES = 64 * 1024
+# Read throughput and retained-tail size are independent policies.
 _OUTPUT_READ_BYTES = 64 * 1024
 _OUTPUT_STOP_GRACE_SEC = 0.1
 INTERRUPTED_EXIT_CODE = 130
@@ -80,6 +81,7 @@ class ProcessOutputDrainer:
     One worker owns each supplied stream and its optional file. File failures
     switch that stream to its fallback without stopping the drain. ``finish``
     returns one warning value instead of raising into training control flow.
+    The drainer closes supplied streams; callers must not read them afterward.
     """
 
     def __init__(

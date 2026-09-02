@@ -139,6 +139,48 @@ def test_sink_failure_falls_back_and_keeps_draining(
     assert source.closed
 
 
+def test_sink_open_failure_falls_back_and_is_reported(
+    monkeypatch, tmp_path
+) -> None:
+    source = _ChunkStream(b"all output")
+    fallback = io.BytesIO()
+
+    def fail_open(*_args, **_kwargs):
+        raise OSError("read-only directory")
+
+    monkeypatch.setattr(Path, "open", fail_open)
+    result = ProcessOutputDrainer(
+        stdout=source,
+        stdout_path=tmp_path / "training.stdout.log",
+        stdout_fallback=fallback,
+    ).finish()
+
+    assert result.stdout_path is None
+    assert fallback.getvalue() == b"all output"
+    assert result.warning is not None
+    assert result.warning.count("stdout output file could not be opened") == 1
+
+
+def test_mirror_failure_does_not_invalidate_saved_output(tmp_path) -> None:
+    source = _ChunkStream(b"one", b"two")
+    mirror = _FailingSink()
+    fallback = io.BytesIO()
+    output_path = tmp_path / "training.stdout.log"
+
+    result = ProcessOutputDrainer(
+        stdout=source,
+        stdout_path=output_path,
+        stdout_mirror=mirror,
+        stdout_fallback=fallback,
+    ).finish()
+
+    assert result.stdout_path == output_path.resolve()
+    assert output_path.read_bytes() == b"onetwo"
+    assert fallback.getvalue() == b""
+    assert result.warning is not None
+    assert result.warning.count("stdout output mirror failed") == 1
+
+
 def test_finish_is_bounded_and_idempotent(tmp_path) -> None:
     source = _BlockingStream()
     output = ProcessOutputDrainer(
@@ -155,7 +197,14 @@ def test_finish_is_bounded_and_idempotent(tmp_path) -> None:
     assert result.warning is not None
     assert "output drain timed out for stdout" in result.warning
     assert output.finish() is result
-    assert not any(
-        thread.name == "traceml-process-stdout"
-        for thread in threading.enumerate()
-    )
+
+    def worker_is_alive() -> bool:
+        return any(
+            thread.name == "traceml-process-stdout"
+            for thread in threading.enumerate()
+        )
+
+    deadline = time.monotonic() + 2.0
+    while worker_is_alive() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert not worker_is_alive()
