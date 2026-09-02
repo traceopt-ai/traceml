@@ -229,3 +229,31 @@ def test_a_genuine_zero_reading_is_reported_as_zero(system_db):
 
     text = _render_text(path)
     assert "N/A" not in text
+
+
+def test_a_database_with_no_samples_is_not_an_idle_host(tmp_path):
+    """Before the first sample lands there is nothing to report.
+
+    The terminal renderer is registered unconditionally, so this payload
+    is what the card draws while a run is starting, and again after a
+    read failure once the stale window lapses. It hardcoded zeros, so
+    the card opened every run by reporting a host at 0% CPU.
+    """
+    import sqlite3 as _sqlite3
+
+    from tests.sqlite_fixtures import init_summary_schema
+
+    path = str(tmp_path / "empty.db")
+    conn = _sqlite3.connect(path)
+    try:
+        init_summary_schema(conn)
+        conn.commit()
+    finally:
+        conn.close()
+
+    out = SystemCLIComputer(path).compute()
+
+    assert out["cpu"] is None
+    assert out["ram_used"] is None
+    assert out["ram_total"] is None
+    assert "CPU 0.0%" not in _render_text(path)

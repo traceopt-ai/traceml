@@ -237,10 +237,17 @@ class SystemCLIComputer:
         return self._empty_snapshot()
 
     def _empty_snapshot(self) -> Dict[str, Any]:
+        """The payload when there is nothing to report yet.
+
+        Every field is absent rather than zero. This is what the card
+        draws before the first sample lands and after a read failure
+        outlives the stale window, and the host is not idle in either
+        case: nothing has been measured at all.
+        """
         return SystemCLISnapshot(
-            cpu=0.0,
-            ram_used=0.0,
-            ram_total=0.0,
+            cpu=None,
+            ram_used=None,
+            ram_total=None,
             gpu_available=False,
             gpu_count=0,
             gpu_util_devices=None,
