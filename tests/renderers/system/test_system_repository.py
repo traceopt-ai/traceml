@@ -431,7 +431,12 @@ def test_one_unclocked_row_does_not_erase_the_whole_run_chart(system_db):
         SystemDashboardComputer,
     )
 
-    path = system_db(ticks=200, cadence_s=2.0, null_ts_before=1)
+    path = system_db(ticks=200, cadence_s=2.0)
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "UPDATE system_samples SET sample_ts_s = NULL "
+            "WHERE seq = (SELECT MAX(seq) FROM system_samples)"
+        )
     out = SystemDashboardComputer(path).compute(window_n=100)
 
     assert out.series.cpu_run_mode == "retained"

@@ -101,11 +101,10 @@ def system_db(tmp_path: Path) -> Callable[..., str]:
                         gpu_samples=list(gpus(seq)) if gpus else (),
                     )
             if null_ts_before:
-                # `sample_ts_s` is nullable in the writer's schema, so a row
-                # can carry telemetry and no clock. Real cause: a sampler
-                # that reports before its first clock read.
-                # Both tables carry their own clock, and a sample that
-                # reported without one has children in the same state.
+                # The best-effort projection stores malformed or legacy
+                # telemetry without a usable `ts` as NULL. Both tables carry
+                # that projected clock, so a parent sample without one has
+                # GPU children in the same state.
                 for table in ("system_samples", "system_gpu_samples"):
                     conn.execute(
                         f"UPDATE {table} SET sample_ts_s = NULL "
