@@ -684,7 +684,7 @@ class SystemDashboardComputer:
             g = latest_rows.get(idx)
             reported = g is not None and _gpu_reported(g)
             if not reported:
-                g = None  # the sampler's all-zero fallback: unreported
+                g = None  # Normalize unavailable and legacy-zero rows.
             out.append(
                 {
                     "gpu_idx": idx,

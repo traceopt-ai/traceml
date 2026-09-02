@@ -292,8 +292,8 @@ def test_power_history_has_no_point_cap(system_db):
     assert len(out[0]["t"]) == 288
 
 
-def test_the_sampler_zero_fallback_is_not_a_power_reading(system_db):
-    """An all-zero capacity row is NVML failing, not a 0 W observation."""
+def test_a_legacy_zero_placeholder_is_not_a_power_reading(system_db):
+    """An all-zero placeholder is unreported, not a 0 W observation."""
 
     def rows(seq):
         if seq >= 500:

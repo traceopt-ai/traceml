@@ -182,11 +182,12 @@ class SystemRollups:
 
     @property
     def gpus_unreported(self) -> bool:
-        """Whether every GPU present sent nothing but the zero fallback.
+        """Whether every GPU present is represented by an unavailable row.
 
-        The sampler emits an all-zero row when it cannot read a device,
-        which is absence rather than a GPU sitting at zero, and the card
-        must not draw it as a measurement.
+        Current sampling failures contain unavailable values; older traces
+        may contain all-zero placeholders. Both represent absence rather
+        than a GPU sitting at zero, so the card must not draw either as a
+        measurement.
 
         Reads the computer's ``reported`` flag rather than re-deriving the
         answer. The card used to test whether ``mem_total`` and ``power``

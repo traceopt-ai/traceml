@@ -557,8 +557,21 @@ def test_section_builds_and_updates_without_a_browser() -> None:
     }
     assert panel["power_label"].text == "gpu power · per GPU · last 3 min"
 
-    # Every GPU unreported on the newest tick (the sampler's all-zero
-    # fallback): level tiles say so instead of printing 0 °C / 0.0 GB.
+    # The GPUs may still report memory and temperature while no current
+    # utilisation reading is available. The window median must not turn
+    # that missing latest reading into a measured 0%.
+    no_util = dict(later)
+    no_util["rollups"] = dict(later["rollups"])
+    no_util["rollups"]["util_gpu_count"] = 0
+    no_util["rollups"]["gpus"] = [
+        dict(row, util_now=None) for row in later["rollups"]["gpus"]
+    ]
+    update_system_section(panel, as_payload(no_util))
+    assert panel["tiles"]["util"].content == "n/a"
+    assert panel["tiles"]["mem"].content != "n/a"
+
+    # Every GPU unreported on the newest tick (represented here by legacy
+    # all-zero rows): level tiles say so instead of printing 0 °C / 0.0 GB.
     zeroed = dict(later)
     zeroed["rollups"] = dict(later["rollups"])
     zeroed["rollups"]["gpus"] = [
@@ -576,6 +589,8 @@ def test_section_builds_and_updates_without_a_browser() -> None:
         for i in range(2)
     ]
     update_system_section(panel, as_payload(zeroed))
+    assert panel["tiles"]["util"].content == "n/a"
+    assert panel["subs"]["util"].text == "GPU sample unreported"
     assert panel["tiles"]["mem"].content == "n/a"
     assert panel["subs"]["temp"].text == "GPU sample unreported"
 

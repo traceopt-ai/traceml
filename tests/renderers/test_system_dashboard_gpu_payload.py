@@ -48,13 +48,14 @@ def _gpu(
     *,
     temp: float,
     mem_used: float,
+    mem_total: float = 16.1 * GB,
     limit: Optional[float] = LIMIT,
 ) -> Dict[str, Any]:
     return {
         "gpu_idx": idx,
         "util": util,
         "mem_used_bytes": mem_used,
-        "mem_total_bytes": 16.1 * GB,
+        "mem_total_bytes": mem_total,
         "temperature_c": temp,
         "power_usage_w": power,
         "power_limit_w": limit,
@@ -304,9 +305,8 @@ def test_null_util_and_temp_stay_none_not_zero(tmp_path: Path) -> None:
     assert g1.util_p50 == 100.0  # the median ignores the unreported ticks
 
 
-def test_sampler_zero_fallback_tick_is_unreported(tmp_path: Path) -> None:
-    """The sampler writes all-zero GPU rows when NVML fails on a device;
-    those zeros are not a 0 W limit, 0 degrees or 0 GB."""
+def test_legacy_zero_placeholder_tick_is_unreported(tmp_path: Path) -> None:
+    """Older all-zero placeholders are not 0 W, 0 degrees, or 0 GB."""
     db = tmp_path / "z.db"
 
     def rows(seq: int):
@@ -638,13 +638,13 @@ def test_an_unreported_gpu_does_not_drag_the_average_down(tmp_path: Path):
     assert roll.util_gpu_count == 3
 
 
-def test_the_nvml_zero_fallback_is_not_an_idle_gpu(tmp_path: Path):
-    """The second way in, and the one the payload already knows about.
+def test_a_legacy_zero_placeholder_is_not_an_idle_gpu(tmp_path: Path):
+    """An older all-zero placeholder remains distinguishable from idle.
 
-    When NVML fails the sampler writes an all-zero row, so the value is a
-    real 0.0 and no `or 0.0` coercion is involved. Only `reported`
-    separates it from a genuinely idle device, and the payload carries
-    that flag correctly; the aggregates simply did not consult it.
+    In traces recorded before sampling failures became NULL, the stored
+    values are real 0.0 values. Only ``reported`` separates such a row
+    from a genuinely idle device, and the payload must carry that fact to
+    the aggregates.
     """
     db = tmp_path / "nvml.db"
 
@@ -693,10 +693,10 @@ def test_all_reporting_leaves_the_count_at_the_device_count(tmp_path: Path):
 def test_a_host_where_no_gpu_reports_has_no_average_to_show(tmp_path: Path):
     """Trigger (b) at full scale, which had no coverage at all.
 
-    NVML fails host-wide and every row is the all-zero fallback. The mean
-    then covers nothing. A tile reading 0% would be a measurement that no
-    device made, so the payload states a count of zero and the card reads
-    n/a rather than inventing an idle host.
+    This fixture uses legacy all-zero placeholders for a host-wide failure.
+    The mean then covers nothing. A tile reading 0% would be a measurement
+    that no device made, so the payload states a count of zero and the card
+    reads n/a rather than inventing an idle host.
     """
     db = tmp_path / "all-failed.db"
     zero = {
@@ -717,29 +717,32 @@ def test_a_host_where_no_gpu_reports_has_no_average_to_show(tmp_path: Path):
 
 
 def test_memory_pairs_stay_with_their_own_device(tmp_path: Path):
-    """The rewired headroom path, which nothing asserted.
-
-    `gpu_mem_worst` and its total must come from ONE device, and headroom
-    needs both halves of that device. A device holding the most memory on
-    a smaller card is the case that separates a per-device pairing from a
-    cross-device one.
-    """
+    """Keep used memory paired with the reporting device's capacity."""
     db = tmp_path / "mem-pairs.db"
 
     def rows(seq: int):
         return [
             _gpu(0, 100.0, 66.0, temp=45.0, mem_used=6.0 * GB),
-            # more used, smaller card: worst on used, and its OWN total
-            _gpu(1, 100.0, 66.0, temp=45.0, mem_used=7.0 * GB),
+            _gpu(
+                1,
+                100.0,
+                66.0,
+                temp=45.0,
+                mem_used=7.0 * GB,
+                mem_total=8.0 * GB,
+            ),
         ]
 
     _write(db, rows)
-    for entry in [r for r in _payload(db).rollups.gpus if r.gpu_idx == 1]:
-        assert entry.mem_used == 7.0 * GB
-    mem = _payload(db).rollups.gpu_mem
+    rollups = _payload(db).rollups
+    entry = next(row for row in rollups.gpus if row.gpu_idx == 1)
+    assert (entry.mem_used, entry.mem_total) == (7.0 * GB, 8.0 * GB)
+
+    mem = rollups.gpu_mem
     assert mem is not None
     assert mem.now == 7.0 * GB
-    assert mem.total == 16.1 * GB
+    assert mem.total == 8.0 * GB
+    assert mem.headroom == 1.0 * GB
 
 
 def test_a_gpu_that_goes_quiet_midway_only_leaves_its_own_ticks(tmp_path):

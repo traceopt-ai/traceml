@@ -4,12 +4,12 @@
 # you may not use this file except in compliance with the License.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The CLI snapshot contract for system telemetry.
+"""Shared contracts and reporting helpers for System telemetry renderers.
 
-The rolling-window ladder and the point budget used to live here as a
-second copy of the numbers `renderers/shared/run_series.py` already owns.
-They were deleted in part 5b; `RunSeriesPolicy.window_for` is the one
-definition now, and the System repository reads a plan built from it.
+``SystemCLISnapshot`` defines the terminal payload. Reporting helpers are
+shared by the dashboard and terminal computations so both surfaces interpret
+missing GPU rows consistently. Rolling-series policy remains in
+``renderers.shared.run_series``.
 """
 
 from dataclasses import dataclass
@@ -26,11 +26,11 @@ def positive(value: Any) -> Optional[float]:
 
 
 def gpu_reported(row: Any) -> bool:
-    """False for the sampler's exception fallback (an all-zero GPU row).
+    """Whether a GPU row contains a positive hardware-capacity signal.
 
-    A real GPU always has a memory capacity and a board power limit; the
-    sampler writes zeros for every field when NVML fails on a device, and
-    those zeros must not be read as 0 W, 0 C or 0 GB.
+    The current sampler writes ``None`` when NVML cannot read a device.
+    Older traces may contain an all-zero placeholder for the same state;
+    neither form is a measurement of 0 W, 0 C, or 0 GB.
 
     Lives here rather than in one computer because BOTH System surfaces
     aggregate the same rows: the dashboard and the terminal card. When it
