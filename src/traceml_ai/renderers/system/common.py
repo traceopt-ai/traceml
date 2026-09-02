@@ -32,9 +32,13 @@ def reading(value: Any) -> Optional[float]:
     difference from ``positive`` is that 0.0 is a real reading here: a
     device can genuinely sit at 0% or 0 W, and only absence is None.
 
-    Lives here for the same reason ``gpu_reported`` does: both System
-    surfaces read the same rows, and a coercion applied on one of them is
-    half an answer.
+    Lives here for the same reason ``gpu_reported`` does: the dashboard
+    computer and the terminal computer read the same rows, and a
+    coercion applied on one of them is half an answer.
+    ``SystemCLIClusterBuilder`` still carries its own equivalent, which
+    is already correct and is left alone rather than folded in here,
+    because its ``except`` is broader and proving that equivalence is
+    not free.
     """
     if value is None:
         return None
