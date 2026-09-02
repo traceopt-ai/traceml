@@ -133,7 +133,12 @@ def test_an_unread_host_is_not_an_idle_host(system_db):
     assert out["ram_used"] is None
     # The capacity is a separate reading and this row still carries it.
     assert out["ram_total"] == 16.0 * GB
-    assert "N/A" in _render_text(path)
+
+    text = _render_text(path)
+    assert "CPU N/A" in text
+    assert "RAM N/A" in text
+    # The exact fabrication being removed: the card read 0.0% for both.
+    assert "0.0%" not in text
 
 
 def test_live_devices_with_unread_metrics_abstain(system_db):

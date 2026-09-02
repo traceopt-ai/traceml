@@ -999,6 +999,9 @@ def test_a_window_with_no_host_readings_abstains(tmp_path: Path) -> None:
     # Headroom is derived from a level nothing measured, so it has no value
     # either. A zero here would read as a full machine.
     assert roll.ram.headroom is None
+    # The capacity is a different reading and these rows still carry it.
+    # Abstaining here too would be over-reach, not a fix.
+    assert roll.ram.total == 200.0 * GB
 
 
 def _live_devices_no_metrics(path: Path) -> None:
