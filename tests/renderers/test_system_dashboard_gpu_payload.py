@@ -899,3 +899,60 @@ def test_a_missing_cpu_reading_does_not_halve_the_cpu_tile(tmp_path: Path):
     assert out.rollups.cpu.p95 == 80.0
     # And the chart shows the gaps rather than drawing them at zero.
     assert list(out.series.cpu).count(None) == 10
+
+
+def test_memory_and_its_capacity_come_from_the_same_tick(tmp_path: Path):
+    """A level and the capacity it is measured against must be one moment.
+
+    Skipping backwards past a blind tick for the value while leaving the
+    capacity at the newest tick pairs two different moments, and when the
+    newest tick is blind the capacity is zero, so the tile silently drops
+    its denominator and renders a bare number.
+    """
+    db = tmp_path / "paired.db"
+    zero = {
+        "gpu_idx": 0,
+        "util": 0.0,
+        "mem_used_bytes": 0.0,
+        "mem_total_bytes": 0.0,
+        "temperature_c": 0.0,
+        "power_usage_w": 0.0,
+        "power_limit_w": 0.0,
+    }
+
+    def rows(seq: int):
+        if seq == TICKS - 1:  # the NEWEST tick is blind
+            return [dict(zero, gpu_idx=i) for i in range(4)]
+        return [
+            _gpu(i, 100.0, 66.0, temp=45.0, mem_used=6.3 * GB)
+            for i in range(4)
+        ]
+
+    _write(db, rows)
+    mem = _payload(db).rollups.gpu_mem
+    assert mem is not None
+    assert mem.now == 6.3 * GB
+    assert mem.total == 16.1 * GB
+
+
+def test_a_tick_with_no_gpu_rows_at_all_is_also_a_gap(tmp_path: Path):
+    """The branch the all-zero fixtures do not reach.
+
+    A row that is present and unreadable takes the reported-ness filter;
+    a tick with NO rows takes a different branch entirely. Both must leave
+    the slot absent, and only the first was covered.
+    """
+    db = tmp_path / "norows.db"
+
+    def rows(seq: int):
+        if seq == TICKS // 2:
+            return ()
+        return [
+            _gpu(i, 100.0, 66.0, temp=45.0, mem_used=6.3 * GB)
+            for i in range(4)
+        ]
+
+    _write(db, rows)
+    out = _payload(db)
+    assert list(out.series.gpu_avg)[TICKS // 2] is None
+    assert out.rollups.gpu_util.p50 == 100.0

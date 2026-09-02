@@ -98,12 +98,25 @@ def _typed(
 def _nan_pct(values: Any, q: float) -> float:
     """A percentile over the ticks that were measured.
 
-    An all-absent window has no percentile, and returns 0.0 so the caller
-    behaves as it did when absence was stored as zero.
+    A window in which nothing was measured has no percentile. It returns
+    0.0 rather than None, which is NOT a defence of that value: it is the
+    pre-existing shape of every rollup field, and making the all-absent
+    case abstain means giving the tiles an n/a path. Tracked separately;
+    this function narrows the defect to the all-absent window rather than
+    every window containing one blind tick.
     """
     if values.size == 0 or bool(np.all(np.isnan(values))):
         return 0.0
     return float(np.nanpercentile(values, q))
+
+
+def _last_measured_index(values: Any) -> Optional[int]:
+    """Index of the newest measured tick, or None if there is none."""
+    listed = values.tolist()
+    for i in range(len(listed) - 1, -1, -1):
+        if listed[i] == listed[i]:  # not NaN
+            return i
+    return None
 
 
 def _last_measured(values: Any) -> float:
@@ -112,6 +125,15 @@ def _last_measured(values: Any) -> float:
         if value == value:  # not NaN
             return float(value)
     return 0.0
+
+
+def _paired_total(levels: Any, totals: Any) -> float:
+    """The capacity belonging to the tick the level was read from."""
+    i = _last_measured_index(levels)
+    if i is None:
+        return 0.0
+    total = totals.tolist()[i]
+    return float(total) if total == total else 0.0
 
 
 def _gap_list(values: Any) -> List[Optional[float]]:
@@ -294,9 +316,14 @@ class SystemDashboardComputer:
         gpu_avg = np.full(n, np.nan, dtype=np.float64)
         gpu_delta = np.full(n, np.nan, dtype=np.float64)
         gpu_mem_worst = np.full(n, np.nan, dtype=np.float64)
+        # The capacity of the device in gpu_mem_worst, per tick.
+        # Kept per tick so the level and the capacity it is
+        # measured against can be read from the SAME moment; a
+        # level that skips back past a blind tick while its
+        # capacity does not describes two different instants.
+        gpu_mem_total_hist = np.full(n, np.nan, dtype=np.float64)
         gpu_mem_headroom_min = np.full(n, np.nan, dtype=np.float64)
         temp_max = np.full(n, np.nan, dtype=np.float64)
-        gpu_mem_worst_total = 0.0
         # Util readings in the newest tick. This distinguishes a measured
         # zero from no current reading; it does not describe coverage of
         # the window median shown by the tile. A device can report and
@@ -356,8 +383,8 @@ class SystemDashboardComputer:
                         mem_pairs, key=lambda pair: pair[0]
                     )
                     gpu_mem_worst[i] = worst_used
-                    if i == n - 1:
-                        gpu_mem_worst_total = worst_total or 0.0
+                    if worst_total is not None:
+                        gpu_mem_total_hist[i] = worst_total
                 if temps:
                     temp_max[i] = max(temps)
                 if i == n - 1:
@@ -491,7 +518,7 @@ class SystemDashboardComputer:
                 "headroom": _last_measured(gpu_mem_headroom_min),
                 # Capacity of the GPU shown in "now" (the max-used one),
                 # so the tile can read "used / total".
-                "total": gpu_mem_worst_total,
+                "total": _paired_total(gpu_mem_worst, gpu_mem_total_hist),
             },
             "temp": {
                 "now": temp_now,
