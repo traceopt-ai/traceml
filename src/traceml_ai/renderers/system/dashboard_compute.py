@@ -263,12 +263,15 @@ class SystemDashboardComputer:
             [float(r["sample_ts_s"] or 0.0) for r in samples],
             dtype=np.float64,
         )
+        # NaN for a missing reading, for the same reason the GPU arrays
+        # below use it: `cpu_percent` is nullable, and a coerced zero is
+        # both drawn as a real 0% and folded into the window percentile.
         cpu_hist = np.array(
-            [float(r["cpu_percent"] or 0.0) for r in samples],
+            [_opt_float(r["cpu_percent"]) for r in samples],
             dtype=np.float64,
         )
         ram_used_hist = np.array(
-            [float(r["ram_used_bytes"] or 0.0) for r in samples],
+            [_opt_float(r["ram_used_bytes"]) for r in samples],
             dtype=np.float64,
         )
         ram_total = float(last["ram_total_bytes"] or 0.0)
@@ -395,14 +398,10 @@ class SystemDashboardComputer:
                 # which is what the pre-fill already says.
                 pass
 
-        cpu_p50 = float(np.percentile(cpu_hist, 50)) if cpu_hist.size else 0.0
-        cpu_p95 = float(np.percentile(cpu_hist, 95)) if cpu_hist.size else 0.0
+        cpu_p50 = _nan_pct(cpu_hist, 50)
+        cpu_p95 = _nan_pct(cpu_hist, 95)
 
-        ram_p95 = (
-            float(np.percentile(ram_used_hist, 95))
-            if ram_used_hist.size
-            else 0.0
-        )
+        ram_p95 = _nan_pct(ram_used_hist, 95)
 
         # nanpercentile, not percentile: a blind tick must not be counted
         # as a measured zero when the window is summarised. All-NaN means
@@ -465,15 +464,17 @@ class SystemDashboardComputer:
 
         rollups = {
             "cpu": {
-                "now": float(cpu_hist[-1]),
+                "now": _last_measured(cpu_hist),
                 "p50": cpu_p50,
                 "p95": cpu_p95,
             },
             "ram": {
-                "now": float(ram_used_hist[-1]),
+                "now": _last_measured(ram_used_hist),
                 "p95": ram_p95,
                 "total": ram_total,
-                "headroom": max(ram_total - float(ram_used_hist[-1]), 0.0),
+                "headroom": max(
+                    ram_total - _last_measured(ram_used_hist), 0.0
+                ),
             },
             "gpu_util": {
                 "now": _last_measured(gpu_avg),
@@ -543,7 +544,7 @@ class SystemDashboardComputer:
             rollups=rollups,
             series={
                 "x_time": x_time,
-                "cpu": cpu_hist.astype(float).tolist(),
+                "cpu": _gap_list(cpu_hist),
                 "gpu_avg": (_gap_list(gpu_avg) if gpu_available else []),
                 "gpu_power": (
                     [

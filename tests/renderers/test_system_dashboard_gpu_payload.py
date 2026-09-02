@@ -853,3 +853,49 @@ def test_a_blind_tick_does_not_drag_the_window_statistics(tmp_path: Path):
     assert roll.gpu_util.p50 == 100.0
     assert roll.gpu_delta.p95 == 0.0
     assert roll.temp.p95 == 45.0
+
+
+def test_a_missing_cpu_reading_does_not_halve_the_cpu_tile(tmp_path: Path):
+    """The same rule on the host CPU history, in the same function.
+
+    `cpu_percent` is nullable, and the window was built with
+    `float(x or 0.0)`, so a missing reading entered the percentile as a
+    measured 0%. A host sitting at a steady 80% with half its rows
+    lacking the reading showed 40% on the tile: the exact arithmetic of
+    counting absences as zeros.
+    """
+    import sqlite3
+
+    from tests.sqlite_fixtures import init_summary_schema, insert_system_sample
+    from traceml_ai.renderers.system.dashboard_compute import (
+        SystemDashboardComputer,
+    )
+
+    db = tmp_path / "null-cpu.db"
+    conn = sqlite3.connect(db)
+    init_summary_schema(conn)
+    for seq in range(20):
+        insert_system_sample(
+            conn,
+            row_id=seq + 1,
+            rank=0,
+            ts=1000.0 + 2.0 * seq,
+            gpu_available=False,
+            gpu_count=0,
+            seq=seq,
+            cpu_percent=80.0,
+            ram_used_bytes=8.0 * GB,
+            ram_total_bytes=16.0 * GB,
+        )
+    conn.commit()
+    conn.execute(
+        "UPDATE system_samples SET cpu_percent = NULL WHERE seq % 2 = 0"
+    )
+    conn.commit()
+    conn.close()
+
+    out = SystemDashboardComputer(str(db)).compute(window_n=100)
+    assert out.rollups.cpu.p50 == 80.0
+    assert out.rollups.cpu.p95 == 80.0
+    # And the chart shows the gaps rather than drawing them at zero.
+    assert list(out.series.cpu).count(None) == 10
