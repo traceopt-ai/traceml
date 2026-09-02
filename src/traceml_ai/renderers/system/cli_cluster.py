@@ -35,7 +35,7 @@ class _NodeSystemSample:
 
     label: str
     seq: int
-    cpu_percent: float
+    cpu_percent: Optional[float]
     ram_percent: Optional[float]
     gpu_util_percent: Optional[float]
     gpu_mem_percent: Optional[float]
@@ -245,7 +245,7 @@ class SystemCLIClusterBuilder:
         return _NodeSystemSample(
             label=self._node_label(row),
             seq=int(row["seq"]),
-            cpu_percent=float(row["cpu_percent"] or 0.0),
+            cpu_percent=self._optional_float(row["cpu_percent"]),
             ram_percent=(
                 ram_used / ram_total * 100.0
                 if (
