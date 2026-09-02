@@ -227,12 +227,13 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
-        "--capture-stderr",
-        action="store_true",
+        "--save-training-output",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help=(
-            "Tee child stderr to the console and retain its last 64 KiB in "
-            "logs/<run-name>/nodes/node_<node-rank>/crash_stderr.log. "
-            "Default: disabled."
+            "Save node-scoped training stdout and stderr files. Use "
+            "--no-save-training-output to inherit the terminal directly. "
+            "Default: enabled."
         ),
     )
 

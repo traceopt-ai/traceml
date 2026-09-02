@@ -7,14 +7,18 @@ which carry the full historical notes for versions predating this file.
 
 ## [Unreleased]
 
-- Added a byte-oriented subprocess-output drainer for future launcher-owned
-  stdout/stderr persistence; existing launcher behavior remains unchanged.
+- Training stdout and stderr are now saved by default in separate node-scoped
+  files under `logs/<run-name>/nodes/node_<node-rank>/`. Summary and dashboard
+  modes mirror them live; CLI mode keeps the Rich display clean and prints a
+  bounded stderr excerpt when training fails. Use
+  `--no-save-training-output` to inherit terminal descriptors instead.
+- **Breaking:** Removed `--capture-stderr` and
+  `TRACEML_CAPTURE_STDERR`. The default two-stream launcher capture supersedes
+  the optional bounded `crash_stderr.log` tail.
+- **Breaking:** New runs no longer replace Python stdout/stderr or produce
+  per-rank `stdout_stderr.log` telemetry. Existing artifacts remain readable.
 - Root `system_manifest.json` writes now come only from global rank 0, avoiding
   nondeterministic node ownership on shared filesystems.
-- **Breaking:** Opt-in `--capture-stderr` output moved for both single-node and
-  multi-node runs from `logs/<run-name>/crash_stderr.log` to
-  `logs/<run-name>/nodes/node_<node-rank>/crash_stderr.log`, preventing
-  multi-node launchers from overwriting a shared root file.
 - **Breaking:** `--summary-window-rows` and
   `TRACEML_SUMMARY_WINDOW_ROWS` were removed. Use
   `--history-retention`, `history_retention`, or

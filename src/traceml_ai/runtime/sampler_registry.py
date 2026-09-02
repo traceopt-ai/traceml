@@ -12,7 +12,6 @@ from traceml_ai.samplers.process_sampler import ProcessSampler
 from traceml_ai.samplers.runtime_environment_sampler import (
     RuntimeEnvironmentSampler,
 )
-from traceml_ai.samplers.stdout_stderr_sampler import StdoutStderrSampler
 from traceml_ai.samplers.system_sampler import SystemSampler
 
 SamplerFactory = Callable[[], BaseSampler]
@@ -94,7 +93,6 @@ DEFAULT_SAMPLER_REGISTRY: Registry[SamplerSpec] = Registry(
             drain_on_recording_stop=True,
         ),
         _spec("process", ProcessSampler),
-        _spec("stdout_stderr", StdoutStderrSampler, modes=("cli",)),
         _spec(
             "step_time",
             _step_time_sampler,

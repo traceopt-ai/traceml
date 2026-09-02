@@ -163,6 +163,34 @@ When launched with `--mode=cli`, the terminal shows live:
 Live CLI mode is intended for single-node runs, including single-node
 multi-GPU.
 
+### Training stdout and stderr
+
+`traceml run` and `traceml watch` save the supervised training command's raw
+streams by default:
+
+```text
+logs/<run-name>/nodes/node_<node-rank>/training.stdout.log
+logs/<run-name>/nodes/node_<node-rank>/training.stderr.log
+```
+
+These are node-scoped files because each node launcher owns one local torchrun
+process tree. They include bytes that reach that tree's OS pipes, including
+Python output, native file-descriptor writes, torchrun diagnostics, and output
+from local workers that inherit the descriptors. They are intentionally not
+per-rank files.
+
+Summary and dashboard modes mirror the saved streams live. CLI mode suppresses
+live mirroring so training output cannot corrupt the Rich display; if training
+fails, TraceML stops the display and prints at most the final 40 stderr lines
+and 8 KiB before the saved paths and final outcome.
+
+Use `--no-save-training-output` to inherit the terminal descriptors and create
+no training-output files. This is useful when a scheduler or container already
+owns the authoritative logs, or when a workload depends on terminal identity.
+With saving enabled the descriptors are pipes, so `isatty()` truthfully returns
+false. TraceML does not force unbuffered output and cannot recover bytes left
+in a process's user-space buffer after an abrupt crash.
+
 Phases that were never measured in the current window are omitted from the
 live step-time table rather than shown as `0.0 ms`, and the diagnosis block
 shows `INCOMPLETE DATA` with the missing signal names when no reliable

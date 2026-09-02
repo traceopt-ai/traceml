@@ -20,17 +20,14 @@ from traceml_ai.aggregator.display_drivers.layout import (
     MODEL_MEMORY_LAYOUT,
     PROCESS_LAYOUT,
     ROOT_LAYOUT,
-    STDOUT_STDERR_LAYOUT,
     SYSTEM_LAYOUT,
 )
 from traceml_ai.renderers.base_renderer import CLIRenderer
 from traceml_ai.renderers.process.renderer import ProcessRenderer
-from traceml_ai.renderers.stdout_stderr_renderer import StdoutStderrRenderer
 from traceml_ai.renderers.step_memory.renderer import StepMemoryRenderer
 from traceml_ai.renderers.step_time.renderer import StepTimeRenderer
 from traceml_ai.renderers.system.renderer import SystemRenderer
 from traceml_ai.runtime.settings import TraceMLSettings
-from traceml_ai.runtime.stdout_stderr_capture import StreamCapture
 from traceml_ai.step_time.pipeline import LiveStepTimeSession
 
 
@@ -90,7 +87,6 @@ class CLIDisplayDriver(BaseDisplayDriver):
                 db_path=self._settings.db_path,
                 sampler_interval_s=self._settings.sampler_interval_sec,
             ),
-            StdoutStderrRenderer(db_path=self._settings.db_path),
         ]
 
         # Run profile
@@ -115,7 +111,7 @@ class CLIDisplayDriver(BaseDisplayDriver):
         _safe(self._logger, "CLI Live.start failed", self._live.start)
 
     def stop(self) -> None:
-        """Stop Rich Live and restore stdout/stderr redirection."""
+        """Stop Rich Live and clear renderer bindings."""
         if self._live is None:
             return
         try:
@@ -155,11 +151,7 @@ class CLIDisplayDriver(BaseDisplayDriver):
         return self._create_run_layout()
 
     def _create_watch_layout(self) -> Layout:
-        # You can tune these independently for watch
-        self._layout.split_column(
-            Layout(name="dashboard", ratio=2),
-            Layout(name=STDOUT_STDERR_LAYOUT, ratio=6),
-        )
+        self._layout.split_column(Layout(name="dashboard"))
         dashboard = self._layout["dashboard"]
         dashboard.split_row(
             Layout(name=SYSTEM_LAYOUT, ratio=4),
@@ -168,10 +160,7 @@ class CLIDisplayDriver(BaseDisplayDriver):
         return dashboard
 
     def _create_run_layout(self) -> Layout:
-        self._layout.split_column(
-            Layout(name="dashboard", ratio=7),
-            Layout(name=STDOUT_STDERR_LAYOUT, ratio=2),
-        )
+        self._layout.split_column(Layout(name="dashboard"))
         dashboard = self._layout["dashboard"]
         dashboard.split_column(
             Layout(name="upper_row", ratio=2),
@@ -215,15 +204,6 @@ class CLIDisplayDriver(BaseDisplayDriver):
         if self._has_section(MODEL_MEMORY_LAYOUT):
             self._layout[MODEL_MEMORY_LAYOUT].update(
                 Panel(Text("Waiting for Step Memory...", justify="center"))
-            )
-
-        if self._has_section(STDOUT_STDERR_LAYOUT):
-            self._layout[STDOUT_STDERR_LAYOUT].update(
-                Panel(
-                    Text("Waiting for Stdout/Stderr...", justify="center"),
-                    title="Logs",
-                    border_style="cyan",
-                )
             )
 
     def _register_once(self) -> None:
@@ -289,13 +269,7 @@ class CLIDisplayDriver(BaseDisplayDriver):
                 )
 
     def _refresh(self) -> None:
-        """
-        Refresh Live display safely w.r.t. stdout/stderr capture.
-        """
+        """Refresh the live display."""
         if self._live is None:
             return
-        try:
-            StreamCapture.redirect_to_original()
-            self._live.refresh()
-        finally:
-            StreamCapture.redirect_to_capture()
+        self._live.refresh()

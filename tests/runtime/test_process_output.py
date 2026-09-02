@@ -7,16 +7,19 @@
 from __future__ import annotations
 
 import io
+import os
 import subprocess
 import sys
 import threading
 import time
 from collections import deque
 from pathlib import Path
+from unittest.mock import Mock
 
 from traceml_ai.launcher.process import (
     DEFAULT_STDERR_TAIL_BYTES,
     ProcessOutputDrainer,
+    start_training_process,
 )
 
 
@@ -113,6 +116,75 @@ def test_drains_flooded_streams_as_exact_separate_bytes(tmp_path) -> None:
     assert stderr_mirror.getvalue() == expected_stderr
     assert result.stderr_tail == expected_stderr[-DEFAULT_STDERR_TAIL_BYTES:]
     assert proc.stdout.closed and proc.stderr.closed
+
+
+def test_launcher_boundary_captures_python_native_and_traceback_output(
+    tmp_path,
+) -> None:
+    script = (
+        "import os, sys\n"
+        "print(f'isatty={sys.stdout.isatty()}')\n"
+        "print(f'buffer={hasattr(sys.stdout, \"buffer\")}')\n"
+        "print(f'fileno={sys.stdout.fileno()}')\n"
+        "os.write(1, b'native stdout\\n')\n"
+        "os.write(2, b'native stderr\\n')\n"
+        "raise RuntimeError('training failed')\n"
+    )
+    stdout_path = tmp_path / "training.stdout.log"
+    stderr_path = tmp_path / "training.stderr.log"
+
+    proc = start_training_process(
+        train_cmd=[sys.executable, "-c", script],
+        env=os.environ.copy(),
+        cwd=str(tmp_path),
+        capture_output=True,
+    )
+    assert proc.stdout is not None and proc.stderr is not None
+    output = ProcessOutputDrainer(
+        stdout=proc.stdout,
+        stderr=proc.stderr,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+    )
+
+    assert proc.wait(timeout=10) != 0
+    result = output.finish()
+
+    assert result.warning is None
+    stdout = stdout_path.read_bytes()
+    assert b"isatty=False" in stdout
+    assert b"buffer=True" in stdout
+    assert b"fileno=1" in stdout
+    assert b"native stdout\n" in stdout
+    stderr = stderr_path.read_bytes()
+    assert b"native stderr\n" in stderr
+    assert b"Traceback (most recent call last)" in stderr
+    assert b"RuntimeError: training failed" in stderr
+
+
+def test_training_process_only_pipes_output_when_requested(
+    monkeypatch,
+) -> None:
+    popen = Mock()
+    monkeypatch.setattr(subprocess, "Popen", popen)
+
+    start_training_process(
+        train_cmd=["python", "train.py"],
+        env={},
+        cwd=".",
+        capture_output=False,
+    )
+    assert "stdout" not in popen.call_args.kwargs
+    assert "stderr" not in popen.call_args.kwargs
+
+    start_training_process(
+        train_cmd=["python", "train.py"],
+        env={},
+        cwd=".",
+        capture_output=True,
+    )
+    assert popen.call_args.kwargs["stdout"] is subprocess.PIPE
+    assert popen.call_args.kwargs["stderr"] is subprocess.PIPE
 
 
 def test_sink_failure_falls_back_and_keeps_draining(

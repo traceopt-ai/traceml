@@ -349,19 +349,21 @@ traceml run train.py --disable-traceml
 
 ---
 
-## How can I keep stderr from a native training crash?
+## Where are training stdout and stderr saved?
 
-Enable the opt-in bounded stderr tail:
+`traceml run` and `traceml watch` save both streams by default:
 
-```bash
-traceml run train.py --mode=summary --capture-stderr
+```text
+logs/<run-name>/nodes/node_<node-rank>/training.stdout.log
+logs/<run-name>/nodes/node_<node-rank>/training.stderr.log
 ```
 
-You can also set `TRACEML_CAPTURE_STDERR=1`. TraceML continues to print the
-child process's stderr to the terminal and stores only its last 64 KiB in
-`logs/<run-name>/nodes/node_<node-rank>/crash_stderr.log` when the child exits.
-The node-scoped path prevents launchers from overwriting one another on shared
-filesystems. The file remains local and stderr capture is disabled by default.
+The node launcher owns these files, so they include Python output, native
+writes, torchrun diagnostics, and output from local workers that inherits the
+launcher's descriptors. CLI mode keeps the streams out of the live Rich
+display and shows a bounded stderr excerpt after a failure. Use
+`--no-save-training-output` when another system already captures the streams
+or when the workload requires a real terminal.
 
 ---
 

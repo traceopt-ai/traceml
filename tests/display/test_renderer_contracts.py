@@ -1,7 +1,10 @@
 import builtins
+from unittest.mock import Mock
 
 import pytest
 
+from traceml_ai.aggregator.display_drivers.cli import CLIDisplayDriver
+from traceml_ai.aggregator.display_drivers.layout import STDOUT_STDERR_LAYOUT
 from traceml_ai.aggregator.trace_aggregator import _resolve_display_driver
 from traceml_ai.renderers.base_renderer import (
     BaseRenderer,
@@ -9,6 +12,7 @@ from traceml_ai.renderers.base_renderer import (
     DashboardRenderer,
     RendererMetadata,
 )
+from traceml_ai.runtime.settings import TraceMLSettings
 
 
 class MetadataOnlyRenderer(BaseRenderer):
@@ -75,6 +79,22 @@ def test_renderer_can_support_both_cli_and_dashboard_contracts() -> None:
     assert isinstance(renderer, DashboardRenderer)
     assert renderer.get_panel_renderable() == "panel"
     assert renderer.get_dashboard_renderable() == {"payload": "dual"}
+
+
+@pytest.mark.parametrize("profile", ["watch", "run"])
+def test_cli_layout_has_no_legacy_stdout_panel(profile) -> None:
+    driver = CLIDisplayDriver(
+        logger=Mock(),
+        settings=TraceMLSettings(profile=profile, mode="cli"),
+    )
+
+    driver._create_initial_layout()
+
+    assert not driver._has_section(STDOUT_STDERR_LAYOUT)
+    assert all(
+        renderer.layout_section_name != STDOUT_STDERR_LAYOUT
+        for renderer in driver._renderers
+    )
 
 
 def test_dashboard_driver_missing_dependency_has_install_hint(

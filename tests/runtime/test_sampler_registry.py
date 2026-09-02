@@ -1,3 +1,6 @@
+import sys
+from unittest.mock import Mock
+
 from traceml_ai.core import Registry
 from traceml_ai.runtime.sampler_registry import (
     DEFAULT_SAMPLER_REGISTRY,
@@ -77,12 +80,11 @@ def _selected_keys(
     )
 
 
-def test_watch_cli_selects_host_process_and_stdout_samplers() -> None:
+def test_watch_cli_selects_host_and_process_samplers() -> None:
     assert _selected_keys(profile="watch", mode="cli") == (
         "system",
         "runtime_environment",
         "process",
-        "stdout_stderr",
     )
 
 
@@ -94,12 +96,24 @@ def test_watch_dashboard_omits_stdout_sampler() -> None:
     )
 
 
+def test_runtime_start_does_not_replace_python_streams() -> None:
+    stdout = sys.stdout
+    stderr = sys.stderr
+    runtime = TraceMLRuntime.__new__(TraceMLRuntime)
+    runtime._exporter = Mock()
+    runtime._sampler_thread = Mock()
+
+    runtime.start()
+
+    assert sys.stdout is stdout
+    assert sys.stderr is stderr
+
+
 def test_run_cli_selects_step_samplers() -> None:
     assert _selected_keys(profile="run", mode="cli") == (
         "system",
         "runtime_environment",
         "process",
-        "stdout_stderr",
         "step_time",
         "step_memory",
     )
@@ -123,7 +137,6 @@ def test_ddp_nonzero_rank_skips_rank_zero_only_system_sampler() -> None:
     ) == (
         "runtime_environment",
         "process",
-        "stdout_stderr",
         "step_time",
         "step_memory",
     )
@@ -139,7 +152,6 @@ def test_ddp_rank_zero_keeps_rank_zero_only_system_sampler() -> None:
         "system",
         "runtime_environment",
         "process",
-        "stdout_stderr",
         "step_time",
         "step_memory",
     )
@@ -150,7 +162,6 @@ def test_unknown_profile_keeps_only_profile_agnostic_samplers() -> None:
         "system",
         "runtime_environment",
         "process",
-        "stdout_stderr",
     )
 
 
