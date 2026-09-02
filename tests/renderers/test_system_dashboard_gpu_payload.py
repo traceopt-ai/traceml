@@ -778,3 +778,78 @@ def test_a_gpu_that_goes_quiet_midway_only_leaves_its_own_ticks(tmp_path):
     assert roll.gpu_delta.p95 == 0.0
     # The newest tick is one of the ones it missed.
     assert roll.util_gpu_count == 3
+
+
+# --- a tick where nothing reported is a gap, not a zero (#430) -----------
+def test_a_tick_where_no_gpu_reported_is_a_gap_in_the_chart(tmp_path: Path):
+    """A transient host-wide NVML failure is an absence, not 0% util.
+
+    #432 stopped a single unreported DEVICE being averaged in as a real
+    zero. This is the same idea one level up: a tick in which NO device
+    reported left its slot at the pre-filled 0.0, so the chart drew a
+    utilisation point, a memory point and a temperature point for a
+    moment nothing was measured.
+
+    The correct convention already exists four lines away in the same
+    loop, where the per-GPU power history stores None for a gap.
+    """
+    db = tmp_path / "blind-tick.db"
+    zero = {
+        "gpu_idx": 0,
+        "util": 0.0,
+        "mem_used_bytes": 0.0,
+        "mem_total_bytes": 0.0,
+        "temperature_c": 0.0,
+        "power_usage_w": 0.0,
+        "power_limit_w": 0.0,
+    }
+
+    def rows(seq: int):
+        if seq == TICKS // 2:
+            return [dict(zero, gpu_idx=i) for i in range(4)]
+        return [
+            _gpu(i, 100.0, 66.0, temp=45.0, mem_used=6.3 * GB)
+            for i in range(4)
+        ]
+
+    _write(db, rows)
+    out = _payload(db)
+
+    series = list(out.series.gpu_avg)
+    assert series[TICKS // 2] is None
+    assert all(v == 100.0 for i, v in enumerate(series) if i != TICKS // 2)
+
+
+def test_a_blind_tick_does_not_drag_the_window_statistics(tmp_path: Path):
+    """The tile summarises what was measured, not what was not.
+
+    A zero in the array is not only drawn, it is also fed to the window
+    percentiles, so repeated blind ticks pull the headline number down on
+    a host that never left 100%.
+    """
+    db = tmp_path / "blind-many.db"
+    zero = {
+        "gpu_idx": 0,
+        "util": 0.0,
+        "mem_used_bytes": 0.0,
+        "mem_total_bytes": 0.0,
+        "temperature_c": 0.0,
+        "power_usage_w": 0.0,
+        "power_limit_w": 0.0,
+    }
+
+    def rows(seq: int):
+        # Half the window blind, so the median moves if the blind ticks
+        # are counted: ten zeros and ten hundreds median to 50.
+        if seq % 2 == 0:
+            return [dict(zero, gpu_idx=i) for i in range(4)]
+        return [
+            _gpu(i, 100.0, 66.0, temp=45.0, mem_used=6.3 * GB)
+            for i in range(4)
+        ]
+
+    _write(db, rows)
+    roll = _payload(db).rollups
+    assert roll.gpu_util.p50 == 100.0
+    assert roll.gpu_delta.p95 == 0.0
+    assert roll.temp.p95 == 45.0
