@@ -13,8 +13,9 @@ accent, Geist + Geist Mono. Single source of truth for the dashboard's chrome.
 Functional data-viz colors (phase + severity) are kept as-is (they encode
 meaning) and pulled from the canonical phase keys, not re-hued.
 
-This module is pure styling + ECharts option builders + small format helpers;
-the per-section modules construct their UI with the CSS classes defined here.
+This module owns styling tokens, font registration, and shared dashboard
+markup. Chart construction lives in ``charting``; value formatting lives in
+``formatting``.
 """
 
 from __future__ import annotations
@@ -174,9 +175,3 @@ def kval(num: str, unit: str = "") -> str:
     """KPI value HTML with de-emphasized unit (big number, small muted unit)."""
     u = f"<span class='kunit'>{unit}</span>" if unit else ""
     return f"{num}{u}"
-
-
-# --- ECharts option builders ---------------------------------------------
-# The span x axis holds seconds before the newest sample (<= 0); the
-# tooltip header must read the same way as the axis ('42 s ago'), not
-# the raw float.

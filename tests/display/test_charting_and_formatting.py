@@ -47,6 +47,15 @@ def test_a_garbled_value_does_not_raise():
     assert formatting.gb("many") is None
 
 
+def test_decimal_gb_conversion_preserves_the_moved_helper_contract():
+    """Absence, measured zero, and failed conversion remain distinct."""
+    assert formatting.gb_si(None) is None
+    assert formatting.gb_si(0) == 0.0
+    assert formatting.gb_si(1_000_000_000) == 1.0
+    assert formatting.gb_si("not a number") is None
+    assert formatting.gb_si(10**400) is None
+
+
 @pytest.mark.parametrize(
     "seconds,expected",
     [(45.0, "45 s"), (300.0, "5 min"), (7200.0, "2.0 h")],
