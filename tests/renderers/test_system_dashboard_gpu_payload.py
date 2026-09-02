@@ -855,14 +855,14 @@ def test_a_blind_tick_does_not_drag_the_window_statistics(tmp_path: Path):
     assert roll.temp.p95 == 45.0
 
 
-def test_a_missing_cpu_reading_does_not_halve_the_cpu_tile(tmp_path: Path):
-    """The same rule on the host CPU history, in the same function.
+def test_missing_host_readings_are_not_counted_as_zero(tmp_path: Path):
+    """Missing CPU and RAM readings stay absent from host rollups.
 
     `cpu_percent` is nullable, and the window was built with
     `float(x or 0.0)`, so a missing reading entered the percentile as a
     measured 0%. A host sitting at a steady 80% with half its rows
     lacking the reading showed 40% on the tile: the exact arithmetic of
-    counting absences as zeros.
+    counting absences as zeros. RAM follows the same rule.
     """
     import sqlite3
 
@@ -891,6 +891,11 @@ def test_a_missing_cpu_reading_does_not_halve_the_cpu_tile(tmp_path: Path):
     conn.execute(
         "UPDATE system_samples SET cpu_percent = NULL WHERE seq % 2 = 0"
     )
+    # Leave the newest RAM reading absent to cover both the percentile and
+    # the newest-measured value used to derive headroom.
+    conn.execute(
+        "UPDATE system_samples SET ram_used_bytes = NULL WHERE seq % 2 = 1"
+    )
     conn.commit()
     conn.close()
 
@@ -899,6 +904,10 @@ def test_a_missing_cpu_reading_does_not_halve_the_cpu_tile(tmp_path: Path):
     assert out.rollups.cpu.p95 == 80.0
     # And the chart shows the gaps rather than drawing them at zero.
     assert list(out.series.cpu).count(None) == 10
+    assert out.rollups.ram is not None
+    assert out.rollups.ram.now == 8.0 * GB
+    assert out.rollups.ram.p95 == 8.0 * GB
+    assert out.rollups.ram.headroom == 8.0 * GB
 
 
 def test_memory_and_its_capacity_come_from_the_same_tick(tmp_path: Path):

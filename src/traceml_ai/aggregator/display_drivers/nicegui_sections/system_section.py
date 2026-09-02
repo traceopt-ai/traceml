@@ -83,11 +83,8 @@ def format_span(seconds: Optional[float]) -> str:
 def format_gb_pair(used_bytes: Any, total_bytes: Any) -> Tuple[str, str]:
     """A level against its capacity: ('6.3', '/ 16.1 GB').
 
-    A measured value never renders as "0.0". This card prints ``n/a`` for
-    a value it does not have, so a real 27 MB shown with one decimal is
-    indistinguishable from a missing one. Sub-gigabyte levels keep two
-    decimals instead, which is the rule the Process card's formatter has
-    had since it hit the same problem.
+    Sub-gigabyte levels keep two decimals so small measurements retain
+    useful precision, matching the Process card's formatting rule.
     """
     used = gb_si(used_bytes) if used_bytes is not None else None
     if used is None:
