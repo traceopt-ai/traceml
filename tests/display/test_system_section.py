@@ -48,7 +48,10 @@ def test_levels_carry_their_denominator() -> None:
     assert format_gb_pair(6.31 * GB, 16.1 * GB) == ("6.3", "/ 16.1 GB")
     assert format_gb_pair(9.0 * GB, 200.0 * GB) == ("9.0", "/ 200 GB")
     assert format_gb_pair(None, 16.1 * GB) == ("n/a", "")
-    assert format_gb_pair(0.47 * GB, None) == ("0.5", "GB")
+    # Changed deliberately: this used to read ("0.5", "GB"). A level below
+    # one gigabyte keeps two decimals now, because "0.0" is what this card
+    # prints for a value it does not have.
+    assert format_gb_pair(0.47 * GB, None) == ("0.47", "GB")
 
 
 def test_disclosure_text_states_the_range_and_no_verdict() -> None:
@@ -735,3 +738,26 @@ def test_rolling_window_is_spelled_out_not_named() -> None:
     assert format_window(window_for(4 * 60)) == "30 s"  # the floor
     assert format_window(window_for(48 * 3600)) == "5 min"  # the cap
     assert format_window(0.0) == ""
+
+
+def test_a_small_real_reading_is_not_printed_as_zero() -> None:
+    """A 27 MB level must not render the way absence renders.
+
+    The System card prints `n/a` for a value it does not have. Printing a
+    real 27 MB as `0.0` makes a measurement indistinguishable from a
+    missing one, which is the reading a user most needs to tell apart on a
+    CPU-only host or in the first seconds of a run.
+
+    The Process card's formatter has kept two decimals below a gigabyte
+    since #401 for exactly this reason; this card's copy did not.
+    """
+    from traceml_ai.aggregator.display_drivers.nicegui_sections import (
+        system_section,
+    )
+
+    assert system_section.format_gb_pair(27e6, 16.1e9)[0] == "0.03"
+    assert system_section.format_gb_pair(500e6, 16.1e9)[0] == "0.50"
+    # At and above a gigabyte the extra digit is noise, so one decimal.
+    assert system_section.format_gb_pair(6.3e9, 16.1e9)[0] == "6.3"
+    # And absence still reads as absence, not as a small number.
+    assert system_section.format_gb_pair(None, 16.1e9)[0] == "n/a"
