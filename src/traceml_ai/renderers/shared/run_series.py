@@ -58,6 +58,13 @@ be populated.
 # the row frame.
 HAS_RANGE_FRAME = sqlite3.sqlite_version_info >= (3, 28, 0)
 
+# Window functions themselves arrived in 3.25. A whole-run read that uses
+# one is simply unavailable below that, and the recent-window view stands
+# in. Stated as a capability, deliberately: expressing it as a caught
+# `sqlite3.Error` also swallows every real failure, which is how a corrupt
+# database came to look like a host with no history.
+HAS_WINDOW_FUNCTIONS = sqlite3.sqlite_version_info >= (3, 25, 0)
+
 
 @dataclass(frozen=True)
 class RunSeriesPolicy:
@@ -274,6 +281,7 @@ __all__ = [
     "RunSeriesPolicy",
     "SeriesMode",
     "cadence_of",
+    "HAS_WINDOW_FUNCTIONS",
     "plan_run_series",
     "stride_for",
 ]
