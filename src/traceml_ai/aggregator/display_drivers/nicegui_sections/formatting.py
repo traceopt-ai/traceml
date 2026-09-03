@@ -20,6 +20,7 @@ choose decimals, units and phrasing.
 
 from __future__ import annotations
 
+import math
 from typing import Any, Optional, Tuple
 
 NA = "n/a"
@@ -105,16 +106,27 @@ def format_span(seconds: Optional[float]) -> str:
 
 
 def format_window(window_s: Optional[float]) -> str:
-    """The rolling window in words: ``'30 s'``, ``'2 min'``.
+    """The window a chart aggregates over: ``'30 s'``, ``'2 min'``, ``'1 h 24 min'``.
 
-    The compute layer picks round windows, so this reads as a duration a
-    person recognises rather than an arbitrary number of seconds.
+    The compute layer picks the duration, not this function. Rolling
+    charts get a round window; the bucketed whole-run power chart gets a
+    width that widens past a round step to hold its point budget, which
+    is what puts multi-hour values here.
+
+    Non-finite is guarded explicitly because the hours split converts to
+    an integer, which raises on nan and inf where a format string
+    quietly produced "nan min". A formatter on a card must degrade, not
+    take the section down with it.
     """
-    if not window_s or window_s <= 0:
+    if not window_s or window_s <= 0 or not math.isfinite(window_s):
         return ""
     if window_s < 60:
         return f"{window_s:.0f} s"
-    return f"{window_s / 60.0:.0f} min"
+    minutes = round(window_s / 60.0)
+    if minutes < 60:
+        return f"{minutes:.0f} min"
+    hours, rest = divmod(minutes, 60)
+    return f"{hours:.0f} h" if rest == 0 else f"{hours:.0f} h {rest:.0f} min"
 
 
 def format_age(seconds: Any) -> str:

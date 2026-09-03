@@ -32,7 +32,7 @@ from traceml_ai.renderers.system.dashboard_models import (
 )
 
 from . import charting, theme
-from .formatting import gb_si
+from .formatting import format_window, gb_si
 
 # Window-p95 GPU utilisation spread (max - min, percentage points) that
 # automatically opens the per-GPU rows.
@@ -56,33 +56,6 @@ _MONO = "font-family:var(--mono);"
 # --- pure display rules ----------------------------------------------------
 def gpu_color(index: int) -> str:
     return _GPU_COLORS[int(index) % len(_GPU_COLORS)]
-
-
-def format_window(window_s: float) -> str:
-    """The rolling window in words: '30 s', '2 min'.
-
-    The payload picks the duration, not this function: rolling charts get
-    a round window from ``RunSeriesPolicy.window_for``, and the bucketed
-    whole-run power chart gets ``bucket_width_for``, which may widen past
-    a round step to hold its point budget. Both land on whole minutes
-    here, so either still reads as a duration a person recognises.
-    """
-    if not window_s or window_s <= 0 or not math.isfinite(window_s):
-        # Non-finite is guarded explicitly: this function converts to an
-        # integer now, which raises on nan and inf where the old format
-        # string quietly produced "nan min". A formatter on a card must
-        # degrade, never take the section down with it.
-        return ""
-    if window_s < 60:
-        return f"{window_s:.0f} s"
-    minutes = round(window_s / 60.0)
-    if minutes < 60:
-        return f"{minutes:.0f} min"
-    # Capping the whole-run power chart widens its bucket rather than
-    # growing its point count, which puts multi-hour widths here for the
-    # first time. "84 min" is not how a person reads a duration.
-    hours, rest = divmod(minutes, 60)
-    return f"{hours:.0f} h" if rest == 0 else f"{hours:.0f} h {rest:.0f} min"
 
 
 def format_span(seconds: Optional[float]) -> str:
