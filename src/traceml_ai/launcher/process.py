@@ -113,13 +113,13 @@ class ProcessOutputDrainer:
         ):
             if source is None:
                 continue
-            resolved_path = Path(path).resolve() if path is not None else None
+            output_path = Path(path) if path is not None else None
             thread = threading.Thread(
                 target=self._drain,
                 args=(
                     name,
                     source,
-                    resolved_path,
+                    output_path,
                     mirror,
                     fallback,
                 ),
@@ -170,6 +170,7 @@ class ProcessOutputDrainer:
         try:
             if path is not None:
                 try:
+                    path = path.resolve()
                     path.parent.mkdir(parents=True, exist_ok=True)
                     sink = path.open("wb", buffering=0)
                 except Exception as exc:

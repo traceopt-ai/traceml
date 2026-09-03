@@ -762,9 +762,18 @@ def test_started_training_result_is_authoritative(
     training_output.finish.return_value = ProcessOutputResult(
         stdout_path=None,
         stderr_path=None,
-        stderr_tail=b"",
+        stderr_tail=b"captured failure\n",
         warning="output persistence unavailable",
     )
+    events = []
+    print_training_output = launcher_commands._print_training_output
+
+    def stop_aggregator(*_args, **_kwargs):
+        events.append("stop")
+
+    def print_output(*args, **kwargs):
+        events.append("output")
+        print_training_output(*args, **kwargs)
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("PYTHONUNBUFFERED", "user-choice")
@@ -774,7 +783,8 @@ def test_started_training_result_is_authoritative(
         "wait_for_tcp_listen": Mock(return_value=True),
         "start_training_process": Mock(return_value=training),
         "_start_training_output": Mock(return_value=training_output),
-        "terminate_process_group": Mock(),
+        "terminate_process_group": Mock(side_effect=stop_aggregator),
+        "_print_training_output": Mock(side_effect=print_output),
         "write_code_manifest": Mock(return_value=None),
         "write_run_manifest": Mock(return_value=tmp_path / "manifest.json"),
         "update_run_manifest": Mock(),
@@ -832,6 +842,10 @@ def test_started_training_result_is_authoritative(
     assert stderr_lines[-2].startswith("[TraceML] Telemetry ")
     if train_rc != 0:
         assert "torchrun exited with code 1" in final_line
+    if mode == "cli":
+        assert events.index("stop") < events.index("output")
+        if train_rc != 0 and save_output:
+            assert "captured failure" in "\n".join(stderr_lines)
     if (
         train_rc == 0
         and aggregator_rc == 0

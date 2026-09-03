@@ -1,6 +1,3 @@
-import sys
-from unittest.mock import Mock
-
 from traceml_ai.core import Registry
 from traceml_ai.runtime.sampler_registry import (
     DEFAULT_SAMPLER_REGISTRY,
@@ -94,19 +91,6 @@ def test_watch_dashboard_omits_stdout_sampler() -> None:
         "runtime_environment",
         "process",
     )
-
-
-def test_runtime_start_does_not_replace_python_streams() -> None:
-    stdout = sys.stdout
-    stderr = sys.stderr
-    runtime = TraceMLRuntime.__new__(TraceMLRuntime)
-    runtime._exporter = Mock()
-    runtime._sampler_thread = Mock()
-
-    runtime.start()
-
-    assert sys.stdout is stdout
-    assert sys.stderr is stderr
 
 
 def test_run_cli_selects_step_samplers() -> None:

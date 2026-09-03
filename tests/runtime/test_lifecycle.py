@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import socket
+import sys
 from dataclasses import dataclass
 from typing import Any
+from unittest.mock import Mock
 
 from traceml_ai.runtime import lifecycle
+from traceml_ai.runtime.runtime import TraceMLRuntime
 from traceml_ai.runtime.settings import AggregatorEndpoint, TraceMLSettings
 
 
@@ -82,6 +85,19 @@ class _FakeRuntime:
 
     def stop(self) -> None:
         self.stopped = True
+
+
+def test_runtime_start_does_not_replace_python_streams() -> None:
+    stdout = sys.stdout
+    stderr = sys.stderr
+    runtime = TraceMLRuntime.__new__(TraceMLRuntime)
+    runtime._exporter = Mock()
+    runtime._sampler_thread = Mock()
+
+    runtime.start()
+
+    assert sys.stdout is stdout
+    assert sys.stderr is stderr
 
 
 def test_wait_for_aggregator_true_when_listening() -> None:

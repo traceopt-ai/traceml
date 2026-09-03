@@ -233,6 +233,29 @@ def test_sink_open_failure_falls_back_and_is_reported(
     assert result.warning.count("stdout output file could not be opened") == 1
 
 
+def test_path_resolution_failure_falls_back_and_keeps_draining(
+    monkeypatch, tmp_path
+) -> None:
+    source = _ChunkStream(b"all output")
+    fallback = io.BytesIO()
+
+    def fail_resolve(_path):
+        raise OSError("path unavailable")
+
+    monkeypatch.setattr(Path, "resolve", fail_resolve)
+
+    result = ProcessOutputDrainer(
+        stdout=source,
+        stdout_path=tmp_path / "training.stdout.log",
+        stdout_fallback=fallback,
+    ).finish()
+
+    assert result.stdout_path is None
+    assert fallback.getvalue() == b"all output"
+    assert result.warning is not None
+    assert result.warning.count("stdout output file could not be opened") == 1
+
+
 def test_mirror_failure_does_not_invalidate_saved_output(tmp_path) -> None:
     source = _ChunkStream(b"one", b"two")
     mirror = _FailingSink()
