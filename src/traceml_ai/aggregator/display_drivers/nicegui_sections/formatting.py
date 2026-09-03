@@ -172,3 +172,21 @@ __all__ = [
     "gb",
     "num",
 ]
+
+
+def format_elapsed(seconds: float) -> str:
+    """``47s`` / ``2m 26s`` / ``3h 12m``.
+
+    Shared: the context strip says how long ago the newest sample
+    arrived, and the System card says how long a host has been quiet.
+    One duration vocabulary, so the two cannot drift into wording the
+    same span two ways.
+    """
+    total = max(0, int(seconds))
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m"
+    if minutes:
+        return f"{minutes}m {secs:02d}s"
+    return f"{secs}s"

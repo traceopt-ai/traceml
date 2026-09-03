@@ -21,13 +21,15 @@ from traceml_ai.aggregator.display_drivers.nicegui_sections.context_section impo
     STEP_SECTIONS,
     abbreviate_path,
     format_coverage,
-    format_elapsed,
     format_liveness,
     live_threshold_s,
     resolve_run_identity,
     run_name_label,
     sections_for_profile,
     strategy_token,
+)
+from traceml_ai.aggregator.display_drivers.nicegui_sections.formatting import (  # noqa: E402,E501
+    format_elapsed,
 )
 
 

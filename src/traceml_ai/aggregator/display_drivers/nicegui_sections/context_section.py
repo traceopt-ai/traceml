@@ -31,6 +31,8 @@ from nicegui import ui
 
 from traceml_ai.renderers.context.common import empty_context
 
+from .formatting import format_elapsed
+
 # Sections that only exist on a training run. A watch session has no step
 # loop, so showing them there produces permanently dead panels (#355).
 STEP_SECTIONS: Tuple[str, ...] = (
@@ -65,18 +67,6 @@ def sections_for_profile(profile: str) -> Tuple[str, ...]:
     if str(profile or "run") == "watch":
         return RESOURCE_SECTIONS
     return RUN_SECTIONS
-
-
-def format_elapsed(seconds: float) -> str:
-    """``47s`` / ``2m 26s`` / ``3h 12m``."""
-    total = max(0, int(seconds))
-    hours, rem = divmod(total, 3600)
-    minutes, secs = divmod(rem, 60)
-    if hours:
-        return f"{hours}h {minutes:02d}m"
-    if minutes:
-        return f"{minutes}m {secs:02d}s"
-    return f"{secs}s"
 
 
 def live_threshold_s(sampler_interval_s: Optional[float]) -> float:
