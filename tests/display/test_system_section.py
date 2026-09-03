@@ -855,3 +855,9 @@ def test_a_widened_bucket_reads_as_hours_not_a_big_minute_count() -> None:
     # Unchanged below a minute, and still empty for nothing.
     assert format_window(30.0) == "30 s"
     assert format_window(0.0) == ""
+    # The hours branch converts to an integer, which raises on a
+    # non-finite value where the old format string produced "nan min".
+    # A card formatter has to degrade rather than take the section down.
+    assert format_window(float("nan")) == ""
+    assert format_window(float("inf")) == ""
+    assert format_window(-5.0) == ""

@@ -67,7 +67,11 @@ def format_window(window_s: float) -> str:
     a round step to hold its point budget. Both land on whole minutes
     here, so either still reads as a duration a person recognises.
     """
-    if not window_s or window_s <= 0:
+    if not window_s or window_s <= 0 or not math.isfinite(window_s):
+        # Non-finite is guarded explicitly: this function converts to an
+        # integer now, which raises on nan and inf where the old format
+        # string quietly produced "nan min". A formatter on a card must
+        # degrade, never take the section down with it.
         return ""
     if window_s < 60:
         return f"{window_s:.0f} s"
