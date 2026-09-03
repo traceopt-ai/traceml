@@ -1163,3 +1163,81 @@ def test_a_held_over_payload_carries_why_it_is_held(tmp_path: Path) -> None:
         panel = build_system_section()
     update_system_section(panel, held)
     assert held.rollups.status in panel["note"].text
+
+def _with_arrival_clock(path: Path) -> None:
+    """Give the rows a real arrival clock.
+
+    The fixture writes `recv_ts_ns` as a synthetic row id, which is fine
+    for ordering and useless as a clock. Liveness is measured against the
+    AGGREGATOR's arrival time rather than the sampler's `sample_ts_s`,
+    because the sampler may be a different machine and a skewed remote
+    clock would otherwise read as a dead node. Process measures age the
+    same way.
+    """
+    with sqlite_database(path, init_summary_schema) as conn:
+        conn.execute(
+            "UPDATE system_samples "
+            "SET recv_ts_ns = CAST(sample_ts_s * 1000000000 AS INTEGER)"
+        )
+        conn.commit()
+
+
+def _payload_at(path: Path, now_s: float) -> SystemDashboardPayload:
+    """The payload as it would be computed at a given wall-clock moment."""
+    return SystemDashboardComputer(str(path), now_fn=lambda: now_s).compute(
+        window_n=100
+    )
+
+
+def test_a_node_that_stopped_reporting_is_marked_stale(
+    tmp_path: Path,
+) -> None:
+    """System is single-node, so the question is about the payload.
+
+    Process asks which of N ranks stopped, and answers per rank. There is
+    only one host here, so the question is whether this payload still
+    describes a live machine, and comparing the node against itself would
+    always say yes. The reference is the wall clock.
+    """
+    db = tmp_path / "quiet.db"
+    _write(db, lambda seq: (), gpu_available=False)
+    _with_arrival_clock(db)
+
+    fresh = _payload_at(db, 1000.0 + 2.0 * (TICKS - 1) + 1.0)
+    assert fresh.rollups.node_liveness is not None
+    assert fresh.rollups.node_liveness.state == "fresh"
+
+    # Two minutes later nothing has arrived.
+    quiet = _payload_at(db, 1000.0 + 2.0 * (TICKS - 1) + 120.0)
+    assert quiet.rollups.node_liveness.state == "stale"
+    assert quiet.rollups.node_liveness.age_s == pytest.approx(120.0, abs=1.0)
+
+
+def test_liveness_reads_the_shared_threshold_not_a_local_one(
+    tmp_path: Path,
+) -> None:
+    """One rule for one question, and it is the shared module's.
+
+    This series has already produced two contradictions from answering
+    one question in two places. The threshold here is
+    `FreshnessPolicy.stale_after_s`, which the Process block already
+    reads; nothing about the System card defines its own.
+    """
+    from traceml_ai.renderers.shared.freshness import FreshnessPolicy
+
+    db = tmp_path / "threshold.db"
+    _write(db, lambda seq: (), gpu_available=False)
+    _with_arrival_clock(db)
+    newest = 1000.0 + 2.0 * (TICKS - 1)
+
+    # The fixture samples every 2 s, so the shared policy's floor of 5 s
+    # is what applies, not the cadence multiple.
+    policy = FreshnessPolicy.from_interval(2.0)
+    edge = policy.stale_after_s
+
+    assert _payload_at(
+        db, newest + edge - 0.5
+    ).rollups.node_liveness.state == ("fresh")
+    assert _payload_at(
+        db, newest + edge + 0.5
+    ).rollups.node_liveness.state == ("stale")

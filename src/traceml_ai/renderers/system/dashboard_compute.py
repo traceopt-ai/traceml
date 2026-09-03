@@ -11,11 +11,14 @@ from __future__ import annotations
 import time
 from dataclasses import replace
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
 
-from traceml_ai.renderers.shared.freshness import CachedPayloadTTL
+from traceml_ai.renderers.shared.freshness import (
+    CachedPayloadTTL,
+    FreshnessPolicy,
+)
 from traceml_ai.renderers.shared.run_series import (
     DEFAULT_RUN_SERIES_POLICY,
     RunSeriesPolicy,
@@ -219,8 +222,12 @@ class SystemDashboardComputer:
         node_rank: Optional[int] = None,
         stale_ttl_s: Optional[float] = 30.0,
         run_series_policy: RunSeriesPolicy = DEFAULT_RUN_SERIES_POLICY,
+        now_fn: Callable[[], float] = time.time,
     ) -> None:
         self._db = SystemRepository(db_path=db_path, node_rank=node_rank)
+        # Injectable so liveness can be tested at a chosen moment rather
+        # than by sleeping.
+        self._now_fn = now_fn
         self._last_ok: Optional[SystemDashboardPayload] = None
         self._last_ok_ts: float = 0.0
         # Whether a cached payload may still answer says the DATABASE could
@@ -566,6 +573,15 @@ class SystemDashboardComputer:
             spread is not None and float(spread) > SPREAD_EXPAND_PTS
         )
 
+        # Whether the machine is still reporting. Single-node, so this is
+        # one answer about the payload: comparing the node against itself
+        # would always say yes, and the reference is the aggregator's own
+        # arrival clock rather than the sampler's, which may be a remote
+        # machine's. The threshold is the shared module's, never a local
+        # copy: one question with two thresholds is what this block has
+        # already been bitten by twice.
+        rollups["node_liveness"] = self._node_liveness(samples, ts_hist)
+
         rollups["ctx"] = {
             "world_size": int(last["world_size"] or 0),
             "gpu_count": int(last["gpu_count"] or 0),
@@ -603,6 +619,25 @@ class SystemDashboardComputer:
                 "power_run_mode": power_mode if gpu_available else "recent",
             },
         )
+
+    def _node_liveness(self, samples: Any, ts_hist: Any) -> Dict[str, Any]:
+        """Whether the host this payload describes is still reporting."""
+        recvs = [
+            v / 1e9
+            for v in (_opt_float(r["recv_ts_ns"]) for r in samples)
+            if v is not None
+        ]
+        if not recvs:
+            return {"state": "unknown", "age_s": None}
+        cadence = None
+        stamps = ts_hist.tolist()
+        if len(stamps) > 1:
+            span = float(stamps[-1] - stamps[0])
+            if span > 0:
+                cadence = span / float(len(stamps) - 1)
+        policy = FreshnessPolicy.from_observed_cadence(cadence)
+        age = max(0.0, float(self._now_fn()) - max(recvs))
+        return {"state": policy.state_of(age), "age_s": age}
 
     def _mode_for(
         self, stats: Optional[RunStats], window_span_s: float
