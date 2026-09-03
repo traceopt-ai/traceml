@@ -861,3 +861,66 @@ def test_a_widened_bucket_reads_as_hours_not_a_big_minute_count() -> None:
     assert format_window(float("nan")) == ""
     assert format_window(float("inf")) == ""
     assert format_window(-5.0) == ""
+
+
+def test_the_card_says_when_its_numbers_are_held_over() -> None:
+    """The stale marker has a consumer now.
+
+    The compute layer's one error boundary serves the last good payload
+    and writes why onto `SystemRollups.status`. Nothing rendered it, so a
+    reader saw a frozen card indistinguishable from a live one: the
+    payload said STALE and the tiles printed the held-over numbers as
+    current. Propagating read failures without this would have made that
+    worse, not better, which is why both land together.
+    """
+    from nicegui import ui
+
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section import (  # noqa: E501
+        build_system_section,
+        update_system_section,
+    )
+
+    with ui.element("div"):
+        panel = build_system_section()
+    payload = {
+        "window_len": 20,
+        "gpu_available": False,
+        "rollups": {
+            "cpu": {"now": 42.0, "p50": 42.0, "p95": 42.0},
+            "ram": {"now": 9.0 * GB, "total": 200.0 * GB},
+            "status": "STALE (exception: OperationalError)",
+            "ctx": {"gpu_count": 0},
+        },
+        "series": {"x_time": [], "cpu": []},
+    }
+
+    update_system_section(panel, as_payload(payload))
+
+    assert "STALE (exception: OperationalError)" in panel["note"].text
+
+
+def test_a_healthy_card_carries_no_stale_marker() -> None:
+    """The marker appears only when the payload carries one."""
+    from nicegui import ui
+
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section import (  # noqa: E501
+        build_system_section,
+        update_system_section,
+    )
+
+    with ui.element("div"):
+        panel = build_system_section()
+    payload = {
+        "window_len": 20,
+        "gpu_available": False,
+        "rollups": {
+            "cpu": {"now": 42.0, "p50": 42.0, "p95": 42.0},
+            "ram": {"now": 9.0 * GB, "total": 200.0 * GB},
+            "ctx": {"gpu_count": 0},
+        },
+        "series": {"x_time": [], "cpu": []},
+    }
+
+    update_system_section(panel, as_payload(payload))
+
+    assert "STALE" not in panel["note"].text
