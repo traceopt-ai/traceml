@@ -274,9 +274,16 @@ class SystemRepository:
 
         This path BUCKETS rather than rolls, so it takes a bucket width
         rather than a ``RunSeriesPlan``: there is no stride, cadence or
-        point budget for the shared planner to supply. The width is the
-        same duration the rolling charts use, which is the only part of
-        the plan that applies here.
+        point budget for the shared planner to supply. The width comes
+        from ``RunSeriesPolicy.bucket_width_for``, which is the rolling
+        window until the run outgrows the point budget and then widens
+        past it, so it is NOT always the duration the rolling charts use.
+
+        The offset is clamped at zero. ``CAST`` truncates toward zero
+        rather than flooring, so a row older than ``first_ts`` would
+        otherwise land in a negative bucket and push the count past the
+        budget. ``first_ts`` is read by a separate query, so on a live
+        dashboard a delayed sample can arrive between the two.
         """
         where_sql, bound = self._run_scope(hostname)
         try:
@@ -300,7 +307,9 @@ class SystemRepository:
                     {where_sql}
                     {'AND' if where_sql else 'WHERE'} {_GPU_REPORTED_SQL}
                       AND {_HAS_CLOCK_SQL}
-                    GROUP BY gpu_idx, CAST((sample_ts_s - ?) / ? AS INTEGER)
+                    GROUP BY gpu_idx,
+                             CAST(MAX(sample_ts_s - ?, 0.0) / ?
+                                  AS INTEGER)
                     ORDER BY gpu_idx ASC, 2 ASC
                     """,
                     (*bound, float(first_ts), float(width_s)),
