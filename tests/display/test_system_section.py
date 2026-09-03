@@ -924,3 +924,59 @@ def test_a_healthy_card_carries_no_stale_marker() -> None:
     update_system_section(panel, as_payload(payload))
 
     assert "STALE" not in panel["note"].text
+
+
+def _liveness_payload(state: str, age_s: float) -> dict:
+    return {
+        "window_len": 20,
+        "gpu_available": False,
+        "rollups": {
+            "cpu": {"now": 42.0, "p50": 42.0, "p95": 42.0},
+            "ram": {"now": 9.0 * GB, "total": 200.0 * GB},
+            "node_liveness": {"state": state, "age_s": age_s},
+            "ctx": {"gpu_count": 0},
+        },
+        "series": {"x_time": [], "cpu": []},
+    }
+
+
+def test_the_card_says_when_the_machine_stopped_reporting() -> None:
+    """The liveness answer has a consumer.
+
+    Adopting a freshness rule without rendering it would ship a decision
+    nothing reads, which is the same shape as the stale marker that sat
+    unread on the payload until it was wired up. A reader looking at a
+    tile should not have to check a different part of the page to learn
+    the number is old.
+    """
+    from nicegui import ui
+
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section import (  # noqa: E501
+        build_system_section,
+        update_system_section,
+    )
+
+    with ui.element("div"):
+        panel = build_system_section()
+    update_system_section(panel, as_payload(_liveness_payload("stale", 47.0)))
+
+    note = panel["note"].text
+    assert "not reporting" in note
+    # The age is stated, so "old" is a duration rather than a mood.
+    assert "47" in note
+
+
+def test_a_live_machine_gets_no_liveness_note() -> None:
+    """The note appears only when there is something to say."""
+    from nicegui import ui
+
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section import (  # noqa: E501
+        build_system_section,
+        update_system_section,
+    )
+
+    with ui.element("div"):
+        panel = build_system_section()
+    update_system_section(panel, as_payload(_liveness_payload("fresh", 1.0)))
+
+    assert "not reporting" not in panel["note"].text
