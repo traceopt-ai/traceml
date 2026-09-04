@@ -196,7 +196,7 @@ def start_aggregator(
     _apply_settings_env(normalized)
 
     if logger is None:
-        setup_error_logger(is_aggregator=True)
+        setup_error_logger(role="aggregator")
         logger = get_error_logger("TraceMLAggregatorLifecycle")
 
     session_root = Path(str(normalized.logs_dir)).resolve() / session_id

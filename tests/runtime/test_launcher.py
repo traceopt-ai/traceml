@@ -366,7 +366,7 @@ def test_dashboard_dep_check_passes_without_plotly(monkeypatch) -> None:
 
 
 def test_serve_configures_logging_without_preset_env(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, capsys
 ) -> None:
     import logging
 
@@ -383,8 +383,10 @@ def test_serve_configures_logging_without_preset_env(
     os.environ.pop("TRACEML_LOGS_DIR", None)
     os.environ.pop("TRACEML_SESSION_ID", None)
 
-    traceml_logger = logging.getLogger("traceml")
+    traceml_logger = logging.getLogger("traceml_ai")
     saved_handlers = traceml_logger.handlers[:]
+    saved_level = traceml_logger.level
+    saved_propagate = traceml_logger.propagate
     traceml_logger.handlers.clear()
 
     # Do not clobber the process signal handlers, and stop before the blocking
@@ -412,6 +414,17 @@ def test_serve_configures_logging_without_preset_env(
         assert rc == 1
         assert os.environ["TRACEML_LOGS_DIR"] == str(tmp_path)
         assert os.environ["TRACEML_SESSION_ID"] == "serve-test"
+        structured_log = (
+            tmp_path / "serve-test" / "aggregator" / "traceml_errors.log"
+        )
+        raw_log = tmp_path / "serve-test" / "aggregator" / "process.stderr.log"
+        content = structured_log.read_text(encoding="utf-8")
+        assert content.count("Aggregator exiting due to error") == 1
+        assert "RuntimeError: stop before blocking" in content
+        assert not (tmp_path / "serve-test" / "aggregator_error.log").exists()
+        stderr = capsys.readouterr().err
+        assert str(structured_log) in stderr
+        assert str(raw_log) in stderr
     finally:
         for handler in traceml_logger.handlers[:]:
             traceml_logger.removeHandler(handler)
@@ -421,6 +434,8 @@ def test_serve_configures_logging_without_preset_env(
                 pass
         for handler in saved_handlers:
             traceml_logger.addHandler(handler)
+        traceml_logger.setLevel(saved_level)
+        traceml_logger.propagate = saved_propagate
         for key, value in saved_env.items():
             if value is None:
                 os.environ.pop(key, None)
@@ -1162,6 +1177,10 @@ def test_launcher_scopes_telemetry_health_to_aggregator_owner(
         return training
 
     monkeypatch.chdir(tmp_path)
+    setup_error_logger = Mock()
+    monkeypatch.setattr(
+        launcher_commands, "setup_error_logger", setup_error_logger
+    )
     install_shutdown_handlers = Mock()
     monkeypatch.setattr(
         launcher_commands,
@@ -1208,6 +1227,11 @@ def test_launcher_scopes_telemetry_health_to_aggregator_owner(
         launch_process(str(script), args)
 
     assert exc.value.code == 0
+    setup_error_logger.assert_called_once_with(
+        role="launcher",
+        session_root=(tmp_path / "logs" / "warn-run").resolve(),
+        node_rank=node_rank,
+    )
     launcher_commands._start_training_output.assert_called_once_with(
         training,
         stdout_path=(

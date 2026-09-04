@@ -7,6 +7,12 @@ which carry the full historical notes for versions predating this file.
 
 ## [Unreleased]
 
+- **Breaking:** TraceML implementation errors now have one structured owner:
+  `rank_<global_rank>/traceml_errors.log`,
+  `aggregator/traceml_errors.log`, or
+  `nodes/node_<node_rank>/launcher_errors.log`. New runs no longer create the
+  duplicate `torchrun_error.log`, `runtime_error.log`, or
+  `aggregator_error.log` files.
 - Launcher-owned aggregator stderr is now saved separately at
   `logs/<run-name>/aggregator/process.stderr.log`. Summary and dashboard modes
   mirror it live; CLI mode preserves the Rich display and reports the saved

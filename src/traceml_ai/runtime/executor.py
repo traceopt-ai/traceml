@@ -13,11 +13,10 @@ torchrun remain responsible for exception reporting and process exit status.
 import os
 import runpy
 import sys
-import traceback
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Union
 
+from traceml_ai.loggers.error_log import get_error_logger, setup_error_logger
 from traceml_ai.runtime.launch_context import (
     LaunchContext,
     script_execution_context,
@@ -42,13 +41,6 @@ DEFAULT_AGGREGATOR_HOST = "127.0.0.1"
 DEFAULT_AGGREGATOR_BIND_HOST = "127.0.0.1"
 DEFAULT_AGGREGATOR_PORT = 29765
 DEFAULT_PROFILE = "run"
-USER_ERROR_LOG_NAME = "torchrun_error.log"
-RUNTIME_ERROR_LOG_NAME = "runtime_error.log"
-
-
-def _utc_now_iso() -> str:
-    """Return the current UTC time as a string."""
-    return datetime.now(timezone.utc).isoformat()
 
 
 def _parse_optional_positive_int(value: Optional[str]) -> Optional[int]:
@@ -61,100 +53,17 @@ def _parse_optional_positive_int(value: Optional[str]) -> Optional[int]:
     return parsed
 
 
-def _get_session_dir(cfg: Dict[str, Any]) -> Path:
-    """Return the TraceML session directory for the current run."""
-    logs_dir = Path(str(cfg.get("logs_dir", DEFAULT_LOGS_DIR)))
-    session_id = str(cfg.get("session_id", "") or "no_session")
-    return logs_dir / session_id
-
-
-def _append_error_log(
-    cfg: Dict[str, Any],
-    filename: str,
-    header: str,
-    error: Optional[BaseException] = None,
-) -> None:
-    """
-    Append an error report to a session log file.
-
-    Parameters
-    ----------
-    cfg:
-        Runtime configuration dictionary.
-    filename:
-        Target log filename under the session directory.
-    header:
-        Short human-readable header describing the failure.
-    error:
-        Optional exception to serialize as a traceback.
-
-    Notes
-    -----
-    This function must never raise. Logging failures should not change
-    the outcome of the user's run.
-    """
+def _log_runtime_exception(message: str, error: BaseException) -> None:
+    """Record an executor/runtime implementation failure without raising."""
     try:
-        out_dir = _get_session_dir(cfg)
-        out_dir.mkdir(parents=True, exist_ok=True)
-
-        path = out_dir / filename
-        with open(path, "a", encoding="utf-8", errors="replace") as f:
-            f.write("\n" + "=" * 80 + "\n")
-            f.write(f"{_utc_now_iso()}  {header}\n")
-
-            if error is not None:
-                traceback.print_exception(
-                    type(error),
-                    error,
-                    error.__traceback__,
-                    file=f,
-                )
-
-            f.flush()
+        setup_error_logger(role="rank")
+        get_error_logger("TraceMLExecutor").error(
+            "[TraceML] %s",
+            message,
+            exc_info=(type(error), error, error.__traceback__),
+        )
     except Exception:
-        # Never break the user's run because best-effort logging failed.
         pass
-
-
-def write_user_error_log(
-    cfg: Dict[str, Any],
-    header: str,
-    error: Optional[BaseException] = None,
-) -> None:
-    """
-    Append an ordinary user-script exception to torchrun_error.log.
-
-    This is a compatibility bridge until launcher-owned stderr persistence is
-    available for every display mode. It must never replace or alter native
-    exception propagation, and it can be removed once the launcher output is
-    the canonical durable record.
-    """
-    _append_error_log(
-        cfg=cfg,
-        filename=USER_ERROR_LOG_NAME,
-        header=header,
-        error=error,
-    )
-
-
-def write_runtime_error_log(
-    cfg: Dict[str, Any],
-    header: str,
-    error: Optional[BaseException] = None,
-) -> None:
-    """
-    Append a TraceML internal runtime or executor failure report to
-    runtime_error.log.
-
-    This log is reserved for TraceML infrastructure problems such as runtime
-    startup failure, runtime shutdown failure, and executor-internal errors.
-    """
-    _append_error_log(
-        cfg=cfg,
-        filename=RUNTIME_ERROR_LOG_NAME,
-        header=header,
-        error=error,
-    )
 
 
 def read_traceml_env() -> Dict[str, Any]:
@@ -303,17 +212,12 @@ def start_runtime(cfg: Dict[str, Any]) -> Union[TraceMLRuntime, NoOpRuntime]:
         handle = start_runtime_handle(settings, fail_open=False)
         return handle.runtime
     except Exception as error:
-        write_runtime_error_log(
-            cfg,
-            header="Failed to start TraceMLRuntime",
-            error=error,
-        )
+        _log_runtime_exception("Failed to start TraceMLRuntime", error)
         return NoOpRuntime()
 
 
 def stop_runtime(
     runtime: Union[TraceMLRuntime, NoOpRuntime],
-    cfg: Dict[str, Any],
 ) -> None:
     """
     Stop the TraceML runtime.
@@ -329,11 +233,7 @@ def stop_runtime(
         # runtime.log_summaries(path=None)
 
     except Exception as error:
-        write_runtime_error_log(
-            cfg,
-            header="Error during TraceML runtime shutdown",
-            error=error,
-        )
+        _log_runtime_exception("Error during TraceML runtime shutdown", error)
 
 
 def run_user_script(script_path: str, script_args: list[str]) -> None:
@@ -358,28 +258,18 @@ def run_user_script(script_path: str, script_args: list[str]) -> None:
 def _execute_with_runtime() -> None:
     """Execute the user script while owning one TraceML runtime lifecycle.
 
-    User exceptions are logged best effort for compatibility and then
-    re-raised unchanged. The ``finally`` block guarantees Python-level cleanup
-    without converting ``SystemExit``, ``KeyboardInterrupt``, or ordinary
-    exceptions into TraceML-specific failures.
+    User exceptions propagate unchanged to native Python/torchrun stderr. The
+    ``finally`` block guarantees Python-level cleanup without converting
+    ``SystemExit``, ``KeyboardInterrupt``, or ordinary exceptions into
+    TraceML-specific failures.
     """
     cfg = read_traceml_env()
     runtime = start_runtime(cfg)
 
     try:
-        run_user_script(
-            str(cfg["script_path"]),
-            extract_script_args(),
-        )
-    except Exception as error:
-        write_user_error_log(
-            cfg,
-            header="Unhandled exception in user script",
-            error=error,
-        )
-        raise
+        run_user_script(str(cfg["script_path"]), extract_script_args())
     finally:
-        stop_runtime(runtime, cfg)
+        stop_runtime(runtime)
 
 
 def _run_with_torchelastic_record(

@@ -6,112 +6,112 @@
 
 import logging
 import os
+import threading
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import Literal, Optional
 
 from traceml_ai.runtime.identity import resolve_runtime_identity
 from traceml_ai.runtime.session import rank_dir_name
 
+ErrorLogRole = Literal["rank", "aggregator", "launcher"]
+_HANDLER_MARKER = "_traceml_error_file_handler"
+_SETUP_LOCK = threading.Lock()
 
-def setup_error_logger(is_aggregator=False) -> logging.Logger:
-    """
-    Configure and initialize the global TraceML error logger.
 
-    This function sets up a process-wide logger named ``"traceml_ai"`` with:
-      - WARNING and above logged to stderr (for visibility during runs)
-      - ERROR and above logged to a rotating file on disk
+def _error_log_path(
+    role: ErrorLogRole,
+    *,
+    session_root: Optional[Path] = None,
+    node_rank: Optional[int] = None,
+) -> Path:
+    """Resolve the structured error path owned by one TraceML process."""
+    if session_root is None:
+        logs_dir = os.environ.get("TRACEML_LOGS_DIR", "./logs")
+        session_id = os.environ.get("TRACEML_SESSION_ID") or "default"
+        session_root = Path(logs_dir) / session_id
 
-    The logger is initialized only once per process. Subsequent calls
-    return the already-configured logger.
-
-    Logging behavior
-    ----------------
-    - stderr:
-        * Level: WARNING+
-        * Intended for immediate user feedback
-    - file:
-        * Level: ERROR+
-        * Rotating log file with size-based rollover
-
-    Distributed assumptions
-    -----------------------
-    - Uses global rank to separate process-owned log files.
-    - This avoids write contention between ranks across all nodes.
-
-    Returns
-    -------
-    logging.Logger
-        The configured TraceML root logger.
-    """
-    # Parent of every ``get_error_logger`` child ("traceml_ai.<name>"), so
-    # child records propagate into the handlers attached here.
-    logger = logging.getLogger("traceml_ai")
-
-    # If handlers are already attached, assume the logger
-    # has been initialized and return it as-is.
-    if logger.handlers:
-        return logger
-
-    # Root level is ERROR: more verbose output is controlled
-    # at the handler level.
-    logger.setLevel(logging.ERROR)
-
-    # ----------------------------
-    # File handler (ERROR+)
-    # ----------------------------
-    if is_aggregator is False:
-        rank_dir = rank_dir_name(resolve_runtime_identity().global_rank)
+    if role == "rank":
+        owner_dir = rank_dir_name(resolve_runtime_identity().global_rank)
+        filename = "traceml_errors.log"
+    elif role == "aggregator":
+        owner_dir = "aggregator"
+        filename = "traceml_errors.log"
+    elif role == "launcher":
+        if node_rank is None:
+            raise ValueError("node_rank is required for launcher error logs")
+        owner_dir = f"nodes/node_{int(node_rank)}"
+        filename = "launcher_errors.log"
     else:
-        rank_dir = "aggregator"
+        raise ValueError(f"unknown TraceML error logger role: {role!r}")
 
-    logs_dir = os.environ.get("TRACEML_LOGS_DIR")
-    session_id = os.environ.get("TRACEML_SESSION_ID")
+    return Path(session_root).resolve() / owner_dir / filename
 
-    # Directory layout:
-    #   <logs_dir>/<session_id>/rank_<global_rank>/traceml_errors.log
-    #   <logs_dir>/<session_id>/aggregator/traceml_errors.log
-    errors_dir = Path(logs_dir) / session_id / rank_dir
 
-    errors_dir.mkdir(parents=True, exist_ok=True)
+def setup_error_logger(
+    role: ErrorLogRole,
+    *,
+    session_root: Optional[Path] = None,
+    node_rank: Optional[int] = None,
+) -> logging.Logger:
+    """Configure the process-owned TraceML ERROR-level rotating file.
 
-    fh = RotatingFileHandler(
-        errors_dir / "traceml_errors.log",
-        maxBytes=50_000_000,  # ~5 MB per file
-        backupCount=3,  # keep last 3 rotated files
-        encoding="utf-8",
-    )
-    fh.setLevel(logging.ERROR)
-    fh.setFormatter(
-        logging.Formatter(
-            "%(asctime)s\t%(levelname)s\t%(name)s\t%(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        )
-    )
-    logger.addHandler(fh)
-
-    # Prevent propagation to the root logger to avoid
-    # duplicate log lines in user applications.
+    No stderr handler is installed. Initialization is idempotent for the same
+    role and session, and filesystem failures leave logging disabled rather
+    than affecting training or telemetry control flow.
+    """
+    logger = logging.getLogger("traceml_ai")
+    logger.setLevel(logging.ERROR)
     logger.propagate = False
 
-    return logger
+    try:
+        path = _error_log_path(
+            role,
+            session_root=session_root,
+            node_rank=node_rank,
+        )
+    except Exception:
+        return logger
+
+    with _SETUP_LOCK:
+        for handler in list(logger.handlers):
+            if not getattr(handler, _HANDLER_MARKER, False):
+                continue
+            base_filename = getattr(handler, "baseFilename", None)
+            if base_filename is not None and Path(base_filename) == path:
+                return logger
+            logger.removeHandler(handler)
+            try:
+                handler.close()
+            except Exception:
+                pass
+
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            handler = RotatingFileHandler(
+                path,
+                maxBytes=50_000_000,
+                backupCount=3,
+                encoding="utf-8",
+            )
+        except Exception:
+            handler = logging.NullHandler()
+            setattr(handler, _HANDLER_MARKER, True)
+            logger.addHandler(handler)
+            return logger
+
+        handler.setLevel(logging.ERROR)
+        handler.setFormatter(
+            logging.Formatter(
+                "%(asctime)s\t%(levelname)s\t%(name)s\t%(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
+            )
+        )
+        setattr(handler, _HANDLER_MARKER, True)
+        logger.addHandler(handler)
+        return logger
 
 
 def get_error_logger(name: str) -> logging.Logger:
-    """
-    Return a child logger under the TraceML namespace.
-
-    This is a lightweight convenience wrapper that ensures all
-    TraceML loggers share a common root configuration created by
-    ``setup_error_logger()``.
-
-    Parameters
-    ----------
-    name : str
-        Sub-logger name (e.g., "Aggregator", "Sampler").
-
-    Returns
-    -------
-    logging.Logger
-        Logger instance named ``f"traceml_ai.{name}"``.
-    """
+    """Return a component child of the process-owned TraceML logger."""
     return logging.getLogger(f"traceml_ai.{name}")

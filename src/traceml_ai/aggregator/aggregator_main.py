@@ -18,9 +18,7 @@ Expected usage (via CLI)
 
 Error handling
 --------------
-- Fatal aggregator errors are logged through the configured logger.
-- Fatal aggregator errors are also written to ``aggregator_error.log`` under
-  the current session directory.
+- Fatal aggregator errors are logged once through the configured logger.
 - A brief error is printed to stderr as a last-resort fallback in case the
   terminal UI has already been torn down or failed.
 """
@@ -31,7 +29,6 @@ import sys
 import threading
 import traceback
 from dataclasses import replace
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -48,44 +45,6 @@ from traceml_ai.telemetry.retention import (
     DEFAULT_HISTORY_RETENTION_S,
     parse_history_retention,
 )
-
-AGGREGATOR_ERROR_LOG_NAME = "aggregator_error.log"
-
-
-def _utc_now_iso() -> str:
-    """Return the current UTC timestamp as an ISO-8601 string."""
-    return datetime.now(timezone.utc).isoformat()
-
-
-def write_aggregator_error_log(
-    session_root: Path,
-    header: str,
-    error: BaseException,
-) -> None:
-    """
-    Append a fatal aggregator error report to ``aggregator_error.log``.
-
-    This function is best-effort and must never raise. Aggregator failures
-    should still surface through stderr and exit codes even if file logging
-    fails.
-    """
-    try:
-        session_root.mkdir(parents=True, exist_ok=True)
-        path = session_root / AGGREGATOR_ERROR_LOG_NAME
-
-        with open(path, "a", encoding="utf-8", errors="replace") as f:
-            f.write("\n" + "=" * 80 + "\n")
-            f.write(f"{_utc_now_iso()}  {header}\n")
-            traceback.print_exception(
-                type(error),
-                error,
-                error.__traceback__,
-                file=f,
-            )
-            f.flush()
-    except Exception:
-        # Best-effort only: never mask the original failure.
-        pass
 
 
 def read_traceml_env() -> dict[str, Any]:
@@ -190,7 +149,7 @@ def run_aggregator(
     - prints the reachable endpoint
     - blocks until SIGINT/SIGTERM
     - shuts down cleanly, preserving final-summary behavior
-    - logs fatal aggregator errors to ``aggregator_error.log``
+    - logs fatal errors to its structured process-owned log
 
     Returns a process exit code (0 on clean shutdown, 1 on fatal error).
     """
@@ -209,7 +168,7 @@ def run_aggregator(
     os.environ["TRACEML_SESSION_ID"] = session_id
 
     if logger is None:
-        setup_error_logger(is_aggregator=True)
+        setup_error_logger(role="aggregator")
         logger = get_error_logger("TraceMLAggregatorMain")
 
     stop_event = threading.Event()
@@ -259,19 +218,18 @@ def run_aggregator(
 
         if err is not None:
             try:
-                logger.exception("[TraceML] Aggregator exiting due to error")
+                logger.error(
+                    "[TraceML] Aggregator exiting due to error",
+                    exc_info=(type(err), err, err.__traceback__),
+                )
             except Exception:
                 pass
 
-            write_aggregator_error_log(
-                session_root=session_root,
-                header="Fatal aggregator error",
-                error=err,
-            )
-
             print(
                 "\n[TraceML] Aggregator exiting due to error. "
-                f"See {session_root / AGGREGATOR_ERROR_LOG_NAME}",
+                f"Structured log: {session_dir / 'traceml_errors.log'}. "
+                "Launcher-owned runs also preserve raw stderr at "
+                f"{session_dir / 'process.stderr.log'}.",
                 file=sys.stderr,
                 flush=True,
             )
@@ -296,7 +254,7 @@ def main() -> None:
     ``traceml run`` launcher, builds settings, and delegates the lifecycle to
     :func:`run_aggregator`.
     """
-    setup_error_logger(is_aggregator=True)
+    setup_error_logger(role="aggregator")
     logger = get_error_logger("TraceMLAggregatorMain")
 
     cfg = read_traceml_env()
