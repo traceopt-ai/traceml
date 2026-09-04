@@ -137,6 +137,33 @@ def _paired_total(levels: Any, totals: Any) -> Optional[float]:
     return float(total) if total == total else None
 
 
+# A clock can jitter backwards by a hair without having stepped; only a
+# real step is treated as "we cannot tell".
+_CLOCK_STEP_TOLERANCE_S = 1.0
+
+
+def _observed_cadence(ts_hist: Any) -> Optional[float]:
+    """The rhythm the host actually reports at, robust to one stall.
+
+    The MEDIAN gap, not the mean over the window's whole span. A single
+    stall inside the window (a suspend, a blocked sampler thread) drags
+    a mean far above the real cadence, and the freshness threshold is a
+    multiple of it: 99 samples at 2 s plus one two-hour gap gives a mean
+    near 75 s and a threshold near four minutes, so a host that dies on
+    resume would read as live for that long.
+    """
+    stamps = ts_hist.tolist()
+    if len(stamps) < 2:
+        return None
+    gaps = sorted(float(b - a) for a, b in zip(stamps, stamps[1:]) if b > a)
+    if not gaps:
+        return None
+    mid = len(gaps) // 2
+    if len(gaps) % 2:
+        return gaps[mid]
+    return (gaps[mid - 1] + gaps[mid]) / 2.0
+
+
 def _gap_list(values: Any) -> List[Optional[float]]:
     """A series where an absent tick is a gap rather than a zero."""
     return [None if v != v else float(v) for v in values.tolist()]
@@ -621,7 +648,14 @@ class SystemDashboardComputer:
         )
 
     def _node_liveness(self, samples: Any, ts_hist: Any) -> Dict[str, Any]:
-        """Whether the host this payload describes is still reporting."""
+        """Whether the host this payload describes is still reporting.
+
+        Age is measured against ``recv_ts_ns``, when the AGGREGATOR
+        received the sample, not ``sample_ts_s``, when the sampler took
+        it: the sampler may be another machine and a skewed remote clock
+        would read as a dead node. ``recv_ts_ns`` is in the table's
+        original schema and is ``NOT NULL``, so it is always present.
+        """
         recvs = [
             v / 1e9
             for v in (_opt_float(r["recv_ts_ns"]) for r in samples)
@@ -629,15 +663,24 @@ class SystemDashboardComputer:
         ]
         if not recvs:
             return {"state": "unknown", "age_s": None}
-        cadence = None
-        stamps = ts_hist.tolist()
-        if len(stamps) > 1:
-            span = float(stamps[-1] - stamps[0])
-            if span > 0:
-                cadence = span / float(len(stamps) - 1)
-        policy = FreshnessPolicy.from_observed_cadence(cadence)
-        age = max(0.0, float(self._now_fn()) - max(recvs))
-        return {"state": policy.state_of(age), "age_s": age}
+
+        newest = max(recvs)
+        age = float(self._now_fn()) - newest
+        if age < -_CLOCK_STEP_TOLERANCE_S:
+            # The arrival clock is wall time on both ends, so it is not
+            # monotonic. A backward NTP step makes "now" earlier than a
+            # sample we already hold. Clamping that to zero would assert
+            # the host is live, which is the one answer we cannot
+            # support: we do not know how long ago it reported.
+            return {"state": "unknown", "age_s": None}
+
+        policy = FreshnessPolicy.from_observed_cadence(
+            _observed_cadence(ts_hist)
+        )
+        return {
+            "state": policy.state_of(max(0.0, age)),
+            "age_s": max(0.0, age),
+        }
 
     def _mode_for(
         self, stats: Optional[RunStats], window_span_s: float

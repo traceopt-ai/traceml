@@ -1164,6 +1164,7 @@ def test_a_held_over_payload_carries_why_it_is_held(tmp_path: Path) -> None:
     update_system_section(panel, held)
     assert held.rollups.status in panel["note"].text
 
+
 def _with_arrival_clock(path: Path) -> None:
     """Give the rows a real arrival clock.
 
@@ -1230,9 +1231,11 @@ def test_liveness_reads_the_shared_threshold_not_a_local_one(
     _with_arrival_clock(db)
     newest = 1000.0 + 2.0 * (TICKS - 1)
 
-    # The fixture samples every 2 s, so the shared policy's floor of 5 s
-    # is what applies, not the cadence multiple.
-    policy = FreshnessPolicy.from_interval(2.0)
+    # Built through the same entry point production uses. Using
+    # `from_interval(2.0)` instead would agree only because the fixture
+    # cadence happens to be exactly 2 s, so the test would stop
+    # tracking the code the moment either changed.
+    policy = FreshnessPolicy.from_observed_cadence(2.0)
     edge = policy.stale_after_s
 
     assert _payload_at(
@@ -1241,3 +1244,58 @@ def test_liveness_reads_the_shared_threshold_not_a_local_one(
     assert _payload_at(
         db, newest + edge + 0.5
     ).rollups.node_liveness.state == ("stale")
+
+
+def test_one_stall_does_not_inflate_the_staleness_threshold(
+    tmp_path: Path,
+) -> None:
+    """The cadence is the host's rhythm, not the window's average gap.
+
+    A mean over the whole span lets a single stall dominate: 19 samples
+    two seconds apart plus one two-hour gap averages near 380 s, and the
+    threshold is a multiple of that, so a host that dies right after
+    resuming would read live for many minutes. The median gap ignores
+    the stall.
+    """
+    db = tmp_path / "stalled.db"
+    _write(db, lambda seq: (), gpu_available=False)
+    _with_arrival_clock(db)
+    newest = 1000.0 + 2.0 * (TICKS - 1)
+
+    # Push one sample two hours into the past, creating a huge gap.
+    with sqlite_database(db, init_summary_schema) as conn:
+        conn.execute(
+            "UPDATE system_samples SET sample_ts_s = sample_ts_s - 7200.0 "
+            "WHERE seq = 0"
+        )
+        conn.commit()
+
+    # Thirty seconds of silence is still stale on a two-second cadence.
+    out = _payload_at(db, newest + 30.0)
+
+    assert out.rollups.node_liveness is not None
+    assert out.rollups.node_liveness.state == "stale"
+
+
+def test_a_clock_that_moved_backwards_says_it_does_not_know(
+    tmp_path: Path,
+) -> None:
+    """Both ends of the age are wall time, so it is not monotonic.
+
+    A backward NTP step puts "now" before a sample already held.
+    Clamping that to a zero age would assert the host is live, which is
+    the one answer the data cannot support: how long ago it reported is
+    exactly what has been lost.
+    """
+    db = tmp_path / "stepped.db"
+    _write(db, lambda seq: (), gpu_available=False)
+    _with_arrival_clock(db)
+    newest = 1000.0 + 2.0 * (TICKS - 1)
+
+    stepped = _payload_at(db, newest - 600.0)
+
+    assert stepped.rollups.node_liveness is not None
+    assert stepped.rollups.node_liveness.state == "unknown"
+    assert stepped.rollups.node_liveness.age_s is None
+    # A hair of jitter is not a step, and still reads normally.
+    assert _payload_at(db, newest - 0.2).rollups.node_liveness.state == "fresh"
