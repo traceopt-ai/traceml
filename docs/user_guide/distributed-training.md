@@ -57,6 +57,11 @@ launcher, which owns the aggregator process and can observe its exit and
 finalization. Non-owner launchers do not infer final aggregator health from a
 startup TCP readiness check.
 
+Each node launcher writes its own `nodes/node_<node_rank>/training.*.log`
+files when training-output saving is enabled. Only node 0 writes
+`aggregator/process.stderr.log`, because it is the only launcher that owns the
+aggregator process.
+
 `--session-id` remains accepted as a backward-compatible alias for
 `--run-name`.
 

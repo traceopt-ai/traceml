@@ -134,6 +134,13 @@ prints a bounded stderr excerpt, the saved paths, and the final outcome. Use
 output files. Captured streams are pipes, so `isatty()` returns false. TraceML
 does not replace Python's `sys.stdout` or `sys.stderr` objects.
 
+`--no-save-training-output` controls only the supervised training streams. The
+owner launcher always saves raw aggregator diagnostics to
+`logs/<run-name>/aggregator/process.stderr.log`; only node 0 creates this file
+in a multi-node run. Summary and dashboard modes mirror it live, while CLI mode
+reports its path if telemetry fails. Aggregator stdout remains attached to the
+terminal and is not persisted.
+
 ## Direct Launch with `traceml serve`
 
 `traceml run` starts the aggregator and your script together. For direct

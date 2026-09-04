@@ -9,6 +9,7 @@ import io
 import json
 import os
 import signal
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import Mock
@@ -164,6 +165,29 @@ def test_aggregator_output_policy_saves_only_stderr(
     assert stderr_path.read_bytes() == b"aggregator failure\n"
     expected = b"aggregator failure\n" if mirrors_live else b""
     assert terminal.getvalue() == expected
+
+
+def test_aggregator_output_sink_failure_falls_back(
+    monkeypatch, tmp_path
+) -> None:
+    terminal = io.BytesIO()
+    monkeypatch.setattr(
+        launcher_commands, "_binary_stream", lambda _stream: terminal
+    )
+    blocked_parent = tmp_path / "not-a-directory"
+    blocked_parent.write_text("blocked", encoding="utf-8")
+    proc = Mock(stderr=io.BytesIO(b"aggregator failure\n"))
+
+    result = launcher_commands._start_aggregator_output(
+        proc,
+        stderr_path=blocked_parent / "process.stderr.log",
+        mode="cli",
+    ).finish()
+
+    assert result.stderr_path is None
+    assert terminal.getvalue() == b"aggregator failure\n"
+    assert result.warning is not None
+    assert "stderr output file could not be opened" in result.warning
 
 
 def test_cli_failure_output_is_bounded_and_prints_confirmed_paths(
@@ -1041,6 +1065,34 @@ def test_strict_aggregator_failure_does_not_start_training(
     else:
         start_aggregator.assert_not_called()
         update_manifest.assert_not_called()
+
+
+def test_stderr_from_process_exiting_before_readiness_is_exact(
+    tmp_path,
+) -> None:
+    expected = b"pre-readiness failure: \xff\n"
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import os; os.write(2, "
+            "b'pre-readiness failure: \\xff\\n'); raise SystemExit(7)",
+        ],
+        stderr=subprocess.PIPE,
+    )
+    stderr_path = tmp_path / "aggregator" / "process.stderr.log"
+    output = launcher_commands._start_aggregator_output(
+        proc, stderr_path=stderr_path, mode="cli"
+    )
+
+    assert proc.wait(timeout=5) == 7
+    assert not launcher_commands.wait_for_tcp_listen(
+        host="127.0.0.1", port=0, proc=proc, timeout_sec=0.1
+    )
+    result = output.finish()
+
+    assert stderr_path.read_bytes() == expected
+    assert result.stderr_path == stderr_path.resolve()
 
 
 @pytest.mark.parametrize(
