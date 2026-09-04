@@ -19,6 +19,7 @@ from unittest.mock import Mock
 from traceml_ai.launcher.process import (
     DEFAULT_STDERR_TAIL_BYTES,
     ProcessOutputDrainer,
+    start_aggregator_process,
     start_training_process,
 )
 
@@ -185,6 +186,16 @@ def test_training_process_only_pipes_output_when_requested(
     )
     assert popen.call_args.kwargs["stdout"] is subprocess.PIPE
     assert popen.call_args.kwargs["stderr"] is subprocess.PIPE
+
+
+def test_aggregator_process_pipes_only_stderr(monkeypatch) -> None:
+    popen = Mock()
+    monkeypatch.setattr(subprocess, "Popen", popen)
+
+    start_aggregator_process(env={}, cwd=".")
+
+    assert popen.call_args.kwargs["stderr"] is subprocess.PIPE
+    assert "stdout" not in popen.call_args.kwargs
 
 
 def test_sink_failure_falls_back_and_keeps_draining(

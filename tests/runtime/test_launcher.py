@@ -139,6 +139,33 @@ def test_training_output_display_policy_saves_both_streams(
     assert stderr_terminal.getvalue() == expected_stderr
 
 
+@pytest.mark.parametrize(
+    ("mode", "mirrors_live"),
+    [("summary", True), ("dashboard", True), ("cli", False)],
+)
+def test_aggregator_output_policy_saves_only_stderr(
+    monkeypatch, tmp_path, mode, mirrors_live
+) -> None:
+    terminal = io.BytesIO()
+    monkeypatch.setattr(
+        launcher_commands, "_binary_stream", lambda _stream: terminal
+    )
+    proc = Mock(stderr=io.BytesIO(b"aggregator failure\n"))
+    stderr_path = tmp_path / "aggregator" / "process.stderr.log"
+
+    result = launcher_commands._start_aggregator_output(
+        proc,
+        stderr_path=stderr_path,
+        mode=mode,
+    ).finish()
+
+    assert result.warning is None
+    assert result.stdout_path is None
+    assert stderr_path.read_bytes() == b"aggregator failure\n"
+    expected = b"aggregator failure\n" if mirrors_live else b""
+    assert terminal.getvalue() == expected
+
+
 def test_cli_failure_output_is_bounded_and_prints_confirmed_paths(
     tmp_path, capsys
 ) -> None:
@@ -757,7 +784,28 @@ def test_started_training_result_is_authoritative(
 
     aggregator = Mock(pid=10, returncode=aggregator_rc)
     training = Mock()
-    training.poll.return_value = train_rc
+    if aggregator_rc == 9:
+        training.poll.side_effect = [None, train_rc]
+    else:
+        training.poll.return_value = train_rc
+    aggregator_stderr_path = (
+        tmp_path
+        / "logs"
+        / "outcome-test"
+        / "aggregator"
+        / "process.stderr.log"
+    )
+    aggregator_stderr_path.parent.mkdir(parents=True)
+    aggregator_stderr_path.write_bytes(b"aggregator details\n")
+    aggregator_output_result = ProcessOutputResult(
+        stdout_path=None,
+        stderr_path=aggregator_stderr_path,
+        stderr_tail=b"aggregator details\n",
+        warning=(
+            "aggregator output capture degraded" if not save_output else None
+        ),
+    )
+    aggregator_output = Mock()
     training_output = Mock()
     training_output.finish.return_value = ProcessOutputResult(
         stdout_path=None,
@@ -771,6 +819,12 @@ def test_started_training_result_is_authoritative(
     def stop_aggregator(*_args, **_kwargs):
         events.append("stop")
 
+    def finish_aggregator_output():
+        events.append("aggregator-output")
+        return aggregator_output_result
+
+    aggregator_output.finish.side_effect = finish_aggregator_output
+
     def print_output(*args, **kwargs):
         events.append("output")
         print_training_output(*args, **kwargs)
@@ -782,6 +836,7 @@ def test_started_training_result_is_authoritative(
         "start_aggregator_process": Mock(return_value=aggregator),
         "wait_for_tcp_listen": Mock(return_value=True),
         "start_training_process": Mock(return_value=training),
+        "_start_aggregator_output": Mock(return_value=aggregator_output),
         "_start_training_output": Mock(return_value=training_output),
         "terminate_process_group": Mock(side_effect=stop_aggregator),
         "_print_training_output": Mock(side_effect=print_output),
@@ -792,6 +847,7 @@ def test_started_training_result_is_authoritative(
     }
     for name, replacement in replacements.items():
         monkeypatch.setattr(launcher_commands, name, replacement)
+    monkeypatch.setattr(launcher_commands.time, "sleep", Mock())
 
     if finalization_fails:
         monkeypatch.setattr(
@@ -821,6 +877,16 @@ def test_started_training_result_is_authoritative(
     ]["training_output"]
     assert output_manifest["enabled"] is save_output
     assert output_manifest["scope"] == "node"
+    replacements["_start_aggregator_output"].assert_called_once_with(
+        aggregator,
+        stderr_path=aggregator_stderr_path,
+        mode=mode,
+    )
+    aggregator_output.finish.assert_called_once_with()
+    if aggregator_rc == 9:
+        assert events.index("aggregator-output") < events.index("output")
+    else:
+        assert events.index("stop") < events.index("aggregator-output")
     if save_output:
         assert output_manifest["stdout_pattern"] == (
             "nodes/node_<node_rank>/training.stdout.log"
@@ -836,16 +902,30 @@ def test_started_training_result_is_authoritative(
         training_output.finish.assert_not_called()
         assert not list((tmp_path / "logs").rglob("training.*.log"))
     stderr_lines = capsys.readouterr().err.splitlines()
+    if not save_output:
+        assert (
+            stderr_lines.count(
+                "[TraceML] WARNING: aggregator output capture degraded"
+            )
+            == 1
+        )
     final_line = stderr_lines[-1]
     expected_status = "completed successfully" if train_rc == 0 else "failed"
     assert f"Training {expected_status}" in final_line
     assert stderr_lines[-2].startswith("[TraceML] Telemetry ")
     if train_rc != 0:
         assert "torchrun exited with code 1" in final_line
-    if mode == "cli":
+    if mode == "cli" and aggregator_rc != 9:
         assert events.index("stop") < events.index("output")
         if train_rc != 0 and save_output:
             assert "captured failure" in "\n".join(stderr_lines)
+    if aggregator_rc == 9:
+        assert "aggregator exited early" in "\n".join(stderr_lines)
+        assert any(
+            call.kwargs.get("artifacts")
+            == {"aggregator_stderr_log": str(aggregator_stderr_path)}
+            for call in replacements["update_run_manifest"].call_args_list
+        )
     if (
         train_rc == 0
         and aggregator_rc == 0
@@ -893,11 +973,25 @@ def test_strict_aggregator_failure_does_not_start_training(
     monkeypatch.setattr(launcher_commands, "install_shutdown_handlers", Mock())
     aggregator = Mock(pid=10, returncode=7)
     aggregator.poll.return_value = 7
+    aggregator_stderr_path = tmp_path / "aggregator" / "process.stderr.log"
+    aggregator_output = Mock()
+    aggregator_output.finish.return_value = ProcessOutputResult(
+        stdout_path=None,
+        stderr_path=aggregator_stderr_path,
+        stderr_tail=b"failed before readiness\n",
+        warning=None,
+    )
+    start_aggregator_output = Mock(return_value=aggregator_output)
     start_aggregator = Mock(return_value=aggregator)
     if failure == "spawn":
         start_aggregator.side_effect = FileNotFoundError("aggregator missing")
     monkeypatch.setattr(
         launcher_commands, "start_aggregator_process", start_aggregator
+    )
+    monkeypatch.setattr(
+        launcher_commands,
+        "_start_aggregator_output",
+        start_aggregator_output,
     )
     monkeypatch.setattr(
         launcher_commands, "wait_for_tcp_listen", Mock(return_value=False)
@@ -927,8 +1021,15 @@ def test_strict_aggregator_failure_does_not_start_training(
     assert "TRACEML_ON_MISSING_AGGREGATOR=warn" in stderr
     if failure == "readiness" and owner:
         assert "(exit=7)" in stderr
+        assert str(aggregator_stderr_path) in stderr
+        assert stderr.index("Aggregator stderr") < stderr.index("ERROR")
+        aggregator_output.finish.assert_called_once_with()
+        assert update_manifest.call_args.kwargs["artifacts"] == {
+            "aggregator_stderr_log": str(aggregator_stderr_path)
+        }
     else:
         assert "(exit=" not in stderr
+        start_aggregator_output.assert_not_called()
     start_training.assert_not_called()
     if owner:
         assert update_manifest.call_args.kwargs["status"] == "failed"
@@ -980,6 +1081,22 @@ def test_launcher_scopes_telemetry_health_to_aggregator_owner(
     )
     training_output = Mock()
     training_output.finish.return_value = output_result
+    aggregator_stderr_path = (
+        tmp_path / "logs" / "warn-run" / "aggregator" / "process.stderr.log"
+    )
+    aggregator_output = Mock()
+
+    def _finish_aggregator_output():
+        events.append("finish-output")
+        return ProcessOutputResult(
+            stdout_path=None,
+            stderr_path=aggregator_stderr_path,
+            stderr_tail=b"startup failure\n",
+            warning=None,
+        )
+
+    aggregator_output.finish.side_effect = _finish_aggregator_output
+    start_aggregator_output = Mock(return_value=aggregator_output)
 
     def _stop_aggregator(*_args, **_kwargs):
         events.append("stop")
@@ -1000,6 +1117,11 @@ def test_launcher_scopes_telemetry_health_to_aggregator_owner(
     start_aggregator = Mock(return_value=aggregator)
     monkeypatch.setattr(
         launcher_commands, "start_aggregator_process", start_aggregator
+    )
+    monkeypatch.setattr(
+        launcher_commands,
+        "_start_aggregator_output",
+        start_aggregator_output,
     )
     monkeypatch.setattr(
         launcher_commands, "wait_for_tcp_listen", Mock(return_value=ready)
@@ -1055,8 +1177,14 @@ def test_launcher_scopes_telemetry_health_to_aggregator_owner(
     )
     training_output.finish.assert_called_once_with()
     if owner:
-        assert events == ["stop", "train"]
+        assert events == ["stop", "finish-output", "train"]
         start_aggregator.assert_called_once()
+        start_aggregator_output.assert_called_once_with(
+            aggregator,
+            stderr_path=aggregator_stderr_path,
+            mode="cli",
+        )
+        aggregator_output.finish.assert_called_once_with()
         write_code_manifest.assert_called_once()
         write_manifest.assert_called_once()
         assert install_shutdown_handlers.call_args.kwargs["manifest_path"] == (
@@ -1069,9 +1197,15 @@ def test_launcher_scopes_telemetry_health_to_aggregator_owner(
         ]
         assert initial_telemetry == "starting"
         assert "unavailable" in reported_statuses
+        assert any(
+            call.kwargs.get("artifacts")
+            == {"aggregator_stderr_log": str(aggregator_stderr_path)}
+            for call in update_manifest.call_args_list
+        )
     else:
         assert events == ["train"]
         start_aggregator.assert_not_called()
+        start_aggregator_output.assert_not_called()
         write_code_manifest.assert_not_called()
         write_manifest.assert_not_called()
         update_manifest.assert_not_called()
@@ -1529,19 +1663,24 @@ def test_collect_existing_artifacts_includes_confirmed_training_output(
     node_dir = node_artifact_dir(tmp_path, 0)
     stdout_path = node_dir / "training.stdout.log"
     stderr_path = node_dir / "training.stderr.log"
+    aggregator_stderr_path = tmp_path / "aggregator" / "process.stderr.log"
     stderr_path.parent.mkdir(parents=True)
+    aggregator_stderr_path.parent.mkdir(parents=True)
     stdout_path.write_bytes(b"training output\n")
     stderr_path.write_bytes(b"native crash details\n")
+    aggregator_stderr_path.write_bytes(b"aggregator details\n")
 
     artifacts = collect_existing_artifacts(
         db_path,
         session_root=tmp_path,
         training_stdout_path=stdout_path,
         training_stderr_path=stderr_path,
+        aggregator_stderr_path=aggregator_stderr_path,
     )
 
     assert artifacts["training_stdout_log"] == str(stdout_path)
     assert artifacts["training_stderr_log"] == str(stderr_path)
+    assert artifacts["aggregator_stderr_log"] == str(aggregator_stderr_path)
 
 
 def test_run_view_reports_user_facing_errors(tmp_path, capsys) -> None:

@@ -351,6 +351,7 @@ def collect_existing_artifacts(
     session_root: Optional[Path] = None,
     training_stdout_path: Optional[Path] = None,
     training_stderr_path: Optional[Path] = None,
+    aggregator_stderr_path: Optional[Path] = None,
 ) -> Dict[str, str]:
     """Return only launcher artifacts that currently exist on disk."""
     candidates = {
@@ -371,6 +372,10 @@ def collect_existing_artifacts(
     if training_stderr_path is not None:
         candidates["training_stderr_log"] = Path(
             training_stderr_path
+        ).resolve()
+    if aggregator_stderr_path is not None:
+        candidates["aggregator_stderr_log"] = Path(
+            aggregator_stderr_path
         ).resolve()
 
     return {
