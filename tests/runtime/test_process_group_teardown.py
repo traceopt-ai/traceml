@@ -14,6 +14,8 @@ import subprocess
 import sys
 import time
 
+import pytest
+
 from traceml_ai.launcher import process as process_mod
 
 # Child spawns a long-lived grandchild, prints its pid, then sleeps.
@@ -65,6 +67,33 @@ def test_process_group_kwargs_matches_the_platform() -> None:
         assert kwargs["creationflags"] != 0
     else:
         assert kwargs == {"start_new_session": True}
+
+
+def test_shutdown_handler_runs_output_cleanup(monkeypatch) -> None:
+    handlers = {}
+    events = []
+    proc = object()
+    monkeypatch.setattr(
+        process_mod.signal,
+        "signal",
+        lambda signum, handler: handlers.__setitem__(signum, handler),
+    )
+    monkeypatch.setattr(
+        process_mod,
+        "terminate_process_group",
+        lambda target, **_kwargs: events.append(("terminate", target)),
+    )
+
+    process_mod.install_shutdown_handlers(
+        lambda: (proc,),
+        cleanup=lambda: events.append(("cleanup", None)),
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        handlers[signal.SIGTERM](signal.SIGTERM, None)
+
+    assert exc.value.code == process_mod.INTERRUPTED_EXIT_CODE
+    assert events == [("terminate", proc), ("cleanup", None)]
 
 
 def test_windows_branch_kills_the_tree(monkeypatch) -> None:

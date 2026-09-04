@@ -21,7 +21,6 @@ from traceml_ai.runtime.state import (
     get_trace_recording_state,
     mark_trace_recording_drained,
 )
-from traceml_ai.runtime.stdout_stderr_capture import StreamCapture
 from traceml_ai.samplers.base_sampler import BaseSampler
 from traceml_ai.telemetry.control import build_rank_finished_payload
 from traceml_ai.transport.tcp_transport import TCPClient, TCPConfig
@@ -191,21 +190,7 @@ class TraceMLRuntime:
             self._drain_recording_samplers()
 
     def start(self) -> None:
-        """
-        Start TraceML runtime.
-
-        Start order:
-        1) enable stdout/stderr capture (CLI mode only, dashboard no need)
-        2) start exporter thread
-        3) start sampler thread
-        """
-        if self.mode == "cli":
-            _safe(
-                self._logger,
-                "Stdout/stderr capture enable failed",
-                StreamCapture.redirect_to_capture,
-            )
-
+        """Start the exporter, then the sampler thread."""
         # Exporter must be running before samplers start enqueuing batches.
         self._exporter.start()
 
@@ -223,7 +208,6 @@ class TraceMLRuntime:
         - Joins the sampler thread
         - Enqueues a final telemetry batch and a rank-finished control message
         - Drains the export queue and closes the TCP client (bounded)
-        - Restores stdout/stderr (CLI mode only)
         """
         self._stop_event.set()
 
@@ -249,14 +233,6 @@ class TraceMLRuntime:
 
         # drain the export queue and close the client last
         self._exporter.stop()
-
-        # restore stdout/stderr
-        if self.mode == "cli":
-            _safe(
-                self._logger,
-                "Stdout/stderr restore failed",
-                StreamCapture.redirect_to_original,
-            )
 
     def log_summaries(self, path: Optional[str] = None) -> None:
         """

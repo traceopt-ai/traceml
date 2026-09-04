@@ -17,7 +17,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Callable, Mapping, Optional
+from typing import Any, BinaryIO, Callable, Mapping, Optional
 
 from traceml_ai.launcher.launch_config import (
     TORCH_LAUNCHER_REQUIRED,
@@ -38,11 +38,11 @@ from traceml_ai.launcher.manifest import (
 from traceml_ai.launcher.process import (
     DEFAULT_SHUTDOWN_TIMEOUT_SEC,
     DEFAULT_TCP_READY_TIMEOUT_SEC,
-    StderrTailCapture,
+    ProcessOutputDrainer,
+    ProcessOutputResult,
     TrainingOutcome,
     install_shutdown_handlers,
     start_aggregator_process,
-    start_stderr_tail_capture,
     start_training_process,
     terminate_process_group,
     wait_for_tcp_listen,
@@ -65,6 +65,8 @@ DASHBOARD_DEPENDENCY_INSTALL_HINT = (
 
 SINGLE_NODE_DEFAULT_MODE = DEFAULT_UI_MODE
 MULTI_NODE_DEFAULT_MODE = DEFAULT_UI_MODE
+_FAILURE_EXCERPT_BYTES = 8 * 1024
+_FAILURE_EXCERPT_LINES = 40
 
 
 def _launch_defaults_for_topology(
@@ -146,22 +148,62 @@ def _log_launcher_exception(message: str, exc: Exception) -> None:
         pass
 
 
-def _stderr_capture_enabled(
-    args: argparse.Namespace, environ: Mapping[str, str]
-) -> bool:
-    """Resolve the opt-in stderr capture flag and environment variable."""
-    return bool(getattr(args, "capture_stderr", False)) or (
-        environ.get("TRACEML_CAPTURE_STDERR") == "1"
+def _binary_stream(stream: Any) -> Optional[BinaryIO]:
+    """Return a launcher terminal's binary buffer, when available."""
+    return getattr(stream, "buffer", None)
+
+
+def _stderr_excerpt(tail: bytes) -> str:
+    """Decode the bounded terminal excerpt without changing persisted bytes."""
+    text = tail[-_FAILURE_EXCERPT_BYTES:].decode("utf-8", errors="replace")
+    return "\n".join(text.splitlines()[-_FAILURE_EXCERPT_LINES:])
+
+
+def _start_training_output(
+    proc: subprocess.Popen,
+    *,
+    stdout_path: Path,
+    stderr_path: Path,
+    mode: str,
+) -> ProcessOutputDrainer:
+    """Own the two training pipes using the display policy for ``mode``."""
+    if proc.stdout is None or proc.stderr is None:
+        raise ValueError("training process output is not piped")
+    stdout_terminal = _binary_stream(sys.stdout)
+    stderr_terminal = _binary_stream(sys.stderr)
+    mirror_live = mode != "cli"
+    return ProcessOutputDrainer(
+        stdout=proc.stdout,
+        stderr=proc.stderr,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+        stdout_mirror=stdout_terminal if mirror_live else None,
+        stderr_mirror=stderr_terminal if mirror_live else None,
+        stdout_fallback=stdout_terminal,
+        stderr_fallback=stderr_terminal,
     )
 
 
-def _finish_stderr_capture(
-    capture: Optional[StderrTailCapture], output_path: Path
+def _print_training_output(
+    result: Optional[ProcessOutputResult],
+    *,
+    mode: str,
+    training_failed: bool,
 ) -> None:
-    """Persist an optional stderr tail without affecting the training result."""
-    if capture is None:
+    """Print output diagnostics after live rendering has stopped."""
+    if result is None:
         return
-    capture.finish(output_path)
+    if result.warning:
+        print(f"[TraceML] WARNING: {result.warning}", file=sys.stderr)
+    if mode == "cli" and training_failed and result.stderr_tail:
+        excerpt = _stderr_excerpt(result.stderr_tail)
+        if excerpt:
+            print("[TraceML] Training stderr excerpt:", file=sys.stderr)
+            print(excerpt, file=sys.stderr)
+    if result.stderr_path is not None:
+        print(f"[TraceML] Stderr: {result.stderr_path}", file=sys.stderr)
+    if result.stdout_path is not None:
+        print(f"[TraceML] Stdout: {result.stdout_path}", file=sys.stderr)
 
 
 def _run_noncritical_launcher_step(
@@ -343,7 +385,7 @@ def _launch_disabled_process(
         train_cmd=train_cmd,
         env=env,
         cwd=launch_context.launch_cwd,
-        capture_stderr=False,
+        capture_output=False,
     )
     returncode = train_proc.wait()
     _exit_with_training_outcome(
@@ -526,17 +568,20 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
             f"Valid modes: {sorted(supported_modes)}"
         )
     _require_dashboard_dependencies(str(cfg["mode"]))
+    save_training_output = bool(getattr(args, "save_training_output", True))
+    if cfg["mode"] == "cli" and not save_training_output:
+        print(
+            "[TraceML] WARNING: training output is inherited and may disturb "
+            "the live CLI display.",
+            file=sys.stderr,
+        )
 
     owns_aggregator = aggregator_cfg.is_owner(node_rank=torchrun_cfg.node_rank)
     # Root run metadata has one writer even when every node has a launcher.
     is_root_writer = owns_aggregator
 
     env = os.environ.copy()
-    env["PYTHONUNBUFFERED"] = "1"
-
     env["TRACEML_DISABLED"] = "0"
-    capture_stderr = _stderr_capture_enabled(args, launcher_env)
-    env["TRACEML_CAPTURE_STDERR"] = "1" if capture_stderr else "0"
     env["TRACEML_PROFILE"] = getattr(args, "profile", "watch")
     env["TRACEML_SCRIPT_PATH"] = script_path
     env["TRACEML_UI_MODE"] = cfg["mode"]
@@ -586,7 +631,8 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     aggregator_dir = session_root / "aggregator"
     db_path = aggregator_dir / "telemetry"
     node_dir = node_artifact_dir(session_root, torchrun_cfg.node_rank)
-    crash_stderr_path = node_dir / "crash_stderr.log"
+    training_stdout_path = node_dir / "training.stdout.log"
+    training_stderr_path = node_dir / "training.stderr.log"
 
     manifest_path: Optional[Path] = None
     if is_root_writer:
@@ -594,6 +640,27 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
             session_root=session_root,
             script_path=script_path,
         )
+        manifest_extra: dict[str, Any] = {
+            "training_output": {
+                "enabled": save_training_output,
+                "scope": "node",
+            }
+        }
+        if save_training_output:
+            manifest_extra["training_output"].update(
+                {
+                    "stdout_pattern": (
+                        "nodes/node_<node_rank>/training.stdout.log"
+                    ),
+                    "stderr_pattern": (
+                        "nodes/node_<node_rank>/training.stderr.log"
+                    ),
+                }
+            )
+        if code_manifest_path is not None:
+            manifest_extra["artifacts"] = {
+                "code_manifest": str(code_manifest_path)
+            }
         manifest_path = write_run_manifest(
             session_root=session_root,
             session_id=session_id,
@@ -618,11 +685,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
             launch_cwd=execution_cwd,
             aggregator_dir=aggregator_dir,
             db_path=db_path,
-            extra=(
-                {"artifacts": {"code_manifest": str(code_manifest_path)}}
-                if code_manifest_path is not None
-                else None
-            ),
+            extra=manifest_extra,
         )
 
     traceml_root = Path(__file__).resolve().parents[1]
@@ -640,14 +703,21 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
 
     agg_proc: Optional[subprocess.Popen] = None
     train_proc: Optional[subprocess.Popen] = None
+    training_output: Optional[ProcessOutputDrainer] = None
     aggregator_started_at: Optional[str] = None
     aggregator_exit_code: Optional[int] = None
     aggregator_exited_early = False
     telemetry_available = False
     telemetry_startup_reason: Optional[str] = None
 
+    def finish_training_output() -> None:
+        if training_output is not None:
+            training_output.finish()
+
     install_shutdown_handlers(
-        lambda: (train_proc, agg_proc), manifest_path=manifest_path
+        lambda: (train_proc, agg_proc),
+        manifest_path=manifest_path,
+        cleanup=finish_training_output,
     )
 
     if owns_aggregator:
@@ -757,8 +827,15 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         train_cmd=train_cmd,
         env=env,
         cwd=execution_cwd,
-        capture_stderr=capture_stderr,
+        capture_output=save_training_output,
     )
+    if save_training_output:
+        training_output = _start_training_output(
+            train_proc,
+            stdout_path=training_stdout_path,
+            stderr_path=training_stderr_path,
+            mode=str(cfg["mode"]),
+        )
     if manifest_path is not None:
         _run_noncritical_launcher_step(
             "failed to record the training start time",
@@ -767,9 +844,6 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                 extra={"lifecycle": {"training_started_at": utc_now_iso()}},
             ),
         )
-    stderr_capture = (
-        start_stderr_tail_capture(train_proc) if capture_stderr else None
-    )
     if owns_aggregator and telemetry_available and cfg["mode"] == "dashboard":
         print(_dashboard_access_box(int(cfg["dashboard_port"])))
 
@@ -787,11 +861,10 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                         },
                     ),
                 )
-            _run_noncritical_launcher_step(
-                "failed to finish stderr capture",
-                lambda: _finish_stderr_capture(
-                    stderr_capture, crash_stderr_path
-                ),
+            output_result = (
+                training_output.finish()
+                if training_output is not None
+                else None
             )
             if agg_proc is not None:
                 print(
@@ -848,13 +921,27 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                         artifacts=collect_existing_artifacts(
                             db_path,
                             session_root=session_root,
-                            crash_stderr_path=crash_stderr_path,
+                            training_stdout_path=(
+                                output_result.stdout_path
+                                if output_result is not None
+                                else None
+                            ),
+                            training_stderr_path=(
+                                output_result.stderr_path
+                                if output_result is not None
+                                else None
+                            ),
                         ),
                         telemetry_status=telemetry_status,
                         telemetry_reason=telemetry_reason,
                         aggregator_exit_code=aggregator_exit_code,
                     ),
                 )
+            _print_training_output(
+                output_result,
+                mode=str(cfg["mode"]),
+                training_failed=train_rc != 0,
+            )
             if owns_aggregator and telemetry_status is not None:
                 _print_telemetry_footer(
                     telemetry_status,

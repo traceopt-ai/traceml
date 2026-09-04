@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import argparse
+import io
 import json
 import os
 import signal
@@ -40,7 +41,7 @@ from traceml_ai.launcher.manifest import (
     update_run_manifest,
     write_run_manifest,
 )
-from traceml_ai.launcher.process import TrainingOutcome
+from traceml_ai.launcher.process import ProcessOutputResult, TrainingOutcome
 from traceml_ai.runtime.settings import (
     DEFAULT_FINALIZE_TIMEOUT_SEC,
     resolve_on_missing_aggregator,
@@ -88,7 +89,7 @@ def test_run_and_watch_accept_missing_aggregator_policy() -> None:
     assert watch_args.on_missing_aggregator is None
 
 
-def test_capture_stderr_help_uses_node_scoped_path(capsys) -> None:
+def test_training_output_help_describes_default_and_opt_out(capsys) -> None:
     parser = build_parser()
 
     with pytest.raises(SystemExit) as exc_info:
@@ -96,8 +97,72 @@ def test_capture_stderr_help_uses_node_scoped_path(capsys) -> None:
 
     help_text = "".join(capsys.readouterr().out.split())
     assert exc_info.value.code == 0
-    assert "nodes/node_<node-rank>/crash_stderr.log" in help_text
-    assert "logs/<run-name>/crash_stderr.log" not in help_text
+    assert "--save-training-output" in help_text
+    assert "--no-save-training-output" in help_text
+    assert "Default:enabled" in help_text
+    assert "--capture-stderr" not in help_text
+
+
+@pytest.mark.parametrize(
+    ("mode", "mirrors_live"),
+    [("summary", True), ("dashboard", True), ("cli", False)],
+)
+def test_training_output_display_policy_saves_both_streams(
+    monkeypatch, tmp_path, mode, mirrors_live
+) -> None:
+    stdout_terminal = io.BytesIO()
+    stderr_terminal = io.BytesIO()
+    terminals = iter((stdout_terminal, stderr_terminal))
+    monkeypatch.setattr(
+        launcher_commands, "_binary_stream", lambda _stream: next(terminals)
+    )
+    proc = Mock(
+        stdout=io.BytesIO(b"training stdout\n"),
+        stderr=io.BytesIO(b"training stderr\n"),
+    )
+    stdout_path = tmp_path / "training.stdout.log"
+    stderr_path = tmp_path / "training.stderr.log"
+
+    result = launcher_commands._start_training_output(
+        proc,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+        mode=mode,
+    ).finish()
+
+    assert result.warning is None
+    assert stdout_path.read_bytes() == b"training stdout\n"
+    assert stderr_path.read_bytes() == b"training stderr\n"
+    expected_stdout = b"training stdout\n" if mirrors_live else b""
+    expected_stderr = b"training stderr\n" if mirrors_live else b""
+    assert stdout_terminal.getvalue() == expected_stdout
+    assert stderr_terminal.getvalue() == expected_stderr
+
+
+def test_cli_failure_output_is_bounded_and_prints_confirmed_paths(
+    tmp_path, capsys
+) -> None:
+    stderr_tail = "".join(f"stderr line {line}\n" for line in range(100))
+    stdout_path = tmp_path / "training.stdout.log"
+    stderr_path = tmp_path / "training.stderr.log"
+
+    launcher_commands._print_training_output(
+        ProcessOutputResult(
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+            stderr_tail=stderr_tail.encode(),
+            warning=None,
+        ),
+        mode="cli",
+        training_failed=True,
+    )
+
+    stderr = capsys.readouterr().err
+    assert "stderr line 59\n" not in stderr
+    assert "stderr line 60\n" in stderr
+    assert "stderr line 99\n" in stderr
+    assert f"[TraceML] Stderr: {stderr_path}" in stderr
+    assert f"[TraceML] Stdout: {stdout_path}" in stderr
 
 
 @pytest.mark.parametrize("default", ["raise", "warn"])
@@ -340,8 +405,13 @@ def test_build_parser_preserves_launch_commands() -> None:
     assert args.history_retention is None
     assert args.finalize_timeout_sec is None
     assert args.trace_max_steps is None
-    assert not args.capture_stderr
+    assert args.save_training_output
     assert args.args == ["--epochs", "1"]
+
+    no_save_args = parser.parse_args(
+        ["run", "train.py", "--no-save-training-output"]
+    )
+    assert not no_save_args.save_training_output
 
     # The launcher defers UI/telemetry defaults to the traceml.yaml config
     # resolver, so the argparse default is None ("flag not supplied"). The
@@ -548,7 +618,7 @@ def test_disabled_launch_runs_script_directly_and_skips_traceml_setup(
             "summary",
             "--no-history",
             "--html-report",
-            "--capture-stderr",
+            "--no-save-training-output",
             "--logs-dir",
             str(tmp_path / "logs"),
             "--aggregator-port",
@@ -579,11 +649,11 @@ def test_disabled_launch_runs_script_directly_and_skips_traceml_setup(
         def wait(self):
             return self.returncode
 
-    def _start_training_process(train_cmd, env, cwd, *, capture_stderr=False):
+    def _start_training_process(train_cmd, env, cwd, *, capture_output=False):
         observed["train_cmd"] = train_cmd
         observed["env"] = env
         observed["cwd"] = cwd
-        observed["capture_stderr"] = capture_stderr
+        observed["capture_output"] = capture_output
         return _Proc()
 
     def _record_shutdown_handler(get_procs, manifest_path=None):
@@ -631,7 +701,7 @@ def test_disabled_launch_runs_script_directly_and_skips_traceml_setup(
         "TRACEML_DISABLED"
     ]
     assert observed["cwd"] == str(tmp_path.resolve())
-    assert observed["capture_stderr"] is False
+    assert observed["capture_output"] is False
     assert observed["manifest_path"] is None
     assert not (tmp_path / "logs").exists()
     assert capsys.readouterr().err.splitlines()[-1] == (
@@ -650,12 +720,12 @@ def test_training_outcome_only_classifies_direct_negative_signals() -> None:
 
 
 @pytest.mark.parametrize(
-    ("train_rc", "aggregator_rc", "finalization_fails"),
+    ("train_rc", "aggregator_rc", "finalization_fails", "save_output"),
     [
-        (0, 9, False),
-        (0, 0, False),
-        (1, 0, False),
-        (0, 0, True),
+        (0, 9, False, True),
+        (0, 0, False, False),
+        (1, 0, False, True),
+        (0, 0, True, True),
     ],
 )
 @pytest.mark.parametrize("mode", ["summary", "cli", "dashboard"])
@@ -666,6 +736,7 @@ def test_started_training_result_is_authoritative(
     train_rc,
     aggregator_rc,
     finalization_fails,
+    save_output,
     mode,
 ) -> None:
     script = tmp_path / "train.py"
@@ -682,18 +753,38 @@ def test_started_training_result_is_authoritative(
             "outcome-test",
         ]
     )
+    args.save_training_output = save_output
 
     aggregator = Mock(pid=10, returncode=aggregator_rc)
     training = Mock()
     training.poll.return_value = train_rc
+    training_output = Mock()
+    training_output.finish.return_value = ProcessOutputResult(
+        stdout_path=None,
+        stderr_path=None,
+        stderr_tail=b"captured failure\n",
+        warning="output persistence unavailable",
+    )
+    events = []
+    print_training_output = launcher_commands._print_training_output
+
+    def stop_aggregator(*_args, **_kwargs):
+        events.append("stop")
+
+    def print_output(*args, **kwargs):
+        events.append("output")
+        print_training_output(*args, **kwargs)
 
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PYTHONUNBUFFERED", "user-choice")
     replacements = {
         "install_shutdown_handlers": Mock(),
         "start_aggregator_process": Mock(return_value=aggregator),
         "wait_for_tcp_listen": Mock(return_value=True),
         "start_training_process": Mock(return_value=training),
-        "terminate_process_group": Mock(),
+        "_start_training_output": Mock(return_value=training_output),
+        "terminate_process_group": Mock(side_effect=stop_aggregator),
+        "_print_training_output": Mock(side_effect=print_output),
         "write_code_manifest": Mock(return_value=None),
         "write_run_manifest": Mock(return_value=tmp_path / "manifest.json"),
         "update_run_manifest": Mock(),
@@ -713,6 +804,37 @@ def test_started_training_result_is_authoritative(
         launcher_commands.launch_process(str(script), args)
 
     assert exc.value.code == TrainingOutcome(train_rc).cli_exit_code
+    assert (
+        replacements["start_training_process"].call_args.kwargs[
+            "capture_output"
+        ]
+        is save_output
+    )
+    assert (
+        replacements["start_training_process"].call_args.kwargs["env"][
+            "PYTHONUNBUFFERED"
+        ]
+        == "user-choice"
+    )
+    output_manifest = replacements["write_run_manifest"].call_args.kwargs[
+        "extra"
+    ]["training_output"]
+    assert output_manifest["enabled"] is save_output
+    assert output_manifest["scope"] == "node"
+    if save_output:
+        assert output_manifest["stdout_pattern"] == (
+            "nodes/node_<node_rank>/training.stdout.log"
+        )
+        assert output_manifest["stderr_pattern"] == (
+            "nodes/node_<node_rank>/training.stderr.log"
+        )
+        training_output.finish.assert_called_once_with()
+    else:
+        assert "stdout_pattern" not in output_manifest
+        assert "stderr_pattern" not in output_manifest
+        replacements["_start_training_output"].assert_not_called()
+        training_output.finish.assert_not_called()
+        assert not list((tmp_path / "logs").rglob("training.*.log"))
     stderr_lines = capsys.readouterr().err.splitlines()
     final_line = stderr_lines[-1]
     expected_status = "completed successfully" if train_rc == 0 else "failed"
@@ -720,6 +842,10 @@ def test_started_training_result_is_authoritative(
     assert stderr_lines[-2].startswith("[TraceML] Telemetry ")
     if train_rc != 0:
         assert "torchrun exited with code 1" in final_line
+    if mode == "cli":
+        assert events.index("stop") < events.index("output")
+        if train_rc != 0 and save_output:
+            assert "captured failure" in "\n".join(stderr_lines)
     if (
         train_rc == 0
         and aggregator_rc == 0
@@ -836,7 +962,6 @@ def test_launcher_scopes_telemetry_health_to_aggregator_owner(
         "warn-run",
         "--on-missing-aggregator",
         "warn",
-        "--capture-stderr",
     ]
     if not owner:
         cli.extend(["--nnodes", "2", "--node-rank", "1"])
@@ -847,14 +972,22 @@ def test_launcher_scopes_telemetry_health_to_aggregator_owner(
     aggregator.poll.return_value = 7
     training = Mock()
     training.poll.return_value = 0
-    stderr_capture = Mock()
+    output_result = ProcessOutputResult(
+        stdout_path=None,
+        stderr_path=None,
+        stderr_tail=b"",
+        warning=None,
+    )
+    training_output = Mock()
+    training_output.finish.return_value = output_result
 
     def _stop_aggregator(*_args, **_kwargs):
         events.append("stop")
 
-    def _start_training(*, train_cmd, env, cwd, capture_stderr):
+    def _start_training(*, train_cmd, env, cwd, capture_output):
         events.append("train")
         assert env["TRACEML_DISABLED"] == ("0" if ready else "1")
+        assert capture_output is True
         return training
 
     monkeypatch.chdir(tmp_path)
@@ -876,8 +1009,8 @@ def test_launcher_scopes_telemetry_health_to_aggregator_owner(
     )
     monkeypatch.setattr(
         launcher_commands,
-        "start_stderr_tail_capture",
-        Mock(return_value=stderr_capture),
+        "_start_training_output",
+        Mock(return_value=training_output),
     )
     monkeypatch.setattr(
         launcher_commands, "terminate_process_group", _stop_aggregator
@@ -900,14 +1033,27 @@ def test_launcher_scopes_telemetry_health_to_aggregator_owner(
 
     assert exc.value.code == 0
     node_rank = 0 if owner else 1
-    stderr_capture.finish.assert_called_once_with(
-        tmp_path.resolve()
-        / "logs"
-        / "warn-run"
-        / "nodes"
-        / f"node_{node_rank}"
-        / "crash_stderr.log"
+    launcher_commands._start_training_output.assert_called_once_with(
+        training,
+        stdout_path=(
+            tmp_path.resolve()
+            / "logs"
+            / "warn-run"
+            / "nodes"
+            / f"node_{node_rank}"
+            / "training.stdout.log"
+        ),
+        stderr_path=(
+            tmp_path.resolve()
+            / "logs"
+            / "warn-run"
+            / "nodes"
+            / f"node_{node_rank}"
+            / "training.stderr.log"
+        ),
+        mode="cli",
     )
+    training_output.finish.assert_called_once_with()
     if owner:
         assert events == ["stop", "train"]
         start_aggregator.assert_called_once()
@@ -1367,8 +1513,8 @@ def test_node_artifact_directories_are_node_scoped(tmp_path) -> None:
 
     node_0.mkdir(parents=True)
     node_1.mkdir(parents=True)
-    node_0_stderr = node_0 / "crash_stderr.log"
-    node_1_stderr = node_1 / "crash_stderr.log"
+    node_0_stderr = node_0 / "training.stderr.log"
+    node_1_stderr = node_1 / "training.stderr.log"
     node_0_stderr.write_text("node 0", encoding="utf-8")
     node_1_stderr.write_text("node 1", encoding="utf-8")
 
@@ -1376,19 +1522,26 @@ def test_node_artifact_directories_are_node_scoped(tmp_path) -> None:
     assert node_1_stderr.read_text(encoding="utf-8") == "node 1"
 
 
-def test_collect_existing_artifacts_includes_stderr_tail(tmp_path) -> None:
+def test_collect_existing_artifacts_includes_confirmed_training_output(
+    tmp_path,
+) -> None:
     db_path = tmp_path / "aggregator" / "telemetry"
-    stderr_path = node_artifact_dir(tmp_path, 0) / "crash_stderr.log"
+    node_dir = node_artifact_dir(tmp_path, 0)
+    stdout_path = node_dir / "training.stdout.log"
+    stderr_path = node_dir / "training.stderr.log"
     stderr_path.parent.mkdir(parents=True)
+    stdout_path.write_bytes(b"training output\n")
     stderr_path.write_bytes(b"native crash details\n")
 
     artifacts = collect_existing_artifacts(
         db_path,
         session_root=tmp_path,
-        crash_stderr_path=stderr_path,
+        training_stdout_path=stdout_path,
+        training_stderr_path=stderr_path,
     )
 
-    assert artifacts["crash_stderr_log"] == str(stderr_path)
+    assert artifacts["training_stdout_log"] == str(stdout_path)
+    assert artifacts["training_stderr_log"] == str(stderr_path)
 
 
 def test_run_view_reports_user_facing_errors(tmp_path, capsys) -> None:

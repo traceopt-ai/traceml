@@ -349,7 +349,8 @@ def update_run_manifest(
 def collect_existing_artifacts(
     db_path: Path,
     session_root: Optional[Path] = None,
-    crash_stderr_path: Optional[Path] = None,
+    training_stdout_path: Optional[Path] = None,
+    training_stderr_path: Optional[Path] = None,
 ) -> Dict[str, str]:
     """Return only launcher artifacts that currently exist on disk."""
     candidates = {
@@ -363,8 +364,14 @@ def collect_existing_artifacts(
         candidates["code_manifest"] = (
             Path(session_root).resolve() / "code_manifest.json"
         )
-    if crash_stderr_path is not None:
-        candidates["crash_stderr_log"] = Path(crash_stderr_path).resolve()
+    if training_stdout_path is not None:
+        candidates["training_stdout_log"] = Path(
+            training_stdout_path
+        ).resolve()
+    if training_stderr_path is not None:
+        candidates["training_stderr_log"] = Path(
+            training_stderr_path
+        ).resolve()
 
     return {
         name: str(path) for name, path in candidates.items() if path.exists()

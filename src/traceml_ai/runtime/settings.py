@@ -89,7 +89,7 @@ class TraceMLSettings:
     - `sampler_interval_sec` controls worker sampling cadence (all ranks).
     - `render_interval_sec` controls aggregator UI cadence only; TCP telemetry
       is drained as soon as data arrives.
-    - `mode` selects display backend and capture behavior ("cli" | "summary" | "dashboard").
+    - `mode` selects the display backend ("cli" | "summary" | "dashboard").
     - `summary` mode disables live rendering and prints only the final
       end-of-run summary.
     - Aggregator transport is used for telemetry, including rank0 -> rank0
