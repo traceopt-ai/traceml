@@ -209,7 +209,10 @@ def test_bucket_width_caps_the_point_count_on_a_long_run():
 
     for span in (86_400.0, 172_800.0, 604_800.0):
         width = policy.bucket_width_for(span)
-        assert span / width <= policy.max_points
+        assert int(span / width) + 1 <= policy.max_points
+
+    one_point = RunSeriesPolicy(max_points=1)
+    assert int(86_400.0 / one_point.bucket_width_for(86_400.0)) + 1 == 1
 
 
 def test_bucket_width_leaves_short_runs_alone():

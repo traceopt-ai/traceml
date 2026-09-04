@@ -129,7 +129,14 @@ class RunSeriesPolicy:
         usable = finite(span_s)
         if usable is None or usable <= 0:
             return window
-        return max(window, usable / self.max_points)
+        # Samples at both ends of the span can open a bucket, so a budget of
+        # N points has N - 1 intervals between them.
+        cap_width = (
+            math.nextafter(usable, math.inf)
+            if self.max_points == 1
+            else usable / float(self.max_points - 1)
+        )
+        return max(window, cap_width)
 
     def mode_for(self, run_span_s: float, window_span_s: float) -> SeriesMode:
         """Whether the chart should describe the window or the whole run."""

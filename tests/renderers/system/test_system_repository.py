@@ -290,11 +290,8 @@ def test_power_history_is_capped_on_a_long_run(system_db):
         stats, out = _power_run(repo, conn)
 
     budget = DEFAULT_RUN_SERIES_POLICY.max_points
-    # At most one bucket over the budget: the buckets are half-open, so
-    # the run's final instant opens one more. That is a bounded overshoot
-    # of exactly one, not the unbounded growth this replaces.
-    assert len(out[0]["t"]) <= budget + 1
-    assert len(out[0]["t"]) == 121
+    assert len(out[0]["t"]) <= budget
+    assert len(out[0]["t"]) == 120
     # The width did the work, and it is wider than the window ceiling.
     assert stats is not None
     width = DEFAULT_RUN_SERIES_POLICY.bucket_width_for(stats.span_s)
@@ -538,7 +535,7 @@ def test_a_sample_older_than_the_run_start_cannot_break_the_cap(system_db):
         )
 
     budget = DEFAULT_RUN_SERIES_POLICY.max_points
-    assert len(rows) <= budget + 1
+    assert len(rows) <= budget
     # Every bucket index is non-negative, so the series still reads left
     # to right in time.
     stamps = [r[1] for r in rows]
