@@ -1125,9 +1125,11 @@ def test_launcher_scopes_telemetry_health_to_aggregator_owner(
     aggregator.poll.return_value = 7
     training = Mock()
     training.poll.return_value = 0
+    node_rank = 0 if owner else 1
+    node_dir = tmp_path / "logs" / "warn-run" / "nodes" / f"node_{node_rank}"
     output_result = ProcessOutputResult(
-        stdout_path=None,
-        stderr_path=None,
+        stdout_path=node_dir / "training.stdout.log",
+        stderr_path=node_dir / "training.stderr.log",
         stderr_tail=b"",
         warning=None,
     )
@@ -1206,7 +1208,6 @@ def test_launcher_scopes_telemetry_health_to_aggregator_owner(
         launch_process(str(script), args)
 
     assert exc.value.code == 0
-    node_rank = 0 if owner else 1
     launcher_commands._start_training_output.assert_called_once_with(
         training,
         stdout_path=(
@@ -1254,6 +1255,17 @@ def test_launcher_scopes_telemetry_health_to_aggregator_owner(
             == {"aggregator_stderr_log": str(aggregator_stderr_path)}
             for call in update_manifest.call_args_list
         )
+
+        # Signal teardown invokes this callback after marking the run
+        # interrupted. It must then merge the paths confirmed by the drainers.
+        updates_before_cleanup = update_manifest.call_count
+        install_shutdown_handlers.call_args.kwargs["cleanup"]()
+        assert update_manifest.call_count == updates_before_cleanup + 1
+        assert update_manifest.call_args.kwargs["artifacts"] == {
+            "aggregator_stderr_log": str(aggregator_stderr_path),
+            "training_stdout_log": str(output_result.stdout_path),
+            "training_stderr_log": str(output_result.stderr_path),
+        }
     else:
         assert events == ["train"]
         start_aggregator.assert_not_called()

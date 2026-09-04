@@ -760,9 +760,29 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         return aggregator_output_result
 
     def finish_process_output() -> None:
-        if training_output is not None:
-            training_output.finish()
+        training_result = (
+            training_output.finish() if training_output is not None else None
+        )
         finish_aggregator_output()
+
+        # The signal handler marks the run interrupted before this cleanup.
+        # Merge paths only after both drainers have confirmed their files.
+        if manifest_path is not None:
+            artifacts = aggregator_output_artifacts() or {}
+            if training_result is not None:
+                confirmed_paths = {
+                    "training_stdout_log": training_result.stdout_path,
+                    "training_stderr_log": training_result.stderr_path,
+                }
+                artifacts.update(
+                    {
+                        name: str(path)
+                        for name, path in confirmed_paths.items()
+                        if path is not None
+                    }
+                )
+            if artifacts:
+                update_run_manifest(manifest_path, artifacts=artifacts)
 
     def aggregator_output_artifacts() -> Optional[dict[str, str]]:
         if confirmed_aggregator_stderr_path is None:
