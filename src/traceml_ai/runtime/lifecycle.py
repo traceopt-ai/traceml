@@ -199,34 +199,40 @@ def start_aggregator(
         setup_error_logger(role="aggregator")
         logger = get_error_logger("TraceMLAggregatorLifecycle")
 
-    session_root = Path(str(normalized.logs_dir)).resolve() / session_id
-    aggregator_dir = session_root / "aggregator"
-    aggregator_dir.mkdir(parents=True, exist_ok=True)
-
-    db_path = (
-        Path(str(normalized.db_path))
-        if normalized.db_path
-        else aggregator_dir / "telemetry"
-    )
-    normalized = replace(normalized, db_path=str(db_path))
-
     event = stop_event or threading.Event()
-    aggregator = _build_aggregator(
-        logger=logger,
-        stop_event=event,
-        settings=normalized,
-    )
+    aggregator = None
     try:
+        session_root = Path(str(normalized.logs_dir)).resolve() / session_id
+        aggregator_dir = session_root / "aggregator"
+        aggregator_dir.mkdir(parents=True, exist_ok=True)
+        db_path = (
+            Path(str(normalized.db_path))
+            if normalized.db_path
+            else aggregator_dir / "telemetry"
+        )
+        normalized = replace(normalized, db_path=str(db_path))
+        aggregator = _build_aggregator(
+            logger=logger,
+            stop_event=event,
+            settings=normalized,
+        )
         aggregator.start()
-    except BaseException:
-        event.set()
+        os.environ["TRACEML_AGGREGATOR_PORT"] = str(aggregator.endpoint.port)
+    except BaseException as exc:
         try:
-            aggregator.stop(timeout_sec=1.0)
+            logger.error(
+                "[TraceML] Aggregator startup failed",
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
         except Exception:
             pass
+        event.set()
+        if aggregator is not None:
+            try:
+                aggregator.stop(timeout_sec=1.0)
+            except Exception:
+                pass
         raise
-
-    os.environ["TRACEML_AGGREGATOR_PORT"] = str(aggregator.endpoint.port)
 
     return AggregatorHandle(
         settings=normalized,

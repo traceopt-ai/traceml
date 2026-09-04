@@ -19,6 +19,13 @@ _HANDLER_MARKER = "_traceml_error_file_handler"
 _SETUP_LOCK = threading.Lock()
 
 
+class _SilentRotatingFileHandler(RotatingFileHandler):
+    """Keep diagnostic write failures from leaking into workload stderr."""
+
+    def handleError(self, record: logging.LogRecord) -> None:  # noqa: N802
+        pass
+
+
 def _error_log_path(
     role: ErrorLogRole,
     *,
@@ -71,14 +78,18 @@ def setup_error_logger(
             node_rank=node_rank,
         )
     except Exception:
-        return logger
+        path = None
 
     with _SETUP_LOCK:
         for handler in list(logger.handlers):
             if not getattr(handler, _HANDLER_MARKER, False):
                 continue
             base_filename = getattr(handler, "baseFilename", None)
-            if base_filename is not None and Path(base_filename) == path:
+            if (
+                path is not None
+                and base_filename is not None
+                and Path(base_filename) == path
+            ):
                 return logger
             logger.removeHandler(handler)
             try:
@@ -86,16 +97,21 @@ def setup_error_logger(
             except Exception:
                 pass
 
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            handler = RotatingFileHandler(
-                path,
-                maxBytes=50_000_000,
-                backupCount=3,
-                encoding="utf-8",
-            )
-        except Exception:
+        if path is None:
             handler = logging.NullHandler()
+        else:
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                handler = _SilentRotatingFileHandler(
+                    path,
+                    maxBytes=50_000_000,
+                    backupCount=3,
+                    encoding="utf-8",
+                )
+            except Exception:
+                handler = logging.NullHandler()
+
+        if isinstance(handler, logging.NullHandler):
             setattr(handler, _HANDLER_MARKER, True)
             logger.addHandler(handler)
             return logger

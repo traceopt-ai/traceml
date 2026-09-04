@@ -1,4 +1,6 @@
+import io
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -224,6 +226,27 @@ def test_runtime_start_and_stop_failures_use_internal_log(monkeypatch):
         ("Failed to start TraceMLRuntime", startup_error),
         ("Error during TraceML runtime shutdown", shutdown_error),
     ]
+
+
+def test_shutdown_log_excludes_active_user_exception(monkeypatch):
+    stream = io.StringIO()
+    logger = logging.Logger("test-runtime-error")
+    logger.addHandler(logging.StreamHandler(stream))
+    monkeypatch.setattr(executor, "setup_error_logger", lambda *, role: None)
+    monkeypatch.setattr(executor, "get_error_logger", lambda _name: logger)
+
+    with pytest.raises(ValueError, match="private user failure"):
+        try:
+            raise ValueError("private user failure")
+        finally:
+            try:
+                raise RuntimeError("TraceML shutdown failed")
+            except RuntimeError as error:
+                executor._log_runtime_exception("shutdown failed", error)
+
+    content = stream.getvalue()
+    assert "TraceML shutdown failed" in content
+    assert "private user failure" not in content
 
 
 @pytest.mark.parametrize(

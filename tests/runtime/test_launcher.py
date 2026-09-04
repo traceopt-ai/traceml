@@ -371,6 +371,7 @@ def test_serve_configures_logging_without_preset_env(
     import logging
 
     import traceml_ai.aggregator.aggregator_main as agg_main
+    import traceml_ai.runtime.lifecycle as lifecycle
     from traceml_ai.runtime.settings import (
         AggregatorTransportSettings,
         TraceMLSettings,
@@ -393,10 +394,18 @@ def test_serve_configures_logging_without_preset_env(
     # wait by making aggregator startup raise a controlled error.
     monkeypatch.setattr(agg_main, "_install_signal_handlers", lambda ev: None)
 
-    def _boom(*args, **kwargs):
-        raise RuntimeError("stop before blocking")
+    class _FailingAggregator:
+        def start(self):
+            raise RuntimeError("stop before blocking")
 
-    monkeypatch.setattr(agg_main, "start_aggregator", _boom)
+        def stop(self, timeout_sec):
+            return None
+
+    monkeypatch.setattr(
+        lifecycle,
+        "_build_aggregator",
+        lambda **kwargs: _FailingAggregator(),
+    )
 
     settings = TraceMLSettings(
         mode="summary",
@@ -419,7 +428,8 @@ def test_serve_configures_logging_without_preset_env(
         )
         raw_log = tmp_path / "serve-test" / "aggregator" / "process.stderr.log"
         content = structured_log.read_text(encoding="utf-8")
-        assert content.count("Aggregator exiting due to error") == 1
+        assert content.count("Aggregator startup failed") == 1
+        assert "Aggregator exiting due to error" not in content
         assert "RuntimeError: stop before blocking" in content
         assert not (tmp_path / "serve-test" / "aggregator_error.log").exists()
         stderr = capsys.readouterr().err

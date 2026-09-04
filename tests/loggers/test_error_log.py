@@ -11,6 +11,7 @@ handler lived on ``"traceml"`` while every call site logged under
 ``"traceml_ai.*"``, leaving every ``traceml_errors.log`` empty.
 """
 
+import io
 import logging
 from unittest.mock import Mock
 
@@ -103,7 +104,7 @@ def test_setup_failure_disables_internal_file_logging(
     monkeypatch.setenv("TRACEML_SESSION_ID", "session_test")
     monkeypatch.setattr(
         error_log,
-        "RotatingFileHandler",
+        "_SilentRotatingFileHandler",
         Mock(side_effect=OSError("read-only filesystem")),
     )
 
@@ -112,3 +113,26 @@ def test_setup_failure_disables_internal_file_logging(
 
     assert len(logger.handlers) == 1
     assert isinstance(logger.handlers[0], logging.NullHandler)
+
+
+def test_write_failure_does_not_reach_stderr(
+    tmp_path, monkeypatch, capsys, clean_error_logger
+):
+    monkeypatch.setenv("TRACEML_LOGS_DIR", str(tmp_path))
+    monkeypatch.setenv("TRACEML_SESSION_ID", "session_test")
+
+    logger = setup_error_logger(role="aggregator")
+    handler = logger.handlers[0]
+    original_stream = handler.stream
+
+    class _BrokenStream(io.StringIO):
+        def write(self, value):
+            raise OSError("disk full")
+
+    try:
+        handler.stream = _BrokenStream()
+        get_error_logger("Probe").error("must remain isolated")
+    finally:
+        handler.stream = original_stream
+
+    assert capsys.readouterr().err == ""

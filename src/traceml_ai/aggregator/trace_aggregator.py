@@ -179,12 +179,8 @@ class TraceMLAggregator:
         self._sqlite_writer.start()
         self._display_driver.start()
 
-        try:
-            self._thread.start()
-            self._started = True
-        except Exception:
-            self._logger.exception("[TraceML] Aggregator thread start failed")
-            raise
+        self._thread.start()
+        self._started = True
 
     @property
     def endpoint(self) -> AggregatorEndpoint:
@@ -277,7 +273,6 @@ class TraceMLAggregator:
                         profile=str(self._settings.profile),
                     )
                 except Exception as summary_exc:
-                    self._logger.exception("[TraceML] generate_summary raised")
                     summary_error = summary_exc
 
                 if self._summary_generation_id(summary_path) in (
@@ -292,6 +287,16 @@ class TraceMLAggregator:
                     raise refresh_error
 
                 if summary_error is not None:
+                    # A refreshed artifact makes this error nonfatal, so this
+                    # component remains its sole structured-log owner.
+                    self._logger.error(
+                        "[TraceML] generate_summary raised",
+                        exc_info=(
+                            type(summary_error),
+                            summary_error,
+                            summary_error.__traceback__,
+                        ),
+                    )
                     warning_payload = self._add_generate_summary_warning(
                         warning_payload,
                         summary_error,

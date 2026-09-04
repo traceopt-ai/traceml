@@ -217,13 +217,17 @@ def run_aggregator(
         )
 
         if err is not None:
-            try:
-                logger.error(
-                    "[TraceML] Aggregator exiting due to error",
-                    exc_info=(type(err), err, err.__traceback__),
-                )
-            except Exception:
-                pass
+            # Startup failures are logged by start_aggregator(), which is also
+            # used by integrations such as Ray. This boundary owns failures
+            # only after a handle has been returned.
+            if handle is not None:
+                try:
+                    logger.error(
+                        "[TraceML] Aggregator exiting due to error",
+                        exc_info=(type(err), err, err.__traceback__),
+                    )
+                except Exception:
+                    pass
 
             print(
                 "\n[TraceML] Aggregator exiting due to error. "

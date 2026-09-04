@@ -13,6 +13,7 @@ torchrun remain responsible for exception reporting and process exit status.
 import os
 import runpy
 import sys
+import traceback
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Union
 
@@ -54,13 +55,21 @@ def _parse_optional_positive_int(value: Optional[str]) -> Optional[int]:
 
 
 def _log_runtime_exception(message: str, error: BaseException) -> None:
-    """Record an executor/runtime implementation failure without raising."""
+    """Record a TraceML failure without raising or copying user context."""
     try:
         setup_error_logger(role="rank")
+        error_traceback = "".join(
+            traceback.format_exception(
+                type(error),
+                error,
+                error.__traceback__,
+                chain=False,
+            )
+        ).rstrip()
         get_error_logger("TraceMLExecutor").error(
-            "[TraceML] %s",
+            "[TraceML] %s\n%s",
             message,
-            exc_info=(type(error), error, error.__traceback__),
+            error_traceback,
         )
     except Exception:
         pass

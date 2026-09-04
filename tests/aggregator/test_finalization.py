@@ -2,6 +2,7 @@ import json
 import threading
 import time
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -11,7 +12,7 @@ from traceml_ai.aggregator.trace_aggregator import (
     TraceMLAggregator,
     TraceMLFinalizationError,
 )
-from traceml_ai.runtime.settings import TraceMLSettings
+from traceml_ai.runtime.settings import AggregatorEndpoint, TraceMLSettings
 from traceml_ai.sdk.protocol import get_final_summary_json_path
 from traceml_ai.telemetry.control import build_rank_finished_payload
 
@@ -467,6 +468,55 @@ def test_stop_rejects_stale_summary_when_refresh_fails(
         )
     )
     assert current_payload == stale_payload
+
+
+def test_fatal_summary_failure_is_logged_once_at_process_boundary(
+    monkeypatch,
+    tmp_path,
+):
+    aggregator = _make_aggregator(
+        tmp_path,
+        writer=_Writer(_ok_result()),
+        tcp=_TCP(),
+    )
+    logger = Mock()
+    aggregator._logger = logger
+    monkeypatch.setattr(
+        trace_aggregator,
+        "generate_summary",
+        Mock(side_effect=RuntimeError("generation failed")),
+    )
+    monkeypatch.setattr(
+        aggregator_main,
+        "_install_signal_handlers",
+        lambda _event: None,
+    )
+
+    handle = Mock()
+    handle.endpoint = AggregatorEndpoint("127.0.0.1", 1234, "run")
+    handle.stop.side_effect = aggregator.stop
+
+    def _start(_settings, *, logger, stop_event):
+        stop_event.set()
+        return handle
+
+    monkeypatch.setattr(aggregator_main, "start_aggregator", _start)
+
+    rc = aggregator_main.run_aggregator(
+        TraceMLSettings(
+            mode="summary",
+            logs_dir=str(tmp_path),
+            session_id="run",
+            finalize_timeout_sec=0.0,
+        ),
+        logger=logger,
+    )
+
+    assert rc == 1
+    logger.error.assert_called_once()
+    assert logger.error.call_args.args[0] == (
+        "[TraceML] Aggregator exiting due to error"
+    )
 
 
 def test_stop_generates_summary_through_real_writer(tmp_path):
