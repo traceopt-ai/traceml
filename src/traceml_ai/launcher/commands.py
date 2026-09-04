@@ -184,6 +184,30 @@ def _start_training_output(
     )
 
 
+def _start_aggregator_output(
+    proc: subprocess.Popen,
+    *,
+    stderr_path: Path,
+    mode: str,
+) -> ProcessOutputDrainer:
+    """Persist launcher-owned aggregator stderr without capturing stdout."""
+    if proc.stderr is None:
+        raise ValueError("aggregator process stderr is not piped")
+    stderr_terminal = _binary_stream(sys.stderr)
+    return ProcessOutputDrainer(
+        stderr=proc.stderr,
+        stderr_path=stderr_path,
+        stderr_mirror=stderr_terminal if mode != "cli" else None,
+        stderr_fallback=stderr_terminal,
+    )
+
+
+def _print_aggregator_stderr_path(path: Optional[Path]) -> None:
+    """Report confirmed raw aggregator diagnostics after a failure."""
+    if path is not None:
+        print(f"[TraceML] Aggregator stderr: {path}", file=sys.stderr)
+
+
 def _print_training_output(
     result: Optional[ProcessOutputResult],
     *,
@@ -266,6 +290,7 @@ def _print_telemetry_footer(
     status: str,
     reason: Optional[str],
     aggregator_exit_code: Optional[int],
+    aggregator_stderr_path: Optional[Path] = None,
 ) -> None:
     """Print one factual telemetry line before the final training line."""
     if status == "complete":
@@ -294,6 +319,9 @@ def _print_telemetry_footer(
         message = f"Telemetry failed during finalization{suffix}."
     else:
         message = f"Telemetry {status}."
+
+    if status != "complete" and aggregator_stderr_path is not None:
+        message += f" Aggregator stderr: {aggregator_stderr_path}"
 
     print(f"[TraceML] {message}", file=sys.stderr, flush=True)
 
@@ -630,6 +658,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     session_root = Path(cfg["logs_dir"]).resolve() / session_id
     aggregator_dir = session_root / "aggregator"
     db_path = aggregator_dir / "telemetry"
+    aggregator_stderr_log_path = aggregator_dir / "process.stderr.log"
     node_dir = node_artifact_dir(session_root, torchrun_cfg.node_rank)
     training_stdout_path = node_dir / "training.stdout.log"
     training_stderr_path = node_dir / "training.stderr.log"
@@ -703,6 +732,9 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
 
     agg_proc: Optional[subprocess.Popen] = None
     train_proc: Optional[subprocess.Popen] = None
+    aggregator_output: Optional[ProcessOutputDrainer] = None
+    aggregator_output_result: Optional[ProcessOutputResult] = None
+    confirmed_aggregator_stderr_path: Optional[Path] = None
     training_output: Optional[ProcessOutputDrainer] = None
     aggregator_started_at: Optional[str] = None
     aggregator_exit_code: Optional[int] = None
@@ -710,14 +742,57 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     telemetry_available = False
     telemetry_startup_reason: Optional[str] = None
 
-    def finish_training_output() -> None:
-        if training_output is not None:
-            training_output.finish()
+    def finish_aggregator_output() -> Optional[ProcessOutputResult]:
+        nonlocal aggregator_output_result
+        nonlocal confirmed_aggregator_stderr_path
+        if aggregator_output is None:
+            return None
+        if aggregator_output_result is None:
+            aggregator_output_result = aggregator_output.finish()
+            confirmed_aggregator_stderr_path = (
+                aggregator_output_result.stderr_path
+            )
+            if aggregator_output_result.warning:
+                print(
+                    f"[TraceML] WARNING: {aggregator_output_result.warning}",
+                    file=sys.stderr,
+                )
+        return aggregator_output_result
+
+    def finish_process_output() -> None:
+        training_result = (
+            training_output.finish() if training_output is not None else None
+        )
+        finish_aggregator_output()
+
+        # The signal handler marks the run interrupted before this cleanup.
+        # Merge paths only after both drainers have confirmed their files.
+        if manifest_path is not None:
+            artifacts = aggregator_output_artifacts() or {}
+            if training_result is not None:
+                confirmed_paths = {
+                    "training_stdout_log": training_result.stdout_path,
+                    "training_stderr_log": training_result.stderr_path,
+                }
+                artifacts.update(
+                    {
+                        name: str(path)
+                        for name, path in confirmed_paths.items()
+                        if path is not None
+                    }
+                )
+            if artifacts:
+                update_run_manifest(manifest_path, artifacts=artifacts)
+
+    def aggregator_output_artifacts() -> Optional[dict[str, str]]:
+        if confirmed_aggregator_stderr_path is None:
+            return None
+        return {"aggregator_stderr_log": str(confirmed_aggregator_stderr_path)}
 
     install_shutdown_handlers(
         lambda: (train_proc, agg_proc),
         manifest_path=manifest_path,
-        cleanup=finish_training_output,
+        cleanup=finish_process_output,
     )
 
     if owns_aggregator:
@@ -735,6 +810,11 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
             ready = False
             telemetry_startup_reason = "aggregator_spawn_failed"
         else:
+            aggregator_output = _start_aggregator_output(
+                agg_proc,
+                stderr_path=aggregator_stderr_log_path,
+                mode=str(cfg["mode"]),
+            )
             print(f"[TraceML] Aggregator PID: {agg_proc.pid}")
             ready = wait_for_tcp_listen(
                 host=aggregator_cfg.connect_host,
@@ -766,6 +846,8 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
             terminate_process_group(agg_proc, timeout_sec=3.0)
             aggregator_exit_code = agg_proc.returncode
             agg_proc = None
+        finish_aggregator_output()
+        _print_aggregator_stderr_path(confirmed_aggregator_stderr_path)
 
         if missing_aggregator_policy == "raise":
             if manifest_path is not None:
@@ -774,6 +856,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                     lambda: update_run_manifest(
                         manifest_path,
                         status="failed",
+                        artifacts=aggregator_output_artifacts(),
                         telemetry_status=(
                             "unavailable" if owns_aggregator else None
                         ),
@@ -813,6 +896,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
             lambda: update_run_manifest(
                 manifest_path,
                 status="running",
+                artifacts=aggregator_output_artifacts(),
                 telemetry_status=(
                     ("running" if telemetry_available else "unavailable")
                     if owns_aggregator
@@ -882,6 +966,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                     ),
                 )
                 aggregator_exit_code = agg_proc.returncode
+                finish_aggregator_output()
 
             final_status = "completed" if train_rc == 0 else "failed"
             telemetry_status: Optional[str] = None
@@ -931,6 +1016,9 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                                 if output_result is not None
                                 else None
                             ),
+                            aggregator_stderr_path=(
+                                confirmed_aggregator_stderr_path
+                            ),
                         ),
                         telemetry_status=telemetry_status,
                         telemetry_reason=telemetry_reason,
@@ -947,6 +1035,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                     telemetry_status,
                     telemetry_reason,
                     aggregator_exit_code,
+                    confirmed_aggregator_stderr_path,
                 )
             _exit_with_training_outcome(
                 outcome,
@@ -957,16 +1046,19 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
             agg_rc = agg_proc.returncode
             aggregator_exited_early = True
             aggregator_exit_code = agg_rc
+            finish_aggregator_output()
             print(
                 f"[TraceML] WARNING: aggregator exited early (code={agg_rc}). "
                 "Training will continue without TraceML telemetry.",
                 file=sys.stderr,
             )
+            _print_aggregator_stderr_path(confirmed_aggregator_stderr_path)
             if manifest_path is not None:
                 _run_noncritical_launcher_step(
                     "failed to record degraded telemetry status",
                     lambda: update_run_manifest(
                         manifest_path,
+                        artifacts=aggregator_output_artifacts(),
                         telemetry_status="degraded",
                         telemetry_reason="aggregator_exited_early",
                         aggregator_exit_code=agg_rc,

@@ -199,6 +199,19 @@ outlive training should redirect its own stdout and stderr, or the launch
 should use `--no-save-training-output`; otherwise the launcher eventually
 closes its output pipes during shutdown.
 
+The owner launcher also saves the aggregator's raw stderr separately:
+
+```text
+logs/<run-name>/aggregator/process.stderr.log
+```
+
+This file is a fallback for startup failures, native diagnostics, and errors
+emitted before structured logging is available. Summary and dashboard modes
+mirror it live. CLI mode does not mirror it over the Rich display; if telemetry
+fails, TraceML reports the saved path. This artifact is distinct from
+`aggregator/traceml_errors.log`, which contains structured TraceML log records.
+Aggregator stdout remains attached to the terminal and is not persisted.
+
 Phases that were never measured in the current window are omitted from the
 live step-time table rather than shown as `0.0 ms`, and the diagnosis block
 shows `INCOMPLETE DATA` with the missing signal names when no reliable

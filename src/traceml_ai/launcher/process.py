@@ -463,6 +463,7 @@ def start_aggregator_process(
         cmd,
         env=env,
         cwd=cwd,
+        stderr=subprocess.PIPE,
         **process_group_kwargs(),
     )
 

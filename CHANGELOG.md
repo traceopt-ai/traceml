@@ -7,6 +7,10 @@ which carry the full historical notes for versions predating this file.
 
 ## [Unreleased]
 
+- Launcher-owned aggregator stderr is now saved separately at
+  `logs/<run-name>/aggregator/process.stderr.log`. Summary and dashboard modes
+  mirror it live; CLI mode preserves the Rich display and reports the saved
+  path if telemetry fails.
 - Training stdout and stderr are now saved by default in separate node-scoped
   files under `logs/<run-name>/nodes/node_<node-rank>/`. Summary and dashboard
   modes mirror them live; CLI mode keeps the Rich display clean and prints a
