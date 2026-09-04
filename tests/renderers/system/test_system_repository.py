@@ -64,7 +64,7 @@ def _power_run(repo, conn, hostname=None):
     stats = repo.gpu_power_run_stats(conn, hostname=hostname)
     if stats is None:
         return None, []
-    width = DEFAULT_RUN_SERIES_POLICY.window_for(stats.span_s)
+    width = DEFAULT_RUN_SERIES_POLICY.bucket_width_for(stats.span_s)
     rows = repo.fetch_gpu_power_run(
         conn,
         width_s=width,
@@ -274,22 +274,47 @@ def test_power_history_buckets_per_gpu(system_db):
     assert stats.span_s == pytest.approx(2.0 * 599)
 
 
-def test_power_history_has_no_point_cap(system_db):
-    """Pinned as a known gap, deferred to its own issue.
+def test_power_history_is_capped_on_a_long_run(system_db):
+    """A long run widens its buckets instead of growing its point count.
 
-    The CPU chart budgets 120 points. This path buckets at one bucket per
-    `choose_window_s`, which saturates at 300 s, so bucket count grows
-    without bound: about 288 per GPU on a 24 hour run.
+    This used to be pinned at 288 buckets per GPU for 24 hours, because
+    the width saturated at the 300 s window ceiling and the count was
+    just `span / 300`. It rose linearly forever: 576 at 48 hours, 2016 at
+    seven days, and each entry carries four parallel arrays.
     """
     path = system_db(
         ticks=720, cadence_s=120.0, gpus=lambda seq: [gpu(0)]
     )  # a 24 hour run
     repo = _repo(path)
     with repo.connect() as conn:
-        _stats, out = _power_run(repo, conn)
-    # 86400 s of run at the 300 s window cap is 288 buckets, against the
-    # 120 the CPU chart budgets for. On an 8-GPU host that is ~2300 points.
-    assert len(out[0]["t"]) == 288
+        stats, out = _power_run(repo, conn)
+
+    budget = DEFAULT_RUN_SERIES_POLICY.max_points
+    assert len(out[0]["t"]) <= budget
+    assert len(out[0]["t"]) == 120
+    # The width did the work, and it is wider than the window ceiling.
+    assert stats is not None
+    width = DEFAULT_RUN_SERIES_POLICY.bucket_width_for(stats.span_s)
+    assert width > DEFAULT_RUN_SERIES_POLICY.roll_max_s
+
+
+def test_a_short_run_keeps_its_window_sized_buckets(system_db):
+    """The cap is a ceiling, not a reshaping. Below it nothing moves.
+
+    A two hour run's buckets are still the rolling window, so the chart
+    keeps the resolution it had and the "rolling N min" label a reader
+    sees does not change.
+    """
+    path = system_db(ticks=60, cadence_s=120.0, gpus=lambda seq: [gpu(0)])
+    repo = _repo(path)
+    with repo.connect() as conn:
+        stats, out = _power_run(repo, conn)
+
+    assert stats is not None
+    assert DEFAULT_RUN_SERIES_POLICY.bucket_width_for(
+        stats.span_s
+    ) == DEFAULT_RUN_SERIES_POLICY.window_for(stats.span_s)
+    assert len(out[0]["t"]) < DEFAULT_RUN_SERIES_POLICY.max_points
 
 
 def test_a_legacy_zero_placeholder_is_not_a_power_reading(system_db):
@@ -443,3 +468,75 @@ def test_one_unclocked_row_does_not_erase_the_whole_run_chart(system_db):
     assert len(out.series.cpu_run.t) > 2
     # And no drawn timestamp is the empty string the 1970 value formatted to.
     assert all(x for x in out.series.x_time)
+
+
+def test_a_dip_survives_the_cap_on_a_long_run(system_db):
+    """Why the buckets widen instead of the series being strided.
+
+    The chart is labelled "average and lowest". Widening keeps both words
+    true, because the buckets TILE the run: every instant belongs to
+    exactly one plotted slice, so a momentary dip is the minimum of the
+    slice containing it and cannot fall between two plotted points. A
+    strided series samples every Nth bucket and would leave holes.
+
+    One tick out of 720 drops to 11 W.
+    """
+    cadence = 120.0
+
+    def rows(seq):
+        return [gpu(0, power=11.0 if seq == 431 else 66.0)]
+
+    path = system_db(ticks=720, cadence_s=cadence, gpus=rows)
+    repo = _repo(path)
+    with repo.connect() as conn:
+        stats, out = _power_run(repo, conn)
+
+    assert stats is not None
+    assert min(out[0]["min"]) == 11.0
+    assert sum(1 for v in out[0]["min"] if v == 11.0) == 1
+    # Averaged INTO its slice rather than becoming it, the stated cost.
+    assert 11.0 < min(out[0]["avg"]) < 66.0
+
+    # The three assertions above hold under the OLD narrow buckets too,
+    # so alone they do not test this change at all. Coverage is what
+    # does: consecutive buckets start within one width (plus the sample
+    # cadence, since a bucket begins at its first sample rather than on
+    # the boundary), which is only true while the slices are contiguous.
+    width = DEFAULT_RUN_SERIES_POLICY.bucket_width_for(stats.span_s)
+    stamps = out[0]["t"]
+    gaps = [b - a for a, b in zip(stamps, stamps[1:])]
+    assert gaps, "a capped run still has more than one bucket"
+    assert max(gaps) <= width + cadence
+    # And the slices reach both ends of the run.
+    assert stamps[0] == pytest.approx(stats.first_ts)
+    assert stats.last_ts - stamps[-1] <= width + cadence
+
+
+def test_a_sample_older_than_the_run_start_cannot_break_the_cap(system_db):
+    """The bound is proved above the SQL, so the SQL has to hold it.
+
+    `first_ts` comes from a separate query than the fetch, so on a live
+    dashboard a delayed sample can arrive between the two carrying a
+    timestamp older than the one already read. `CAST` truncates toward
+    zero rather than flooring, so such a row would land in a NEGATIVE
+    bucket and push the count past the budget the caller asserts.
+
+    Clamped at zero, it folds into the first bucket instead.
+    """
+    path = system_db(ticks=720, cadence_s=120.0, gpus=lambda seq: [gpu(0)])
+    repo = _repo(path)
+    with repo.connect() as conn:
+        stats = repo.gpu_power_run_stats(conn)
+        assert stats is not None
+        width = DEFAULT_RUN_SERIES_POLICY.bucket_width_for(stats.span_s)
+        # A sample from well before the start the planner saw.
+        rows = repo.fetch_gpu_power_run(
+            conn, width_s=width, first_ts=stats.first_ts + 2.0 * width
+        )
+
+    budget = DEFAULT_RUN_SERIES_POLICY.max_points
+    assert len(rows) <= budget
+    # Every bucket index is non-negative, so the series still reads left
+    # to right in time.
+    stamps = [r[1] for r in rows]
+    assert stamps == sorted(stamps)

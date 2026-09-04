@@ -32,7 +32,7 @@ from traceml_ai.renderers.system.dashboard_models import (
 )
 
 from . import charting, theme
-from .formatting import gb_si
+from .formatting import format_window, gb_si
 
 # Window-p95 GPU utilisation spread (max - min, percentage points) that
 # automatically opens the per-GPU rows.
@@ -56,19 +56,6 @@ _MONO = "font-family:var(--mono);"
 # --- pure display rules ----------------------------------------------------
 def gpu_color(index: int) -> str:
     return _GPU_COLORS[int(index) % len(_GPU_COLORS)]
-
-
-def format_window(window_s: float) -> str:
-    """The rolling window in words: '30 s', '2 min'.
-
-    The payload picks round windows (``RunSeriesPolicy.window_for``) so it reads
-    as a duration a person recognises.
-    """
-    if not window_s or window_s <= 0:
-        return ""
-    if window_s < 60:
-        return f"{window_s:.0f} s"
-    return f"{window_s / 60.0:.0f} min"
 
 
 def format_span(seconds: Optional[float]) -> str:

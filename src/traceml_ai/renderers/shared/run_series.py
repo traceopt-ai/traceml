@@ -108,6 +108,36 @@ class RunSeriesPolicy:
                 return min(max(step, self.roll_min_s), self.roll_max_s)
         return self.roll_max_s
 
+    def bucket_width_for(self, span_s: float) -> float:
+        """The width for a whole-run series that BUCKETS rather than rolls.
+
+        The rolling window is the floor: while the run still fits the
+        point budget a bucket is exactly the window, so a short run keeps
+        its resolution and the label it already prints. Past the budget
+        the bucket WIDENS instead of the count growing, which is what
+        makes ``max_points`` a real ceiling rather than a suggestion.
+
+        Widening rather than striding is deliberate. Every point stays
+        the real mean and the real floor of one contiguous slice, so a
+        chart labelled "average and lowest" is telling the truth about
+        both words. A strided series cannot show a dip it never plotted.
+        The cost is stated rather than hidden: a brief dip inside one
+        wide slice is averaged in, and the recent-window view is what
+        resolves short events.
+        """
+        window = self.window_for(span_s)
+        usable = finite(span_s)
+        if usable is None or usable <= 0:
+            return window
+        # Samples at both ends of the span can open a bucket, so a budget of
+        # N points has N - 1 intervals between them.
+        cap_width = (
+            math.nextafter(usable, math.inf)
+            if self.max_points == 1
+            else usable / float(self.max_points - 1)
+        )
+        return max(window, cap_width)
+
     def mode_for(self, run_span_s: float, window_span_s: float) -> SeriesMode:
         """Whether the chart should describe the window or the whole run."""
         run = finite(run_span_s)

@@ -835,3 +835,29 @@ def test_tiles_abstain_when_the_payload_carries_no_measurement() -> None:
         assert not re.search(r"\d", _tile_number(content)), key
     # Not "0%", which is what a measured idle host reads.
     assert panel["cpu_value"].text == ""
+
+
+def test_a_widened_bucket_reads_as_hours_not_a_big_minute_count() -> None:
+    """Long runs now produce widths past an hour, so the label must too.
+
+    Before the whole-run power chart was capped, its width could not
+    exceed the 300 s window ceiling, so this branch was unreachable and
+    minutes were always enough. Capping widens the bucket instead of
+    growing the count, which puts multi-hour widths on the label: a seven
+    day run buckets at 5040 s, and "84 min" is not how a person reads it.
+    """
+    assert format_window(120.0) == "2 min"
+    assert format_window(719.0) == "12 min"
+    assert format_window(1440.0) == "24 min"
+    assert format_window(3600.0) == "1 h"
+    assert format_window(5040.0) == "1 h 24 min"
+    assert format_window(7200.0) == "2 h"
+    # Unchanged below a minute, and still empty for nothing.
+    assert format_window(30.0) == "30 s"
+    assert format_window(0.0) == ""
+    # The hours branch converts to an integer, which raises on a
+    # non-finite value where the old format string produced "nan min".
+    # A card formatter has to degrade rather than take the section down.
+    assert format_window(float("nan")) == ""
+    assert format_window(float("inf")) == ""
+    assert format_window(-5.0) == ""
