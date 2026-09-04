@@ -11,10 +11,13 @@ handler lived on ``"traceml"`` while every call site logged under
 ``"traceml_ai.*"``, leaving every ``traceml_errors.log`` empty.
 """
 
+import io
 import logging
+from unittest.mock import Mock
 
 import pytest
 
+import traceml_ai.loggers.error_log as error_log
 from traceml_ai.loggers.error_log import get_error_logger, setup_error_logger
 
 
@@ -40,13 +43,16 @@ def test_error_from_call_site_lands_in_file(
     monkeypatch.setenv("TRACEML_LOGS_DIR", str(tmp_path))
     monkeypatch.setenv("TRACEML_SESSION_ID", "session_test")
 
-    setup_error_logger(is_aggregator=True)
-    get_error_logger("Probe").error("[TraceML] probe-error-message")
+    setup_error_logger(role="aggregator")
+    probe = get_error_logger("Probe")
+    probe.warning("[TraceML] warning-is-not-persisted")
+    probe.error("[TraceML] probe-error-message")
 
     log_file = tmp_path / "session_test" / "aggregator" / "traceml_errors.log"
     assert log_file.is_file()
     content = log_file.read_text(encoding="utf-8")
     assert "probe-error-message" in content
+    assert "warning-is-not-persisted" not in content
     assert "traceml_ai.Probe" in content
 
 
@@ -58,7 +64,7 @@ def test_rank_process_writes_its_own_error_file(
     monkeypatch.setenv("TRACEML_SESSION_ID", "session_test")
     monkeypatch.setenv("RANK", "3")
 
-    setup_error_logger(is_aggregator=False)
+    setup_error_logger(role="rank")
     get_error_logger("Sampler").error("[TraceML] rank-scoped-error")
 
     log_file = tmp_path / "session_test" / "rank_3" / "traceml_errors.log"
@@ -66,12 +72,67 @@ def test_rank_process_writes_its_own_error_file(
     assert "rank-scoped-error" in log_file.read_text(encoding="utf-8")
 
 
+def test_launcher_writes_its_node_owned_error_file(
+    tmp_path, clean_error_logger
+):
+    session_root = tmp_path / "session_test"
+
+    setup_error_logger(role="launcher", session_root=session_root, node_rank=2)
+    get_error_logger("Launcher").error("[TraceML] launcher-error")
+
+    log_file = session_root / "nodes" / "node_2" / "launcher_errors.log"
+    assert log_file.is_file()
+    assert "launcher-error" in log_file.read_text(encoding="utf-8")
+
+
 def test_setup_is_idempotent(tmp_path, monkeypatch, clean_error_logger):
     monkeypatch.setenv("TRACEML_LOGS_DIR", str(tmp_path))
     monkeypatch.setenv("TRACEML_SESSION_ID", "session_test")
 
-    first = setup_error_logger(is_aggregator=True)
-    second = setup_error_logger(is_aggregator=True)
+    first = setup_error_logger(role="aggregator")
+    second = setup_error_logger(role="aggregator")
 
     assert first is second
     assert len(first.handlers) == 1
+    assert first.propagate is False
+
+
+def test_setup_failure_disables_internal_file_logging(
+    tmp_path, monkeypatch, clean_error_logger
+):
+    monkeypatch.setenv("TRACEML_LOGS_DIR", str(tmp_path))
+    monkeypatch.setenv("TRACEML_SESSION_ID", "session_test")
+    monkeypatch.setattr(
+        error_log,
+        "_SilentRotatingFileHandler",
+        Mock(side_effect=OSError("read-only filesystem")),
+    )
+
+    logger = setup_error_logger(role="aggregator")
+    get_error_logger("Probe").error("must not raise")
+
+    assert len(logger.handlers) == 1
+    assert isinstance(logger.handlers[0], logging.NullHandler)
+
+
+def test_write_failure_does_not_reach_stderr(
+    tmp_path, monkeypatch, capsys, clean_error_logger
+):
+    monkeypatch.setenv("TRACEML_LOGS_DIR", str(tmp_path))
+    monkeypatch.setenv("TRACEML_SESSION_ID", "session_test")
+
+    logger = setup_error_logger(role="aggregator")
+    handler = logger.handlers[0]
+    original_stream = handler.stream
+
+    class _BrokenStream(io.StringIO):
+        def write(self, value):
+            raise OSError("disk full")
+
+    try:
+        handler.stream = _BrokenStream()
+        get_error_logger("Probe").error("must remain isolated")
+    finally:
+        handler.stream = original_stream
+
+    assert capsys.readouterr().err == ""

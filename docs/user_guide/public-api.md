@@ -141,6 +141,12 @@ in a multi-node run. Summary and dashboard modes mirror it live, while CLI mode
 reports its path if telemetry fails. Aggregator stdout remains attached to the
 terminal and is not persisted.
 
+TraceML implementation errors are stored separately in
+`rank_<global_rank>/traceml_errors.log`,
+`aggregator/traceml_errors.log`, and
+`nodes/node_<node_rank>/launcher_errors.log`. User exceptions remain in the
+native training stderr artifacts above.
+
 ## Direct Launch with `traceml serve`
 
 `traceml run` starts the aggregator and your script together. For direct

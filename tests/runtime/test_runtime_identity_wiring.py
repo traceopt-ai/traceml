@@ -4,6 +4,8 @@
 # you may not use this file except in compliance with the License.
 # SPDX-License-Identifier: Apache-2.0
 
+from unittest.mock import Mock
+
 from traceml_ai.runtime.runtime import TraceMLRuntime
 from traceml_ai.runtime.sender import SenderIdentity
 from traceml_ai.runtime.settings import TraceMLSettings
@@ -61,6 +63,7 @@ def test_runtime_uses_local_rank_for_samplers_and_global_rank_for_publisher(
         return []
 
     _FakePublisher.instances.clear()
+    setup_error_logger = Mock()
     monkeypatch.setenv("RANK", "5")
     monkeypatch.setenv("LOCAL_RANK", "1")
     monkeypatch.setenv("WORLD_SIZE", "8")
@@ -68,7 +71,7 @@ def test_runtime_uses_local_rank_for_samplers_and_global_rank_for_publisher(
     monkeypatch.setenv("GROUP_RANK", "1")
     monkeypatch.setattr(
         "traceml_ai.runtime.runtime.setup_error_logger",
-        lambda: None,
+        setup_error_logger,
     )
     monkeypatch.setattr(
         "traceml_ai.runtime.runtime.get_error_logger",
@@ -86,6 +89,7 @@ def test_runtime_uses_local_rank_for_samplers_and_global_rank_for_publisher(
 
     runtime = TraceMLRuntime(settings=TraceMLSettings(mode="summary"))
 
+    setup_error_logger.assert_called_once_with(role="rank")
     assert runtime.global_rank == 5
     assert runtime.local_rank == 1
     assert runtime.world_size == 8
