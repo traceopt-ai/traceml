@@ -89,18 +89,18 @@ class SystemCLIComputer:
         reporting = 0
         if gpu_rows:
             util_total = 0.0
-            # Each metric counts its own readings. A device can report a
-            # memory total and no temperature, so one count for the whole
-            # row would call a metric measured because a sibling was.
+            # One count, over the devices that reported. The sampler
+            # reads a device's metrics under a single try, so they arrive
+            # together or not at all; counting each metric separately
+            # would let memory USED come from one set of devices and
+            # memory TOTAL from another, and their ratio would describe
+            # no real machine.
+            reported_devices = 0
             mem_used_total = 0.0
-            mem_used_seen = 0
             mem_total_total = 0.0
-            mem_total_seen = 0
             temp_max: Optional[float] = None
             power_total = 0.0
-            power_seen = 0
             power_limit_total = 0.0
-            power_limit_seen = 0
             gpu_util_skew: Optional[float]
 
             util_min: Optional[float] = None
@@ -114,15 +114,11 @@ class SystemCLIComputer:
                     # a healthy four-GPU host at 75% with a fabricated
                     # 100-point skew. Same defect the dashboard carried.
                     continue
-                mem_used = reading(gpu["mem_used_bytes"])
-                mem_total = reading(gpu["mem_total_bytes"])
-
-                if mem_used is not None:
-                    mem_used_total += mem_used
-                    mem_used_seen += 1
-                if mem_total is not None:
-                    mem_total_total += mem_total
-                    mem_total_seen += 1
+                reported_devices += 1
+                mem_used = reading(gpu["mem_used_bytes"]) or 0.0
+                mem_total = reading(gpu["mem_total_bytes"]) or 0.0
+                mem_used_total += mem_used
+                mem_total_total += mem_total
 
                 # A reporting device can still carry a NULL util column,
                 # so the util mean counts READINGS, not devices. Same
@@ -140,15 +136,7 @@ class SystemCLIComputer:
                         util if util_max is None else max(util_max, util)
                     )
 
-                # Free memory is the gap between two readings, so it
-                # needs both. With the level unread this reported the
-                # whole card free, which points the wrong way about
-                # pressure.
-                if (
-                    mem_total is not None
-                    and mem_total > 0.0
-                    and mem_used is not None
-                ):
+                if mem_total > 0.0:
                     headroom = max(mem_total - mem_used, 0.0)
                     if headroom_min is None or headroom < headroom_min:
                         headroom_min = headroom
@@ -164,14 +152,8 @@ class SystemCLIComputer:
                 ):
                     temp_max = temp_val
 
-                power = reading(gpu["power_usage_w"])
-                if power is not None:
-                    power_total += power
-                    power_seen += 1
-                limit = reading(gpu["power_limit_w"])
-                if limit is not None:
-                    power_limit_total += limit
-                    power_limit_seen += 1
+                power_total += reading(gpu["power_usage_w"]) or 0.0
+                power_limit_total += reading(gpu["power_limit_w"]) or 0.0
 
             gpu_util_skew = (
                 util_max - util_min
@@ -180,15 +162,12 @@ class SystemCLIComputer:
             )
         else:
             util_total = None
+            reported_devices = 0
             mem_used_total = None
-            mem_used_seen = 0
             mem_total_total = None
-            mem_total_seen = 0
             temp_max = None
             power_total = None
-            power_seen = 0
             power_limit_total = None
-            power_limit_seen = 0
             gpu_util_skew = None
             headroom_min = None
             headroom_min_idx = None
@@ -209,16 +188,16 @@ class SystemCLIComputer:
             gpu_util_avg=(util_total / reporting if reporting else None),
             gpu_util_devices=reporting,
             gpu_util_skew=gpu_util_skew,
-            # A sum over no readings is not a measurement of zero. Each
-            # of these abstains on its own count, because the metrics go
-            # missing independently.
-            gpu_mem_used=mem_used_total if mem_used_seen else None,
-            gpu_mem_total=mem_total_total if mem_total_seen else None,
+            # A sum over no reporting device is not a measurement of
+            # zero. All four abstain on the same count, so used and total
+            # always describe the same set of devices.
+            gpu_mem_used=mem_used_total if reported_devices else None,
+            gpu_mem_total=mem_total_total if reported_devices else None,
             gpu_mem_headroom_min=headroom_min,
             gpu_mem_headroom_min_idx=headroom_min_idx,
             gpu_temp_max=temp_max,
-            gpu_power_usage=power_total if power_seen else None,
-            gpu_power_limit=power_limit_total if power_limit_seen else None,
+            gpu_power_usage=power_total if reported_devices else None,
+            gpu_power_limit=power_limit_total if reported_devices else None,
         ).to_dict()
 
     def _return_stale(self) -> Dict[str, Any]:

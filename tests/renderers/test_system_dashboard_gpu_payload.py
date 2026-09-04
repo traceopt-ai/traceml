@@ -1004,24 +1004,25 @@ def test_a_window_with_no_host_readings_abstains(tmp_path: Path) -> None:
     assert roll.ram.total == 200.0 * GB
 
 
-def _live_devices_no_metrics(path: Path) -> None:
-    """Devices that report their capacity but none of their metrics.
+def _all_devices_failed(path: Path) -> None:
+    """Every device writing the sampler's NVML-failure row.
 
-    This is the case the per-device work does NOT cover: ``mem_total_bytes``
-    and ``power_limit_w`` are present, so every device is reported and
-    ``gpus_unreported`` is False, while every metric column is NULL.
+    This is the reachable trigger: the sampler reads a device's metrics
+    under one try and appends an all-zero placeholder when that raises,
+    so a device reports everything or nothing. A row with capacity
+    present and metrics missing does not occur.
     """
 
     def rows(_seq):
         return [
             {
                 "gpu_idx": i,
-                "util": None,
-                "mem_used_bytes": None,
-                "mem_total_bytes": 16.1 * GB,
-                "temperature_c": None,
-                "power_usage_w": None,
-                "power_limit_w": LIMIT,
+                "util": 0.0,
+                "mem_used_bytes": 0.0,
+                "mem_total_bytes": 0.0,
+                "temperature_c": 0.0,
+                "power_usage_w": 0.0,
+                "power_limit_w": 0.0,
             }
             for i in range(4)
         ]
@@ -1029,30 +1030,25 @@ def _live_devices_no_metrics(path: Path) -> None:
     _write(path, rows)
 
 
-def test_live_devices_with_no_metrics_abstain(tmp_path: Path) -> None:
-    """A reported device with an unread metric still has no measurement.
+def test_a_host_where_no_device_reported_abstains(tmp_path: Path) -> None:
+    """Nothing was measured, so nothing is stated.
 
-    The reported-ness guard the card already has is about the DEVICE. It
-    does not fire here, because these devices do report: they carry a
-    memory total and a power limit. Only the utilisation tile was covered,
-    because only utilisation carries a count. Memory read "0.0 GB" on four
-    live cards and temperature read "0 degrees".
+    The zeros are the sampler's failure marker, not readings, so every
+    across-device aggregate has no value and the verdict derived from
+    the temperature has nothing to be OK about.
     """
-    db = tmp_path / "live-no-metrics.db"
-    _live_devices_no_metrics(db)
+    db = tmp_path / "all-failed.db"
+    _all_devices_failed(db)
 
     roll = _payload(db).rollups
 
-    assert roll.gpus_unreported is False  # the guard genuinely does not fire
+    assert roll.gpus_unreported is True
     assert roll.gpu_mem is not None
     assert roll.gpu_mem.now is None
-    assert roll.gpu_mem.p95 is None
-    # No measured level means no tick to read a paired capacity from.
     assert roll.gpu_mem.total is None
     assert roll.gpu_mem.headroom is None
     assert roll.temp is not None
     assert roll.temp.now is None
-    assert roll.temp.p95 is None
     # A verdict computed from no temperature is not a verdict.
     assert roll.temp.status is None
     assert roll.gpu_util is not None

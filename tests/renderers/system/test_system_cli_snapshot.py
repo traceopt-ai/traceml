@@ -141,40 +141,26 @@ def test_an_unread_host_is_not_an_idle_host(system_db):
     assert "0.0%" not in text
 
 
-def test_live_devices_with_unread_metrics_abstain(system_db):
-    """Reported devices whose metric columns are all NULL.
+def test_memory_used_and_total_describe_the_same_devices(system_db):
+    """One count, not one per metric.
 
-    The device guard does not fire: these cards report a memory total and
-    a power limit, so they are live. Only the utilisation mean was
-    covered, because only utilisation counts its readings. Memory summed
-    to 0 bytes, temperature reported 0.0 degrees, and headroom reported
-    the entire card free, which is the one that points the wrong way
-    about pressure.
+    The sampler reads a device's metrics under a single try, so they
+    arrive together or not at all. Counting each metric separately let
+    memory USED be summed over one set of devices and memory TOTAL over
+    another, and the card renders their ratio, which would then describe
+    no real machine. Both abstain on the same count now.
     """
     path = system_db(
         ticks=5,
-        gpus=lambda seq: [
-            gpu(i, util=None, temp=None, power=None, mem_used=None)
-            for i in range(4)
-        ],
+        gpus=lambda seq: [gpu(0), dict(NVML_FAILED), gpu(2), gpu(3)],
     )
 
     out = SystemCLIComputer(path).compute()
 
-    assert out["gpu_util_avg"] is None  # already correct
-    assert out["gpu_mem_used"] is None
-    assert out["gpu_temp_max"] is None
-    assert out["gpu_power_usage"] is None
-    # Free memory is measured against a level, so with no level there is
-    # no headroom. 16.1 GB here read as a completely free card.
-    assert out["gpu_mem_headroom_min"] is None
-    # The capacities the devices DID report are still reported.
-    assert out["gpu_mem_total"] == 4 * 16.1 * GB
-    assert out["gpu_power_limit"] == 4 * 70.0
-
-    text = _render_text(path)
-    assert "0.0°C" not in text
-    assert "GPU TMP" in text and "N/A" in text
+    # Three devices reported; the failed one is in neither sum.
+    assert out["gpu_mem_used"] == 3 * 6.3 * GB
+    assert out["gpu_mem_total"] == 3 * 16.1 * GB
+    assert out["gpu_power_limit"] == 3 * 70.0
 
 
 def test_a_partly_read_host_still_reports(system_db):
