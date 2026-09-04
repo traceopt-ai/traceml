@@ -13,7 +13,7 @@ import time
 from typing import Any, Dict, Optional
 
 from .cli_cluster import CLI_CLUSTER_WINDOW_ROWS, SystemCLIClusterBuilder
-from .common import SystemCLISnapshot, gpu_reported
+from .common import SystemCLISnapshot, gpu_reported, positive, reading
 from .repository import SystemRepository
 
 
@@ -89,9 +89,16 @@ class SystemCLIComputer:
         reporting = 0
         if gpu_rows:
             util_total = 0.0
+            # One count, over the devices that reported. The sampler
+            # reads a device's metrics under a single try, so they arrive
+            # together or not at all; counting each metric separately
+            # would let memory USED come from one set of devices and
+            # memory TOTAL from another, and their ratio would describe
+            # no real machine.
+            reported_devices = 0
             mem_used_total = 0.0
             mem_total_total = 0.0
-            temp_max = 0.0
+            temp_max: Optional[float] = None
             power_total = 0.0
             power_limit_total = 0.0
             gpu_util_skew: Optional[float]
@@ -107,9 +114,9 @@ class SystemCLIComputer:
                     # a healthy four-GPU host at 75% with a fabricated
                     # 100-point skew. Same defect the dashboard carried.
                     continue
-                mem_used = float(gpu["mem_used_bytes"] or 0.0)
-                mem_total = float(gpu["mem_total_bytes"] or 0.0)
-
+                reported_devices += 1
+                mem_used = reading(gpu["mem_used_bytes"]) or 0.0
+                mem_total = reading(gpu["mem_total_bytes"]) or 0.0
                 mem_used_total += mem_used
                 mem_total_total += mem_total
 
@@ -139,12 +146,14 @@ class SystemCLIComputer:
                             else idx
                         )
 
-                temp_val = float(gpu["temperature_c"] or 0.0)
-                if temp_val > temp_max:
+                temp_val = reading(gpu["temperature_c"])
+                if temp_val is not None and (
+                    temp_max is None or temp_val > temp_max
+                ):
                     temp_max = temp_val
 
-                power_total += float(gpu["power_usage_w"] or 0.0)
-                power_limit_total += float(gpu["power_limit_w"] or 0.0)
+                power_total += reading(gpu["power_usage_w"]) or 0.0
+                power_limit_total += reading(gpu["power_limit_w"]) or 0.0
 
             gpu_util_skew = (
                 util_max - util_min
@@ -153,6 +162,7 @@ class SystemCLIComputer:
             )
         else:
             util_total = None
+            reported_devices = 0
             mem_used_total = None
             mem_total_total = None
             temp_max = None
@@ -163,9 +173,12 @@ class SystemCLIComputer:
             headroom_min_idx = None
 
         return SystemCLISnapshot(
-            cpu=float(latest["cpu_percent"] or 0.0),
-            ram_used=float(latest["ram_used_bytes"] or 0.0),
-            ram_total=float(latest["ram_total_bytes"] or 0.0),
+            # A host that did not report is not a host at rest. These are
+            # readings, so an absent one stays absent and the card says
+            # N/A rather than 0%.
+            cpu=reading(latest["cpu_percent"]),
+            ram_used=reading(latest["ram_used_bytes"]),
+            ram_total=positive(latest["ram_total_bytes"]),
             gpu_available=bool(latest["gpu_available"] or False),
             gpu_count=int(latest["gpu_count"] or 0),
             # An empty sum is not a measured 0% utilisation. Keep the
@@ -175,13 +188,16 @@ class SystemCLIComputer:
             gpu_util_avg=(util_total / reporting if reporting else None),
             gpu_util_devices=reporting,
             gpu_util_skew=gpu_util_skew,
-            gpu_mem_used=mem_used_total,
-            gpu_mem_total=mem_total_total,
+            # A sum over no reporting device is not a measurement of
+            # zero. All four abstain on the same count, so used and total
+            # always describe the same set of devices.
+            gpu_mem_used=mem_used_total if reported_devices else None,
+            gpu_mem_total=mem_total_total if reported_devices else None,
             gpu_mem_headroom_min=headroom_min,
             gpu_mem_headroom_min_idx=headroom_min_idx,
             gpu_temp_max=temp_max,
-            gpu_power_usage=power_total,
-            gpu_power_limit=power_limit_total,
+            gpu_power_usage=power_total if reported_devices else None,
+            gpu_power_limit=power_limit_total if reported_devices else None,
         ).to_dict()
 
     def _return_stale(self) -> Dict[str, Any]:
@@ -195,10 +211,17 @@ class SystemCLIComputer:
         return self._empty_snapshot()
 
     def _empty_snapshot(self) -> Dict[str, Any]:
+        """The payload when there is nothing to report yet.
+
+        Every field is absent rather than zero. This is what the card
+        draws before the first sample lands and after a read failure
+        outlives the stale window, and the host is not idle in either
+        case: nothing has been measured at all.
+        """
         return SystemCLISnapshot(
-            cpu=0.0,
-            ram_used=0.0,
-            ram_total=0.0,
+            cpu=None,
+            ram_used=None,
+            ram_total=None,
             gpu_available=False,
             gpu_count=0,
             gpu_util_devices=None,

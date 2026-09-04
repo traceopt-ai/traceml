@@ -43,12 +43,18 @@ class Stat:
 
 @dataclass(frozen=True)
 class RamStat:
-    """Host memory, carrying the capacity that makes the level readable."""
+    """Host memory, carrying the capacity that makes the level readable.
 
-    now: float
-    p95: Optional[float]
-    total: float
-    headroom: float
+    Every field is optional because every one of them can be genuinely
+    unread: a window where no sample carried a level, or a row with no
+    capacity. 0.0 is a level a machine can be at, so it cannot also mean
+    "not measured".
+    """
+
+    now: Optional[float] = None
+    p95: Optional[float] = None
+    total: Optional[float] = None
+    headroom: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -60,10 +66,10 @@ class GpuMemStat:
     rather than about an imaginary merged one.
     """
 
-    now: float
-    p95: Optional[float]
-    headroom: float
-    total: Optional[float]
+    now: Optional[float] = None
+    p95: Optional[float] = None
+    headroom: Optional[float] = None
+    total: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -226,19 +232,19 @@ class SystemRollups:
             gpu_delta=stat("gpu_delta"),
             ram=(
                 RamStat(
-                    now=ram["now"],
+                    now=ram.get("now"),
                     p95=ram.get("p95"),
-                    total=ram["total"],
-                    headroom=ram.get("headroom", 0.0),
+                    total=ram.get("total"),
+                    headroom=ram.get("headroom"),
                 )
                 if ram
                 else None
             ),
             gpu_mem=(
                 GpuMemStat(
-                    now=mem["now"],
+                    now=mem.get("now"),
                     p95=mem.get("p95"),
-                    headroom=mem.get("headroom", 0.0),
+                    headroom=mem.get("headroom"),
                     total=mem.get("total"),
                 )
                 if mem

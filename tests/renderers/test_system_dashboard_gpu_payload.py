@@ -965,3 +965,148 @@ def test_a_tick_with_no_gpu_rows_at_all_is_also_a_gap(tmp_path: Path):
     out = _payload(db)
     assert list(out.series.gpu_avg)[TICKS // 2] is None
     assert out.rollups.gpu_util.p50 == 100.0
+
+
+def _all_null_host(path: Path, *, gpu_available: bool) -> None:
+    """A window in which the host reported no CPU and no RAM at all."""
+    _write(path, lambda seq: (), gpu_available=gpu_available)
+    with sqlite_database(path, init_summary_schema) as conn:
+        conn.execute("UPDATE system_samples SET cpu_percent = NULL")
+        conn.execute("UPDATE system_samples SET ram_used_bytes = NULL")
+        conn.commit()
+
+
+def test_a_window_with_no_host_readings_abstains(tmp_path: Path) -> None:
+    """No CPU or RAM reading at all is not a host sitting idle.
+
+    Every tick absent used to collapse to 0.0, which the card renders as a
+    real measurement: the CPU label read "0%" and the RAM tile read
+    "0.0 / 200 GB". Both describe a machine doing nothing, which is the
+    opposite of what an unmeasured window means.
+    """
+    db = tmp_path / "host-absent.db"
+    _all_null_host(db, gpu_available=False)
+
+    roll = _payload(db).rollups
+
+    assert roll.cpu is not None
+    assert roll.cpu.now is None
+    assert roll.cpu.p50 is None
+    assert roll.cpu.p95 is None
+    assert roll.ram is not None
+    assert roll.ram.now is None
+    assert roll.ram.p95 is None
+    # Headroom is derived from a level nothing measured, so it has no value
+    # either. A zero here would read as a full machine.
+    assert roll.ram.headroom is None
+    # The capacity is a different reading and these rows still carry it.
+    # Abstaining here too would be over-reach, not a fix.
+    assert roll.ram.total == 200.0 * GB
+
+
+def _all_devices_failed(path: Path) -> None:
+    """Every device writing the sampler's NVML-failure row.
+
+    This is the reachable trigger: the sampler reads a device's metrics
+    under one try and appends an all-zero placeholder when that raises,
+    so a device reports everything or nothing. A row with capacity
+    present and metrics missing does not occur.
+    """
+
+    def rows(_seq):
+        return [
+            {
+                "gpu_idx": i,
+                "util": 0.0,
+                "mem_used_bytes": 0.0,
+                "mem_total_bytes": 0.0,
+                "temperature_c": 0.0,
+                "power_usage_w": 0.0,
+                "power_limit_w": 0.0,
+            }
+            for i in range(4)
+        ]
+
+    _write(path, rows)
+
+
+def test_a_host_where_no_device_reported_abstains(tmp_path: Path) -> None:
+    """Nothing was measured, so nothing is stated.
+
+    The zeros are the sampler's failure marker, not readings, so every
+    across-device aggregate has no value and the verdict derived from
+    the temperature has nothing to be OK about.
+    """
+    db = tmp_path / "all-failed.db"
+    _all_devices_failed(db)
+
+    roll = _payload(db).rollups
+
+    assert roll.gpus_unreported is True
+    assert roll.gpu_mem is not None
+    assert roll.gpu_mem.now is None
+    assert roll.gpu_mem.total is None
+    assert roll.gpu_mem.headroom is None
+    assert roll.temp is not None
+    assert roll.temp.now is None
+    # A verdict computed from no temperature is not a verdict.
+    assert roll.temp.status is None
+    assert roll.gpu_util is not None
+    assert roll.gpu_util.p50 is None
+
+
+def test_a_partly_measured_window_still_reports(tmp_path: Path) -> None:
+    """Abstention is for the all-absent window, not for any absence.
+
+    The narrower behaviour is the point: one measured tick is enough for a
+    percentile and for a newest-value read, and this is what separates this
+    change from suppressing the whole card whenever a sample goes missing.
+    """
+    db = tmp_path / "partly.db"
+    _all_null_host(db, gpu_available=False)
+    with sqlite_database(db, init_summary_schema) as conn:
+        conn.execute(
+            "UPDATE system_samples SET cpu_percent = 80.0, "
+            "ram_used_bytes = ? WHERE seq = ?",
+            (9.0 * GB, TICKS - 1),
+        )
+        conn.commit()
+
+    roll = _payload(db).rollups
+
+    assert roll.cpu.now == 80.0
+    assert roll.cpu.p50 == 80.0
+    assert roll.ram.now == 9.0 * GB
+    assert roll.ram.headroom == 191.0 * GB
+
+
+def test_a_genuine_zero_reading_is_reported_as_zero(tmp_path: Path) -> None:
+    """The same invariant on the dashboard payload.
+
+    Absence and zero must stay distinct in BOTH directions. Every value
+    is deliberately 0 here: a device really can sit at 0% drawing no
+    power, and turning that into an abstention would hide a real
+    measurement, which is worse than the defect being fixed.
+    """
+    db = tmp_path / "idle.db"
+
+    def rows(_seq):
+        return [_gpu(i, 0.0, 0.0, temp=0.0, mem_used=0.0) for i in range(4)]
+
+    _write(db, rows)
+    with sqlite_database(db, init_summary_schema) as conn:
+        conn.execute("UPDATE system_samples SET cpu_percent = 0.0")
+        conn.commit()
+
+    roll = _payload(db).rollups
+
+    assert roll.cpu.now == 0.0
+    assert roll.cpu.p50 == 0.0
+    assert roll.gpu_util.p50 == 0.0
+    assert roll.gpu_mem.now == 0.0
+    assert roll.temp.now == 0.0
+    # A verdict computed from a real 0 degrees is still a verdict.
+    assert roll.temp.status == "OK"
+    # The capacity pairs with a measured level, so it is present.
+    assert roll.gpu_mem.total == 16.1 * GB
+    assert roll.util_gpu_count == 4

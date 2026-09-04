@@ -69,10 +69,12 @@ class SystemRenderer(BaseRenderer):
 
     def _single_node_panel(self, data: Dict[str, Any], grid: Table) -> Panel:
         """Render the single-node terminal system view."""
-        ram_pct_str = ""
-        if data["ram_total"]:
-            ram_pct = data["ram_used"] * 100.0 / data["ram_total"]
-            ram_pct_str = fmt_percent(ram_pct)
+        # A share needs both readings. Either one absent means there is
+        # no percentage to state, which is not the same as 0%.
+        used = data["ram_used"]
+        total = data["ram_total"]
+        if used is not None and total:
+            ram_pct_str = fmt_percent(used * 100.0 / total)
         else:
             ram_pct_str = "N/A"
 

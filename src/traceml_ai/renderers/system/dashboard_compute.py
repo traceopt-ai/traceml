@@ -24,22 +24,13 @@ from traceml_ai.renderers.shared.run_series import (
 )
 
 from .common import gpu_reported as _gpu_reported
+from .common import reading as _opt_float
 from .dashboard_models import (
     SystemDashboardPayload,
     SystemRollups,
     SystemSeries,
 )
 from .repository import RunStats, SystemRepository
-
-
-def _opt_float(value: Any) -> Optional[float]:
-    """Float or None: an unreported column stays unreported, never 0."""
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
 
 
 def _median(values: List[Optional[float]]) -> Optional[float]:
@@ -95,18 +86,16 @@ def _typed(
     )
 
 
-def _nan_pct(values: Any, q: float) -> float:
+def _nan_pct(values: Any, q: float) -> Optional[float]:
     """A percentile over the ticks that were measured.
 
-    A window in which nothing was measured has no percentile. It returns
-    0.0 rather than None, which is NOT a defence of that value: it is the
-    pre-existing shape of every rollup field, and making the all-absent
-    case abstain means giving the tiles an n/a path. Tracked separately;
-    this function narrows the defect to the all-absent window rather than
-    every window containing one blind tick.
+    A window in which nothing was measured has no percentile, so this
+    abstains rather than naming a number. The card already renders an
+    absent field as "n/a"; a 0.0 here would render as a real measurement
+    of an idle machine.
     """
     if values.size == 0 or bool(np.all(np.isnan(values))):
-        return 0.0
+        return None
     return float(np.nanpercentile(values, q))
 
 
@@ -119,21 +108,30 @@ def _last_measured_index(values: Any) -> Optional[int]:
     return None
 
 
-def _last_measured(values: Any) -> float:
-    """The newest measured value, skipping absent ticks."""
+def _last_measured(values: Any) -> Optional[float]:
+    """The newest measured value, skipping absent ticks.
+
+    None when no tick in the window was measured: there is no newest
+    value to report, and 0.0 is a level a machine can genuinely be at.
+    """
     for value in reversed(values.tolist()):
         if value == value:  # not NaN
             return float(value)
-    return 0.0
+    return None
 
 
-def _paired_total(levels: Any, totals: Any) -> float:
-    """The capacity belonging to the tick the level was read from."""
+def _paired_total(levels: Any, totals: Any) -> Optional[float]:
+    """The capacity belonging to the tick the level was read from.
+
+    None when no level was measured: with no tick to read from there is
+    no capacity that belongs to the reported value, and pairing one
+    anyway is how a level and its denominator come from two moments.
+    """
     i = _last_measured_index(levels)
     if i is None:
-        return 0.0
+        return None
     total = totals.tolist()[i]
-    return float(total) if total == total else 0.0
+    return float(total) if total == total else None
 
 
 def _gap_list(values: Any) -> List[Optional[float]]:
@@ -296,7 +294,7 @@ class SystemDashboardComputer:
             [_opt_float(r["ram_used_bytes"]) for r in samples],
             dtype=np.float64,
         )
-        ram_total = float(last["ram_total_bytes"] or 0.0)
+        ram_total = _positive(last["ram_total_bytes"])
 
         gpu_rows = self._db.fetch_gpu_rows_for_samples(
             conn,
@@ -425,14 +423,15 @@ class SystemDashboardComputer:
                 # which is what the pre-fill already says.
                 pass
 
+        ram_now = _last_measured(ram_used_hist)
         cpu_p50 = _nan_pct(cpu_hist, 50)
         cpu_p95 = _nan_pct(cpu_hist, 95)
 
         ram_p95 = _nan_pct(ram_used_hist, 95)
 
         # nanpercentile, not percentile: a blind tick must not be counted
-        # as a measured zero when the window is summarised. All-NaN means
-        # nothing was measured at all, which is 0.0 as it was before.
+        # as a measured zero when the window is summarised, and a window
+        # with no measured tick at all has no percentile to state.
         gpu_p50 = _nan_pct(gpu_avg, 50)
         gpu_p95 = _nan_pct(gpu_avg, 95)
         delta_p95 = _nan_pct(gpu_delta, 95)
@@ -440,8 +439,16 @@ class SystemDashboardComputer:
         temp_p95 = _nan_pct(temp_max, 95)
 
         temp_now = _last_measured(temp_max)
+        # A verdict needs a reading. With no temperature there is
+        # nothing to be OK about. Nothing renders this field today, so
+        # the change is not visible; it is here because a derived
+        # judgment must not outlive the measurement it came from.
         temp_status = (
-            "Hot" if temp_now >= 85 else "Warm" if temp_now >= 80 else "OK"
+            None
+            if temp_now is None
+            else (
+                "Hot" if temp_now >= 85 else "Warm" if temp_now >= 80 else "OK"
+            )
         )
 
         host = (
@@ -496,11 +503,15 @@ class SystemDashboardComputer:
                 "p95": cpu_p95,
             },
             "ram": {
-                "now": _last_measured(ram_used_hist),
+                "now": ram_now,
                 "p95": ram_p95,
                 "total": ram_total,
-                "headroom": max(
-                    ram_total - _last_measured(ram_used_hist), 0.0
+                # Free memory is the difference between two readings, so
+                # it exists only when both of them do.
+                "headroom": (
+                    max(ram_total - ram_now, 0.0)
+                    if ram_total is not None and ram_now is not None
+                    else None
                 ),
             },
             "gpu_util": {

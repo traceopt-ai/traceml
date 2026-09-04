@@ -14,9 +14,11 @@ this package, so a fix that lands in one of them is half a fix.
 
 from __future__ import annotations
 
+import sqlite3
+
 from rich.console import Console
 
-from tests.renderers.system.conftest import gpu
+from tests.renderers.system.conftest import GB, gpu
 from traceml_ai.renderers.system.cli_compute import SystemCLIComputer
 from traceml_ai.renderers.system.renderer import SystemRenderer
 
@@ -93,3 +95,151 @@ def test_no_util_readings_render_as_unavailable(system_db):
     text = _render_text(path)
     assert "GPU UTIL N/A" in text
     assert "GPU UTIL 0.0%" not in text
+
+
+def _null_host_readings(path: str) -> None:
+    """Drop the CPU and memory readings on every row.
+
+    Written directly rather than through the fixture: passing None for
+    ``cpu_percent`` means "unspecified" there and substitutes a default,
+    so the fixture cannot express a NULL column. The dashboard tests take
+    the same route for the same reason.
+    """
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            "UPDATE system_samples SET cpu_percent = NULL, "
+            "ram_used_bytes = NULL"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_an_unread_host_is_not_an_idle_host(system_db):
+    """No CPU or RAM reading on the newest row is not 0%.
+
+    The terminal card reads one row rather than a window, so the trigger
+    is narrower than the dashboard's, but the confusion is identical: the
+    card read "CPU 0.0%" and "RAM 0.0%" for a host whose readings simply
+    never arrived.
+    """
+    path = system_db(ticks=5)
+    _null_host_readings(path)
+
+    out = SystemCLIComputer(path).compute()
+
+    assert out["cpu"] is None
+    assert out["ram_used"] is None
+    # The capacity is a separate reading and this row still carries it.
+    assert out["ram_total"] == 16.0 * GB
+
+    text = _render_text(path)
+    assert "CPU N/A" in text
+    assert "RAM N/A" in text
+    # The exact fabrication being removed: the card read 0.0% for both.
+    assert "0.0%" not in text
+
+
+def test_memory_used_and_total_describe_the_same_devices(system_db):
+    """One count, not one per metric.
+
+    The sampler reads a device's metrics under a single try, so they
+    arrive together or not at all. Counting each metric separately let
+    memory USED be summed over one set of devices and memory TOTAL over
+    another, and the card renders their ratio, which would then describe
+    no real machine. Both abstain on the same count now.
+    """
+    path = system_db(
+        ticks=5,
+        gpus=lambda seq: [gpu(0), dict(NVML_FAILED), gpu(2), gpu(3)],
+    )
+
+    out = SystemCLIComputer(path).compute()
+
+    # Three devices reported; the failed one is in neither sum.
+    assert out["gpu_mem_used"] == 3 * 6.3 * GB
+    assert out["gpu_mem_total"] == 3 * 16.1 * GB
+    assert out["gpu_power_limit"] == 3 * 70.0
+
+
+def test_a_partly_read_host_still_reports(system_db):
+    """One device reading is enough; abstention is for none at all."""
+    path = system_db(
+        ticks=5,
+        gpus=lambda seq: [gpu(0)]
+        + [
+            gpu(i, util=None, temp=None, power=None, mem_used=None)
+            for i in range(1, 4)
+        ],
+    )
+
+    out = SystemCLIComputer(path).compute()
+
+    assert out["gpu_util_avg"] == 100.0
+    assert out["gpu_util_devices"] == 1
+    assert out["gpu_temp_max"] == 45.0
+    assert out["gpu_power_usage"] == 66.0
+    assert out["gpu_mem_used"] == 6.3 * GB
+
+
+def test_a_genuine_zero_reading_is_reported_as_zero(system_db):
+    """The invariant that keeps this change from becoming suppression.
+
+    Every value here is deliberately 0, which is the whole point: a
+    device really can sit at 0% with no power draw, and that is a
+    measurement. If absence and zero are confused in the other
+    direction, this is the test that fails. The devices still carry
+    their capacities, because a card at rest reports what it is.
+    """
+    path = system_db(
+        ticks=5,
+        cpu=lambda seq: 0.0,
+        gpus=lambda seq: [
+            gpu(i, util=0.0, temp=0.0, power=0.0, mem_used=0.0)
+            for i in range(4)
+        ],
+    )
+
+    out = SystemCLIComputer(path).compute()
+
+    assert out["cpu"] == 0.0
+    assert out["gpu_util_avg"] == 0.0
+    assert out["gpu_util_devices"] == 4
+    assert out["gpu_mem_used"] == 0.0
+    assert out["gpu_temp_max"] == 0.0
+    assert out["gpu_power_usage"] == 0.0
+    # Nothing was used, so the whole card is free. That is a real
+    # headroom, unlike the one an unread level produces.
+    assert out["gpu_mem_headroom_min"] == 16.1 * GB
+
+    text = _render_text(path)
+    assert "N/A" not in text
+
+
+def test_a_database_with_no_samples_is_not_an_idle_host(tmp_path):
+    """Before the first sample lands there is nothing to report.
+
+    The terminal renderer is registered unconditionally, so this payload
+    is what the card draws while a run is starting, and again after a
+    read failure once the stale window lapses. It hardcoded zeros, so
+    the card opened every run by reporting a host at 0% CPU.
+    """
+    import sqlite3 as _sqlite3
+
+    from tests.sqlite_fixtures import init_summary_schema
+
+    path = str(tmp_path / "empty.db")
+    conn = _sqlite3.connect(path)
+    try:
+        init_summary_schema(conn)
+        conn.commit()
+    finally:
+        conn.close()
+
+    out = SystemCLIComputer(path).compute()
+
+    assert out["cpu"] is None
+    assert out["ram_used"] is None
+    assert out["ram_total"] is None
+    assert "CPU 0.0%" not in _render_text(path)
