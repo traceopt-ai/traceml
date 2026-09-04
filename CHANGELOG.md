@@ -11,7 +11,9 @@ which carry the full historical notes for versions predating this file.
   files under `logs/<run-name>/nodes/node_<node-rank>/`. Summary and dashboard
   modes mirror them live; CLI mode keeps the Rich display clean and prints a
   bounded stderr excerpt when training fails. Use
-  `--no-save-training-output` to inherit terminal descriptors instead.
+  `--no-save-training-output` to inherit terminal descriptors instead. Capture
+  preserves application buffering, so abrupt termination cannot recover
+  stdout bytes the application has not flushed.
 - **Breaking:** Removed `--capture-stderr` and
   `TRACEML_CAPTURE_STDERR`. The default two-stream launcher capture supersedes
   the optional bounded `crash_stderr.log` tail.

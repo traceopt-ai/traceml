@@ -189,7 +189,15 @@ no training-output files. This is useful when a scheduler or container already
 owns the authoritative logs, or when a workload depends on terminal identity.
 With saving enabled the descriptors are pipes, so `isatty()` truthfully returns
 false. TraceML does not force unbuffered output and cannot recover bytes left
-in a process's user-space buffer after an abrupt crash.
+in a process's user-space buffer after an abrupt crash. Applications that need
+every stdout write persisted before such a crash should flush explicitly, use
+`python -u`, or set `PYTHONUNBUFFERED=1` themselves.
+
+The launcher expects processes that inherit its output pipes to finish with
+the supervised training command. A deliberately detached process that may
+outlive training should redirect its own stdout and stderr, or the launch
+should use `--no-save-training-output`; otherwise the launcher eventually
+closes its output pipes during shutdown.
 
 Phases that were never measured in the current window are omitted from the
 live step-time table rather than shown as `0.0 ms`, and the diagnosis block
