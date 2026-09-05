@@ -16,7 +16,7 @@ All metric computation is delegated to SystemMetricsComputer.
 """
 
 import shutil
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from rich.panel import Panel
 from rich.table import Table
@@ -41,11 +41,16 @@ class SystemRenderer(BaseRenderer):
 
     NAME = "System"
 
-    def __init__(self, db_path) -> None:
+    def __init__(
+        self, db_path, sampler_interval_s: Optional[float] = None
+    ) -> None:
         super().__init__(name=self.NAME, layout_section_name=SYSTEM_LAYOUT)
         self.db_path = db_path
         self._logger = get_error_logger(self.NAME + "Renderer")
-        self._computer = SystemMetricsComputer(db_path=self.db_path)
+        self._computer = SystemMetricsComputer(
+            db_path=self.db_path,
+            sampler_interval_s=sampler_interval_s,
+        )
 
     def _compute_cli(self) -> Dict[str, Any]:
         return self._computer.compute_cli()

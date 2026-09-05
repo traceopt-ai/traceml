@@ -1183,11 +1183,18 @@ def _with_arrival_clock(path: Path) -> None:
         conn.commit()
 
 
-def _payload_at(path: Path, now_s: float) -> SystemDashboardPayload:
+def _payload_at(
+    path: Path,
+    now_s: float,
+    *,
+    sampler_interval_s: Optional[float] = None,
+) -> SystemDashboardPayload:
     """The payload as it would be computed at a given wall-clock moment."""
-    return SystemDashboardComputer(str(path), now_fn=lambda: now_s).compute(
-        window_n=100
-    )
+    return SystemDashboardComputer(
+        str(path),
+        sampler_interval_s=sampler_interval_s,
+        now_fn=lambda: now_s,
+    ).compute(window_n=100)
 
 
 def test_a_node_that_stopped_reporting_is_marked_stale(
@@ -1244,6 +1251,26 @@ def test_liveness_reads_the_shared_threshold_not_a_local_one(
     assert _payload_at(
         db, newest + edge + 0.5
     ).rollups.node_liveness.state == ("stale")
+
+
+def test_liveness_uses_configured_cadence_before_it_can_observe_one(
+    tmp_path: Path,
+) -> None:
+    """A slow sampler is not stale while waiting for its second sample."""
+    db = tmp_path / "first-sample.db"
+    _write(db, lambda seq: (), gpu_available=False, ticks=1)
+    _with_arrival_clock(db)
+
+    out = _payload_at(db, 1020.0, sampler_interval_s=10.0)
+
+    assert out.rollups.node_liveness is not None
+    assert out.rollups.node_liveness.state == "fresh"
+    assert (
+        _payload_at(
+            db, 1031.0, sampler_interval_s=10.0
+        ).rollups.node_liveness.state
+        == "stale"
+    )
 
 
 def test_one_stall_does_not_inflate_the_staleness_threshold(

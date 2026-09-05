@@ -31,6 +31,7 @@ from traceml_ai.aggregator.display_drivers.nicegui_sections.context_section impo
 from traceml_ai.aggregator.display_drivers.nicegui_sections.formatting import (  # noqa: E402,E501
     format_elapsed,
 )
+from traceml_ai.renderers.shared.freshness import FreshnessPolicy  # noqa: E402
 
 
 def test_elapsed_formats() -> None:
@@ -257,13 +258,19 @@ def test_artifact_path_is_abbreviated_for_display() -> None:
 
 
 def test_live_threshold_follows_a_slow_sampler() -> None:
-    assert live_threshold_s(None) == 5.0
-    assert live_threshold_s(2.0) == 5.0  # default sampler: the 5 s floor
-    assert live_threshold_s(10.0) == 25.0  # 2.5 ticks of a slow sampler
+    assert live_threshold_s(None) == 6.0
+    assert live_threshold_s(2.0) == 6.0
+    assert live_threshold_s(10.0) == 30.0
+    for interval in (None, 2.0, 10.0):
+        threshold = live_threshold_s(interval)
+        assert (
+            threshold == FreshnessPolicy.from_interval(interval).stale_after_s
+        )
+        assert format_liveness(threshold, threshold) == ("live", "")
     assert format_liveness(12.0, live_threshold_s(10.0)) == ("live", "")
-    assert format_liveness(30.0, live_threshold_s(10.0)) == (
+    assert format_liveness(31.0, live_threshold_s(10.0)) == (
         "stale",
-        "30s since last data",
+        "31s since last data",
     )
 
 

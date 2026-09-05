@@ -30,6 +30,7 @@ from typing import Any, Dict, Optional, Tuple
 from nicegui import ui
 
 from traceml_ai.renderers.context.common import empty_context
+from traceml_ai.renderers.shared.freshness import FreshnessPolicy
 
 from .formatting import format_elapsed
 
@@ -53,10 +54,6 @@ RUN_SECTIONS: Tuple[str, ...] = (
 # handed to ``update_context_section`` is ignored rather than misread.
 _CONTEXT_KEYS = frozenset(empty_context())
 
-# Data older than this reads "stale"; same bar as the display-loop staleness
-# chip (TRA-68), so the two indicators never disagree on what fresh means.
-LIVE_THRESHOLD_S = 5.0
-
 # Shape of a launcher-generated session id, e.g. session_20260821_123224_1103e8;
 # used when a manifest without identity_source is replayed.
 _GENERATED_ID = re.compile(r"^session_\d{8}_\d{6}_[0-9a-f]{6}$")
@@ -70,24 +67,39 @@ def sections_for_profile(profile: str) -> Tuple[str, ...]:
 
 
 def live_threshold_s(sampler_interval_s: Optional[float]) -> float:
-    """Age below which data counts as live: 5 s, or 2.5 sampler ticks when
-    the sampler is slower than that, so a slow sampler never reads stale
-    between its own ticks."""
-    try:
-        interval = float(sampler_interval_s or 0.0)
-    except (TypeError, ValueError):
-        interval = 0.0
-    return max(LIVE_THRESHOLD_S, 2.5 * interval)
+    """The shared freshness threshold, fed the CONFIGURED cadence.
+
+    One rule -- ``FreshnessPolicy``, ``max(5 s, 3 ticks)`` -- but the strip
+    and the System card deliberately feed it different cadences, so their
+    thresholds can differ. That is the design, not the drift that the old
+    local ``2.5 * interval`` was.
+
+    The strip is run-wide: its age is the newest System or Process
+    timestamp anywhere in the run, so there is no single host whose real
+    rhythm it could measure. It is judged against the cadence the run was
+    configured with.
+
+    The System card describes one node and knows what that node actually
+    reported at, so it feeds the same policy its OBSERVED cadence
+    (:meth:`SystemDashboardComputer._node_liveness`). A node reporting
+    slower than requested is judged against its real rhythm rather than
+    against an intention it never met.
+    """
+    return FreshnessPolicy.from_interval(sampler_interval_s).stale_after_s
 
 
 def format_liveness(
-    age_s: Optional[float], threshold_s: float = LIVE_THRESHOLD_S
+    age_s: Optional[float], threshold_s: Optional[float] = None
 ) -> Tuple[str, str]:
-    """(state word, detail) from the age of the newest sample."""
+    """(state word, detail) from age and a shared-policy threshold."""
     if age_s is None:
         return "no data", "waiting for the first sample"
     age = max(0.0, float(age_s))
-    if age < threshold_s:
+    threshold = (
+        live_threshold_s(None) if threshold_s is None else float(threshold_s)
+    )
+    # FreshnessPolicy marks data stale only after the threshold is exceeded.
+    if age <= threshold:
         # No age on the fresh side: with a 2 s sampler it only cycles
         # 0/1/2 and reads as noise. The age matters once data has stopped.
         return "live", ""
@@ -373,9 +385,7 @@ def update_context_section(
     age = None
     if last is not None:
         age = (now if now is not None else time.time()) - float(last)
-    word, detail = format_liveness(
-        age, cards.get("live_threshold_s", LIVE_THRESHOLD_S)
-    )
+    word, detail = format_liveness(age, cards.get("live_threshold_s"))
     live = word == "live"
     color = "#16a34a" if live else "#dc2626"
     cards["liveness"].text = f"{word} · {detail}" if detail else word

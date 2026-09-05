@@ -249,9 +249,11 @@ class SystemDashboardComputer:
         node_rank: Optional[int] = None,
         stale_ttl_s: Optional[float] = 30.0,
         run_series_policy: RunSeriesPolicy = DEFAULT_RUN_SERIES_POLICY,
+        sampler_interval_s: Optional[float] = None,
         now_fn: Callable[[], float] = time.time,
     ) -> None:
         self._db = SystemRepository(db_path=db_path, node_rank=node_rank)
+        self._configured_interval_s = sampler_interval_s
         # Injectable so liveness can be tested at a chosen moment rather
         # than by sleeping.
         self._now_fn = now_fn
@@ -655,6 +657,16 @@ class SystemDashboardComputer:
         it: the sampler may be another machine and a skewed remote clock
         would read as a dead node. ``recv_ts_ns`` is in the table's
         original schema and is ``NOT NULL``, so it is always present.
+
+        The threshold is the shared ``FreshnessPolicy``, fed the cadence
+        this node was OBSERVED to report at. The context strip feeds the
+        same policy the run's CONFIGURED interval, because it is run-wide
+        and has no single host whose rhythm it could measure. Same rule,
+        different input by design: the two indicators can therefore hold
+        different thresholds, and a node reporting slower than requested
+        is judged against its real rhythm. The configured interval is the
+        fallback here only until a second sample makes a cadence
+        measurable.
         """
         recvs = [
             v / 1e9
@@ -675,7 +687,8 @@ class SystemDashboardComputer:
             return {"state": "unknown", "age_s": None}
 
         policy = FreshnessPolicy.from_observed_cadence(
-            _observed_cadence(ts_hist)
+            _observed_cadence(ts_hist),
+            configured_s=self._configured_interval_s,
         )
         return {
             "state": policy.state_of(max(0.0, age)),
