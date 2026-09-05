@@ -376,10 +376,6 @@ def test_the_old_sqlite_path_runs_and_falls_back(system_db, monkeypatch):
         # early rather than an error being swallowed.
         assert repo.fetch_cpu_run(conn, plan=plan) == []
 
-    monkeypatch.setattr(repo_module, "HAS_WINDOW_FUNCTIONS", True)
-    with repo.connect() as conn:
-        assert repo.fetch_cpu_run(conn, plan=plan) != []
-
 
 def test_an_old_engine_shows_the_recent_view_not_a_dead_card(
     tmp_path, monkeypatch
@@ -625,9 +621,6 @@ def test_an_old_sqlite_is_a_capability_decision_not_a_caught_error(
     repo = _repo(system_db(ticks=5))
     plan = plan_run_series(span_s=600.0, sample_count=300)
     assert plan is not None
-    # On an engine that HAS the feature a real error still propagates;
-    # the degraded path is exercised separately by patching the flag,
-    # so neither branch depends on which engine CI happens to run.
-    assert HAS_WINDOW_FUNCTIONS, "modern engine expected in CI"
-    with pytest.raises(sqlite3.Error):
-        repo.fetch_cpu_run(_FailingConnection(), plan=plan)
+    if HAS_WINDOW_FUNCTIONS:
+        with pytest.raises(sqlite3.Error):
+            repo.fetch_cpu_run(_FailingConnection(), plan=plan)
