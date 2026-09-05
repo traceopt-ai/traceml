@@ -135,7 +135,7 @@ def test_update_context_section_consumes_the_context_payload() -> None:
         "coverage": _Label(),
         "liveness": _Label(),
         "dot": _Label(),
-        "live_threshold_s": 5.0,
+        "live_threshold_s": 6.0,
     }
     payload = {
         "world_size": 4,

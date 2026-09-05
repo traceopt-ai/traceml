@@ -257,16 +257,34 @@ def test_artifact_path_is_abbreviated_for_display() -> None:
     assert abbreviate_path("") == ""
 
 
-def test_live_threshold_follows_a_slow_sampler() -> None:
+def test_strip_threshold_is_the_shared_policy_at_configured_cadence() -> None:
+    """The strip holds no threshold of its own, and stales on the same edge.
+
+    Two claims. The number comes from ``FreshnessPolicy`` fed the
+    CONFIGURED interval, which is the only cadence a run-wide indicator
+    has. And the boundary is inclusive, matching
+    ``FreshnessPolicy.state_of``, which stales only once the threshold is
+    exceeded. The local ``max(5 s, 2.5 * interval)`` this replaced fails
+    both.
+
+    It does NOT claim the strip and the System card report one state for
+    one age. The card feeds the same policy the cadence it observed for
+    the single node it describes, so the two thresholds legitimately
+    differ; the card's own liveness is covered in
+    ``tests/renderers/test_system_dashboard_gpu_payload.py``.
+    """
     assert live_threshold_s(None) == 6.0
-    assert live_threshold_s(2.0) == 6.0
-    assert live_threshold_s(10.0) == 30.0
+    assert live_threshold_s(2.0) == 6.0  # default sampler: the 5 s floor
+    assert live_threshold_s(10.0) == 30.0  # 3 ticks of a slow sampler
+
     for interval in (None, 2.0, 10.0):
         threshold = live_threshold_s(interval)
         assert (
             threshold == FreshnessPolicy.from_interval(interval).stale_after_s
         )
+        # Exactly at the threshold is still live, as ``state_of`` has it.
         assert format_liveness(threshold, threshold) == ("live", "")
+
     assert format_liveness(12.0, live_threshold_s(10.0)) == ("live", "")
     assert format_liveness(31.0, live_threshold_s(10.0)) == (
         "stale",
