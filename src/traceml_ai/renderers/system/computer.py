@@ -32,6 +32,8 @@ class SystemMetricsComputer:
         Optional node-rank filter.
     stale_ttl_s:
         Maximum age in seconds for stale cached payload reuse.
+    sampler_interval_s:
+        Configured sampling cadence, used until an observed cadence exists.
     """
 
     def __init__(
@@ -39,6 +41,7 @@ class SystemMetricsComputer:
         db_path: str,
         node_rank: Optional[int] = None,
         stale_ttl_s: Optional[float] = 30.0,
+        sampler_interval_s: Optional[float] = None,
     ) -> None:
         self._cli = SystemCLIComputer(
             db_path=db_path,
@@ -49,6 +52,7 @@ class SystemMetricsComputer:
             db_path=db_path,
             node_rank=node_rank,
             stale_ttl_s=stale_ttl_s,
+            sampler_interval_s=sampler_interval_s,
         )
 
     def compute_cli(self) -> Dict[str, Any]:

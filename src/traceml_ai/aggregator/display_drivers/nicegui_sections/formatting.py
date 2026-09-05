@@ -168,7 +168,30 @@ __all__ = [
     "gb_si",
     "format_percent",
     "format_span",
+    "format_elapsed",
     "format_window",
     "gb",
     "num",
 ]
+
+
+def format_elapsed(seconds: float) -> str:
+    """``47s`` / ``2m 26s`` / ``3h 12m``.
+
+    Shared by the context strip, which says how long ago the newest
+    sample arrived, and the System card, which says how long a host has
+    been quiet.
+
+    NOT yet the module's only duration vocabulary: ``format_age`` below
+    words the same quantity differently ("3 min" against "3m 00s") for
+    the Process card. Unifying them changes what that card prints, so it
+    belongs in its own change rather than this one.
+    """
+    total = max(0, int(seconds))
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m"
+    if minutes:
+        return f"{minutes}m {secs:02d}s"
+    return f"{secs}s"

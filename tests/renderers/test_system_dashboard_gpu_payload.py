@@ -1163,3 +1163,166 @@ def test_a_held_over_payload_carries_why_it_is_held(tmp_path: Path) -> None:
         panel = build_system_section()
     update_system_section(panel, held)
     assert held.rollups.status in panel["note"].text
+
+
+def _with_arrival_clock(path: Path) -> None:
+    """Give the rows a real arrival clock.
+
+    The fixture writes `recv_ts_ns` as a synthetic row id, which is fine
+    for ordering and useless as a clock. Liveness is measured against the
+    AGGREGATOR's arrival time rather than the sampler's `sample_ts_s`,
+    because the sampler may be a different machine and a skewed remote
+    clock would otherwise read as a dead node. Process measures age the
+    same way.
+    """
+    with sqlite_database(path, init_summary_schema) as conn:
+        conn.execute(
+            "UPDATE system_samples "
+            "SET recv_ts_ns = CAST(sample_ts_s * 1000000000 AS INTEGER)"
+        )
+        conn.commit()
+
+
+def _payload_at(
+    path: Path,
+    now_s: float,
+    *,
+    sampler_interval_s: Optional[float] = None,
+) -> SystemDashboardPayload:
+    """The payload as it would be computed at a given wall-clock moment."""
+    return SystemDashboardComputer(
+        str(path),
+        sampler_interval_s=sampler_interval_s,
+        now_fn=lambda: now_s,
+    ).compute(window_n=100)
+
+
+def test_a_node_that_stopped_reporting_is_marked_stale(
+    tmp_path: Path,
+) -> None:
+    """System is single-node, so the question is about the payload.
+
+    Process asks which of N ranks stopped, and answers per rank. There is
+    only one host here, so the question is whether this payload still
+    describes a live machine, and comparing the node against itself would
+    always say yes. The reference is the wall clock.
+    """
+    db = tmp_path / "quiet.db"
+    _write(db, lambda seq: (), gpu_available=False)
+    _with_arrival_clock(db)
+
+    fresh = _payload_at(db, 1000.0 + 2.0 * (TICKS - 1) + 1.0)
+    assert fresh.rollups.node_liveness is not None
+    assert fresh.rollups.node_liveness.state == "fresh"
+
+    # Two minutes later nothing has arrived.
+    quiet = _payload_at(db, 1000.0 + 2.0 * (TICKS - 1) + 120.0)
+    assert quiet.rollups.node_liveness.state == "stale"
+    assert quiet.rollups.node_liveness.age_s == pytest.approx(120.0, abs=1.0)
+
+
+def test_liveness_reads_the_shared_threshold_not_a_local_one(
+    tmp_path: Path,
+) -> None:
+    """One rule for one question, and it is the shared module's.
+
+    This series has already produced two contradictions from answering
+    one question in two places. The threshold here is
+    `FreshnessPolicy.stale_after_s`, which the Process block already
+    reads; nothing about the System card defines its own.
+    """
+    from traceml_ai.renderers.shared.freshness import FreshnessPolicy
+
+    db = tmp_path / "threshold.db"
+    _write(db, lambda seq: (), gpu_available=False)
+    _with_arrival_clock(db)
+    newest = 1000.0 + 2.0 * (TICKS - 1)
+
+    # Built through the same entry point production uses. Using
+    # `from_interval(2.0)` instead would agree only because the fixture
+    # cadence happens to be exactly 2 s, so the test would stop
+    # tracking the code the moment either changed.
+    policy = FreshnessPolicy.from_observed_cadence(2.0)
+    edge = policy.stale_after_s
+
+    assert _payload_at(
+        db, newest + edge - 0.5
+    ).rollups.node_liveness.state == ("fresh")
+    assert _payload_at(
+        db, newest + edge + 0.5
+    ).rollups.node_liveness.state == ("stale")
+
+
+def test_liveness_uses_configured_cadence_before_it_can_observe_one(
+    tmp_path: Path,
+) -> None:
+    """A slow sampler is not stale while waiting for its second sample."""
+    db = tmp_path / "first-sample.db"
+    _write(db, lambda seq: (), gpu_available=False, ticks=1)
+    _with_arrival_clock(db)
+
+    out = _payload_at(db, 1020.0, sampler_interval_s=10.0)
+
+    assert out.rollups.node_liveness is not None
+    assert out.rollups.node_liveness.state == "fresh"
+    assert (
+        _payload_at(
+            db, 1031.0, sampler_interval_s=10.0
+        ).rollups.node_liveness.state
+        == "stale"
+    )
+
+
+def test_one_stall_does_not_inflate_the_staleness_threshold(
+    tmp_path: Path,
+) -> None:
+    """The cadence is the host's rhythm, not the window's average gap.
+
+    A mean over the whole span lets a single stall dominate: 19 samples
+    two seconds apart plus one two-hour gap averages near 380 s, and the
+    threshold is a multiple of that, so a host that dies right after
+    resuming would read live for many minutes. The median gap ignores
+    the stall.
+    """
+    db = tmp_path / "stalled.db"
+    _write(db, lambda seq: (), gpu_available=False)
+    _with_arrival_clock(db)
+    newest = 1000.0 + 2.0 * (TICKS - 1)
+
+    # Push one sample two hours into the past, creating a huge gap.
+    with sqlite_database(db, init_summary_schema) as conn:
+        conn.execute(
+            "UPDATE system_samples SET sample_ts_s = sample_ts_s - 7200.0 "
+            "WHERE seq = 0"
+        )
+        conn.commit()
+
+    # Thirty seconds of silence is still stale on a two-second cadence.
+    out = _payload_at(db, newest + 30.0)
+
+    assert out.rollups.node_liveness is not None
+    assert out.rollups.node_liveness.state == "stale"
+
+
+def test_a_clock_that_moved_backwards_says_it_does_not_know(
+    tmp_path: Path,
+) -> None:
+    """Both ends of the age are wall time, so it is not monotonic.
+
+    A backward NTP step puts "now" before a sample already held.
+    Clamping that to a zero age would assert the host is live, which is
+    the one answer the data cannot support: how long ago it reported is
+    exactly what has been lost.
+    """
+    db = tmp_path / "stepped.db"
+    _write(db, lambda seq: (), gpu_available=False)
+    _with_arrival_clock(db)
+    newest = 1000.0 + 2.0 * (TICKS - 1)
+
+    stepped = _payload_at(db, newest - 600.0)
+
+    assert stepped.rollups.node_liveness is not None
+    assert stepped.rollups.node_liveness.state == "unknown"
+    assert stepped.rollups.node_liveness.age_s is None
+    # A hair of jitter is not a step, and still reads normally.
+    assert _payload_at(db, newest - 0.2).rollups.node_liveness.state == "fresh"

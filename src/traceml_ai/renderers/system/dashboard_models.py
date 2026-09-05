@@ -125,6 +125,20 @@ class GpuRow:
 
 
 @dataclass(frozen=True)
+class NodeLiveness:
+    """Whether the host this payload describes is still reporting.
+
+    System is single-node by construction, so this is one answer about
+    the payload rather than a map over entities. The verdict is the
+    shared freshness module's word; the card prints it and does not
+    restate it in its own vocabulary.
+    """
+
+    state: str = "unknown"
+    age_s: Optional[float] = None
+
+
+@dataclass(frozen=True)
 class RunContext:
     """Which machine and which slice of the job this payload describes."""
 
@@ -168,6 +182,10 @@ class SystemRollups:
     gpus: Tuple[GpuRow, ...] = ()
     ctx: Optional[RunContext] = None
     status: Optional[str] = None
+    # Whether the host is still reporting at all, which is a different
+    # question from `status`: that one says a READ failed and the numbers
+    # are held over, this one says the MACHINE went quiet.
+    node_liveness: Optional[NodeLiveness] = None
     # GPUs whose utilisation puts them in the smaller group. Decided here
     # rather than in the card, which is where a rule that selects entities
     # by a derived threshold belongs.
@@ -281,6 +299,14 @@ class SystemRollups:
                 else None
             ),
             status=raw.get("status"),
+            node_liveness=(
+                NodeLiveness(
+                    state=str(live.get("state") or "unknown"),
+                    age_s=live.get("age_s"),
+                )
+                if (live := raw.get("node_liveness"))
+                else None
+            ),
             odd_gpus=tuple(raw.get("odd_gpus") or ()),
             util_range=(tuple(span) if span else None),
             rows_over=bool(raw.get("rows_over")),
@@ -351,6 +377,7 @@ __all__ = [
     "RamStat",
     "RunContext",
     "Stat",
+    "NodeLiveness",
     "SystemDashboardPayload",
     "SystemRollups",
     "SystemSeries",

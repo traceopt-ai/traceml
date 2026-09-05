@@ -11,11 +11,14 @@ from __future__ import annotations
 import time
 from dataclasses import replace
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
 
-from traceml_ai.renderers.shared.freshness import CachedPayloadTTL
+from traceml_ai.renderers.shared.freshness import (
+    CachedPayloadTTL,
+    FreshnessPolicy,
+)
 from traceml_ai.renderers.shared.run_series import (
     DEFAULT_RUN_SERIES_POLICY,
     RunSeriesPolicy,
@@ -134,6 +137,33 @@ def _paired_total(levels: Any, totals: Any) -> Optional[float]:
     return float(total) if total == total else None
 
 
+# A clock can jitter backwards by a hair without having stepped; only a
+# real step is treated as "we cannot tell".
+_CLOCK_STEP_TOLERANCE_S = 1.0
+
+
+def _observed_cadence(ts_hist: Any) -> Optional[float]:
+    """The rhythm the host actually reports at, robust to one stall.
+
+    The MEDIAN gap, not the mean over the window's whole span. A single
+    stall inside the window (a suspend, a blocked sampler thread) drags
+    a mean far above the real cadence, and the freshness threshold is a
+    multiple of it: 99 samples at 2 s plus one two-hour gap gives a mean
+    near 75 s and a threshold near four minutes, so a host that dies on
+    resume would read as live for that long.
+    """
+    stamps = ts_hist.tolist()
+    if len(stamps) < 2:
+        return None
+    gaps = sorted(float(b - a) for a, b in zip(stamps, stamps[1:]) if b > a)
+    if not gaps:
+        return None
+    mid = len(gaps) // 2
+    if len(gaps) % 2:
+        return gaps[mid]
+    return (gaps[mid - 1] + gaps[mid]) / 2.0
+
+
 def _gap_list(values: Any) -> List[Optional[float]]:
     """A series where an absent tick is a gap rather than a zero."""
     return [None if v != v else float(v) for v in values.tolist()]
@@ -219,8 +249,14 @@ class SystemDashboardComputer:
         node_rank: Optional[int] = None,
         stale_ttl_s: Optional[float] = 30.0,
         run_series_policy: RunSeriesPolicy = DEFAULT_RUN_SERIES_POLICY,
+        sampler_interval_s: Optional[float] = None,
+        now_fn: Callable[[], float] = time.time,
     ) -> None:
         self._db = SystemRepository(db_path=db_path, node_rank=node_rank)
+        self._configured_interval_s = sampler_interval_s
+        # Injectable so liveness can be tested at a chosen moment rather
+        # than by sleeping.
+        self._now_fn = now_fn
         self._last_ok: Optional[SystemDashboardPayload] = None
         self._last_ok_ts: float = 0.0
         # Whether a cached payload may still answer says the DATABASE could
@@ -566,6 +602,15 @@ class SystemDashboardComputer:
             spread is not None and float(spread) > SPREAD_EXPAND_PTS
         )
 
+        # Whether the machine is still reporting. Single-node, so this is
+        # one answer about the payload: comparing the node against itself
+        # would always say yes, and the reference is the aggregator's own
+        # arrival clock rather than the sampler's, which may be a remote
+        # machine's. The threshold is the shared module's, never a local
+        # copy: one question with two thresholds is what this block has
+        # already been bitten by twice.
+        rollups["node_liveness"] = self._node_liveness(samples, ts_hist)
+
         rollups["ctx"] = {
             "world_size": int(last["world_size"] or 0),
             "gpu_count": int(last["gpu_count"] or 0),
@@ -603,6 +648,52 @@ class SystemDashboardComputer:
                 "power_run_mode": power_mode if gpu_available else "recent",
             },
         )
+
+    def _node_liveness(self, samples: Any, ts_hist: Any) -> Dict[str, Any]:
+        """Whether the host this payload describes is still reporting.
+
+        Age is measured against ``recv_ts_ns``, when the AGGREGATOR
+        received the sample, not ``sample_ts_s``, when the sampler took
+        it: the sampler may be another machine and a skewed remote clock
+        would read as a dead node. ``recv_ts_ns`` is in the table's
+        original schema and is ``NOT NULL``, so it is always present.
+
+        The threshold is the shared ``FreshnessPolicy``, fed the cadence
+        this node was OBSERVED to report at. The context strip feeds the
+        same policy the run's CONFIGURED interval, because it is run-wide
+        and has no single host whose rhythm it could measure. Same rule,
+        different input by design: the two indicators can therefore hold
+        different thresholds, and a node reporting slower than requested
+        is judged against its real rhythm. The configured interval is the
+        fallback here only until a second sample makes a cadence
+        measurable.
+        """
+        recvs = [
+            v / 1e9
+            for v in (_opt_float(r["recv_ts_ns"]) for r in samples)
+            if v is not None
+        ]
+        if not recvs:
+            return {"state": "unknown", "age_s": None}
+
+        newest = max(recvs)
+        age = float(self._now_fn()) - newest
+        if age < -_CLOCK_STEP_TOLERANCE_S:
+            # The arrival clock is wall time on both ends, so it is not
+            # monotonic. A backward NTP step makes "now" earlier than a
+            # sample we already hold. Clamping that to zero would assert
+            # the host is live, which is the one answer we cannot
+            # support: we do not know how long ago it reported.
+            return {"state": "unknown", "age_s": None}
+
+        policy = FreshnessPolicy.from_observed_cadence(
+            _observed_cadence(ts_hist),
+            configured_s=self._configured_interval_s,
+        )
+        return {
+            "state": policy.state_of(max(0.0, age)),
+            "age_s": max(0.0, age),
+        }
 
     def _mode_for(
         self, stats: Optional[RunStats], window_span_s: float

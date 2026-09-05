@@ -32,7 +32,7 @@ from traceml_ai.renderers.system.dashboard_models import (
 )
 
 from . import charting, theme
-from .formatting import format_window, gb_si
+from .formatting import format_elapsed, format_window, gb_si
 
 # Window-p95 GPU utilisation spread (max - min, percentage points) that
 # automatically opens the per-GPU rows.
@@ -574,6 +574,14 @@ def _update_system_tiles(
     # says why here. Without this the card showed held-over numbers as
     # current, which is a frozen card a reader cannot tell from a live
     # one. The wording is the computer's, not the card's.
+    # Two different absences, both worth saying and neither the other:
+    # `status` means a READ failed and these numbers are held over,
+    # liveness means the MACHINE stopped sending. The verdict word is
+    # the compute layer's; this only turns it into a sentence.
+    live = roll.node_liveness
+    if live is not None and live.state == "stale":
+        age = format_elapsed(live.age_s) if live.age_s is not None else ""
+        notes.append(f"not reporting for {age}" if age else "not reporting")
     if roll.status:
         notes.append(roll.status)
     if not has_data:
