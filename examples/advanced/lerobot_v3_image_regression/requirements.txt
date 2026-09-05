@@ -1,0 +1,8 @@
+--extra-index-url https://download.pytorch.org/whl/cu128
+
+# Regression-sensitive versions from the upstream LeRobot investigation.
+accelerate==1.11.0
+datasets==4.1.1
+torch==2.7.1+cu128
+torchcodec==0.5
+torchvision==0.22.1+cu128
