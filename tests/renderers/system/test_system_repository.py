@@ -21,9 +21,12 @@ should be a stated decision rather than a silent one:
   than it claims across a gap,
 * the retained-vs-recent gate is a bare `span > min_span_s`, with the 1.2x
   hysteresis held by the caller in a constant that duplicates the shared
-  policy's,
-* a failed read returns an empty result rather than raising, which turns a
-  database failure into a confident "no data".
+  policy's.
+
+The third, a failed read returning an empty result instead of raising, was
+pinned here as a defect and has since been fixed: every read propagates now
+and the module carries no exception handler, so the compute layer's one
+error boundary sees the failure.
 """
 
 from __future__ import annotations
@@ -346,50 +349,77 @@ class _FailingConnection:
         raise sqlite3.OperationalError("query failed")
 
 
-def test_a_failed_read_returns_empty_instead_of_raising(system_db):
-    """Pinned as-is, and it is a defect: see the follow-up issue.
+def test_the_old_sqlite_path_runs_and_falls_back(system_db, monkeypatch):
+    """The degraded path is exercised, not just reasoned about.
 
-    The one error boundary is `SystemDashboardComputer.compute()`, which
-    returns the last good payload marked stale. Swallowing here turns a
-    database failure into a confident "no data" and that boundary never
-    runs. It is NOT fixed in 5b: `SystemRollups.status` is written by the
-    boundary and read nowhere in `system_section.py`, so propagating alone
-    would replace two empty charts with a frozen card carrying no stale
-    marker, which is worse. The fix needs the card note too.
+    Below SQLite 3.25 the rolled read needs a window function it does not
+    have, so the whole-run view is unavailable and the recent window
+    stands in. On a modern engine that branch would never execute, so the
+    capability flag is patched where the repository reads it.
 
-    The Process repository already propagates (`bde1ca6`), so this is also
-    the assertion that records the two blocks disagreeing.
+    This replaces a pair of tests that asserted on the module's SOURCE
+    TEXT. Those passed if a swallow came back as `except
+    sqlite3.OperationalError`, and would have failed on any unrelated
+    handler added later: a lint rule wearing a test's clothes. The
+    behaviour is pinned by the raising tests above instead.
     """
-    path = system_db(ticks=5)
+    import traceml_ai.renderers.system.repository as repo_module
+
+    path = system_db(ticks=40, cadence_s=2.0)
     repo = _repo(path)
-    assert repo.cpu_run_stats(_FailingConnection()) is None
-    assert repo.gpu_power_run_stats(_FailingConnection()) is None
-    assert (
-        repo.fetch_gpu_power_run(
-            _FailingConnection(), width_s=30.0, first_ts=0.0
-        )
-        == []
-    )
+    plan = plan_run_series(span_s=600.0, sample_count=300)
+    assert plan is not None
+
+    monkeypatch.setattr(repo_module, "HAS_WINDOW_FUNCTIONS", False)
+    with repo.connect() as conn:
+        # A real connection, so this is the capability check returning
+        # early rather than an error being swallowed.
+        assert repo.fetch_cpu_run(conn, plan=plan) == []
 
 
-def test_one_swallow_is_a_capability_fallback_not_a_defect(system_db):
-    """Named so the follow-up does not delete all five uniformly.
+def test_an_old_engine_shows_the_recent_view_not_a_dead_card(
+    tmp_path, monkeypatch
+):
+    """And the payload flips to the view it can actually draw.
 
-    The `except` around the rolling query stands in for "this SQLite has no
-    window functions" (< 3.25), where the whole-run view is genuinely
-    unavailable and the recent window still stands. Removing it with the
-    others would turn a missing chart into a dead card on an old host.
+    The early return is only correct because something consumes it. If
+    the flip to "recent" were removed the card would show an empty
+    whole-run chart, which is the outcome the capability check exists to
+    avoid, and no test would have noticed.
     """
-    source = (
-        __import__(
-            "traceml_ai.renderers.system.repository",
-            fromlist=["repository"],
-        ).__file__
-        or ""
+    import traceml_ai.renderers.system.repository as repo_module
+    from tests.sqlite_fixtures import (
+        init_summary_schema,
+        insert_system_sample,
+        sqlite_database,
     )
-    with open(source, encoding="utf-8") as handle:
-        text = handle.read()
-    assert "Window functions need SQLite >= 3.25" in text
+    from traceml_ai.renderers.system.dashboard_compute import (
+        SystemDashboardComputer,
+    )
+
+    db = tmp_path / "old-engine.db"
+    with sqlite_database(db, init_summary_schema) as conn:
+        for seq in range(400):
+            insert_system_sample(
+                conn,
+                row_id=seq + 1,
+                rank=0,
+                ts=1000.0 + 30.0 * seq,
+                gpu_available=False,
+                gpu_count=0,
+                seq=seq,
+                cpu_percent=42.0,
+            )
+        conn.commit()
+
+    monkeypatch.setattr(repo_module, "HAS_WINDOW_FUNCTIONS", False)
+    out = SystemDashboardComputer(str(db)).compute(window_n=100)
+
+    assert out.series.cpu_run_mode == "recent"
+    assert not out.series.cpu_run.t
+    # Not a dead card: the window view still carries the numbers.
+    assert out.rollups.cpu is not None
+    assert out.rollups.cpu.p50 == 42.0
 
 
 # --- NULL sample timestamps (#418) ---------------------------------------
@@ -540,3 +570,57 @@ def test_a_sample_older_than_the_run_start_cannot_break_the_cap(system_db):
     # to right in time.
     stamps = [r[1] for r in rows]
     assert stamps == sorted(stamps)
+
+
+def test_run_stats_sql_errors_propagate(system_db):
+    """A database error is not an empty result.
+
+    Swallowing it returns `None`, which the compute layer reads as "this
+    host has no whole-run history", so its one error boundary never runs
+    and the card draws an empty chart for a machine that is fine. The
+    Process repository had exactly this removed in `bde1ca6`; this is the
+    same rule on the other block.
+    """
+    repo = _repo(system_db(ticks=5))
+
+    with pytest.raises(sqlite3.Error):
+        repo.cpu_run_stats(_FailingConnection())
+    with pytest.raises(sqlite3.Error):
+        repo.gpu_power_run_stats(_FailingConnection())
+
+
+def test_power_history_sql_errors_propagate(system_db):
+    """The same for the read itself, not only for planning it."""
+    repo = _repo(system_db(ticks=5))
+
+    with pytest.raises(sqlite3.Error):
+        repo.fetch_gpu_power_run(
+            _FailingConnection(), width_s=30.0, first_ts=0.0
+        )
+
+
+def test_an_old_sqlite_is_a_capability_decision_not_a_caught_error(
+    system_db,
+):
+    """The whole-run CPU read degrades by CHECKING, not by catching.
+
+    Its window function needs SQLite >= 3.25. Expressing that as an
+    `except sqlite3.Error` also swallows every real failure, which is the
+    defect above. The check is explicit and the shared module already
+    states one such fact as `HAS_RANGE_FRAME`.
+
+    On an engine that HAS the feature, an error must propagate like any
+    other; the degraded path is for engines that lack it.
+    """
+    from traceml_ai.renderers.shared.run_series import (
+        HAS_WINDOW_FUNCTIONS,
+    )
+
+    assert HAS_WINDOW_FUNCTIONS == (sqlite3.sqlite_version_info >= (3, 25, 0))
+
+    repo = _repo(system_db(ticks=5))
+    plan = plan_run_series(span_s=600.0, sample_count=300)
+    assert plan is not None
+    if HAS_WINDOW_FUNCTIONS:
+        with pytest.raises(sqlite3.Error):
+            repo.fetch_cpu_run(_FailingConnection(), plan=plan)

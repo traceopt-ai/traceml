@@ -20,7 +20,10 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-from traceml_ai.renderers.shared.run_series import RunSeriesPlan
+from traceml_ai.renderers.shared.run_series import (
+    HAS_WINDOW_FUNCTIONS,
+    RunSeriesPlan,
+)
 
 # A row without a clock cannot be placed on a chart or counted toward a
 # cadence. `sample_ts_s` is nullable in the writer's schema, so this is a
@@ -178,15 +181,12 @@ class SystemRepository:
     ) -> Optional[RunStats]:
         """The shape of the whole-run CPU history, for planning a read."""
         where_sql, bound = self._run_scope(hostname)
-        try:
-            row = conn.execute(
-                "SELECT MIN(sample_ts_s), MAX(sample_ts_s), COUNT(*) "
-                f"FROM system_samples {where_sql} "
-                f"{'AND' if where_sql else 'WHERE'} {_HAS_CLOCK_SQL}",
-                tuple(bound),
-            ).fetchone()
-        except sqlite3.Error:
-            return None
+        row = conn.execute(
+            "SELECT MIN(sample_ts_s), MAX(sample_ts_s), COUNT(*) "
+            f"FROM system_samples {where_sql} "
+            f"{'AND' if where_sql else 'WHERE'} {_HAS_CLOCK_SQL}",
+            tuple(bound),
+        ).fetchone()
         if not row or row[0] is None or row[1] is None:
             return None
         return RunStats(
@@ -209,9 +209,16 @@ class SystemRepository:
         row frame reaches further back in wall clock than the label claims.
         """
         where_sql, bound = self._run_scope(hostname)
-        try:
-            rows = conn.execute(
-                f"""
+        if not HAS_WINDOW_FUNCTIONS:
+            # Stated as a capability rather than caught as an error. The
+            # rolled read below needs a window function, so on an older
+            # engine the whole-run view is simply unavailable and the
+            # recent window stands in. Catching instead also swallowed
+            # every real failure, which made a broken database look like
+            # a host with no history.
+            return []
+        rows = conn.execute(
+            f"""
                 WITH rolled AS (
                     SELECT
                         sample_ts_s AS t,
@@ -231,12 +238,8 @@ class SystemRepository:
                 WHERE rn % ? = 0 AND rn > ?
                 ORDER BY t ASC
                 """,
-                (*bound, int(plan.stride), int(plan.preceding_rows)),
-            ).fetchall()
-        except sqlite3.Error:
-            # Window functions need SQLite >= 3.25; without them the whole
-            # run view is simply unavailable and the window view stands.
-            return []
+            (*bound, int(plan.stride), int(plan.preceding_rows)),
+        ).fetchall()
         return [(float(r[0]), float(r[1]), float(r[2])) for r in rows]
 
     def gpu_power_run_stats(
@@ -244,16 +247,13 @@ class SystemRepository:
     ) -> Optional[RunStats]:
         """The shape of the whole-run power history, over reported rows."""
         where_sql, bound = self._run_scope(hostname)
-        try:
-            row = conn.execute(
-                "SELECT MIN(sample_ts_s), MAX(sample_ts_s), COUNT(*) FROM "
-                f"system_gpu_samples {where_sql} "
-                f"{'AND' if where_sql else 'WHERE'} {_GPU_REPORTED_SQL} "
-                f"AND {_HAS_CLOCK_SQL}",
-                tuple(bound),
-            ).fetchone()
-        except sqlite3.Error:
-            return None
+        row = conn.execute(
+            "SELECT MIN(sample_ts_s), MAX(sample_ts_s), COUNT(*) FROM "
+            f"system_gpu_samples {where_sql} "
+            f"{'AND' if where_sql else 'WHERE'} {_GPU_REPORTED_SQL} "
+            f"AND {_HAS_CLOCK_SQL}",
+            tuple(bound),
+        ).fetchone()
         if not row or row[0] is None or row[1] is None:
             return None
         return RunStats(
@@ -286,17 +286,16 @@ class SystemRepository:
         dashboard a delayed sample can arrive between the two.
         """
         where_sql, bound = self._run_scope(hostname)
-        try:
-            return [
-                (
-                    int(r[0]),
-                    float(r[1]),
-                    float(r[2]),
-                    float(r[3]),
-                    float(r[4]),
-                )
-                for r in conn.execute(
-                    f"""
+        return [
+            (
+                int(r[0]),
+                float(r[1]),
+                float(r[2]),
+                float(r[3]),
+                float(r[4]),
+            )
+            for r in conn.execute(
+                f"""
                     SELECT
                         gpu_idx,
                         MIN(sample_ts_s),
@@ -312,11 +311,9 @@ class SystemRepository:
                                   AS INTEGER)
                     ORDER BY gpu_idx ASC, 2 ASC
                     """,
-                    (*bound, float(first_ts), float(width_s)),
-                ).fetchall()
-            ]
-        except sqlite3.Error:
-            return []
+                (*bound, float(first_ts), float(width_s)),
+            ).fetchall()
+        ]
 
     def fetch_gpu_rows_for_sample(
         self,

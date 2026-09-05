@@ -570,6 +570,12 @@ def _update_system_tiles(
     node_note = node_scope_text(roll.ctx)
     if node_note:
         notes.append(node_note)
+    # The compute layer's error boundary serves the last good payload and
+    # says why here. Without this the card showed held-over numbers as
+    # current, which is a frozen card a reader cannot tell from a live
+    # one. The wording is the computer's, not the card's.
+    if roll.status:
+        notes.append(roll.status)
     if not has_data:
         notes.append("waiting for data")
     panel["note"].text = " · ".join(notes)

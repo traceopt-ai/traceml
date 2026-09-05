@@ -1110,3 +1110,56 @@ def test_a_genuine_zero_reading_is_reported_as_zero(tmp_path: Path) -> None:
     # The capacity pairs with a measured level, so it is present.
     assert roll.gpu_mem.total == 16.1 * GB
     assert roll.util_gpu_count == 4
+
+
+def test_a_held_over_payload_carries_why_it_is_held(tmp_path: Path) -> None:
+    """The whole point of this change, end to end.
+
+    A first compute succeeds and is cached. The next read fails. The
+    boundary must serve the cached numbers AND say they are held over,
+    because numbers without that marker are indistinguishable from live
+    ones.
+
+    Pinned here because the two ends were already covered and the middle
+    was not: the first-failure case has a test, and the card has a test
+    that is handed a literal status string. Dropping the status write in
+    `_return_stale` would leave both of those green while restoring the
+    original defect.
+    """
+    db = tmp_path / "held.db"
+    _write(db, lambda seq: (), gpu_available=False)
+
+    computer = SystemDashboardComputer(str(db))
+    good = computer.compute(window_n=100)
+    assert good.rollups.cpu is not None
+    assert good.rollups.status is None
+    live_value = good.rollups.cpu.p50
+
+    with sqlite_database(db, init_summary_schema) as conn:
+        conn.execute("DROP TABLE system_samples")
+        conn.commit()
+
+    held = computer.compute(window_n=100)
+
+    # The numbers are the cached ones, not zeros and not absent.
+    assert held.rollups.cpu is not None
+    assert held.rollups.cpu.p50 == live_value
+    # And they arrive saying why they are still here.
+    assert held.rollups.status is not None
+    assert "STALE" in held.rollups.status
+
+    # And the card actually shows it, which is the other half of the
+    # wiring: the boundary writing a marker nothing renders is the
+    # defect this replaces, not a fix for it.
+    pytest.importorskip("nicegui")
+    from nicegui import ui
+
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section import (  # noqa: E501
+        build_system_section,
+        update_system_section,
+    )
+
+    with ui.element("div"):
+        panel = build_system_section()
+    update_system_section(panel, held)
+    assert held.rollups.status in panel["note"].text
