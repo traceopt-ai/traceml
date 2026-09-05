@@ -102,6 +102,7 @@ def test_run_cli_selects_step_samplers() -> None:
         "stdout_stderr",
         "step_time",
         "step_memory",
+        "batch_size",
     )
 
 
@@ -126,6 +127,7 @@ def test_ddp_nonzero_rank_skips_rank_zero_only_system_sampler() -> None:
         "stdout_stderr",
         "step_time",
         "step_memory",
+        "batch_size",
     )
 
 
@@ -142,6 +144,7 @@ def test_ddp_rank_zero_keeps_rank_zero_only_system_sampler() -> None:
         "stdout_stderr",
         "step_time",
         "step_memory",
+        "batch_size",
     )
 
 
@@ -247,6 +250,7 @@ def test_queue_backed_samplers_are_marked_for_final_recording_drain() -> None:
     assert specs["process"].drain_on_recording_stop is False
     assert specs["step_time"].drain_on_recording_stop is True
     assert specs["step_memory"].drain_on_recording_stop is True
+    assert specs["batch_size"].drain_on_recording_stop is True
 
 
 def test_runtime_final_recording_drain_skips_periodic_samplers() -> None:

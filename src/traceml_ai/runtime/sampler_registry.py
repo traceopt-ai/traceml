@@ -8,6 +8,7 @@ from typing import Callable, Iterable, Optional
 from traceml_ai.core import Registry
 from traceml_ai.loggers.error_log import get_error_logger
 from traceml_ai.samplers.base_sampler import BaseSampler
+from traceml_ai.samplers.batch_size_sampler import BatchSizeSampler
 from traceml_ai.samplers.process_sampler import ProcessSampler
 from traceml_ai.samplers.runtime_environment_sampler import (
     RuntimeEnvironmentSampler,
@@ -89,6 +90,12 @@ DEFAULT_SAMPLER_REGISTRY: Registry[SamplerSpec] = Registry(
         _spec(
             "step_memory",
             StepMemorySampler,
+            profiles=("run",),
+            drain_on_recording_stop=True,
+        ),
+        _spec(
+            "batch_size",
+            BatchSizeSampler,
             profiles=("run",),
             drain_on_recording_stop=True,
         ),

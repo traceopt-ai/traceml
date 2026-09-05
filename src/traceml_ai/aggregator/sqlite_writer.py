@@ -14,6 +14,9 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Dict, Iterator, Optional
 
+from traceml_ai.aggregator.sqlite_writers import (
+    batch_size as batch_size_sql_writer,
+)
 from traceml_ai.aggregator.sqlite_writers import process as process_sql_writer
 from traceml_ai.aggregator.sqlite_writers import (
     runtime_environment as runtime_environment_sql_writer,
@@ -44,6 +47,7 @@ _PROJECTION_WRITERS = [
     process_sql_writer,
     step_time_sql_writer,
     step_memory_sql_writer,
+    batch_size_sql_writer,
     stdout_stderr_sql_writer,
 ]
 _RETENTION_TABLES = frozenset(
@@ -56,6 +60,7 @@ _RETENTION_PARTITION_SQL = {
     "process_samples": "COALESCE(global_rank, rank, 0)",
     "step_time_samples": "COALESCE(global_rank, rank, 0)",
     "step_memory_samples": "COALESCE(global_rank, rank, 0)",
+    "batch_size_samples": "COALESCE(global_rank, rank, 0)",
 }
 _RETENTION_PRUNE_INTERVAL_BATCHES = 10
 
