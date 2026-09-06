@@ -36,6 +36,24 @@ logs/lerobot_v3_image_regression/runs/<experiment-id>/
 
 The comparison is in `compare/`; raw TraceML summaries are in `traceml/`.
 
+## Analyze it locally
+
+Copy `compare/`, `traceml/`, `terminal/`, and `environment.txt` from the GPU
+machine into one local result directory. Analysis does not need a GPU or a
+TraceML installation:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r examples/advanced/lerobot_v3_image_regression/analysis-requirements.txt
+jupyter lab examples/advanced/lerobot_v3_image_regression/analyze_results.ipynb
+```
+
+Choose **Run All**. The notebook finds the newest complete result under
+`remote_logs/` or `logs/lerobot_v3_image_regression/runs/`. You can also set
+`RESULT_DIR` in its first code cell. It validates the two SQLite databases,
+reports timing coverage and plots per-step input wait and total step time.
+
 ## What is fixed
 
 - Broken LeRobot: `f6b16f6d97155e3ce34ab2a1ec145e9413588197`
