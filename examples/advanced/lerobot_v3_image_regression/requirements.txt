@@ -4,5 +4,5 @@
 accelerate==1.11.0
 datasets==4.1.1
 torch==2.7.1+cu128
-torchcodec==0.5
+torchcodec==0.5+cu128
 torchvision==0.22.1+cu128
