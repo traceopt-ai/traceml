@@ -45,6 +45,9 @@ readonly FIXED_COMMIT="67a6c8dfef90351830ad02afc5bf1bd299f9a521"
 readonly DATASET_ID="imstevenpmwork/aloha_sim_transfer_cube_human_image"
 readonly DATASET_REVISION="13e0d3bff90f02ec417761b58199eb1d33a72efb"
 readonly STEPS=200
+readonly BATCH_SIZE=8
+readonly NUM_WORKERS=4
+readonly SEED=1000
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/../../.." && pwd)"
@@ -65,6 +68,10 @@ check_host() {
   need git
   need python3.10
   need nvidia-smi
+  [[ "$(python3.10 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')" == "3.10" ]] ||
+    die "python3.10 must run Python 3.10"
+  python3.10 -m ensurepip --version >/dev/null 2>&1 ||
+    die "Python venv support is required; on Ubuntu/Debian install python3.10-venv"
   nvidia-smi >/dev/null || die "nvidia-smi cannot access an NVIDIA GPU"
 
   export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
@@ -104,16 +111,19 @@ instrument() {
 }
 
 prepare_environment() {
-  if [[ ! -x "$venv_root/bin/python" ]]; then
+  if [[ ! -e "$venv_root" ]]; then
     python3.10 -m venv "$venv_root" ||
       die "could not create the Python 3.10 environment"
+    "$venv_root/bin/python" -m pip install --upgrade pip setuptools wheel
+  elif [[ ! -x "$venv_root/bin/python" ]] ||
+    ! "$venv_root/bin/python" -m pip --version >/dev/null 2>&1; then
+    die "the reusable environment is incomplete; remove logs/lerobot_v3_image_regression/venv and rerun"
   fi
 
   local python="$venv_root/bin/python"
-  "$python" -m pip install --upgrade pip setuptools wheel
   "$python" -m pip install -r "$requirements_file"
-  "$python" -m pip install -e "$broken_tree"
-  "$python" -m pip install -e "$repo_root"
+  "$python" -m pip install -c "$requirements_file" -e "$broken_tree"
+  "$python" -m pip install -c "$requirements_file" -e "$repo_root"
   "$python" - <<'PY' || die "PyTorch cannot access exactly one CUDA GPU"
 import torch
 
@@ -124,7 +134,21 @@ PY
 }
 
 select_lerobot() {
-  "$venv_root/bin/python" -m pip install --quiet --no-deps -e "$1"
+  local worktree="$1"
+  local python="$venv_root/bin/python"
+
+  "$python" -m pip install --quiet --no-deps -e "$worktree" ||
+    die "could not activate the selected LeRobot worktree"
+  "$python" - "$worktree" <<'PY' || die "LeRobot did not import from the selected worktree"
+import sys
+from pathlib import Path
+
+import lerobot
+
+active = Path(lerobot.__file__).resolve()
+expected = Path(sys.argv[1]).resolve()
+raise SystemExit(0 if active.is_relative_to(expected) else 1)
+PY
 }
 
 record_environment() {
@@ -134,15 +158,31 @@ record_environment() {
     echo "lerobot_fixed=$FIXED_COMMIT"
     echo "dataset=$DATASET_ID@$DATASET_REVISION"
     echo "traceml=$(git -C "$repo_root" rev-parse HEAD)"
+    echo "steps=$STEPS"
+    echo "batch_size=$BATCH_SIZE"
+    echo "num_workers=$NUM_WORKERS"
+    echo "seed=$SEED"
     "$venv_root/bin/python" --version
     "$venv_root/bin/python" - <<'PY'
+import os
 from importlib.metadata import version
+from pathlib import Path
 
 for package in ("accelerate", "datasets", "torch", "torchcodec", "torchvision"):
     print(f"{package}={version(package)}")
+
+cpu_model = "unknown"
+for line in Path("/proc/cpuinfo").read_text().splitlines():
+    if line.startswith("model name"):
+        cpu_model = line.split(":", 1)[1].strip()
+        break
+print(f"cpu_model={cpu_model}")
+print(f"cpu_logical_count={os.cpu_count()}")
 PY
     nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
   } > "$experiment_root/environment.txt"
+  "$venv_root/bin/python" -m pip list --format=freeze \
+    > "$experiment_root/installed-packages.txt"
 }
 
 run_revision() {
@@ -169,6 +209,9 @@ run_revision() {
     "--wandb.mode=offline" \
     "--log_freq=2" \
     "--steps=$STEPS" \
+    "--batch_size=$BATCH_SIZE" \
+    "--num_workers=$NUM_WORKERS" \
+    "--seed=$SEED" \
     "--policy.push_to_hub=false" \
     "--policy.repo_id=$DATASET_ID" \
     "--output_dir=$experiment_root/lerobot/$run_name" \

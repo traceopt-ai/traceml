@@ -6,13 +6,16 @@ read. [PR #2408](https://github.com/huggingface/lerobot/pull/2408) changed that
 access path. The runner trains the same ACT workload before and after the fix,
 then asks TraceML to compare them.
 
-This is a reproduction, not a published benchmark. It intentionally contains
-no performance claim.
+This is a case-study reproduction, not a portable benchmark. Exact timings and
+percentage changes depend on the host; the useful result is the paired
+diagnosis and attribution.
 
 ## Run it
 
 You need Linux x86-64, Python 3.10, one NVIDIA GPU, and network access. The
 environment uses PyTorch 2.7.1 with CUDA 12.8. A newer NVIDIA driver is fine.
+On Ubuntu or Debian, install venv support first with
+`sudo apt-get install python3.10-venv`.
 
 From the TraceML repository root:
 
@@ -21,7 +24,7 @@ bash examples/advanced/lerobot_v3_image_regression/run_reproduction.sh
 ```
 
 That runs one broken/fixed pair. For publication evidence, run two pairs so the
-second pair reverses the order:
+second pair reverses the order and exposes startup or cache effects:
 
 ```bash
 bash examples/advanced/lerobot_v3_image_regression/run_reproduction.sh --pairs 2
@@ -35,12 +38,13 @@ logs/lerobot_v3_image_regression/runs/<experiment-id>/
 ```
 
 The comparison is in `compare/`; raw TraceML summaries are in `traceml/`.
+`environment.txt` and `installed-packages.txt` record the run configuration.
 
 ## Analyze it locally
 
-Copy `compare/`, `traceml/`, `terminal/`, and `environment.txt` from the GPU
-machine into one local result directory. Analysis does not need a GPU or a
-TraceML installation:
+Copy `compare/`, `traceml/`, `terminal/`, `environment.txt`, and
+`installed-packages.txt` from the GPU machine into one local result directory.
+Analysis does not need a GPU or a TraceML installation:
 
 ```bash
 python3 -m venv .venv
@@ -61,9 +65,11 @@ reports timing coverage and plots per-step input wait and total step time.
 - Dataset: `imstevenpmwork/aloha_sim_transfer_cube_human_image`
 - Dataset revision: `13e0d3bff90f02ec417761b58199eb1d33a72efb`
 - ACT on CUDA for 200 steps
-- LeRobot defaults for batch size, workers, and seed
+- Batch size 8, 4 DataLoader workers, and seed 1000
 
-Exact dependency versions live in `requirements.txt`.
+Regression-sensitive dependency pins live in `requirements.txt`; the complete
+resolved package list is written with each run. The historical pins are
+deliberate and should be used only in this isolated environment.
 
 ## TraceML boundary
 
