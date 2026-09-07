@@ -95,6 +95,7 @@ first-run examples.
 |---|---|---|---|
 | `advanced/bert_single_gpu_compare.py` | Run the same fixed BERT workload on different single-GPU machines, then compare TraceML summaries | CUDA | Use the same batch size, sequence length, precision, and step count on each machine |
 | [`advanced/qwen3_8b_lora_ga`](advanced/qwen3_8b_lora_ga/) | Measure physical batch size and gradient accumulation with Qwen3-8B TRL LoRA while holding effective batch and packed-token capacity constant | CUDA | Production-shaped single-L40S workload; includes a 500-step matrix runner |
+| [`advanced/lerobot_v3_image_regression`](advanced/lerobot_v3_image_regression/) | Reproduce LeRobot's v3 image-dataset input regression before and after its upstream fix | CUDA | Pinned ACT workload with isolated LeRobot revisions and TraceML A/B comparison |
 
 Example hardware comparison run:
 
