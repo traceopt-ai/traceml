@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from typing import Any
 from unittest.mock import Mock
 
+import pytest
+
 from traceml_ai.runtime import lifecycle
 from traceml_ai.runtime.runtime import TraceMLRuntime
 from traceml_ai.runtime.settings import AggregatorEndpoint, TraceMLSettings
@@ -70,6 +72,37 @@ def test_start_aggregator_returns_idempotent_handle(
     handle.stop()
 
     assert handle.stop_event.is_set()
+    assert created[0].stops == 1
+
+
+def test_start_aggregator_logs_endpoint_failure_once(monkeypatch, tmp_path):
+    class _EndpointFailureAggregator(_FakeAggregator):
+        @property
+        def endpoint(self):
+            raise RuntimeError("endpoint unavailable")
+
+    created = []
+
+    def _factory(*, logger, stop_event, settings):
+        aggregator = _EndpointFailureAggregator(
+            logger=logger,
+            stop_event=stop_event,
+            settings=settings,
+        )
+        created.append(aggregator)
+        return aggregator
+
+    logger = Mock()
+    monkeypatch.setattr(lifecycle, "_build_aggregator", _factory)
+
+    with pytest.raises(RuntimeError, match="endpoint unavailable"):
+        lifecycle.start_aggregator(
+            TraceMLSettings(logs_dir=str(tmp_path), session_id="run"),
+            logger=logger,
+        )
+
+    logger.error.assert_called_once()
+    assert created[0].stop_event.is_set()
     assert created[0].stops == 1
 
 

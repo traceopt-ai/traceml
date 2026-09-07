@@ -238,3 +238,7 @@ then stops the actor in a ``finally`` block. Each worker also stops its local
 TraceML runtime in a ``finally`` block. Normal exceptions and keyboard
 interrupts should therefore release TraceML resources. A hard ``SIGKILL`` cannot
 run Python cleanup code in any framework.
+
+If aggregator finalization fails, the actor records the failure in
+``aggregator/traceml_errors.log``. Cleanup remains best effort at the Ray driver
+boundary, so a TraceML shutdown failure does not replace the Ray Train result.

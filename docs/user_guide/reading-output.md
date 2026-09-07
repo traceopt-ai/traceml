@@ -212,6 +212,21 @@ fails, TraceML reports the saved path. This artifact is distinct from
 `aggregator/traceml_errors.log`, which contains structured TraceML log records.
 Aggregator stdout remains attached to the terminal and is not persisted.
 
+### TraceML internal error logs
+
+TraceML implementation failures are kept separate from workload output. Each
+owning process writes ERROR-level records to one rotating file:
+
+```text
+logs/<run-name>/rank_<global_rank>/traceml_errors.log
+logs/<run-name>/aggregator/traceml_errors.log
+logs/<run-name>/nodes/node_<node_rank>/launcher_errors.log
+```
+
+User exceptions remain in native training stderr and are not copied into these
+files. The internal logger does not add a terminal handler; terminal output
+continues to follow the launcher and display policies described above.
+
 Phases that were never measured in the current window are omitted from the
 live step-time table rather than shown as `0.0 ms`, and the diagnosis block
 shows `INCOMPLETE DATA` with the missing signal names when no reliable

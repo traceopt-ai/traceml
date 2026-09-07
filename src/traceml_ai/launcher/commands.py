@@ -47,6 +47,7 @@ from traceml_ai.launcher.process import (
     terminate_process_group,
     wait_for_tcp_listen,
 )
+from traceml_ai.loggers.error_log import get_error_logger, setup_error_logger
 from traceml_ai.runtime.launch_context import LaunchContext
 from traceml_ai.runtime.session import get_session_id
 from traceml_ai.runtime.settings import (
@@ -141,9 +142,11 @@ def _dashboard_access_box(dashboard_port: int) -> str:
 def _log_launcher_exception(message: str, exc: Exception) -> None:
     """Log launcher failures when the shared error logger is available."""
     try:
-        from traceml_ai.loggers.error_log import get_error_logger
-
-        get_error_logger("TraceMLLauncher").exception("[TraceML] %s", message)
+        get_error_logger("TraceMLLauncher").error(
+            "[TraceML] %s",
+            message,
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
     except Exception:
         pass
 
@@ -662,6 +665,17 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     node_dir = node_artifact_dir(session_root, torchrun_cfg.node_rank)
     training_stdout_path = node_dir / "training.stdout.log"
     training_stderr_path = node_dir / "training.stderr.log"
+
+    # Every node launcher owns one structured internal-error file. Logging is
+    # diagnostic only and must never prevent training from starting.
+    try:
+        setup_error_logger(
+            role="launcher",
+            session_root=session_root,
+            node_rank=torchrun_cfg.node_rank,
+        )
+    except Exception:
+        pass
 
     manifest_path: Optional[Path] = None
     if is_root_writer:

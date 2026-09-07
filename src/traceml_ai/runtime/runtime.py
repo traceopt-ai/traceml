@@ -55,7 +55,7 @@ class TraceMLRuntime:
         self.mode = self._settings.mode
         self.profile = getattr(self._settings, "profile", "run")
 
-        setup_error_logger()
+        setup_error_logger(role="rank")
         self._logger = get_error_logger("TraceMLRuntime")
 
         # Runtime identity separates local device rank from globally unique
