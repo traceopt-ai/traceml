@@ -20,6 +20,10 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Mapping, Optional
 
+from traceml_ai.loggers.error_log import (
+    get_error_logger,
+    log_internal_exception,
+)
 from traceml_ai.runtime.lifecycle import RuntimeHandle, start_aggregator
 from traceml_ai.runtime.lifecycle import start_runtime as start_runtime_handle
 from traceml_ai.runtime.settings import (
@@ -223,6 +227,7 @@ class _TraceMLAggregatorActor:
                 connect_host=self._node_ip,
             )
         )
+        self._logger = get_error_logger("TraceMLRayAggregator")
 
     def endpoint(self) -> dict[str, Any]:
         """Return the reachable aggregator endpoint for Ray Train workers."""
@@ -234,11 +239,21 @@ class _TraceMLAggregatorActor:
         }
 
     def stop(self) -> None:
-        """Stop the TraceML aggregator once."""
+        """Stop the aggregator once and record a finalization failure."""
         if self._closed:
             return
         self._closed = True
-        self._handle.stop(timeout_sec=float(self._config.stop_timeout_sec))
+        try:
+            self._handle.stop(timeout_sec=float(self._config.stop_timeout_sec))
+        except BaseException as exc:
+            # Ray actors use the lifecycle handle directly, so they do not pass
+            # through aggregator_main's process-level failure log boundary.
+            log_internal_exception(
+                self._logger,
+                "[TraceML] Ray aggregator finalization failed",
+                exc,
+            )
+            raise
 
 
 @dataclass(frozen=True)
@@ -279,6 +294,8 @@ def _stop_actor_best_effort(ray: Any, actor: Any) -> None:
     try:
         ray.get(actor.stop.remote())
     except Exception:
+        # The actor records its own finalization failure before the RPC fails.
+        # Keep cleanup from replacing the Ray Train result at the driver.
         pass
 
     try:

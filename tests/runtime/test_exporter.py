@@ -142,7 +142,10 @@ def test_aggregator_unavailable_does_not_block_or_crash() -> None:
         # The exporter thread keeps attempting sends and swallows failures.
         assert _wait_until(lambda: client.call_count >= 5)
         assert exporter.dropped_count == 0
-        assert len(logger.exceptions) >= 5
+        assert len(logger.errors) >= 5
+        assert all(
+            "RuntimeError: send failed" in item for item in logger.errors
+        )
     finally:
         exporter.stop()
 

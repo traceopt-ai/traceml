@@ -13,11 +13,14 @@ torchrun remain responsible for exception reporting and process exit status.
 import os
 import runpy
 import sys
-import traceback
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Union
 
-from traceml_ai.loggers.error_log import get_error_logger, setup_error_logger
+from traceml_ai.loggers.error_log import (
+    get_error_logger,
+    log_internal_exception,
+    setup_error_logger,
+)
 from traceml_ai.runtime.launch_context import (
     LaunchContext,
     script_execution_context,
@@ -58,18 +61,10 @@ def _log_runtime_exception(message: str, error: BaseException) -> None:
     """Record a TraceML failure without raising or copying user context."""
     try:
         setup_error_logger(role="rank")
-        error_traceback = "".join(
-            traceback.format_exception(
-                type(error),
-                error,
-                error.__traceback__,
-                chain=False,
-            )
-        ).rstrip()
-        get_error_logger("TraceMLExecutor").error(
-            "[TraceML] %s\n%s",
-            message,
-            error_traceback,
+        log_internal_exception(
+            get_error_logger("TraceMLExecutor"),
+            f"[TraceML] {message}",
+            error,
         )
     except Exception:
         pass

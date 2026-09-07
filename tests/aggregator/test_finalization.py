@@ -514,6 +514,7 @@ def test_fatal_summary_failure_is_logged_once_at_process_boundary(
 
     assert rc == 1
     logger.error.assert_called_once()
+    assert logger.error.call_count + logger.exception.call_count == 1
     assert logger.error.call_args.args[0] == (
         "[TraceML] Aggregator exiting due to error"
     )

@@ -249,6 +249,32 @@ def test_shutdown_log_excludes_active_user_exception(monkeypatch):
     assert "private user failure" not in content
 
 
+def test_shutdown_log_keeps_explicit_cause_without_user_context(monkeypatch):
+    stream = io.StringIO()
+    logger = logging.Logger("test-runtime-error-with-cause")
+    logger.addHandler(logging.StreamHandler(stream))
+    monkeypatch.setattr(executor, "setup_error_logger", lambda *, role: None)
+    monkeypatch.setattr(executor, "get_error_logger", lambda _name: logger)
+
+    with pytest.raises(ValueError, match="private user failure"):
+        try:
+            raise ValueError("private user failure")
+        finally:
+            try:
+                try:
+                    raise OSError("TraceML socket failure")
+                except OSError as cause:
+                    raise RuntimeError("TraceML shutdown failed") from cause
+            except RuntimeError as error:
+                executor._log_runtime_exception("shutdown failed", error)
+
+    content = stream.getvalue()
+    assert "TraceML socket failure" in content
+    assert "TraceML shutdown failed" in content
+    assert "The above exception was the direct cause" in content
+    assert "private user failure" not in content
+
+
 @pytest.mark.parametrize(
     "user_exit",
     [SystemExit(7), KeyboardInterrupt()],
@@ -303,8 +329,10 @@ def test_torchelastic_record_wraps_entrypoint_when_configured(monkeypatch):
     assert calls == ["record", "entrypoint"]
 
 
+@pytest.mark.parametrize("traceml_disabled", [True, False])
 def test_executor_user_failure_stays_native_and_out_of_internal_logs(
     tmp_path,
+    traceml_disabled,
 ):
     script_path = tmp_path / "raise_error.py"
     script_path.write_text(
@@ -318,7 +346,7 @@ def test_executor_user_failure_stays_native_and_out_of_internal_logs(
         {
             "PYTHONPATH": str(SRC),
             "TRACEML_SCRIPT_PATH": str(script_path),
-            "TRACEML_DISABLED": "1",
+            "TRACEML_DISABLED": "1" if traceml_disabled else "0",
             "TRACEML_LOGS_DIR": str(tmp_path / "logs"),
             "TRACEML_SESSION_ID": "executor-test",
         }
@@ -337,4 +365,11 @@ def test_executor_user_failure_stays_native_and_out_of_internal_logs(
     run_root = tmp_path / "logs" / "executor-test"
     assert not (run_root / "torchrun_error.log").exists()
     assert not (run_root / "runtime_error.log").exists()
-    assert not list(run_root.rglob("traceml_errors.log"))
+    internal_logs = list(run_root.rglob("traceml_errors.log"))
+    if traceml_disabled:
+        assert not internal_logs
+    else:
+        assert len(internal_logs) == 1
+        assert "subprocess boom" not in internal_logs[0].read_text(
+            encoding="utf-8"
+        )
