@@ -1,5 +1,6 @@
 import tempfile
 from pathlib import Path
+from typing import Optional
 
 import pytest
 from packaging.version import Version
@@ -17,7 +18,6 @@ from transformers import (  # noqa: E402
 )
 
 from traceml_ai.integrations.huggingface import (  # noqa: E402
-    TraceMLTrainer,
     TraceMLTrainerCallback,
     init,
 )
@@ -79,7 +79,7 @@ def _build_training_args(
     max_steps: int,
     gradient_accumulation_steps: int = 1,
     batch_size: int = 4,
-    use_cpu: bool | None = None,
+    use_cpu: Optional[bool] = None,
 ) -> "TrainingArguments":
     return TrainingArguments(
         output_dir=output_dir,
@@ -123,31 +123,6 @@ def _reset_traceml_state() -> None:
     _drain_step_memory_queue()
 
 
-def test_hf_trainer_integration():
-    """
-    Test that TraceMLTrainer (legacy thin-wrapper path) runs a few steps with
-    a real model and TraceML instrumentation enabled.
-    """
-    _reset_traceml_state()
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        output_dir = Path(tmp_dir) / "results"
-        model = _build_tiny_model()
-        train_dataset = _TinyTokenizedDataset()
-        training_args = _build_training_args(str(output_dir), max_steps=5)
-
-        trainer = TraceMLTrainer(
-            model=model,
-            args=training_args,
-            train_dataset=train_dataset,
-            traceml_enabled=True,
-        )
-        trainer.train()
-
-        from traceml_ai.sdk.instrumentation import TraceState
-
-        assert TraceState.step >= 5, "TraceState.step should have incremented"
-
-
 def test_hf_trainer_callback_integration():
     """
     Vanilla transformers.Trainer with TraceMLTrainerCallback should emit
@@ -156,6 +131,7 @@ def test_hf_trainer_callback_integration():
     StepMemoryTracker in the callback.
     """
     _reset_traceml_state()
+    init()
     max_steps = 5
 
     with tempfile.TemporaryDirectory() as tmp_dir:
@@ -183,7 +159,7 @@ def test_hf_trainer_callback_integration():
 
         from traceml_ai.sdk.instrumentation import TraceState
 
-        assert TraceState.step >= max_steps
+        assert TraceState.step == max_steps
 
 
 @pytest.mark.parametrize(
@@ -375,102 +351,58 @@ def test_hf_trainer_callback_counts_update_boundary_when_scaler_skips(
         ] == expected
 
 
-def test_hf_trainer_wrapper_equivalent_to_direct_callback():
-    """
-    TraceMLTrainer is now a thin wrapper that auto-installs
-    TraceMLTrainerCallback. Running the same tiny setup through both paths
-    should produce identical step counts and identical numbers of step-memory
-    events. This is the regression gate against the wrapper drifting away
-    from direct callback semantics.
-    """
+def test_hf_trainer_optional_callback_preserves_training():
+    """Conditional callback registration preserves losses and parameters."""
     max_steps = 4
 
-    def _run_with(make_trainer) -> tuple:
+    def _run_with(enable_tracing: bool) -> tuple:
         _reset_traceml_state()
+        torch.manual_seed(42)
+        callbacks = []
+        if enable_tracing:
+            init()
+            callbacks.append(TraceMLTrainerCallback())
+
         with tempfile.TemporaryDirectory() as tmp_dir:
             output_dir = Path(tmp_dir) / "results"
             model = _build_tiny_model()
             train_dataset = _TinyTokenizedDataset()
             training_args = _build_training_args(
-                str(output_dir), max_steps=max_steps
+                str(output_dir), max_steps=max_steps, use_cpu=True
             )
 
-            trainer = make_trainer(model, training_args, train_dataset)
-            trainer.train()
+            trainer = Trainer(
+                model=model,
+                args=training_args,
+                train_dataset=train_dataset,
+                callbacks=callbacks,
+            )
+            result = trainer.train()
+            assert trainer.state.global_step == max_steps
 
             from traceml_ai.runtime.state import get_trace_session_state
 
             step = get_trace_session_state().step
             drained = _drain_step_memory_queue()
-            return step, len(drained)
+            batches = _drain_step_time_queue()
+            parameters = {
+                name: value.detach().clone()
+                for name, value in model.state_dict().items()
+            }
+            return (
+                result.training_loss,
+                parameters,
+                step,
+                len(drained),
+                len(batches),
+            )
 
-    callback_steps, callback_samples = _run_with(
-        lambda m, a, d: Trainer(
-            model=m,
-            args=a,
-            train_dataset=d,
-            callbacks=[TraceMLTrainerCallback()],
-        )
-    )
-
-    wrapper_steps, wrapper_samples = _run_with(
-        lambda m, a, d: TraceMLTrainer(
-            model=m,
-            args=a,
-            train_dataset=d,
-            traceml_enabled=True,
-        )
-    )
-
-    assert callback_steps == max_steps
-    assert wrapper_steps == max_steps
-    assert callback_samples == max_steps
-    assert wrapper_samples == max_steps
-
-
-def test_hf_trainer_wrapper_dedups_user_supplied_callback():
-    """
-    If a user passes their own TraceMLTrainerCallback in callbacks=[...] and
-    also uses TraceMLTrainer, the wrapper must NOT add a second instance.
-    Otherwise every step would be double-bracketed and the step counter would
-    advance twice per optimizer step.
-    """
-    _reset_traceml_state()
-    max_steps = 3
-
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        output_dir = Path(tmp_dir) / "results"
-        model = _build_tiny_model()
-        train_dataset = _TinyTokenizedDataset()
-        training_args = _build_training_args(
-            str(output_dir), max_steps=max_steps
-        )
-
-        trainer = TraceMLTrainer(
-            model=model,
-            args=training_args,
-            train_dataset=train_dataset,
-            callbacks=[TraceMLTrainerCallback()],
-            traceml_enabled=True,
-        )
-
-        installed = [
-            cb
-            for cb in trainer.callback_handler.callbacks
-            if isinstance(cb, TraceMLTrainerCallback)
-        ]
-        assert len(installed) == 1, (
-            f"Expected exactly one TraceMLTrainerCallback after dedup, "
-            f"found {len(installed)}."
-        )
-
-        trainer.train()
-
-        drained = _drain_step_memory_queue()
-        assert len(drained) == max_steps, (
-            f"Expected one StepMemoryEvent per optimizer step "
-            f"({max_steps}), got {len(drained)}; dedup guard failed."
-        )
+    untraced = _run_with(False)
+    traced = _run_with(True)
+    assert untraced[2:] == (0, 0, 0)
+    assert traced[2:] == (max_steps, max_steps, max_steps)
+    assert traced[0] == pytest.approx(untraced[0])
+    torch.testing.assert_close(traced[1], untraced[1])
 
 
 def test_hf_trainer_callback_noop_when_disabled(monkeypatch):

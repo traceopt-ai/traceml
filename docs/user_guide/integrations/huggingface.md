@@ -2,11 +2,10 @@
 
 Use TraceML with Hugging Face `Trainer` without rewriting your training loop.
 
-The preferred integration is two steps: call
+The integration is two steps: call
 `traceml_ai.integrations.huggingface.init()` once, then pass
 `TraceMLTrainerCallback` (a standard `transformers.TrainerCallback`) to your
-existing `Trainer`. The legacy `TraceMLTrainer` subclass is still supported. It
-is now a thin wrapper that installs the same callback under the hood.
+existing `Trainer`.
 
 ## 1. Install
 
@@ -51,29 +50,6 @@ trainer.train()
 `traceml_hf.init()` enables automatic timing. The callback groups timing and
 memory measurements into training steps. Use both; you do not need to add
 `traceml.trace_step(...)` to your training code.
-
-### Legacy `TraceMLTrainer`
-
-The `TraceMLTrainer(Trainer)` subclass remains supported for users who already
-adopted it. It is now a thin wrapper that auto-installs
-`TraceMLTrainerCallback` on construction and accepts `traceml_enabled` to turn
-step-level instrumentation on or off:
-
-```python
-from traceml_ai.integrations import huggingface as traceml_hf
-
-traceml_hf.init()
-
-trainer = traceml_hf.TraceMLTrainer(
-    model=model,
-    args=training_args,
-    train_dataset=train_dataset,
-    traceml_enabled=True,
-)
-trainer.train()
-```
-
-New code should prefer the direct callback registration shown above.
 
 ## 3. Launch The Run
 
@@ -133,8 +109,7 @@ for the exact timing boundaries and optimizer behavior.
   a step are outside its memory measurement.
 - **Interrupted training.** If training raises, tracing can remain active
   until a later cleanup call, which may record the unfinished group as a
-  completed step. The legacy wrapper uses the same callback and has the same
-  limitation.
+  completed step.
 - **Callback registration.** Register the callback before `trainer.train()`
   so it receives the training events from the start.
 
@@ -356,10 +331,34 @@ and returns the effective `TraceMLInitConfig`.
 `TraceMLTrainerCallback()` takes no TraceML-specific arguments and records
 standard step-level timing and memory.
 
-`TraceMLTrainer` (legacy thin wrapper) accepts:
+## Migration
 
-- everything that normal `transformers.Trainer` accepts
-- `traceml_enabled=True|False`
+`TraceMLTrainer` was intentionally removed because it only installed
+`TraceMLTrainerCallback`. Replace it with `transformers.Trainer`, call
+`traceml_hf.init()` once, and add `traceml_hf.TraceMLTrainerCallback()` to the
+Trainer's callbacks, as shown above. Keep the rest of your Trainer arguments.
+
+The `traceml_enabled` argument was removed with the wrapper. For optional
+tracing, control initialization and callback registration in your code:
+
+```python
+enable_tracing = True
+callbacks = []  # Add any other Trainer callbacks here.
+if enable_tracing:
+    traceml_hf.init()
+    callbacks.append(traceml_hf.TraceMLTrainerCallback())
+
+trainer = Trainer(
+    model=model,
+    args=training_args,
+    train_dataset=train_dataset,
+    callbacks=callbacks,
+)
+trainer.train()
+```
+
+To disable TraceML for an entire launched run, use `--disable-traceml` as
+shown in Troubleshooting.
 
 ## Next Steps
 

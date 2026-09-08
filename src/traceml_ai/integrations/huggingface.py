@@ -1,3 +1,9 @@
+"""TraceML callbacks for the standard Hugging Face Trainer.
+
+The TraceMLTrainer wrapper was intentionally removed. Use init() and register
+TraceMLTrainerCallback with transformers.Trainer.
+"""
+
 import os
 import sys
 
@@ -15,12 +21,11 @@ def _traceml_disabled() -> bool:
 
 
 try:
-    from transformers import Trainer, TrainerCallback
+    from transformers import TrainerCallback
 
     HAS_TRANSFORMERS = True
 except ImportError:
     HAS_TRANSFORMERS = False
-    Trainer = object  # Fallback for type hinting
     TrainerCallback = object  # Fallback for type hinting
 
 
@@ -70,7 +75,7 @@ def _log_hf_error(message: str, exc: Exception) -> None:
 
 class TraceMLTrainerCallback(TrainerCallback if HAS_TRANSFORMERS else object):
     """
-    Preferred Hugging Face integration for TraceML.
+    Hugging Face Trainer integration for TraceML.
 
     Register with ``Trainer(..., callbacks=[TraceMLTrainerCallback()])``.
 
@@ -118,13 +123,8 @@ class TraceMLTrainerCallback(TrainerCallback if HAS_TRANSFORMERS else object):
         if _traceml_disabled():
             return
 
-        # Fail-loud capability check (#88-class): warn, never raise,
-        # when the current init config leaves telemetry streams this
-        # integration owes dark. on_train_begin runs once per train()
-        # call, after user setup, so it reflects post-init() state and
-        # stays off the per-step hot path. Covers both the direct
-        # callback path and the TraceMLTrainer wrapper (which installs
-        # this callback).
+        # Check instrumentation once per train() call, after user setup.
+        # Missing streams should warn without interrupting training.
         try:
             from traceml_ai.integrations._capability import (
                 warn_if_missing_streams,
@@ -178,41 +178,4 @@ class TraceMLTrainerCallback(TrainerCallback if HAS_TRANSFORMERS else object):
         self._close_step_cm_safely()
 
 
-class TraceMLTrainer(Trainer if HAS_TRANSFORMERS else object):
-    """
-    Thin wrapper around ``transformers.Trainer`` that auto-installs
-    ``TraceMLTrainerCallback``.
-
-    Kept for backward compatibility with users on the original TraceML HF
-    integration API. New code should prefer
-    ``Trainer(..., callbacks=[TraceMLTrainerCallback()])`` directly.
-    """
-
-    def __init__(
-        self,
-        *args,
-        traceml_enabled: bool = True,
-        **kwargs,
-    ):
-        if not HAS_TRANSFORMERS:
-            raise ImportError(
-                "TraceMLTrainer requires the Hugging Face integration. "
-                "Install it with `pip install 'traceml-ai[hf]'`."
-            )
-
-        super().__init__(*args, **kwargs)
-        self.traceml_enabled = traceml_enabled
-
-        if not traceml_enabled or _traceml_disabled():
-            return
-
-        # Dedup guard: a user passing callbacks=[TraceMLTrainerCallback()] to
-        # TraceMLTrainer would otherwise double-instrument every step.
-        existing = getattr(self.callback_handler, "callbacks", [])
-        if any(isinstance(cb, TraceMLTrainerCallback) for cb in existing):
-            return
-
-        self.add_callback(TraceMLTrainerCallback())
-
-
-__all__ = ["TraceMLTrainerCallback", "TraceMLTrainer", "init"]
+__all__ = ["TraceMLTrainerCallback", "init"]
