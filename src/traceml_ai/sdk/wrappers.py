@@ -10,7 +10,8 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from traceml_ai.instrumentation.h2d import should_time_h2d
-from traceml_ai.utils.timing import TimeScope, timed_region
+from traceml_ai.instrumentation.step_events import TimeScope
+from traceml_ai.utils.timing import timed_region
 
 
 def _raise_duplicate_instrumentation(feature: str, reason: str) -> None:

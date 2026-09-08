@@ -7,6 +7,10 @@ which carry the full historical notes for versions predating this file.
 
 ## [Unreleased]
 
+- Timing event types and queue access now live in
+  `instrumentation/step_events.py`. Producers and the timing sampler share an
+  explicit handoff; measurement boundaries, CUDA FIFO processing, and stored
+  output are unchanged.
 - **Breaking:** TraceML implementation errors now have one structured owner:
   `rank_<global_rank>/traceml_errors.log`,
   `aggregator/traceml_errors.log`, or

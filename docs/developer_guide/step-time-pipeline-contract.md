@@ -10,7 +10,35 @@ For the public final-summary shape, see
 For user-facing timing definitions, see the
 [Step Time glossary](../user_guide/reading-output.md#step-time-glossary).
 
-## Current flow
+## Training-to-sampler handoff
+
+`instrumentation/step_events.py` owns `TimeEvent`, `StepTimeBatch`, and the
+private timing queue. `utils/timing.py` measures regions and buffers events
+until the existing step boundary assigns their step number and publishes one
+batch through `publish_step_time_batch()`.
+
+```text
+timed regions / optimizer hooks
+  -> utils/timing.py: pending events and step flush
+  -> instrumentation/step_events.py: timing batch queue
+  -> StepTimeSampler: pending FIFO, CUDA resolution, aggregation, storage
+```
+
+The sampler calls `drain_step_time_batches()` to take available batches without
+blocking. Publication and reading transfer references, not copies of events.
+After publication, the producer must not change a batch's membership or step
+identity. Only the sampler resolves its CUDA events.
+
+The queue holds up to 2,048 batches and retains the existing drop-on-full
+behavior. The sampler keeps its existing pending FIFO: an unresolved earlier
+CUDA batch holds back later batches. Reading continues after recording stops
+so already-published measurements can drain. No GPU synchronization is added.
+
+This first cleanup changes the timing handoff only. Memory still uses its
+existing queue, and step completion, failure handling, and input-fetch
+boundaries are unchanged. Global timing is currently not persisted.
+
+## Analysis and presentation flow
 
 ```mermaid
 flowchart LR

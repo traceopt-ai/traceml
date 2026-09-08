@@ -112,23 +112,23 @@ def test_direct_runtime_settings_default_to_summary(
 def test_disabled_env_dynamically_silences_low_level_utilities(monkeypatch):
     import torch.nn as nn
 
+    from traceml_ai.instrumentation.step_events import (
+        TimeEvent,
+        TimeScope,
+        drain_step_time_batches,
+    )
     from traceml_ai.utils.step_memory import (
         StepMemoryTracker,
         flush_step_memory_buffer,
         step_memory_queue,
     )
     from traceml_ai.utils.timing import (
-        TimeEvent,
-        TimeScope,
         flush_step_time_buffer,
-        get_step_time_queue,
         record_event,
         timed_region,
     )
 
-    step_time_queue = get_step_time_queue()
-    while not step_time_queue.empty():
-        step_time_queue.get_nowait()
+    drain_step_time_batches()
     while not step_memory_queue.empty():
         step_memory_queue.get_nowait()
 
@@ -155,7 +155,7 @@ def test_disabled_env_dynamically_silences_low_level_utilities(monkeypatch):
         pass
     flush_step_time_buffer(2)
 
-    assert step_time_queue.empty()
+    assert drain_step_time_batches() == []
     assert step_memory_queue.empty()
 
 

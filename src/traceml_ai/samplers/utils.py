@@ -13,7 +13,6 @@ contain sampler-specific aggregation logic.
 
 from __future__ import annotations
 
-from collections import deque
 from pathlib import Path
 from queue import Empty
 from typing import Any
@@ -47,19 +46,6 @@ def drain_queue_nowait(queue_obj: Any, *, skip_none: bool = True) -> list[Any]:
         items.append(item)
 
     return items
-
-
-def append_queue_nowait_to_deque(
-    queue_obj: Any,
-    target: deque[Any],
-    *,
-    skip_none: bool = True,
-) -> None:
-    """
-    Drain a queue and append its current items into a target deque.
-    """
-    for item in drain_queue_nowait(queue_obj, skip_none=skip_none):
-        target.append(item)
 
 
 def ensure_session_dir(

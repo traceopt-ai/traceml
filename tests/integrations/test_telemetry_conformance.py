@@ -28,11 +28,11 @@ from pathlib import Path
 
 import pytest
 
-from traceml_ai.samplers.utils import drain_queue_nowait
-from traceml_ai.utils.timing import _STEP_BUFFER, get_step_time_queue
+from traceml_ai.instrumentation.step_events import drain_step_time_batches
+from traceml_ai.utils.timing import _STEP_BUFFER
 
 # --- StreamContract registry -------------------------------------------------
-# Logical stream name -> wire name (utils/timing TimeEvent.name).
+# Logical stream name -> wire name (TimeEvent.name).
 STEP_TIME_WIRE = {
     "step_time": "_traceml_internal:step_time",
     "forward": "_traceml_internal:forward_time",
@@ -68,7 +68,7 @@ def _have(*mods: str) -> bool:
 
 def _drain_step_time_names() -> set[str]:
     names: set[str] = set()
-    for batch in drain_queue_nowait(get_step_time_queue()):
+    for batch in drain_step_time_batches():
         for evt in getattr(batch, "events", []):
             names.add(evt.name)
     return names
@@ -108,7 +108,7 @@ def _run_huggingface() -> set[str]:
     # Canonical documented path (#135); == traceml_ai.init(mode="auto"),
     # idempotent if already initialized with the same effective config.
     hf_init()
-    drain_queue_nowait(get_step_time_queue())
+    drain_step_time_batches()
     _STEP_BUFFER.clear()
 
     with tempfile.TemporaryDirectory() as tmp:
