@@ -115,13 +115,9 @@ def _drain_step_memory_queue(model_id: int) -> list:
 
 def _drain_step_time_queue() -> list:
     """Drain all StepTimeBatch entries from the shared queue."""
-    from traceml_ai.utils.timing import get_step_time_queue
+    from traceml_ai.instrumentation.step_events import drain_step_time_batches
 
-    queue = get_step_time_queue()
-    batches = []
-    while not queue.empty():
-        batches.append(queue.get_nowait())
-    return batches
+    return drain_step_time_batches()
 
 
 def _reset_traceml_state() -> None:

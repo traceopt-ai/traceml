@@ -13,14 +13,13 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from typing import Any, Deque, Dict, Tuple
 
-from traceml_ai.samplers.base_sampler import BaseSampler
-from traceml_ai.samplers.schema.step_time_schema import StepTimeEventSample
-from traceml_ai.samplers.utils import append_queue_nowait_to_deque
-from traceml_ai.utils.timing import (
+from traceml_ai.instrumentation.step_events import (
     StepTimeBatch,
     TimeEvent,
-    get_step_time_queue,
+    drain_step_time_batches,
 )
+from traceml_ai.samplers.base_sampler import BaseSampler
+from traceml_ai.samplers.schema.step_time_schema import StepTimeEventSample
 
 _CPU_DURATION_EVENT_NAMES = frozenset(
     {
@@ -48,10 +47,7 @@ class StepTimeSampler(BaseSampler):
         """
         Drain shared STEP queue and append all batches into local FIFO buffer.
         """
-        append_queue_nowait_to_deque(
-            get_step_time_queue(),
-            self._pending,
-        )
+        self._pending.extend(drain_step_time_batches())
 
     @staticmethod
     def _cpu_duration_ms(evt: TimeEvent) -> float:

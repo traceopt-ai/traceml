@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 import torch.nn as nn
 
+from traceml_ai.instrumentation.step_events import TimeScope
 from traceml_ai.integrations import lightning as lightning_integration
-from traceml_ai.utils.timing import TimeScope
 
 
 def _enable_callback_without_lightning(monkeypatch):

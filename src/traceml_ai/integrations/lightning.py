@@ -7,18 +7,14 @@ from typing import TYPE_CHECKING, Any
 from traceml_ai.instrumentation.patches.h2d_auto_timer_patch import (
     h2d_auto_timer,
 )
+from traceml_ai.instrumentation.step_events import TimeEvent, TimeScope
 from traceml_ai.runtime.state import (
     get_trace_session_state,
     mark_trace_step_flushed,
 )
 from traceml_ai.utils.flush_buffers import flush_step_events
 from traceml_ai.utils.step_memory import StepMemoryTracker
-from traceml_ai.utils.timing import (
-    TimeEvent,
-    TimeScope,
-    record_event,
-    timed_region,
-)
+from traceml_ai.utils.timing import record_event, timed_region
 
 if TYPE_CHECKING:
     from lightning.pytorch.callbacks import Callback as _CallbackBase
