@@ -71,7 +71,7 @@ def flush_step_time_buffer(step: int) -> None:
     """
     Flush buffered STEP events as a single StepTimeBatch.
 
-    Called once per optimizer step.
+    Called at the caller-defined step boundary with its assigned step number.
     """
     if _traceml_disabled() or not should_record_trace_events():
         return

@@ -5,7 +5,7 @@ Step-level timing sampler for TraceML.
 
 Reads StepTimeBatch objects from the STEP timing queue, resolves GPU timings
 asynchronously (without blocking training), aggregates repeated regions within
-the same optimizer step, and persists one record per step.
+each batch, and persists one record per flushed batch.
 """
 
 from __future__ import annotations
