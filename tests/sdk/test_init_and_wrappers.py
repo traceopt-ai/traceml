@@ -295,11 +295,6 @@ def _run_trace_step_once(*, mode, monkeypatch):
     )
     monkeypatch.setattr(
         instrumentation,
-        "flush_step_events",
-        lambda step: None,
-    )
-    monkeypatch.setattr(
-        instrumentation,
         "ensure_optimizer_timing_installed",
         lambda: calls.append("optimizer"),
     )
@@ -355,11 +350,6 @@ def test_trace_step_publishes_runtime_environment_once(monkeypatch):
         instrumentation,
         "StepMemoryTracker",
         _NoopStepMemoryTracker,
-    )
-    monkeypatch.setattr(
-        instrumentation,
-        "flush_step_events",
-        lambda step: None,
     )
     monkeypatch.setattr(
         instrumentation,
@@ -425,11 +415,6 @@ def test_trace_step_without_init_does_not_auto_install_optimizer_timing(
     )
     monkeypatch.setattr(
         instrumentation,
-        "flush_step_events",
-        lambda step: None,
-    )
-    monkeypatch.setattr(
-        instrumentation,
         "ensure_optimizer_timing_installed",
         lambda: calls.append("optimizer"),
     )
@@ -477,11 +462,6 @@ def test_trace_step_records_gpu_events_for_step_envelope(monkeypatch):
     )
     monkeypatch.setattr(
         instrumentation,
-        "flush_step_events",
-        lambda step: None,
-    )
-    monkeypatch.setattr(
-        instrumentation,
         "ensure_optimizer_timing_installed",
         lambda: None,
     )
@@ -490,6 +470,76 @@ def test_trace_step_records_gpu_events_for_step_envelope(monkeypatch):
         pass
 
     assert calls == [("_traceml_internal:step_time", "step", True)]
+
+
+def test_trace_step_discards_failure_before_publishing_next_step(monkeypatch):
+    from queue import Queue
+
+    from traceml_ai.instrumentation import step_events
+    from traceml_ai.instrumentation.step_events import (
+        StepCapture,
+        StepMemoryEvent,
+        TimeEvent,
+        complete_step_capture,
+    )
+    from traceml_ai.runtime.state import (
+        configure_trace_recording,
+        get_trace_session_state,
+        reset_trace_session_state,
+    )
+    from traceml_ai.utils.timing import record_event
+
+    instrumentation = _reload_instrumentation_module()
+    monkeypatch.delenv("TRACEML_DISABLED", raising=False)
+    monkeypatch.setattr(step_events, "_STEP_TIME_QUEUE", Queue(maxsize=2048))
+    monkeypatch.setattr(step_events, "_STEP_MEMORY_QUEUE", Queue(maxsize=2048))
+    monkeypatch.setattr(step_events, "_ACTIVE_STEP_CAPTURE", StepCapture())
+    monkeypatch.setattr(
+        instrumentation, "_publish_runtime_environment", lambda model: None
+    )
+    monkeypatch.setattr(
+        instrumentation, "_should_auto_install_optimizer_timing", lambda: False
+    )
+    reset_trace_session_state()
+    configure_trace_recording(max_steps=None)
+
+    # Establish a completed step that a subsequent failure must not reuse.
+    with instrumentation.trace_step(nn.Linear(1, 1)):
+        record_event(TimeEvent("previous_body", "cpu", 0.0, 1.0))
+    (previous_batch,) = step_events.drain_step_time_batches()
+    (previous_memory,) = step_events.drain_step_memory_events()
+    assert previous_batch.step == previous_memory.step == 1
+
+    failed_capture = step_events.begin_step_capture()
+    record_event(TimeEvent("failed_input", "cpu", 1.0, 2.0))
+    with pytest.raises(RuntimeError, match="user step failed"):
+        with instrumentation.trace_step(nn.Linear(1, 1)):
+            record_event(TimeEvent("failed_body", "cpu", 2.0, 3.0))
+            step_events.record_step_memory_event(
+                StepMemoryEvent(-1, "cpu", 3.0, None, None)
+            )
+            raise RuntimeError("user step failed")
+
+    assert get_trace_session_state().step == 1
+    assert step_events.drain_step_time_batches() == []
+    assert step_events.drain_step_memory_events() == []
+    assert not complete_step_capture(failed_capture, 99)
+
+    with instrumentation.trace_step(nn.Linear(1, 1)):
+        record_event(TimeEvent("successful_body", "cpu", 4.0, 5.0))
+
+    assert get_trace_session_state().step == 2
+    (batch,) = step_events.drain_step_time_batches()
+    assert batch.step == 2
+    assert "successful_body" in {event.name for event in batch.events}
+    assert not {"previous_body", "failed_input", "failed_body"} & {
+        event.name for event in batch.events
+    }
+    (memory_event,) = step_events.drain_step_memory_events()
+    assert memory_event.step == 2
+
+    configure_trace_recording()
+    reset_trace_session_state()
 
 
 def test_trace_step_marks_recording_draining_after_configured_step(
@@ -530,11 +580,6 @@ def test_trace_step_marks_recording_draining_after_configured_step(
         instrumentation,
         "StepMemoryTracker",
         _NoopStepMemoryTracker,
-    )
-    monkeypatch.setattr(
-        instrumentation,
-        "flush_step_events",
-        lambda step: None,
     )
     monkeypatch.setattr(
         instrumentation,

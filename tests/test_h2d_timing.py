@@ -1,9 +1,9 @@
 """
 Tests for H2D (host-to-device) transfer timing instrumentation.
 
-All tests run without a GPU.  The auto-patch and wrap_h2d() paths both fall
-back to CPU timing when CUDA is unavailable, so the event is still emitted and
-stored in the step buffer.
+All tests run without a GPU. The auto-patch and wrap_h2d() paths both fall back
+to CPU timing when CUDA is unavailable, so the event is still submitted to the
+active step capture.
 
 Coverage
 --------
@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import importlib
 import sys
-from collections import deque
 from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
@@ -37,8 +36,9 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 import traceml_ai.instrumentation.patches.h2d_auto_timer_patch as h2d_patch  # noqa: E402
-import traceml_ai.utils.timing as timing_module  # noqa: E402
 from traceml_ai.instrumentation.h2d import is_cuda_target  # noqa: E402
+from traceml_ai.instrumentation import step_events  # noqa: E402
+from traceml_ai.instrumentation.step_events import StepCapture  # noqa: E402
 from traceml_ai.runtime.arming import (  # noqa: E402
     _set_tracing_armed,
     is_tracing_armed,
@@ -73,21 +73,19 @@ def _reload_h2d_patch():
 
 
 @contextmanager
-def _fresh_step_buffer():
-    """
-    Temporarily replace _STEP_BUFFER so tests can inspect recorded events
-    without touching the shared global queue.
-    """
-    original = timing_module._STEP_BUFFER
-    timing_module._STEP_BUFFER = deque()
+def _fresh_step_capture():
+    """Isolate the pending capture so tests can inspect recorded events."""
+    original = step_events._ACTIVE_STEP_CAPTURE
+    capture = StepCapture()
+    step_events._ACTIVE_STEP_CAPTURE = capture
     try:
-        yield timing_module._STEP_BUFFER
+        yield capture.timing_events
     finally:
-        timing_module._STEP_BUFFER = original
+        step_events._ACTIVE_STEP_CAPTURE = original
 
 
-def _recorded_h2d_events(buf: deque) -> list:
-    return [e for e in buf if e.name == "_traceml_internal:h2d_time"]
+def _recorded_h2d_events(events: list) -> list:
+    return [e for e in events if e.name == "_traceml_internal:h2d_time"]
 
 
 def _fake_tensor_to(tensor, *args, **kwargs):
@@ -328,7 +326,7 @@ class TestH2DAutoTimerPatch:
 
 class TestH2DStepScoping:
     """
-    Verify that .to() timing appears in the step buffer only when inside
+    Verify that .to() timing appears in the step capture only when inside
     trace_step, using the h2d_auto_timer context manager directly (no full
     init/patch machinery required).
     """
@@ -338,7 +336,7 @@ class TestH2DStepScoping:
         torch.Tensor._traceml_h2d_patched = False  # type: ignore[attr-defined]
         tensor = torch.ones(4)
 
-        with _fresh_step_buffer() as buf:
+        with _fresh_step_capture() as buf:
             with h2d_auto_timer():
                 # Patch the captured original .to() so it returns
                 # the same tensor without needing a GPU.
@@ -359,7 +357,7 @@ class TestH2DStepScoping:
         _H2D_TLS._traceml_h2d_enabled = False
         tensor = torch.ones(4)
 
-        with _fresh_step_buffer() as buf:
+        with _fresh_step_capture() as buf:
             with patch(
                 "traceml_ai.instrumentation.patches.h2d_auto_timer_patch._ORIG_TENSOR_TO",
                 _fake_tensor_to,
@@ -393,7 +391,7 @@ class TestWrapH2D:
         tensor = torch.ones(4)
         wrapped = wrap_h2d(tensor)
 
-        with _fresh_step_buffer() as buf:
+        with _fresh_step_capture() as buf:
             with patch.object(torch.Tensor, "to", return_value=tensor):
                 wrapped.to("cuda:0")
 
@@ -451,7 +449,7 @@ class TestWrapH2D:
         batch = FakeBatch()
         wrapped = wrap_h2d(batch)
 
-        with _fresh_step_buffer() as buf:
+        with _fresh_step_capture() as buf:
             wrapped.to("cuda:0")
             events = _recorded_h2d_events(buf)
 

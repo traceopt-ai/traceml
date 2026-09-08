@@ -10,21 +10,18 @@ import torch
 
 import traceml_ai.utils.step_memory as step_memory_module
 from traceml_ai.instrumentation import step_events
-from traceml_ai.instrumentation.step_events import StepMemoryEvent
+from traceml_ai.instrumentation.step_events import StepCapture, StepMemoryEvent
 from traceml_ai.runtime.state import configure_trace_recording
 from traceml_ai.samplers.schema.step_memory import StepMemorySample
 from traceml_ai.samplers.step_memory_sampler import StepMemorySampler
-from traceml_ai.utils.step_memory import (
-    StepMemoryTracker,
-    flush_step_memory_buffer,
-)
+from traceml_ai.utils.step_memory import StepMemoryTracker
 
 
 @pytest.fixture(autouse=True)
 def isolated_memory_recording(monkeypatch):
     monkeypatch.delenv("TRACEML_DISABLED", raising=False)
     monkeypatch.setattr(step_events, "_STEP_MEMORY_QUEUE", Queue(maxsize=2048))
-    monkeypatch.setattr(step_memory_module, "_PENDING_MEMORY", None)
+    monkeypatch.setattr(step_events, "_ACTIVE_STEP_CAPTURE", StepCapture())
     configure_trace_recording()
     yield
     configure_trace_recording()
@@ -37,9 +34,10 @@ def test_tracker_captures_timestamp_when_memory_is_measured(
     monkeypatch.setattr(step_memory_module.time, "time", lambda: 12.25)
 
     tracker = StepMemoryTracker(torch.nn.Identity())
+    capture = step_events.begin_step_capture()
     tracker.reset()
     tracker.record()
-    flush_step_memory_buffer(7)
+    assert step_events.complete_step_capture(capture, 7)
     monkeypatch.setattr(step_memory_module.time, "time", lambda: 99.0)
     (event,) = step_events.drain_step_memory_events()
     assert event.timestamp == 12.25
@@ -111,16 +109,19 @@ def test_pending_snapshot_is_cleared_between_steps(
         step_memory_module.time, "time", lambda: next(timestamps)
     )
 
+    first_capture = step_events.begin_step_capture()
     tracker.reset()
     tracker.record()
-    tracker.record()  # Only the final snapshot belongs to this flush.
-    flush_step_memory_buffer(10)
-    # An empty flush must not duplicate the event.
-    flush_step_memory_buffer(10)
+    tracker.record()  # Only the final snapshot belongs to this capture.
+    assert step_events.complete_step_capture(first_capture, 10)
+    # Repeated finalization must not duplicate the event.
+    assert not step_events.complete_step_capture(first_capture, 10)
+    second_capture = step_events.begin_step_capture()
     tracker.reset()
     tracker.record()
-    flush_step_memory_buffer(11)
-    assert step_memory_module._PENDING_MEMORY is None
+    assert step_events.complete_step_capture(second_capture, 11)
+    assert first_capture.memory_event is None
+    assert second_capture.memory_event is None
     assert calls == [
         (name, "cuda:0")
         for name in (

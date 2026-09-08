@@ -78,7 +78,7 @@ class TraceMLTrainerCallback(TrainerCallback if HAS_TRANSFORMERS else object):
     manager: it opens ``trace_step`` in ``on_step_begin`` and closes it in
     ``on_step_end``. ``trace_step`` owns the step memory tracker, the step
     counter advance, the auto-timers for forward/backward/h2d, and the
-    per-step flush. Nothing is duplicated here.
+    per-step capture lifecycle. Nothing is duplicated here.
 
     One TraceML step equals one optimizer step. With
     ``gradient_accumulation_steps > 1``, forward and backward events from all

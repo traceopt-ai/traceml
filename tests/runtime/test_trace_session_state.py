@@ -90,16 +90,18 @@ def test_global_trace_recording_helpers_configure_active_state():
 
 
 def test_timed_region_noops_when_recording_is_complete():
+    from traceml_ai.instrumentation.step_events import begin_step_capture
     import traceml_ai.utils.timing as timing
 
     configure_trace_recording(max_steps=1)
     mark_trace_step_flushed(1)
     mark_trace_recording_drained()
 
-    original_size = len(timing._STEP_BUFFER)
+    capture = begin_step_capture()
+    original_size = len(capture.timing_events)
     with timing.timed_region("_test_region", scope=timing.TimeScope.STEP):
         pass
 
-    assert len(timing._STEP_BUFFER) == original_size
+    assert len(capture.timing_events) == original_size
 
     configure_trace_recording()

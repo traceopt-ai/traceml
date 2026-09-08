@@ -74,17 +74,19 @@ def _reset_traceml_state() -> None:
         configure_trace_recording,
         reset_trace_session_state,
     )
-    from traceml_ai.utils.timing import _STEP_BUFFER
+    from traceml_ai.instrumentation.step_events import (
+        abort_step_capture,
+        begin_step_capture,
+    )
 
     reset_trace_session_state()
     # Restore a fresh RECORDING state in case a prior test left the runtime in
     # a draining/complete state (which would silently drop step events).
     configure_trace_recording(max_steps=None)
     _drain_step_time_queue()
-    # Iterating a DataLoader to exhaustion leaves one unflushed dataloader_next
-    # event from the terminal StopIteration fetch; clear it so it cannot leak
-    # into the next test's first StepTimeBatch.
-    _STEP_BUFFER.clear()
+    # Iterating a DataLoader to exhaustion leaves a terminal StopIteration
+    # fetch in the next pending capture; discard it before the next test.
+    abort_step_capture(begin_step_capture())
 
 
 def _install_auto_instrumentation() -> None:
@@ -190,7 +192,7 @@ def test_deepspeed_recipe_emits_dataloader_next_over_real_loader():
     DataLoader fetch time). It rides a class-level patch of
     ``DataLoader.__iter__``, so it only lands when a real ``torch`` DataLoader
     is iterated. The recipe iterates the loader OUTSIDE ``trace_step``; the
-    fetch is buffered by the process-wide recording gate and flushed into that
+    fetch is retained by the process-wide recording gate and completed into that
     step's StepTimeBatch, so every batch must carry the event. Asserted as rows
     landed, not as "a patch ran".
     """

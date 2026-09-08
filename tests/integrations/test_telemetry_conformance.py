@@ -28,8 +28,11 @@ from pathlib import Path
 
 import pytest
 
-from traceml_ai.instrumentation.step_events import drain_step_time_batches
-from traceml_ai.utils.timing import _STEP_BUFFER
+from traceml_ai.instrumentation.step_events import (
+    abort_step_capture,
+    begin_step_capture,
+    drain_step_time_batches,
+)
 
 # --- StreamContract registry -------------------------------------------------
 # Logical stream name -> wire name (TimeEvent.name).
@@ -109,7 +112,7 @@ def _run_huggingface() -> set[str]:
     # idempotent if already initialized with the same effective config.
     hf_init()
     drain_step_time_batches()
-    _STEP_BUFFER.clear()
+    abort_step_capture(begin_step_capture())
 
     with tempfile.TemporaryDirectory() as tmp:
         model = BertForSequenceClassification(
