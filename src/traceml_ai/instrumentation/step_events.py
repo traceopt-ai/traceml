@@ -14,6 +14,7 @@ import sys
 from dataclasses import dataclass, field
 from enum import Enum
 from queue import Empty, Full, Queue
+from typing import Optional
 
 import torch
 
@@ -36,9 +37,9 @@ class TimeEvent:
     cpu_start: float
     cpu_end: float
 
-    gpu_start: torch.cuda.Event | None = None
-    gpu_end: torch.cuda.Event | None = None
-    gpu_time_ms: float | None = None
+    gpu_start: Optional[torch.cuda.Event] = None
+    gpu_end: Optional[torch.cuda.Event] = None
+    gpu_time_ms: Optional[float] = None
 
     resolved: bool = False
     step: int = -1
