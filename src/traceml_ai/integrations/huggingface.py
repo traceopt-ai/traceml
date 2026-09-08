@@ -80,10 +80,17 @@ class TraceMLTrainerCallback(TrainerCallback if HAS_TRANSFORMERS else object):
     counter advance, the auto-timers for forward/backward/h2d, and the
     per-step capture lifecycle. Nothing is duplicated here.
 
-    One TraceML step equals one optimizer step. With
-    ``gradient_accumulation_steps > 1``, forward and backward events from all
-    accumulated micro-batches fold into a single TraceML step. See the HF
-    integration docs for the full list of limitations vs. ``TraceMLTrainer``.
+    One completed TraceML step corresponds to one HF accumulation/update
+    boundary (``on_step_end``), including when AMP skips the parameter update.
+    ``on_substep_end`` does not advance the counter: forward and backward
+    events from the actual micro-batches in the group fold into one step,
+    including a shorter final group. Optimizer events describe calls that
+    actually run; their count does not drive TraceML's step counter.
+
+    TraceML step IDs remain process-local, so their increments match HF's
+    ``global_step`` increments during recorded, completed groups; their
+    absolute values need not match after checkpoint resume. See the HF
+    integration docs for the input-timing and interrupted-step limitations.
     """
 
     def __init__(self) -> None:
