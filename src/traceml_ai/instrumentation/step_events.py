@@ -1,11 +1,12 @@
 # Copyright 2026 OptAI UG (haftungsbeschraenkt)
 # SPDX-License-Identifier: Apache-2.0
 
-"""Timing event contracts and the training-to-sampler handoff.
+"""Step event contracts and the training-to-sampler handoff.
 
-Producers publish already-grouped step batches. The sampler drains them in
-insertion order and owns CUDA resolution; publishing and draining never wait
-for the GPU. Measurement and pending-step buffering remain in ``utils.timing``.
+Producers publish timing batches and device memory snapshots through separate
+queues. Samplers drain published records in insertion order; only the timing
+sampler resolves CUDA events. Measurement and pending-step buffering remain
+in ``utils.timing`` and ``utils.step_memory``.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ import sys
 from dataclasses import dataclass, field
 from enum import Enum
 from queue import Empty, Full, Queue
-from typing import Optional
+from typing import Optional, TypeVar
 
 import torch
 
@@ -79,7 +80,41 @@ class StepTimeBatch:
     events: list[TimeEvent] = field(default_factory=list)
 
 
+@dataclass
+class StepMemoryEvent:
+    """Process allocator peak on a device, measured at the step boundary.
+
+    Peaks are bytes, or ``None`` when CUDA memory is not applicable. Flush
+    assigns ``step`` before publication; producers must not modify the event
+    afterward. ``timestamp`` is the measurement time, not the drain time.
+    """
+
+    step: int
+    device: str
+    timestamp: float
+    peak_allocated: Optional[float]
+    peak_reserved: Optional[float]
+
+
 _STEP_TIME_QUEUE: Queue[StepTimeBatch] = Queue(maxsize=2048)
+_STEP_MEMORY_QUEUE: Queue[StepMemoryEvent] = Queue(maxsize=2048)
+_T = TypeVar("_T")
+
+
+def _drain_queue(queue: Queue[_T]) -> list[_T]:
+    """Transfer available records without waiting or resolving CUDA events."""
+    items: list[_T] = []
+    while True:
+        try:
+            item = queue.get_nowait()
+        except Empty:
+            break
+        except Exception:  # noqa: BLE001 - preserve best-effort queue draining
+            break
+
+        if item is not None:
+            items.append(item)
+    return items
 
 
 def publish_step_time_batch(batch: StepTimeBatch) -> None:
@@ -99,15 +134,21 @@ def drain_step_time_batches() -> list[StepTimeBatch]:
     This only transfers references. CUDA readiness and the pending FIFO remain
     the timing sampler's responsibility.
     """
-    batches: list[StepTimeBatch] = []
-    while True:
-        try:
-            batch = _STEP_TIME_QUEUE.get_nowait()
-        except Empty:
-            break
-        except Exception:  # noqa: BLE001 - preserve best-effort queue draining
-            break
+    return _drain_queue(_STEP_TIME_QUEUE)
 
-        if batch is not None:
-            batches.append(batch)
-    return batches
+
+def publish_step_memory_event(event: StepMemoryEvent) -> None:
+    """Enqueue without blocking; retain the existing drop-on-full policy."""
+    try:
+        _STEP_MEMORY_QUEUE.put_nowait(event)
+    except Full:
+        print(
+            f"[TraceML:StepMemory] Queue full, dropping event for step "
+            f"{event.step} on {event.device}",
+            file=sys.stderr,
+        )
+
+
+def drain_step_memory_events() -> list[StepMemoryEvent]:
+    """Take available memory snapshots, including after recording stops."""
+    return _drain_queue(_STEP_MEMORY_QUEUE)

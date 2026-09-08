@@ -7,6 +7,10 @@ which carry the full historical notes for versions predating this file.
 
 ## [Unreleased]
 
+- Memory events and wire records no longer include `model_id`. Pending
+  memory is one snapshot per process, published through the shared step-event
+  handoff. Device metadata, peak-counter boundaries, timestamps, byte units,
+  and the SQLite schema are unchanged.
 - Timing event types and queue access now live in
   `instrumentation/step_events.py`. Producers and the timing sampler share an
   explicit handoff; measurement boundaries, CUDA FIFO processing, and stored

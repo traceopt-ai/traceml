@@ -296,7 +296,7 @@ def _run_trace_step_once(*, mode, monkeypatch):
     monkeypatch.setattr(
         instrumentation,
         "flush_step_events",
-        lambda model, step: None,
+        lambda step: None,
     )
     monkeypatch.setattr(
         instrumentation,
@@ -359,7 +359,7 @@ def test_trace_step_publishes_runtime_environment_once(monkeypatch):
     monkeypatch.setattr(
         instrumentation,
         "flush_step_events",
-        lambda model, step: None,
+        lambda step: None,
     )
     monkeypatch.setattr(
         instrumentation,
@@ -426,7 +426,7 @@ def test_trace_step_without_init_does_not_auto_install_optimizer_timing(
     monkeypatch.setattr(
         instrumentation,
         "flush_step_events",
-        lambda model, step: None,
+        lambda step: None,
     )
     monkeypatch.setattr(
         instrumentation,
@@ -478,7 +478,7 @@ def test_trace_step_records_gpu_events_for_step_envelope(monkeypatch):
     monkeypatch.setattr(
         instrumentation,
         "flush_step_events",
-        lambda model, step: None,
+        lambda step: None,
     )
     monkeypatch.setattr(
         instrumentation,
@@ -534,7 +534,7 @@ def test_trace_step_marks_recording_draining_after_configured_step(
     monkeypatch.setattr(
         instrumentation,
         "flush_step_events",
-        lambda model, step: None,
+        lambda step: None,
     )
     monkeypatch.setattr(
         instrumentation,

@@ -196,7 +196,7 @@ def trace_step(model: nn.Module):
             _log_instrumentation_error("record failed", exc)
 
         try:
-            flush_step_events(model, trace_state.step)
+            flush_step_events(trace_state.step)
         except Exception as exc:
             _log_instrumentation_error("flush failed", exc)
 

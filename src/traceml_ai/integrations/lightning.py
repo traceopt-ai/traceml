@@ -408,7 +408,7 @@ class TraceMLCallback(_CallbackBase):
         trace_state = get_trace_session_state()
         trace_state.advance_step()
         try:
-            flush_step_events(pl_module, trace_state.step)
+            flush_step_events(trace_state.step)
         except Exception as e:
             _log_lightning_error("flush failed", e)
 
