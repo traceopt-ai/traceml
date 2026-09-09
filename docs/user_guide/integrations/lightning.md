@@ -339,8 +339,8 @@ traceml compare logs/lightning_baseline/final_summary.json \
 ```
 
 The same experiment runs top to bottom on a free Colab T4, with a last
-section that reads the per-step Input Wait to show the cold first batch of
-every epoch:
+section that reads the per-step DataLoader fetch wait (CPU) to show the cold
+first batch of every epoch:
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/notebooks/lightning_dataloading_bottleneck.ipynb)
 
 ## Gradient accumulation
