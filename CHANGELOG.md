@@ -12,6 +12,8 @@ which carry the full historical notes for versions predating this file.
   Traced Step Time and Step Time on GPU runs; fetches of validation,
   sanity-check, test and predict loaders no longer count toward Input Wait;
   accumulating micro-batches no longer carry a zero-length optimizer event;
+  strategy-owned accumulation also omits non-update optimizer occurrences;
+  unknown-length evaluation prefetches stay outside training Input Wait;
   a batch that raises is discarded instead of being published under the
   previous step; and the callback warns when the init config would leave the
   DataLoader-fetch or H2D stream dark. Real `Trainer.fit()` tests now run in

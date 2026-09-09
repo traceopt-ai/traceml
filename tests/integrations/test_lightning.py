@@ -458,11 +458,15 @@ def test_lightning_on_exception_discards_and_restores(monkeypatch):
     assert "forward" not in module.__dict__
 
 
-def test_lightning_non_training_loops_suppress_fetch_timing(monkeypatch):
+def test_lightning_dataloader_scope_tracks_the_trainer_stage(monkeypatch):
     _enable_callback_without_lightning(monkeypatch)
     events = []
+    predicates = []
 
-    class FakeSuppress:
+    class FakeScope:
+        def __init__(self, enabled):
+            predicates.append(enabled)
+
         def __enter__(self):
             events.append("enter")
             return self
@@ -472,38 +476,43 @@ def test_lightning_non_training_loops_suppress_fetch_timing(monkeypatch):
             return False
 
     monkeypatch.setattr(
-        lightning_integration, "suppress_dataloader_timing", FakeSuppress
+        lightning_integration, "dataloader_timing_scope", FakeScope
     )
-    trainer = SimpleNamespace(training=False, strategy=None)
+    trainer = SimpleNamespace(training=False, strategy=None, callbacks=[])
     module = nn.Linear(2, 2)
     callback = lightning_integration.TraceMLCallback()
+    trainer.callbacks = [callback]
 
-    callback.on_sanity_check_start(trainer, module)
-    callback.on_sanity_check_end(trainer, module)
-    callback.on_validation_start(trainer, module)
-    callback.on_validation_end(trainer, module)
-    callback.on_test_start(trainer, module)
-    callback.on_test_end(trainer, module)
-    callback.on_predict_start(trainer, module)
-    callback.on_predict_end(trainer, module)
-    assert events == ["enter", "exit"] * 4
-
-    # The sanity check runs the validation loop inside it: the nested
-    # start/end pair must not release suppression before the outer end.
-    events.clear()
-    callback.on_sanity_check_start(trainer, module)
-    callback.on_validation_start(trainer, module)
-    callback.on_validation_end(trainer, module)
+    callback.setup(trainer, module)
     assert events == ["enter"]
-    callback.on_sanity_check_end(trainer, module)
+    assert predicates[0]() is False
+
+    trainer.training = True
+    assert predicates[0]() is True
+
+    callback.teardown(trainer, module)
     assert events == ["enter", "exit"]
 
-    # An exception while suppressed releases the suppression.
-    events.clear()
-    callback.on_validation_start(trainer, module)
-    callback.on_exception(trainer, module, RuntimeError("boom"))
-    callback.on_validation_end(trainer, module)
-    assert events == ["enter", "exit"]
+
+def test_strategy_owned_accumulation_skips_optimizer_occurrence(monkeypatch):
+    _enable_callback_without_lightning(monkeypatch)
+    calls = []
+    monkeypatch.setattr(
+        lightning_integration,
+        "timed_region",
+        _ordered_fake_timed_region(calls),
+    )
+    trainer = SimpleNamespace(
+        training=True,
+        strategy=None,
+        fit_loop=SimpleNamespace(_should_accumulate=lambda: True),
+    )
+    module = SimpleNamespace(automatic_optimization=True)
+    callback = lightning_integration.TraceMLCallback()
+
+    callback.on_before_optimizer_step(trainer, module, optimizer=None)
+
+    assert calls == []
 
 
 def test_lightning_backward_closes_an_open_optimizer_region(monkeypatch):

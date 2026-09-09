@@ -1,4 +1,5 @@
 import threading
+from collections.abc import Callable
 
 from torch.utils.data import DataLoader
 
@@ -20,6 +21,21 @@ def _depth() -> int:
 
 def _suppressed() -> bool:
     return _depth() > 0
+
+
+def _timing_allowed() -> bool:
+    """Return whether the current thread should record this fetch."""
+    if _suppressed():
+        return False
+
+    enabled = getattr(_DL_TLS, "_traceml_dl_enabled", None)
+    if enabled is None:
+        return True
+    try:
+        return bool(enabled())
+    except Exception:
+        # Instrumentation policy must never interrupt the DataLoader.
+        return False
 
 
 class suppress_dataloader_timing:
@@ -54,6 +70,42 @@ class suppress_dataloader_timing:
         return False
 
 
+class dataloader_timing_scope:
+    """Limit fetch timing to calls for which ``enabled`` returns true.
+
+    Unlike :class:`suppress_dataloader_timing`, this is intended to remain
+    active across a framework run. The predicate is evaluated for every
+    ``next`` call, which lets integrations distinguish training fetches from
+    evaluation prefetches even when the framework creates both kinds of
+    iterator internally. Scopes are thread-local, support normal nesting, and
+    must be entered and exited on the thread that consumes the DataLoader.
+
+    A predicate failure disables timing for that fetch rather than affecting
+    user code.
+    """
+
+    def __init__(self, enabled: Callable[[], bool]):
+        if not callable(enabled):
+            raise TypeError("enabled must be callable")
+        self.enabled = enabled
+        self._active = False
+        self._previous = None
+
+    def __enter__(self):
+        if not self._active:
+            self._active = True
+            self._previous = getattr(_DL_TLS, "_traceml_dl_enabled", None)
+            _DL_TLS._traceml_dl_enabled = self.enabled
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if self._active:
+            self._active = False
+            _DL_TLS._traceml_dl_enabled = self._previous
+            self._previous = None
+        return False
+
+
 def _traceml_dataloader_iter(self):
     it = _ORIG_DATALOADER_ITER(self)
 
@@ -63,7 +115,7 @@ def _traceml_dataloader_iter(self):
 
     while True:
         try:
-            if _suppressed():
+            if not _timing_allowed():
                 batch = next(it)
             else:
                 with timed_region(

@@ -14,7 +14,11 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("lightning")
 
 import torch.nn as nn  # noqa: E402
-from torch.utils.data import DataLoader, TensorDataset  # noqa: E402
+from torch.utils.data import (  # noqa: E402
+    DataLoader,
+    IterableDataset,
+    TensorDataset,
+)
 
 from traceml_ai.instrumentation.hooks.optimizer_hooks import (  # noqa: E402
     reset_optimizer_timing,
@@ -126,6 +130,18 @@ def _loaders(rows=ROWS, seed=0):
     return DataLoader(ds, batch_size=BATCH), DataLoader(val, batch_size=BATCH)
 
 
+class _UnsizedValidationDataset(IterableDataset):
+    """Validation source that makes Lightning use its look-ahead fetcher."""
+
+    def __iter__(self):
+        generator = torch.Generator().manual_seed(17)
+        for _ in range(2):
+            yield (
+                torch.randn(BATCH, 8, generator=generator),
+                torch.randint(0, 4, (BATCH,), generator=generator),
+            )
+
+
 def _trainer(L, callbacks, **kwargs):
     defaults = dict(
         accelerator="cpu",
@@ -193,6 +209,29 @@ def test_lightning_trainer_validation_fetches_stay_out_of_input_wait(L):
     assert _counts(batches, STEP) == [1, 1, 1, 1]
     assert _counts(batches, FORWARD) == [1, 1, 1, 1]
     assert begin_step_capture().timing_events == []
+
+
+def test_unsized_validation_prefetch_stays_out_of_input_wait(L):
+    traceml_lightning.init()
+    train, _ = _loaders()
+    validation = DataLoader(_UnsizedValidationDataset(), batch_size=None)
+    model = _module_class(L)()
+    trainer = _trainer(
+        L,
+        [traceml_lightning.TraceMLCallback()],
+        val_check_interval=2,
+        limit_val_batches=1.0,
+    )
+
+    trainer.fit(
+        model,
+        train_dataloaders=train,
+        val_dataloaders=validation,
+    )
+    batches = drain_step_time_batches()
+
+    assert [b.step for b in batches] == [1, 2, 3, 4]
+    assert _counts(batches, FETCH) == [1, 1, 1, 1]
 
 
 def test_lightning_trainer_envelope_opens_before_the_batch_transfer(L):
@@ -282,8 +321,7 @@ def test_lightning_trainer_standalone_validate_publishes_nothing(L):
 
     assert drain_step_time_batches() == []
     assert begin_step_capture().timing_events == []
-    assert callback._suppress_cm is None
-    assert callback._suppress_depth == 0
+    assert callback._dataloader_timing_scope is None
     assert callback._traceml_step_ctx is None
 
 
