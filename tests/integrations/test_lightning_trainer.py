@@ -189,6 +189,9 @@ def test_lightning_trainer_validation_fetches_stay_out_of_input_wait(L):
 
     assert [b.step for b in batches] == [1, 2, 3, 4]
     assert _counts(batches, FETCH) == [1, 1, 1, 1]
+    # The envelope and forward must survive the mid-epoch validation too.
+    assert _counts(batches, STEP) == [1, 1, 1, 1]
+    assert _counts(batches, FORWARD) == [1, 1, 1, 1]
     assert begin_step_capture().timing_events == []
 
 
@@ -278,7 +281,7 @@ def test_lightning_trainer_standalone_validate_publishes_nothing(L):
     )
 
     assert drain_step_time_batches() == []
-    assert len(timing._STEP_BUFFER) == 0
+    assert begin_step_capture().timing_events == []
     assert callback._suppress_cm is None
     assert callback._suppress_depth == 0
     assert callback._traceml_step_ctx is None

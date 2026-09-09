@@ -14,33 +14,43 @@ _ORIG_DATALOADER_ITER = DataLoader.__iter__
 _DL_TLS = threading.local()
 
 
+def _depth() -> int:
+    return getattr(_DL_TLS, "_traceml_dl_depth", 0)
+
+
 def _suppressed() -> bool:
-    return bool(getattr(_DL_TLS, "_traceml_dl_suppressed", False))
+    return _depth() > 0
 
 
 class suppress_dataloader_timing:
     """
     Context manager that pauses DataLoader fetch timing on this thread.
 
-    Nested contexts preserve the outer context's state, mirroring
-    ``backward_auto_timer``. Fetches inside the context run untimed; the
-    once-per-iterator armed gate is unchanged.
+    Refcounted per thread, so contexts may nest or interleave: fetches are
+    untimed while any context is open and timing resumes when the last one
+    exits, whatever the exit order. Lightning runs every callback's start
+    hooks in registration order and the end hooks in the same order, so two
+    holders interleave rather than nest. Exiting a context twice is a no-op.
+    The once-per-iterator armed gate is unchanged.
 
-    The flag is thread-local, like the H2D timer's: it covers fetches made on
-    the thread that entered the context, which is the thread Lightning runs
-    its loops and hooks on. Enter and exit on the same thread.
+    The count is thread-local, like the H2D timer's flag: it covers fetches
+    made on the thread that entered the context, which is the thread
+    Lightning runs its loops and hooks on. Enter and exit on the same thread.
     """
 
     def __init__(self):
-        self._prev = False
+        self._active = False
 
     def __enter__(self):
-        self._prev = _suppressed()
-        _DL_TLS._traceml_dl_suppressed = True
+        if not self._active:
+            self._active = True
+            _DL_TLS._traceml_dl_depth = _depth() + 1
         return self
 
     def __exit__(self, exc_type, exc, tb):
-        _DL_TLS._traceml_dl_suppressed = self._prev
+        if self._active:
+            self._active = False
+            _DL_TLS._traceml_dl_depth = max(0, _depth() - 1)
         return False
 
 

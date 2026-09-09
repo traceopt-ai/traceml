@@ -89,6 +89,41 @@ def test_nested_suppression_restores_outer_state():
     assert _fetch_events() == 1
 
 
+def test_interleaved_contexts_hold_until_the_last_exit():
+    # Lightning calls every callback's start hooks in registration order and
+    # the end hooks in the same order, so two holders exit first-in
+    # first-out rather than nesting.
+    it = iter(_loader(6))
+    first = suppress_dataloader_timing()
+    second = suppress_dataloader_timing()
+    first.__enter__()
+    second.__enter__()
+
+    first.__exit__(None, None, None)
+    next(it)
+    assert _fetch_events() == 0, "the second holder is still open"
+
+    second.__exit__(None, None, None)
+    next(it)
+    assert _fetch_events() == 1, "timing resumes after the last exit"
+
+
+def test_exiting_a_context_twice_does_not_unbalance_the_count():
+    it = iter(_loader(6))
+    outer = suppress_dataloader_timing()
+    inner = suppress_dataloader_timing()
+    outer.__enter__()
+    inner.__enter__()
+    inner.__exit__(None, None, None)
+    inner.__exit__(None, None, None)
+    next(it)
+    assert _fetch_events() == 0, "the outer holder is still open"
+
+    outer.__exit__(None, None, None)
+    next(it)
+    assert _fetch_events() == 1
+
+
 def test_suppression_survives_an_exception_inside():
     it = iter(_loader(4))
     with pytest.raises(RuntimeError):
