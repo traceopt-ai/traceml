@@ -2,6 +2,8 @@
 
 Keep one final allocator snapshot until the existing step boundary flushes it
 through ``instrumentation.step_events``. Device identity stays in the event.
+This path assumes one sequential training-step producer and one tracked device
+per process.
 """
 
 import os
