@@ -239,6 +239,31 @@ def test_lightning_trainer_injected_failure_discards_the_partial_step(L):
     assert [b.step for b in drain_step_time_batches()] == [3, 4]
 
 
+def test_lightning_trainer_second_fit_does_not_inherit_pending_events(L):
+    traceml_lightning.init()
+    train, _ = _loaders()
+    callback = traceml_lightning.TraceMLCallback()
+
+    # A full epoch exhausts the loader; the fetch that raises StopIteration
+    # is recorded after the last batch was flushed.
+    _trainer(L, [callback], max_epochs=1).fit(
+        _module_class(L)(), train_dataloaders=train
+    )
+    first = drain_step_time_batches()
+    assert _counts(first, FETCH) == [1, 1, 1, 1]
+    assert (
+        begin_step_capture().timing_events == []
+    ), "teardown must drop what is still pending"
+
+    _trainer(L, [callback], max_steps=2).fit(
+        _module_class(L)(), train_dataloaders=train
+    )
+    second = drain_step_time_batches()
+    assert [b.step for b in second] == [5, 6]
+    assert _counts(second, FETCH) == [1, 1]
+    assert _counts(second, FORWARD) == [1, 1]
+
+
 def test_lightning_trainer_callback_preserves_training(L):
     def run(with_callback):
         reset_trace_session_state()

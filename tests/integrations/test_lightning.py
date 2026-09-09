@@ -504,3 +504,95 @@ def test_lightning_non_training_loops_suppress_fetch_timing(monkeypatch):
     callback.on_exception(trainer, module, RuntimeError("boom"))
     callback.on_validation_end(trainer, module)
     assert events == ["enter", "exit"]
+
+
+def test_lightning_backward_closes_an_open_optimizer_region(monkeypatch):
+    # Manual optimization whose second path never calls pl_module.forward:
+    # the backward after opt_g.step() must end the optimizer region.
+    _enable_callback_without_lightning(monkeypatch)
+    calls = []
+    monkeypatch.setattr(
+        lightning_integration,
+        "timed_region",
+        _ordered_fake_timed_region(calls),
+    )
+    trainer = SimpleNamespace(training=True, strategy=None)
+    module = nn.Linear(2, 2)
+    callback = lightning_integration.TraceMLCallback()
+
+    callback.on_before_optimizer_step(trainer, module, optimizer=None)
+    callback.on_before_backward(trainer, module, loss=None)
+    callback.on_after_backward(trainer, module)
+
+    assert calls == [
+        "enter:_traceml_internal:optimizer_step",
+        "exit:_traceml_internal:optimizer_step",
+        "enter:_traceml_internal:backward_time",
+        "exit:_traceml_internal:backward_time",
+    ]
+
+
+def test_lightning_kill_switch_flipped_mid_batch_abandons_the_batch(
+    monkeypatch,
+):
+    _enable_callback_without_lightning(monkeypatch)
+    monkeypatch.delenv("TRACEML_DISABLED", raising=False)
+    monkeypatch.setattr(step_events, "_ACTIVE_STEP_CAPTURE", StepCapture())
+    discarded = []
+    monkeypatch.setattr(
+        lightning_integration,
+        "abort_step_capture",
+        lambda capture: discarded.append("discard") or True,
+    )
+    calls = []
+    monkeypatch.setattr(
+        lightning_integration,
+        "timed_region",
+        _ordered_fake_timed_region(calls),
+    )
+    monkeypatch.setattr(
+        lightning_integration, "StepMemoryTracker", _FakeMemoryTracker
+    )
+    trainer = SimpleNamespace(training=True, strategy=None)
+    module = nn.Linear(2, 2)
+    callback = lightning_integration.TraceMLCallback()
+
+    callback.on_train_batch_start(trainer, module, batch=None, batch_idx=0)
+    assert callback._traceml_step_ctx is not None
+    monkeypatch.setenv("TRACEML_DISABLED", "1")
+    callback.on_train_batch_end(
+        trainer, module, outputs=None, batch=None, batch_idx=0
+    )
+
+    # The envelope was closed and the capture dropped, nothing advanced.
+    assert callback._traceml_step_ctx is None
+    assert discarded == ["discard"]
+    assert calls == [
+        "enter:_traceml_internal:step_time",
+        "exit:_traceml_internal:step_time",
+    ]
+
+    # Switched back on: the next batch opens its own envelope.
+    monkeypatch.delenv("TRACEML_DISABLED")
+    callback.on_train_batch_start(trainer, module, batch=None, batch_idx=1)
+    assert calls[-1] == "enter:_traceml_internal:step_time"
+    callback._close_context("_traceml_step_ctx")
+
+
+def test_lightning_teardown_discards_whatever_is_still_pending(monkeypatch):
+    _enable_callback_without_lightning(monkeypatch)
+    discarded = []
+    monkeypatch.setattr(
+        lightning_integration,
+        "abort_step_capture",
+        lambda capture: discarded.append("discard") or True,
+    )
+    trainer = SimpleNamespace(training=True, strategy=None)
+    module = nn.Linear(2, 2)
+    callback = lightning_integration.TraceMLCallback()
+    callback.setup(trainer, module)
+
+    callback.teardown(trainer, module)
+
+    assert discarded == ["discard"]
+    assert "forward" not in module.__dict__

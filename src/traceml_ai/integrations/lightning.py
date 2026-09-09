@@ -202,7 +202,6 @@ class TraceMLCallback(_CallbackBase):
         self._suppress_depth = 0
 
         self._mem_tracker = None
-        self._opt_step_occurred = False
 
     def _close_context(self, ctx_attr: str) -> None:
         ctx = getattr(self, ctx_attr, None)
@@ -300,6 +299,15 @@ class TraceMLCallback(_CallbackBase):
             )
         except Exception:
             pass
+        if self._original_batch_to_device is None:
+            # The config check above cannot see this: without the wrapper the
+            # H2D transfer is not timed and the traced step opens late.
+            print(
+                "[TraceML] Lightning strategy.batch_to_device is not wrapped; "
+                "H2D will not be timed and the traced step starts at "
+                "on_train_batch_start.",
+                file=sys.stderr,
+            )
 
     def _wrap_forward(self, trainer, pl_module) -> None:
         if self._original_forward is not None:
@@ -370,8 +378,9 @@ class TraceMLCallback(_CallbackBase):
         self._original_batch_to_device = original
 
     def teardown(self, trainer, pl_module, stage=None):
-        # Lightning may skip ``on_train_batch_end`` after a user exception, so
-        # drop whatever the interrupted batch left pending before restoring.
+        # Events recorded after the last completed step (the fetch that raised
+        # StopIteration at the end of an epoch, or a batch cut short by the
+        # kill switch) must not leak into the next fit in this process.
         self._abandon_pending(pl_module)
         self._restore_forward()
         self._restore_batch_to_device()
@@ -382,7 +391,7 @@ class TraceMLCallback(_CallbackBase):
 
         Nothing is published and the step counter is left where it was. The
         active capture is process-wide, so this also drops any other
-        step-scoped events recorded since the last completion.
+        step-scoped events recorded since the last completed step.
         """
         try:
             self._close_all_contexts()
@@ -402,15 +411,17 @@ class TraceMLCallback(_CallbackBase):
 
         Lightning calls this hook, not ``teardown``, when training raises.
         The open timing regions are closed, the pending timing events and
-        memory snapshot of the aborted batch are discarded, the step counter
-        is left where it was, and the wrappers are restored. The user's
-        exception propagates untouched.
+        memory snapshot are discarded, the step counter is left where it was,
+        and the wrappers are restored. The user's exception propagates
+        untouched.
         """
         self._abandon_pending(pl_module)
         self._restore_forward()
         self._restore_batch_to_device()
 
     # Non-training loops: their loader fetches are not training input wait.
+    # Deliberately not gated on TRACEML_DISABLED: suppression is harmless when
+    # disabled and must still pair correctly if the switch flips back on.
     def on_sanity_check_start(self, trainer, pl_module):
         self._enter_suppression()
 
@@ -480,9 +491,6 @@ class TraceMLCallback(_CallbackBase):
         # never call batch_to_device.
         self._open_step_region()
 
-        # Reset flag for gradient accumulation tracking
-        self._opt_step_occurred = False
-
         # Reset step memory
         try:
             mem_tracker = StepMemoryTracker(pl_module)
@@ -495,7 +503,10 @@ class TraceMLCallback(_CallbackBase):
     def on_before_backward(self, trainer, pl_module, loss):
         if _traceml_disabled():
             return
-        # Start backward timing
+        # A backward after an optimizer step (manual optimization, several
+        # steps per batch) ends that step's region; it must not absorb the
+        # next backward.
+        self._close_context("_optimizer_ctx")
         self._close_context("_backward_ctx")
         self._backward_ctx = timed_region(
             "_traceml_internal:backward_time", scope=TimeScope.STEP
@@ -511,7 +522,6 @@ class TraceMLCallback(_CallbackBase):
     def on_before_optimizer_step(self, trainer, pl_module, optimizer):
         if _traceml_disabled():
             return
-        self._opt_step_occurred = True
 
         # Lightning fires this after the closure (training_step, zero_grad,
         # backward) and before optimizer.step(). The region stays open until
@@ -528,6 +538,10 @@ class TraceMLCallback(_CallbackBase):
         self, trainer, pl_module, outputs, batch, batch_idx
     ):
         if _traceml_disabled():
+            # The kill switch was flipped during this batch. Close what was
+            # opened and drop what was buffered so the next batch starts on a
+            # fresh envelope instead of merging into this one.
+            self._abandon_pending(pl_module)
             return
         # Close the optimizer region, any backward region left open, and the
         # step envelope. On an accumulating micro-batch no optimizer region

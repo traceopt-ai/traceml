@@ -25,6 +25,10 @@ class suppress_dataloader_timing:
     Nested contexts preserve the outer context's state, mirroring
     ``backward_auto_timer``. Fetches inside the context run untimed; the
     once-per-iterator armed gate is unchanged.
+
+    The flag is thread-local, like the H2D timer's: it covers fetches made on
+    the thread that entered the context, which is the thread Lightning runs
+    its loops and hooks on. Enter and exit on the same thread.
     """
 
     def __init__(self):
