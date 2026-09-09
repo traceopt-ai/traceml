@@ -321,6 +321,28 @@ Use the delay flags only when you want to create a deliberate straggler.
 
 ---
 
+## Try it on a real workload
+
+`examples/integrations/lightning_dataloading_bottleneck.py` trains ResNet-18
+on the 320px Imagenette train split; its `--profile` flag changes the
+DataLoader settings and nothing else. Run it twice and compare:
+
+```bash
+traceml run --mode summary --logs-dir logs --run-name lightning_baseline \
+    examples/integrations/lightning_dataloading_bottleneck.py \
+    --args --profile baseline --max-steps 300 --batch-size 64
+traceml run --mode summary --logs-dir logs --run-name lightning_optimized \
+    examples/integrations/lightning_dataloading_bottleneck.py \
+    --args --profile optimized --max-steps 300 --batch-size 64
+traceml compare logs/lightning_baseline/final_summary.json \
+    logs/lightning_optimized/final_summary.json
+```
+
+The same experiment runs top to bottom on a free Colab T4, with a last
+section that reads the per-step DataLoader fetch wait (CPU) to show the cold
+first batch of every epoch:
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/notebooks/lightning_dataloading_bottleneck.ipynb)
+
 ## Gradient accumulation
 
 `TraceMLCallback` supports gradient accumulation.

@@ -28,6 +28,7 @@ AFFECTED_OUTPUT_DOCS = (
     ROOT / "docs" / "guides" / "pytorch-input-pipeline-bottleneck.md",
     ROOT / "docs" / "user_guide" / "integrations" / "accelerate.md",
     ROOT / "notebooks" / "huggingface_dataloading_bottleneck.ipynb",
+    ROOT / "notebooks" / "lightning_dataloading_bottleneck.ipynb",
 )
 LEGACY_SUMMARY_MARKERS = (
     "TraceML Verdict:",

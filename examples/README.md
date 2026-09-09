@@ -31,6 +31,7 @@ These are the main user-facing examples.
 | `integrations/huggingface_trainer_minimal.py` | Minimal Hugging Face `TraceMLTrainerCallback` example | CPU / CUDA | No model download required |
 | `integrations/accelerate_minimal.py` | Minimal Hugging Face `Accelerate` loop wrapped with `traceml.trace_step(...)` | CPU / CUDA | No model download required |
 | `integrations/lightning_minimal.py` | Minimal Lightning integration init + `TraceMLCallback` example | CPU / CUDA | No dataset download required |
+| `integrations/lightning_dataloading_bottleneck.py` | ResNet-18 on 320px Imagenette under Lightning; `--profile` flips the DataLoader settings and nothing else, so two runs plus `traceml compare` isolate the loader change | CPU (`--smoke`) / CUDA | Downloads 326 MB on first use; `--smoke` runs a synthetic CPU check; companion Colab notebook in `notebooks/` |
 | `integrations/deepspeed_minimal.py` | Minimal DeepSpeed loop wrapped with `traceml.trace_step(...)` | CUDA | Requires `deepspeed`; exits cleanly without it |
 
 If you only try one example first, use:
@@ -207,6 +208,10 @@ Starter examples now prefer the top-level public API:
 Lightning examples use `traceml_ai.integrations.lightning.init()` with
 `TraceMLCallback()` so Lightning can keep owning the training loop while
 TraceML records input fetch, transfer, step, phase, and memory timing.
+`integrations/lightning_dataloading_bottleneck.py` is the real-workload
+version: run it twice through `traceml run` with `--profile baseline` and
+`--profile optimized`, then `traceml compare` the two summaries (the module
+docstring carries the exact commands).
 
 Ray Data examples wrap `iter_torch_batches(...)` with
 `traceml.wrap_dataloader_fetch(...)` because Ray Data iterators are not PyTorch
