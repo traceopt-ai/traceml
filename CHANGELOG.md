@@ -7,6 +7,16 @@ which carry the full historical notes for versions predating this file.
 
 ## [Unreleased]
 
+- PyTorch Lightning: `TraceMLCallback` now opens the traced step when
+  Lightning moves the batch to the device, so the H2D transfer is inside
+  Traced Step Time and Step Time on GPU runs; fetches of validation,
+  sanity-check, test and predict loaders no longer count toward Input Wait;
+  accumulating micro-batches no longer carry a zero-length optimizer event;
+  a batch that raises is discarded instead of being published under the
+  previous step; and the callback warns when the init config would leave the
+  DataLoader-fetch or H2D stream dark. Real `Trainer.fit()` tests now run in
+  CI for both the `lightning` and `pytorch_lightning` namespaces, and the
+  Lightning conformance harness is registered.
 - Step timing and memory now share one pending `StepCapture`. Successful steps
   publish once through the existing queues; exceptions propagated through
   `trace_step` discard partial measurements without advancing or reusing the

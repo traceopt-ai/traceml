@@ -88,8 +88,8 @@ def _run_huggingface() -> set[str]:
 
     from traceml_ai.integrations.huggingface import (
         TraceMLTrainer,
-        init as hf_init,
     )
+    from traceml_ai.integrations.huggingface import init as hf_init
 
     class _TinyDS(torch.utils.data.Dataset):
         def __init__(self, n=20, seq=16, vocab=128, labels=4):
@@ -144,9 +144,66 @@ def _run_huggingface() -> set[str]:
     return _drain_step_time_names()
 
 
+def _run_lightning(init: bool = True) -> set[str]:
+    import lightning as L
+    import torch
+    from torch.utils.data import DataLoader, TensorDataset
+
+    from traceml_ai.integrations.lightning import (
+        TraceMLCallback,
+    )
+    from traceml_ai.integrations.lightning import init as lightning_init
+
+    class _Tiny(L.LightningModule):
+        def __init__(self):
+            super().__init__()
+            self.net = torch.nn.Linear(8, 4)
+
+        def forward(self, x):
+            return self.net(x)
+
+        def training_step(self, batch, batch_idx):
+            x, y = batch
+            return torch.nn.functional.cross_entropy(self(x), y)
+
+        def configure_optimizers(self):
+            return torch.optim.SGD(self.parameters(), lr=0.1)
+
+    # Canonical documented path: traceml.init(mode="selective",
+    # patch_dataloader=True, patch_h2d=True). Skipped by the negative control.
+    if init:
+        lightning_init()
+    drain_step_time_batches()
+    abort_step_capture(begin_step_capture())
+
+    g = torch.Generator().manual_seed(0)
+    loader = DataLoader(
+        TensorDataset(
+            torch.randn(16, 8, generator=g),
+            torch.randint(0, 4, (16,), generator=g),
+        ),
+        batch_size=4,
+    )
+    trainer = L.Trainer(
+        max_steps=4,
+        accelerator="cpu",
+        devices=1,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+        enable_checkpointing=False,
+        logger=False,
+        num_sanity_val_steps=0,
+        callbacks=[TraceMLCallback()],
+    )
+    trainer.fit(_Tiny(), train_dataloaders=loader)
+
+    return _drain_step_time_names()
+
+
 # integration -> (runner, required deps). No entry => no runnable harness yet.
 _HARNESSES = {
     "huggingface": (_run_huggingface, ("torch", "transformers")),
+    "lightning": (_run_lightning, ("torch", "lightning")),
 }
 
 
@@ -166,4 +223,24 @@ def test_declared_step_time_streams_emit(integration: str):
     assert not dark, (
         f"{integration}: declared telemetry stream(s) DARK: {dark}. "
         f"Emitted: {sorted(emitted)}"
+    )
+
+
+def test_lightning_harness_detects_a_dark_stream():
+    """
+    Negative control (Stage 2 of #141, item 2 of #320): prove the harness
+    reports an absence. Without the documented ``init()`` the DataLoader patch
+    is never armed, so the dataloader_fetch stream must come back dark while
+    the callback-owned streams still flow.
+    """
+    if not _have("torch", "lightning"):
+        pytest.skip("lightning: required deps not installed")
+
+    emitted = _run_lightning(init=False)
+    required = {STEP_TIME_WIRE[k] for k in REQUIRED_STEP_TIME["lightning"]}
+    dark = sorted(w for w in required if w not in emitted)
+
+    assert dark == [STEP_TIME_WIRE["dataloader_fetch"]], (
+        f"expected exactly the fetch stream to be dark, got {dark}; "
+        f"emitted: {sorted(emitted)}"
     )

@@ -40,11 +40,11 @@ def test_support_matrix_rejects_a_ci_claim_when_its_extra_is_removed(tmp_path):
     manifest = module.load_manifest(MANIFEST)
     workflow = tmp_path / "ci.yml"
     original = WORKFLOW.read_text(encoding="utf-8")
-    expected_install = 'pip install -e ".[torch,dashboard,hf]"'
+    expected_install = 'pip install -e ".[torch,dashboard,hf,lightning]"'
     assert expected_install in original
     workflow.write_text(
         original.replace(
-            expected_install, 'pip install -e ".[torch,dashboard]"'
+            expected_install, 'pip install -e ".[torch,dashboard,lightning]"'
         ),
         encoding="utf-8",
     )
