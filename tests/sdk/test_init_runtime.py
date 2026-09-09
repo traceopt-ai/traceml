@@ -115,12 +115,12 @@ def test_disabled_env_dynamically_silences_low_level_utilities(monkeypatch):
     from traceml_ai.instrumentation.step_events import (
         TimeEvent,
         TimeScope,
+        drain_step_memory_events,
         drain_step_time_batches,
     )
     from traceml_ai.utils.step_memory import (
         StepMemoryTracker,
         flush_step_memory_buffer,
-        step_memory_queue,
     )
     from traceml_ai.utils.timing import (
         flush_step_time_buffer,
@@ -129,8 +129,7 @@ def test_disabled_env_dynamically_silences_low_level_utilities(monkeypatch):
     )
 
     drain_step_time_batches()
-    while not step_memory_queue.empty():
-        step_memory_queue.get_nowait()
+    drain_step_memory_events()
 
     monkeypatch.setenv("TRACEML_DISABLED", "1")
 
@@ -149,14 +148,14 @@ def test_disabled_env_dynamically_silences_low_level_utilities(monkeypatch):
     tracker = StepMemoryTracker(model)
     tracker.reset()
     tracker.record()
-    flush_step_memory_buffer(model, 1)
+    flush_step_memory_buffer(1)
 
     with timed_region("disabled_region"):
         pass
     flush_step_time_buffer(2)
 
     assert drain_step_time_batches() == []
-    assert step_memory_queue.empty()
+    assert drain_step_memory_events() == []
 
 
 def test_init_starts_runtime_when_aggregator_reachable(

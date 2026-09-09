@@ -91,26 +91,11 @@ def _build_training_args(
     )
 
 
-def _drain_step_memory_queue(model_id: int) -> list:
-    """Drain only this test's StepMemoryEvents from the shared queue."""
-    from traceml_ai.utils.step_memory import step_memory_queue
+def _drain_step_memory_queue() -> list:
+    """Drain snapshots from this test's recording session."""
+    from traceml_ai.instrumentation.step_events import drain_step_memory_events
 
-    drained = []
-    leftover = []
-    while not step_memory_queue.empty():
-        evt = step_memory_queue.get_nowait()
-        if getattr(evt, "model_id", None) == model_id:
-            drained.append(evt)
-        else:
-            leftover.append(evt)
-
-    # Put back unrelated events so we do not interfere with other tests.
-    for evt in leftover:
-        try:
-            step_memory_queue.put_nowait(evt)
-        except Exception:
-            pass
-    return drained
+    return drain_step_memory_events()
 
 
 def _drain_step_time_queue() -> list:
@@ -123,22 +108,14 @@ def _drain_step_time_queue() -> list:
 def _reset_traceml_state() -> None:
     """Reset TraceML's process-local step counter and drain shared queues."""
     from traceml_ai.runtime.state import reset_trace_session_state
-    from traceml_ai.utils import timing
+    from traceml_ai.utils import step_memory, timing
 
     reset_trace_session_state()
     # Unflushed step events from a previous test would land in our first batch.
     timing._STEP_BUFFER.clear()
+    step_memory._PENDING_MEMORY = None
     _drain_step_time_queue()
-    # Drain any leftover step-memory events. We don't filter by model_id here
-    # because we want a clean slate; older tests' events would otherwise leak
-    # into this test's drained count.
-    from traceml_ai.utils.step_memory import step_memory_queue
-
-    while not step_memory_queue.empty():
-        try:
-            step_memory_queue.get_nowait()
-        except Exception:
-            break
+    _drain_step_memory_queue()
 
 
 def test_hf_trainer_integration():
@@ -192,7 +169,7 @@ def test_hf_trainer_callback_integration():
         )
         trainer.train()
 
-        drained = _drain_step_memory_queue(id(model))
+        drained = _drain_step_memory_queue()
         assert len(drained) == max_steps, (
             f"Expected exactly one StepMemoryEvent per optimizer step "
             f"({max_steps}), got {len(drained)}. A count higher than "
@@ -314,7 +291,7 @@ def test_hf_trainer_wrapper_equivalent_to_direct_callback():
             from traceml_ai.runtime.state import get_trace_session_state
 
             step = get_trace_session_state().step
-            drained = _drain_step_memory_queue(id(model))
+            drained = _drain_step_memory_queue()
             return step, len(drained)
 
     callback_steps, callback_samples = _run_with(
@@ -379,7 +356,7 @@ def test_hf_trainer_wrapper_dedups_user_supplied_callback():
 
         trainer.train()
 
-        drained = _drain_step_memory_queue(id(model))
+        drained = _drain_step_memory_queue()
         assert len(drained) == max_steps, (
             f"Expected one StepMemoryEvent per optimizer step "
             f"({max_steps}), got {len(drained)}; dedup guard failed."
@@ -423,7 +400,7 @@ def test_hf_trainer_callback_noop_when_disabled(monkeypatch):
             f"advanced by {step_after - step_before}."
         )
 
-        drained = _drain_step_memory_queue(id(model))
+        drained = _drain_step_memory_queue()
         assert (
             drained == []
         ), f"Expected no StepMemoryEvents when disabled, got {len(drained)}."

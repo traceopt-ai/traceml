@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from traceml_ai.instrumentation.step_events import (
+    StepMemoryEvent,
+    drain_step_memory_events,
+)
 from traceml_ai.samplers.base_sampler import BaseSampler
 from traceml_ai.samplers.schema.step_memory import StepMemorySample
-from traceml_ai.samplers.utils import drain_queue_nowait
-from traceml_ai.utils.step_memory import StepMemoryEvent, step_memory_queue
 
 
 class StepMemorySampler(BaseSampler):
@@ -22,7 +24,7 @@ class StepMemorySampler(BaseSampler):
         """
         Drain entire step memory queue.
         """
-        for event in drain_queue_nowait(step_memory_queue):
+        for event in drain_step_memory_events():
             sample = self._event_to_sample(event)
             self._add_record(sample.to_wire())
 
@@ -33,7 +35,6 @@ class StepMemorySampler(BaseSampler):
         return StepMemorySample(
             sample_idx=self.sample_idx,
             timestamp=float(event.timestamp),
-            model_id=event.model_id,
             device=event.device,
             step=event.step,
             peak_allocated=event.peak_allocated,

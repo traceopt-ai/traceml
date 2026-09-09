@@ -14,38 +14,8 @@ contain sampler-specific aggregation logic.
 from __future__ import annotations
 
 from pathlib import Path
-from queue import Empty
-from typing import Any
 
 from traceml_ai.runtime.session import rank_dir_name
-
-
-def drain_queue_nowait(queue_obj: Any, *, skip_none: bool = True) -> list[Any]:
-    """
-    Drain a queue without blocking and return all currently available items.
-
-    Notes
-    -----
-    - Uses `get_nowait()` instead of `queue.empty()` to avoid relying on the
-      weaker `empty()` concurrency semantics.
-    - Best-effort by design: unexpected queue exceptions stop draining.
-    """
-    items: list[Any] = []
-
-    while True:
-        try:
-            item = queue_obj.get_nowait()
-        except Empty:
-            break
-        except Exception:
-            break
-
-        if skip_none and item is None:
-            continue
-
-        items.append(item)
-
-    return items
 
 
 def ensure_session_dir(

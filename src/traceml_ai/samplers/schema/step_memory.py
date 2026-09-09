@@ -22,7 +22,7 @@ class StepMemorySample:
     """
     Step-level peak memory snapshot.
 
-    A single record corresponds to one training step for a given model/device.
+    A record contains process allocator peaks for a step on a tracked device.
 
     Units
     -----
@@ -32,7 +32,6 @@ class StepMemorySample:
 
     sample_idx: int
     timestamp: float
-    model_id: Optional[int]
     device: Optional[str]
     step: Optional[int]
     peak_allocated: Optional[float]
@@ -50,7 +49,6 @@ class StepMemorySample:
         return {
             "seq": self.sample_idx,
             "ts": self.timestamp,
-            "model_id": self.model_id,
             "device": self.device,
             "step": self.step,
             "peak_alloc": self.peak_allocated,
@@ -75,7 +73,6 @@ class StepMemorySample:
         return StepMemorySample(
             sample_idx=data["seq"],
             timestamp=float(data["ts"]),
-            model_id=data.get("model_id"),
             device=data.get("device"),
             step=data.get("step"),
             peak_allocated=data.get("peak_alloc"),

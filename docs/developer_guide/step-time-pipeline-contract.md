@@ -12,16 +12,21 @@ For user-facing timing definitions, see the
 
 ## Training-to-sampler handoff
 
-`instrumentation/step_events.py` owns `TimeEvent`, `StepTimeBatch`, and the
-private timing queue. `utils/timing.py` measures regions and buffers events
-until the existing step boundary assigns their step number and publishes one
-batch through `publish_step_time_batch()`.
+`instrumentation/step_events.py` owns `TimeEvent`, `StepTimeBatch`,
+`StepMemoryEvent`, and two private queues. `utils/timing.py` measures regions
+and buffers events until the existing step boundary assigns their step number
+and publishes one batch through `publish_step_time_batch()`.
 
 ```text
 timed regions / optimizer hooks
   -> utils/timing.py: pending events and step flush
   -> instrumentation/step_events.py: timing batch queue
   -> StepTimeSampler: pending FIFO, CUDA resolution, aggregation, storage
+
+memory tracker
+  -> utils/step_memory.py: one pending snapshot and step flush
+  -> instrumentation/step_events.py: memory event queue
+  -> StepMemorySampler: conversion and storage
 ```
 
 The sampler calls `drain_step_time_batches()` to take available batches without
@@ -29,14 +34,31 @@ blocking. Publication and reading transfer references, not copies of events.
 After publication, the producer must not change a batch's membership or step
 identity. Only the sampler resolves its CUDA events.
 
-The queue holds up to 2,048 batches and retains the existing drop-on-full
-behavior. The sampler keeps its existing pending FIFO: an unresolved earlier
-CUDA batch holds back later batches. Reading continues after recording stops
-so already-published measurements can drain. No GPU synchronization is added.
+Each queue retains its existing capacity of 2,048 items and drops incoming
+items when full: timing items are batches; memory items are device snapshots.
+The timing sampler keeps its existing pending FIFO: an unresolved earlier
+CUDA batch holds back later batches. Both readers continue after recording
+stops so already-published measurements can drain. No GPU synchronization is
+added.
 
-This first cleanup changes the timing handoff only. Memory still uses its
-existing queue, and step completion, failure handling, and input-fetch
-boundaries are unchanged. Global timing is currently not persisted.
+Memory uses `publish_step_memory_event()` and `drain_step_memory_events()`.
+Its peak values describe the process's PyTorch allocator on a tracked device;
+the model selects that device but is not the owner of the measured memory.
+Memory events and wire records therefore do not include `model_id`. The SQLite
+projection already stores device and rank identity without that field.
+
+The current recording path keeps one pending memory snapshot per process for
+one active step on one tracked device. `record()` replaces that snapshot.
+Flush clears the pending slot, assigns the step number, and publishes the
+event. The queue retains all published steps until the sampler drains them.
+There is no model or device key; `device` stays as snapshot metadata. Device
+selection and labels, reset/read boundaries, measurement timestamps, byte
+units, and `None` values for non-CUDA devices are unchanged.
+
+Timing and memory drain independently and may reach different steps on the
+same sampler tick. Step completion, failure handling, and input-fetch
+boundaries remain unchanged. The shared pending-step lifecycle is follow-up
+work; global timing is currently not persisted.
 
 ## Analysis and presentation flow
 
