@@ -126,15 +126,24 @@ backward pass, and the optimizer step are all inside Traced Step Time. The
 DataLoader fetch that precedes the transfer is reported separately as Input
 Wait, and Step Time is the sum of the two.
 
-Only training batches are measured. Fetches and transfers of the validation,
-sanity-check, test, and predict loaders do not count toward Input Wait or
-H2D, and no step is published for them.
+Only training batches are measured. The callback keeps a framework-level
+DataLoader timing policy active for the whole Trainer run and checks
+Lightning's current stage on every fetch. This is intentionally broader than
+the validation start/end hooks because Lightning can prefetch an unknown-length
+evaluation loader before `on_validation_start`. Fetches and transfers of the
+validation, sanity-check, test, and predict loaders therefore do not count
+toward Input Wait or H2D, and no step is published for them.
 
 Normal PyTorch `DataLoader` input timing is automatic after
 `traceml_lightning.init()`. If you pass Lightning a custom iterator or
 non-PyTorch loader, wrap it with `traceml.wrap_dataloader_fetch(...)` before
 passing it to `trainer.fit(...)`. For Ray Data with Lightning, see
 [Ray Train](ray.md).
+
+For a DataLoader whose length is unknown, Lightning performs a one-batch
+look-ahead and probes the iterator for exhaustion. Input Wait reports those
+actual `DataLoader.__next__()` calls, so their distribution across steps can
+differ from the one-fetch-per-step shape of a sized DataLoader.
 
 Small batches may show `H2D 0.0ms` because the transfer is below display
 precision. The full example below uses a wider CPU tensor so H2D timing is
@@ -143,7 +152,9 @@ visible.
 On Lightning the optimizer phase runs from `on_before_optimizer_step` to the
 end of the batch, so it also covers the step-interval learning-rate scheduler
 update. Under manual optimization each `optimizer.step()` call is one
-optimizer event.
+optimizer event. Under automatic optimization, accumulating micro-batches have
+no optimizer event, including for strategies such as DeepSpeed that route each
+micro-batch through an internal `engine.step()` call.
 
 If training raises, the callback discards the measurements of the batch that
 failed rather than publishing a partial step, restores the module and strategy

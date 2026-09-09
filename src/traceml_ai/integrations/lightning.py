@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 from traceml_ai.instrumentation.patches.dataloader_patch import (
-    suppress_dataloader_timing,
+    dataloader_timing_scope,
 )
 from traceml_ai.instrumentation.patches.h2d_auto_timer_patch import (
     h2d_auto_timer,
@@ -167,6 +167,31 @@ def _lightning_uses_cuda(trainer, pl_module) -> bool:
     return _device_is_cuda(module_device)
 
 
+def _lightning_is_accumulating(trainer, pl_module) -> bool:
+    """Return Lightning's update decision for automatic optimization.
+
+    Most strategies do not fire ``on_before_optimizer_step`` on accumulating
+    micro-batches. Strategies that own accumulation, including DeepSpeed, do;
+    Lightning's fit-loop decision is the authoritative way to distinguish
+    those internal calls from parameter-update batches.
+    """
+    if not getattr(pl_module, "automatic_optimization", False):
+        return False
+
+    should_accumulate = getattr(
+        getattr(trainer, "fit_loop", None),
+        "_should_accumulate",
+        None,
+    )
+    if not callable(should_accumulate):
+        return False
+    try:
+        return bool(should_accumulate())
+    except Exception as e:
+        _log_lightning_error("accumulation state check failed", e)
+        return False
+
+
 class TraceMLCallback(_CallbackBase):
     """
     Official TraceML Callback for PyTorch Lightning.
@@ -198,8 +223,7 @@ class TraceMLCallback(_CallbackBase):
         self._original_forward_attr = _MISSING
         self._wrapped_forward = None
         self._step_capture = None
-        self._suppress_cm = None
-        self._suppress_depth = 0
+        self._dataloader_timing_scope = None
 
         self._mem_tracker = None
 
@@ -244,41 +268,37 @@ class TraceMLCallback(_CallbackBase):
             return
         self._traceml_step_ctx = ctx
 
-    def _enter_suppression(self) -> None:
-        """
-        Keep a non-training loader's fetches out of Input Wait.
-
-        Refcounted: the sanity check runs the validation loop inside it, so
-        the hooks nest (sanity start, validation start, validation end,
-        sanity end) and suppression must hold until the outermost end.
-        """
-        self._suppress_depth += 1
-        if self._suppress_cm is not None:
+    def _enter_dataloader_timing_scope(self, trainer) -> None:
+        """Record DataLoader fetches only while Lightning is training."""
+        if self._dataloader_timing_scope is not None:
             return
         try:
-            cm = suppress_dataloader_timing()
-            cm.__enter__()
+            scope = dataloader_timing_scope(
+                lambda: bool(getattr(trainer, "training", False))
+            )
+            scope.__enter__()
         except Exception as e:
-            _log_lightning_error("fetch suppression enter failed", e)
+            _log_lightning_error("DataLoader timing scope enter failed", e)
             return
-        self._suppress_cm = cm
+        self._dataloader_timing_scope = scope
 
-    def _exit_suppression(self, force: bool = False) -> None:
-        self._suppress_depth = 0 if force else max(0, self._suppress_depth - 1)
-        if self._suppress_depth > 0:
+    def _exit_dataloader_timing_scope(self) -> None:
+        """Release the framework-level DataLoader timing policy once."""
+        scope, self._dataloader_timing_scope = (
+            self._dataloader_timing_scope,
+            None,
+        )
+        if scope is None:
             return
-        cm = self._suppress_cm
-        if cm is None:
-            return
-        self._suppress_cm = None
         try:
-            cm.__exit__(None, None, None)
+            scope.__exit__(None, None, None)
         except Exception as e:
-            _log_lightning_error("fetch suppression exit failed", e)
+            _log_lightning_error("DataLoader timing scope exit failed", e)
 
     def setup(self, trainer, pl_module, stage=None):
         if _traceml_disabled():
             return
+        self._enter_dataloader_timing_scope(trainer)
         self._wrap_forward(trainer, pl_module)
         self._wrap_batch_to_device(trainer, pl_module)
 
@@ -384,6 +404,7 @@ class TraceMLCallback(_CallbackBase):
         self._abandon_pending(pl_module)
         self._restore_forward()
         self._restore_batch_to_device()
+        self._exit_dataloader_timing_scope()
 
     def _abandon_pending(self, pl_module) -> None:
         """
@@ -395,7 +416,6 @@ class TraceMLCallback(_CallbackBase):
         """
         try:
             self._close_all_contexts()
-            self._exit_suppression(force=True)
             capture = self._step_capture
             self._step_capture = None
             abort_step_capture(
@@ -418,33 +438,7 @@ class TraceMLCallback(_CallbackBase):
         self._abandon_pending(pl_module)
         self._restore_forward()
         self._restore_batch_to_device()
-
-    # Non-training loops: their loader fetches are not training input wait.
-    # Deliberately not gated on TRACEML_DISABLED: suppression is harmless when
-    # disabled and must still pair correctly if the switch flips back on.
-    def on_sanity_check_start(self, trainer, pl_module):
-        self._enter_suppression()
-
-    def on_sanity_check_end(self, trainer, pl_module):
-        self._exit_suppression()
-
-    def on_validation_start(self, trainer, pl_module):
-        self._enter_suppression()
-
-    def on_validation_end(self, trainer, pl_module):
-        self._exit_suppression()
-
-    def on_test_start(self, trainer, pl_module):
-        self._enter_suppression()
-
-    def on_test_end(self, trainer, pl_module):
-        self._exit_suppression()
-
-    def on_predict_start(self, trainer, pl_module):
-        self._enter_suppression()
-
-    def on_predict_end(self, trainer, pl_module):
-        self._exit_suppression()
+        self._exit_dataloader_timing_scope()
 
     def _restore_forward(self) -> None:
         module = self._forward_module
@@ -521,6 +515,12 @@ class TraceMLCallback(_CallbackBase):
 
     def on_before_optimizer_step(self, trainer, pl_module, optimizer):
         if _traceml_disabled():
+            return
+        # Strategies such as DeepSpeed call this hook on every micro-batch and
+        # perform gradient accumulation inside ``engine.step``. Match
+        # Lightning's semantic optimizer counter by omitting those internal
+        # accumulation calls from TraceML's optimizer occurrence metric.
+        if _lightning_is_accumulating(trainer, pl_module):
             return
 
         # Lightning fires this after the closure (training_step, zero_grad,

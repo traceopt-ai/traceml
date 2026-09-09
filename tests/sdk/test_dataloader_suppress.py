@@ -7,6 +7,7 @@ torch = pytest.importorskip("torch")
 from torch.utils.data import DataLoader, TensorDataset  # noqa: E402
 
 from traceml_ai.instrumentation.patches.dataloader_patch import (  # noqa: E402
+    dataloader_timing_scope,
     patch_dataloader,
     suppress_dataloader_timing,
 )
@@ -133,6 +134,31 @@ def test_suppression_survives_an_exception_inside():
     next(it)
 
     assert _fetch_events() == 1
+
+
+def test_timing_scope_rechecks_framework_state_for_every_fetch():
+    state = {"training": True}
+    it = iter(_loader(4))
+
+    with dataloader_timing_scope(lambda: state["training"]):
+        next(it)
+        state["training"] = False
+        next(it)
+        state["training"] = True
+        next(it)
+
+    assert _fetch_events() == 2
+
+
+def test_timing_scope_predicate_failure_never_breaks_the_loader():
+    def broken_policy():
+        raise RuntimeError("policy failure")
+
+    it = iter(_loader(2))
+    with dataloader_timing_scope(broken_policy):
+        next(it)
+
+    assert _fetch_events() == 0
 
 
 def test_suppression_is_a_no_op_when_disarmed():
