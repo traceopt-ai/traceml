@@ -12,27 +12,42 @@ For user-facing timing definitions, see the
 
 ## Training-to-sampler handoff
 
-`instrumentation/step_events.py` owns `TimeEvent`, `StepTimeBatch`,
-`StepMemoryEvent`, and two private queues. `utils/timing.py` measures regions
-and buffers events until the existing step boundary assigns their step number
-and publishes one batch through `publish_step_time_batch()`.
+`instrumentation/step_events.py` owns `StepCapture`, the timing and memory event
+contracts, and two private queues. The measurement utilities submit events to
+one active capture. Input timing recorded before a framework's explicit step
+callback stays in that capture and is attributed at the next step boundary.
 
 ```text
-timed regions / optimizer hooks
-  -> utils/timing.py: pending events and step flush
-  -> instrumentation/step_events.py: timing batch queue
-  -> StepTimeSampler: pending FIFO, CUDA resolution, aggregation, storage
-
-memory tracker
-  -> utils/step_memory.py: one pending snapshot and step flush
-  -> instrumentation/step_events.py: memory event queue
-  -> StepMemorySampler: conversion and storage
+timed regions / optimizer hooks ─┐
+                                ├─> active StepCapture
+memory tracker ─────────────────┘          │
+                                ┌─────────┴─────────┐
+                         complete(step)          abort()
+                                │                   │
+                    ┌───────────┴───────────┐   discard
+                    ▼                       ▼
+             timing batch queue       memory event queue
+                    ▼                       ▼
+             StepTimeSampler         StepMemorySampler
 ```
 
-The sampler calls `drain_step_time_batches()` to take available batches without
-blocking. Publication and reading transfer references, not copies of events.
-After publication, the producer must not change a batch's membership or step
-identity. Only the sampler resolves its CUDA events.
+On success, completion detaches the capture, assigns one step number, and
+publishes its timing batch and final memory snapshot. An exception propagated
+through `trace_step` aborts the partial capture without advancing the step
+counter. Repeated completion or abort calls on the detached capture do nothing,
+so an old caller cannot finalize a later step. If recording is disabled before
+completion, the capture is detached and discarded instead of being published.
+
+The producer lifecycle is sequential: close the step's timing regions, then
+call `complete_step_capture()` or `abort_step_capture()`, then begin the next
+step. Timing regions must not span capture boundaries. These module helpers
+own finalization and replacement of the active capture; integrations should
+not call the capture's private finalization methods. CUDA resolution may finish
+later in the sampler because queued events already carry their step number.
+
+Publication and reading transfer references, not copies. After publication,
+the producer must not change event membership or step identity. Only the timing
+sampler resolves CUDA events.
 
 Each queue retains its existing capacity of 2,048 items and drops incoming
 items when full: timing items are batches; memory items are device snapshots.
@@ -47,18 +62,18 @@ the model selects that device but is not the owner of the measured memory.
 Memory events and wire records therefore do not include `model_id`. The SQLite
 projection already stores device and rank identity without that field.
 
-The current recording path keeps one pending memory snapshot per process for
-one active step on one tracked device. `record()` replaces that snapshot.
-Flush clears the pending slot, assigns the step number, and publishes the
-event. The queue retains all published steps until the sampler drains them.
-There is no model or device key; `device` stays as snapshot metadata. Device
-selection and labels, reset/read boundaries, measurement timestamps, byte
-units, and `None` values for non-CUDA devices are unchanged.
+The active capture keeps one memory snapshot per process for one active step on
+one tracked device. `record()` replaces that snapshot. The memory queue retains
+all completed steps until the sampler drains them. There is no model or device
+key; `device` stays as snapshot metadata. Device selection and labels,
+reset/read boundaries, measurement timestamps, byte units, and `None` values
+for non-CUDA devices are unchanged.
 
 Timing and memory drain independently and may reach different steps on the
-same sampler tick. Step completion, failure handling, and input-fetch
-boundaries remain unchanged. The shared pending-step lifecycle is follow-up
-work; global timing is currently not persisted.
+same sampler tick; queue delivery is not an atomic transaction across both
+queues. Existing framework boundaries still define a step, CUDA timing remains
+asynchronous, and global timing is currently not persisted. Framework-specific
+exception callbacks and HF input attribution remain separate integration work.
 
 ## Analysis and presentation flow
 

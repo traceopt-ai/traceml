@@ -68,12 +68,15 @@ def _reset_traceml_state() -> None:
         configure_trace_recording,
         reset_trace_session_state,
     )
-    from traceml_ai.utils.timing import _STEP_BUFFER
+    from traceml_ai.instrumentation.step_events import (
+        abort_step_capture,
+        begin_step_capture,
+    )
 
     reset_trace_session_state()
     configure_trace_recording(max_steps=None)
     _drain_step_time_queue()
-    _STEP_BUFFER.clear()
+    abort_step_capture(begin_step_capture())
 
 
 def _install_auto_instrumentation() -> None:
@@ -179,8 +182,8 @@ def test_accelerate_recipe_emits_dataloader_next_over_real_loader():
     DataLoader fetch time). It rides a class-level patch of
     ``DataLoader.__iter__``, so it only lands when a real ``torch``
     DataLoader is iterated. The recipe iterates the loader OUTSIDE
-    ``trace_step``; the fetch is buffered by the process-wide recording
-    gate and flushed into that step's StepTimeBatch, so every batch must
+    ``trace_step``; the fetch is retained by the process-wide recording
+    gate and completed into that step's StepTimeBatch, so every batch must
     carry the event. Asserted as rows landed, not as "a patch ran".
     """
     from torch.utils.data import DataLoader, TensorDataset

@@ -1,10 +1,13 @@
-from collections import deque
 from queue import Queue
 
 import pytest
 
 from traceml_ai.instrumentation import step_events
-from traceml_ai.instrumentation.step_events import StepTimeBatch, TimeEvent
+from traceml_ai.instrumentation.step_events import (
+    StepCapture,
+    StepTimeBatch,
+    TimeEvent,
+)
 from traceml_ai.runtime.state import configure_trace_recording
 from traceml_ai.samplers.step_time_sampler import StepTimeSampler
 from traceml_ai.utils import timing
@@ -14,7 +17,7 @@ from traceml_ai.utils import timing
 def isolated_timing_queue(monkeypatch):
     monkeypatch.delenv("TRACEML_DISABLED", raising=False)
     monkeypatch.setattr(step_events, "_STEP_TIME_QUEUE", Queue(maxsize=2048))
-    monkeypatch.setattr(timing, "_STEP_BUFFER", deque())
+    monkeypatch.setattr(step_events, "_ACTIVE_STEP_CAPTURE", StepCapture())
     configure_trace_recording()
     yield
     configure_trace_recording()
@@ -143,18 +146,21 @@ def test_step_time_sampler_aggregates_repeated_event_clocks() -> None:
     assert stats["n_calls"] == 2
 
 
-def test_flush_preserves_batches_until_sampler_drains(
+def test_completed_captures_wait_until_sampler_drains(
     isolated_timing_queue, monkeypatch
 ):
     first = TimeEvent("forward", "cpu", 1.0, 1.002)
     repeated = TimeEvent("forward", "cpu", 2.0, 2.003)
     second = TimeEvent("forward", "cpu", 3.0, 3.004)
+    first_capture = step_events.begin_step_capture()
     timing.record_event(first)
     timing.record_event(repeated)
-    timing.flush_step_time_buffer(10)
+    assert step_events.complete_step_capture(first_capture, 10)
+    second_capture = step_events.begin_step_capture()
     timing.record_event(second)
-    timing.flush_step_time_buffer(11)
-    assert not timing._STEP_BUFFER
+    assert step_events.complete_step_capture(second_capture, 11)
+    assert not first_capture.timing_events
+    assert not second_capture.timing_events
 
     # Recording may stop before the next sampler tick; queued work still drains.
     configure_trace_recording(max_steps=11).mark_step_flushed(11)

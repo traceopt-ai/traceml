@@ -1,25 +1,22 @@
-"""Timing measurement and pending-step buffering.
+"""Timing measurement for TraceML instrumentation.
 
-Flush publishes one batch through ``instrumentation.step_events``. That module
-owns the timing event contract and queue; the sampler owns CUDA resolution and
-aggregation. Global timing is currently not persisted.
+Step-scoped events are submitted to the active ``StepCapture``. The capture
+owns finalization and queue publication; the timing sampler owns CUDA
+resolution and aggregation. Global timing is currently not persisted.
 """
 
 import os
 import sys
 import time
-from collections import deque
 from contextlib import contextmanager
 from queue import Full, Queue
-from typing import Deque, List
 
 import torch
 
 from traceml_ai.instrumentation.step_events import (
-    StepTimeBatch,
     TimeEvent,
     TimeScope,
-    publish_step_time_batch,
+    record_step_time_event,
 )
 from traceml_ai.runtime.state import should_record_trace_events
 from traceml_ai.utils.cuda_event_pool import get_cuda_event
@@ -30,8 +27,6 @@ def _traceml_disabled() -> bool:
 
 
 _GLOBAL_TIME_QUEUE: Queue = Queue(maxsize=2048)
-
-_STEP_BUFFER: Deque[TimeEvent] = deque()
 
 
 def get_global_time_queue() -> Queue:
@@ -56,35 +51,15 @@ def record_event(evt: TimeEvent) -> None:
     """
     Record a timing event.
 
-    STEP events are buffered until flush.
+    STEP events belong to the active capture until successful completion.
     GLOBAL timing is currently not persisted.
     """
     if _traceml_disabled() or not should_record_trace_events():
         return
     if evt.scope == TimeScope.STEP:
-        _STEP_BUFFER.append(evt)
+        record_step_time_event(evt)
     else:
         _enqueue_global(evt)
-
-
-def flush_step_time_buffer(step: int) -> None:
-    """
-    Flush buffered STEP events as a single StepTimeBatch.
-
-    Called at the caller-defined step boundary with its assigned step number.
-    """
-    if _traceml_disabled() or not should_record_trace_events():
-        return
-    if not _STEP_BUFFER:
-        return
-
-    events: List[TimeEvent] = []
-    while _STEP_BUFFER:
-        evt = _STEP_BUFFER.popleft()
-        evt.step = step  # keep compatibility / make debugging easier
-        events.append(evt)
-
-    publish_step_time_batch(StepTimeBatch(step=step, events=events))
 
 
 @contextmanager

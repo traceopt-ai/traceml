@@ -7,12 +7,17 @@ from typing import TYPE_CHECKING, Any
 from traceml_ai.instrumentation.patches.h2d_auto_timer_patch import (
     h2d_auto_timer,
 )
-from traceml_ai.instrumentation.step_events import TimeEvent, TimeScope
+from traceml_ai.instrumentation.step_events import (
+    TimeEvent,
+    TimeScope,
+    abort_step_capture,
+    begin_step_capture,
+    complete_step_capture,
+)
 from traceml_ai.runtime.state import (
     get_trace_session_state,
     mark_trace_step_flushed,
 )
-from traceml_ai.utils.flush_buffers import flush_step_events
 from traceml_ai.utils.step_memory import StepMemoryTracker
 from traceml_ai.utils.timing import record_event, timed_region
 
@@ -107,7 +112,7 @@ def init():
     Initialize TraceML for PyTorch Lightning runs.
 
     Lightning owns the training loop, so TraceMLCallback owns step boundaries,
-    flushing, and framework hook integration. The integration init enables
+    capture completion, and framework hook integration. The integration enables
     DataLoader fetch timing plus the H2D Tensor.to patch. The callback turns H2D
     timing on only around Lightning's batch transfer hooks and wraps
     LightningModule.forward directly for model-forward timing.
@@ -184,6 +189,7 @@ class TraceMLCallback(_CallbackBase):
         self._original_forward = None
         self._original_forward_attr = _MISSING
         self._wrapped_forward = None
+        self._step_capture = None
 
         self._mem_tracker = None
         self._opt_step_occurred = False
@@ -268,8 +274,23 @@ class TraceMLCallback(_CallbackBase):
         self._original_batch_to_device = original
 
     def teardown(self, trainer, pl_module, stage=None):
+        # Lightning may skip ``on_train_batch_end`` after a user exception.
+        # Close instrumentation regions before discarding their partial events.
+        for ctx_attr in (
+            "_backward_ctx",
+            "_optimizer_ctx",
+            "_traceml_step_ctx",
+        ):
+            self._close_context(ctx_attr)
+        self._abort_step_capture()
         self._restore_forward()
         self._restore_batch_to_device()
+
+    def _abort_step_capture(self) -> None:
+        capture = self._step_capture
+        self._step_capture = None
+        if capture is not None:
+            abort_step_capture(capture)
 
     def _restore_forward(self) -> None:
         module = self._forward_module
@@ -312,6 +333,7 @@ class TraceMLCallback(_CallbackBase):
         # Start overall step timing
         if _traceml_disabled():
             return
+        self._step_capture = begin_step_capture()
         self._traceml_step_ctx = timed_region(
             "_traceml_internal:step_time",
             scope="step",
@@ -403,14 +425,17 @@ class TraceMLCallback(_CallbackBase):
             except Exception as e:
                 _log_lightning_error("record failed", e)
 
-        # Advance step counter and flush (treating every micro-batch as a step
+        # Advance and complete the capture (treating every micro-batch as a step
         # to preserve fine-grained forward/backward times)
         trace_state = get_trace_session_state()
         trace_state.advance_step()
+        capture = self._step_capture
+        self._step_capture = None
         try:
-            flush_step_events(trace_state.step)
+            if capture is not None:
+                complete_step_capture(capture, trace_state.step)
         except Exception as e:
-            _log_lightning_error("flush failed", e)
+            _log_lightning_error("step capture completion failed", e)
 
         try:
             mark_trace_step_flushed(trace_state.step)

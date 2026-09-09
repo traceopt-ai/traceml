@@ -107,13 +107,15 @@ def _drain_step_time_queue() -> list:
 
 def _reset_traceml_state() -> None:
     """Reset TraceML's process-local step counter and drain shared queues."""
+    from traceml_ai.instrumentation.step_events import (
+        abort_step_capture,
+        begin_step_capture,
+    )
     from traceml_ai.runtime.state import reset_trace_session_state
-    from traceml_ai.utils import step_memory, timing
 
     reset_trace_session_state()
-    # Unflushed step events from a previous test would land in our first batch.
-    timing._STEP_BUFFER.clear()
-    step_memory._PENDING_MEMORY = None
+    # Pending events from a previous test would land in our first batch.
+    abort_step_capture(begin_step_capture())
     _drain_step_time_queue()
     _drain_step_memory_queue()
 
@@ -431,7 +433,7 @@ def test_hf_init_enables_dataloader_and_h2d_patches():
 # DataLoader patch (config flags). This guard goes one step further and
 # proves the stream actually EMITS during a real Trainer run. Absences (a
 # stream silently dark) are the costly failure mode; a config flag cannot
-# catch a broken patch, a renamed event, or a buffer that never flushes.
+# catch a broken patch, a renamed event, or a capture that never completes.
 
 DATALOADER_STREAM = "_traceml_internal:dataloader_next"
 
@@ -440,18 +442,21 @@ def test_hf_callback_run_emits_dataloader_fetch_events():
     """
     COMPLETENESS guard: with huggingface.init() called, a vanilla Trainer +
     TraceMLTrainerCallback run must land `_traceml_internal:dataloader_next`
-    TimeEvents in the flushed StepTimeBatches, not merely set the
+    TimeEvents in completed StepTimeBatches, not merely set the
     patch_dataloader config flag. Gates the full path: patch install ->
-    fetch timing -> step-buffer fold -> per-step flush.
+    fetch timing -> step capture -> per-step completion.
     """
     _reset_traceml_state()
 
-    # Drop STEP-scope events still sitting in the unflushed buffer from
+    # Drop STEP-scope events still sitting in the pending capture from
     # earlier tests; they would otherwise fold into this run's first batch
     # and could fake a pass.
-    from traceml_ai.utils.timing import _STEP_BUFFER
+    from traceml_ai.instrumentation.step_events import (
+        abort_step_capture,
+        begin_step_capture,
+    )
 
-    _STEP_BUFFER.clear()
+    abort_step_capture(begin_step_capture())
 
     # Explicit init is the documented HF path; the DataLoader fetch patch
     # is process-wide and only installed here, never by the callback.

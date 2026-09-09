@@ -1,9 +1,15 @@
 from contextlib import contextmanager
+from queue import Queue
 from types import SimpleNamespace
 
 import torch.nn as nn
 
-from traceml_ai.instrumentation.step_events import TimeScope
+from traceml_ai.instrumentation import step_events
+from traceml_ai.instrumentation.step_events import (
+    StepCapture,
+    TimeEvent,
+    TimeScope,
+)
 from traceml_ai.integrations import lightning as lightning_integration
 
 
@@ -186,3 +192,42 @@ def test_lightning_batch_start_does_not_open_forward_region(monkeypatch):
     callback._close_context("_traceml_step_ctx")
 
     assert calls == [("_traceml_internal:step_time", "step", True)]
+
+
+def test_lightning_teardown_discards_an_incomplete_capture(monkeypatch):
+    _enable_callback_without_lightning(monkeypatch)
+    monkeypatch.setattr(step_events, "_STEP_TIME_QUEUE", Queue(maxsize=2048))
+    monkeypatch.setattr(step_events, "_ACTIVE_STEP_CAPTURE", StepCapture())
+
+    @contextmanager
+    def fake_timed_region(name, scope, record_gpu_events=True):
+        yield
+
+    class FakeMemoryTracker:
+        def __init__(self, module):
+            pass
+
+        def reset(self):
+            pass
+
+    monkeypatch.setattr(
+        lightning_integration, "timed_region", fake_timed_region
+    )
+    monkeypatch.setattr(
+        lightning_integration, "StepMemoryTracker", FakeMemoryTracker
+    )
+
+    trainer = SimpleNamespace(training=True, strategy=None)
+    module = nn.Linear(1, 1)
+    callback = lightning_integration.TraceMLCallback()
+    callback.on_train_batch_start(trainer, module, batch=None, batch_idx=0)
+    capture = callback._step_capture
+    step_events.record_step_time_event(
+        TimeEvent("failed_lightning_batch", "cpu", 1.0, 2.0)
+    )
+
+    callback.teardown(trainer, module)
+
+    assert capture is not None
+    assert not step_events.complete_step_capture(capture, 1)
+    assert step_events.drain_step_time_batches() == []

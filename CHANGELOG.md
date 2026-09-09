@@ -7,6 +7,10 @@ which carry the full historical notes for versions predating this file.
 
 ## [Unreleased]
 
+- Step timing and memory now share one pending `StepCapture`. Successful steps
+  publish once through the existing queues; exceptions propagated through
+  `trace_step` discard partial measurements without advancing or reusing the
+  previous step number. Framework-specific failure detection remains separate.
 - Memory events and wire records no longer include `model_id`. The previous
   per-model pending keying is replaced by one process-local memory snapshot,
   published through the shared step-event handoff. Device metadata,

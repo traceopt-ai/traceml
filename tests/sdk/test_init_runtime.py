@@ -115,21 +115,34 @@ def test_disabled_env_dynamically_silences_low_level_utilities(monkeypatch):
     from traceml_ai.instrumentation.step_events import (
         TimeEvent,
         TimeScope,
+        abort_step_capture,
+        begin_step_capture,
+        complete_step_capture,
         drain_step_memory_events,
         drain_step_time_batches,
     )
-    from traceml_ai.utils.step_memory import (
-        StepMemoryTracker,
-        flush_step_memory_buffer,
-    )
-    from traceml_ai.utils.timing import (
-        flush_step_time_buffer,
-        record_event,
-        timed_region,
-    )
+    from traceml_ai.utils.step_memory import StepMemoryTracker
+    from traceml_ai.utils.timing import record_event, timed_region
 
     drain_step_time_batches()
     drain_step_memory_events()
+    abort_step_capture(begin_step_capture())
+    capture = begin_step_capture()
+
+    # Measurements collected before a dynamic shutdown must not be published.
+    record_event(
+        TimeEvent(
+            name="pending_before_disable",
+            device="cpu",
+            cpu_start=0.0,
+            cpu_end=1.0,
+            scope=TimeScope.STEP,
+        )
+    )
+    model = nn.Linear(1, 1)
+    tracker = StepMemoryTracker(model)
+    tracker.reset()
+    tracker.record()
 
     monkeypatch.setenv("TRACEML_DISABLED", "1")
 
@@ -142,17 +155,13 @@ def test_disabled_env_dynamically_silences_low_level_utilities(monkeypatch):
             scope=TimeScope.STEP,
         )
     )
-    flush_step_time_buffer(1)
 
-    model = nn.Linear(1, 1)
-    tracker = StepMemoryTracker(model)
     tracker.reset()
     tracker.record()
-    flush_step_memory_buffer(1)
 
     with timed_region("disabled_region"):
         pass
-    flush_step_time_buffer(2)
+    assert complete_step_capture(capture, 1)
 
     assert drain_step_time_batches() == []
     assert drain_step_memory_events() == []

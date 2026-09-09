@@ -36,6 +36,11 @@ from traceml_ai.instrumentation.patches.forward_auto_timer_patch import (
 from traceml_ai.instrumentation.patches.h2d_auto_timer_patch import (
     h2d_auto_timer,
 )
+from traceml_ai.instrumentation.step_events import (
+    abort_step_capture,
+    begin_step_capture,
+    complete_step_capture,
+)
 from traceml_ai.runtime.environment import detect_runtime_environment
 from traceml_ai.runtime.environment_state import (
     has_runtime_environment_info,
@@ -46,7 +51,6 @@ from traceml_ai.runtime.state import (
     get_trace_session_state,
     mark_trace_step_flushed,
 )
-from traceml_ai.utils.flush_buffers import flush_step_events
 from traceml_ai.utils.step_memory import StepMemoryTracker
 from traceml_ai.utils.timing import timed_region
 
@@ -152,7 +156,7 @@ class TraceState(metaclass=_TraceStateMeta):
 
 @contextmanager
 def trace_step(model: nn.Module):
-    """Define a single training step boundary."""
+    """Publish one completed training step or discard it if the body fails."""
     if _traceml_disabled():
         yield
         return
@@ -163,8 +167,8 @@ def trace_step(model: nn.Module):
         _log_instrumentation_error("runtime environment detection failed", exc)
 
     trace_state = get_trace_session_state()
+    step_capture = begin_step_capture()
     mem_tracker = StepMemoryTracker(model)
-    step_completed = False
 
     try:
         mem_tracker.reset()
@@ -185,28 +189,25 @@ def trace_step(model: nn.Module):
                 if _should_auto_install_optimizer_timing():
                     ensure_optimizer_timing_installed()
                 yield
-                step_completed = True
-    finally:
-        if step_completed:
-            trace_state.advance_step()
-
+    except BaseException:
+        abort_step_capture(step_capture)
+        raise
+    else:
         try:
             mem_tracker.record()
         except Exception as exc:
             _log_instrumentation_error("record failed", exc)
 
+        trace_state.advance_step()
         try:
-            flush_step_events(trace_state.step)
+            complete_step_capture(step_capture, trace_state.step)
         except Exception as exc:
-            _log_instrumentation_error("flush failed", exc)
+            _log_instrumentation_error("step capture completion failed", exc)
 
-        if step_completed:
-            try:
-                mark_trace_step_flushed(trace_state.step)
-            except Exception as exc:
-                _log_instrumentation_error(
-                    "recording state update failed", exc
-                )
+        try:
+            mark_trace_step_flushed(trace_state.step)
+        except Exception as exc:
+            _log_instrumentation_error("recording state update failed", exc)
 
 
 def trace_time(
