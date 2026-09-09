@@ -596,3 +596,22 @@ def test_lightning_teardown_discards_whatever_is_still_pending(monkeypatch):
 
     assert discarded == ["discard"]
     assert "forward" not in module.__dict__
+
+
+def test_lightning_warns_when_the_transfer_wrapper_is_missing(
+    monkeypatch, capsys
+):
+    _enable_callback_without_lightning(monkeypatch)
+    monkeypatch.delenv("TRACEML_DISABLED", raising=False)
+    # No strategy on the trainer: setup cannot wrap batch_to_device.
+    trainer = SimpleNamespace(training=True, strategy=None)
+    module = nn.Linear(2, 2)
+    callback = lightning_integration.TraceMLCallback()
+    callback.setup(trainer, module)
+    assert callback._original_batch_to_device is None
+
+    callback.on_train_start(trainer, module)
+
+    err = capsys.readouterr().err
+    assert "batch_to_device is not wrapped" in err
+    callback.teardown(trainer, module)
