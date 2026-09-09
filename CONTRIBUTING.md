@@ -13,9 +13,10 @@ You can help in many ways:
 - 🔧 Submitting pull requests
 - 📖 Improving documentation or examples
 
-If you are unsure where to start, check the GitHub Issues page or open a discussion.
-Look for issues labeled `good first issue` or `help wanted` when you want a
-scoped task.
+If you are unsure where to start, browse the live lists of unassigned
+[`good first issue`](https://github.com/traceopt-ai/traceml/issues?q=is%3Aissue%20is%3Aopen%20no%3Aassignee%20label%3A%22good%20first%20issue%22)
+or [`help wanted`](https://github.com/traceopt-ai/traceml/issues?q=is%3Aissue%20is%3Aopen%20no%3Aassignee%20label%3A%22help%20wanted%22)
+tasks, or open a discussion.
 
 ---
 
@@ -38,10 +39,12 @@ All contributions must be submitted via GitHub pull requests.
 
 ## Development Setup
 
+This is the canonical development setup for TraceML.
+
 ```bash
 git clone https://github.com/traceopt-ai/traceml.git
 cd traceml
-pip install -e ".[dev]"
+pip install -e ".[dev,torch]"
 ```
 
 Requirements:
@@ -61,56 +64,11 @@ needs a local CUDA setup.
 
 ## Open tasks for first contributors
 
-These are real starter-sized tasks we are willing to review. Please comment on
-the matching GitHub issue before starting, or open a short issue first if one
-does not exist yet.
-
-### Add an end-to-end final-summary smoke test
-
-Add a pytest test that runs a tiny TraceML training script through `traceml run`
-with `--mode=summary` and a fixed `--run-name`.
-
-Done means:
-
-- the test runs on CPU in CI
-- it asserts `logs/<run-name>/final_summary.json` is written
-- it also checks `final_summary.txt` is written
-- the JSON includes `schema_version`, `system`, `process`, `step_time`, and `step_memory`
-
-### Add an executable MLflow summary example
-
-Add a minimal example that logs `traceml.summary()` output to MLflow.
-
-Done means:
-
-- the example lives under `examples/`
-- it keeps `mlflow` optional and does not add it as a core dependency
-- it logs numeric summary values with `mlflow.log_metrics(...)`
-- it logs string diagnosis fields with `mlflow.set_tags(...)`
-- `examples/README.md` links to the new example
-
-### Improve runtime-failure safety tests
-
-TraceML should not stop user training when telemetry or reporting fails. Add or
-extend tests around that contract.
-
-Done means:
-
-- the test simulates a TraceML runtime, sampler, sender, or final-summary failure
-- the user training loop still finishes
-- the failure is logged or handled without escaping into user code
-
-### Add compare regression coverage for diagnosis changes
-
-`traceml compare` should clearly show when a diagnosis changes between two
-saved `final_summary.json` files.
-
-Done means:
-
-- the test uses small summary fixtures, not a full training run
-- it covers at least one improvement and one regression case
-- it asserts the compact text output includes the changed Step Time diagnosis
-- it asserts the structured compare JSON records the same change
+Choose a current task from the live, unassigned
+[`good first issue`](https://github.com/traceopt-ai/traceml/issues?q=is%3Aissue%20is%3Aopen%20no%3Aassignee%20label%3A%22good%20first%20issue%22)
+or [`help wanted`](https://github.com/traceopt-ai/traceml/issues?q=is%3Aissue%20is%3Aopen%20no%3Aassignee%20label%3A%22help%20wanted%22)
+lists. Please comment on the matching issue before starting, or open a short
+issue first if one does not exist yet.
 
 ---
 
@@ -185,8 +143,8 @@ follow these rules when adding or updating dependencies.
 
 3. **Use extras for optional functionality.** Dependencies not required by the
    core import path belong in an optional extra. The current dashboard
-   dependency arrangement is a documented exception; its possible migration
-   to an extra is tracked in #268.
+   dependency arrangement is a documented exception whose migration was
+   discussed in closed issue #268.
 
 4. **Test against current dependency releases.** Scheduled CI resolves the
    newest published dependency versions and runs the core suite so ecosystem
