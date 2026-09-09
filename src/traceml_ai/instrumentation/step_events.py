@@ -12,6 +12,7 @@ events.
 
 from __future__ import annotations
 
+import os
 import sys
 from dataclasses import dataclass, field
 from enum import Enum
@@ -20,6 +21,7 @@ from typing import Optional, TypeVar
 
 import torch
 
+from traceml_ai.runtime.state import should_record_trace_events
 from traceml_ai.utils.cuda_event_pool import return_cuda_event
 
 
@@ -206,9 +208,14 @@ def _detach_step_capture(capture: StepCapture) -> bool:
 
 
 def complete_step_capture(capture: StepCapture, step: int) -> bool:
-    """Detach and publish a successfully completed capture exactly once."""
+    """Detach a completed capture and publish it while recording is enabled."""
     if not _detach_step_capture(capture):
         return False
+    if (
+        os.environ.get("TRACEML_DISABLED") == "1"
+        or not should_record_trace_events()
+    ):
+        return capture._abort()
     return capture._complete(step)
 
 

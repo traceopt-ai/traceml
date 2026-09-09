@@ -129,6 +129,21 @@ def test_disabled_env_dynamically_silences_low_level_utilities(monkeypatch):
     abort_step_capture(begin_step_capture())
     capture = begin_step_capture()
 
+    # Measurements collected before a dynamic shutdown must not be published.
+    record_event(
+        TimeEvent(
+            name="pending_before_disable",
+            device="cpu",
+            cpu_start=0.0,
+            cpu_end=1.0,
+            scope=TimeScope.STEP,
+        )
+    )
+    model = nn.Linear(1, 1)
+    tracker = StepMemoryTracker(model)
+    tracker.reset()
+    tracker.record()
+
     monkeypatch.setenv("TRACEML_DISABLED", "1")
 
     record_event(
@@ -141,8 +156,6 @@ def test_disabled_env_dynamically_silences_low_level_utilities(monkeypatch):
         )
     )
 
-    model = nn.Linear(1, 1)
-    tracker = StepMemoryTracker(model)
     tracker.reset()
     tracker.record()
 

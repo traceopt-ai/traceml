@@ -35,7 +35,8 @@ On success, completion detaches the capture, assigns one step number, and
 publishes its timing batch and final memory snapshot. An exception propagated
 through `trace_step` aborts the partial capture without advancing the step
 counter. Repeated completion or abort calls on the detached capture do nothing,
-so an old caller cannot finalize a later step.
+so an old caller cannot finalize a later step. If recording is disabled before
+completion, the capture is detached and discarded instead of being published.
 
 The producer lifecycle is sequential: close the step's timing regions, then
 call `complete_step_capture()` or `abort_step_capture()`, then begin the next
