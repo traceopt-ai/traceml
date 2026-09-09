@@ -297,8 +297,8 @@ class TraceMLCallback(_CallbackBase):
                 "Lightning TraceMLCallback",
                 requires={"dataloader_fetch", "h2d"},
             )
-        except Exception:
-            pass
+        except Exception as e:
+            _log_lightning_error("capability check failed", e)
         if self._original_batch_to_device is None:
             # The config check above cannot see this: without the wrapper the
             # H2D transfer is not timed and the traced step opens late.

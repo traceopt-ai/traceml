@@ -236,7 +236,11 @@ def test_lightning_trainer_injected_failure_discards_the_partial_step(L):
     # A fresh fit after the failure starts clean.
     fresh = _module_class(L)()
     _trainer(L, [callback], max_steps=2).fit(fresh, train_dataloaders=train)
-    assert [b.step for b in drain_step_time_batches()] == [3, 4]
+    later = drain_step_time_batches()
+    assert [b.step for b in later] == [3, 4]
+    assert _counts(later, FETCH) == [1, 1]
+    assert _counts(later, FORWARD) == [1, 1]
+    assert _counts(later, STEP) == [1, 1]
 
 
 def test_lightning_trainer_second_fit_does_not_inherit_pending_events(L):
@@ -262,6 +266,58 @@ def test_lightning_trainer_second_fit_does_not_inherit_pending_events(L):
     assert [b.step for b in second] == [5, 6]
     assert _counts(second, FETCH) == [1, 1]
     assert _counts(second, FORWARD) == [1, 1]
+
+
+def test_lightning_trainer_standalone_validate_publishes_nothing(L):
+    traceml_lightning.init()
+    _, val = _loaders()
+    callback = traceml_lightning.TraceMLCallback()
+
+    _trainer(L, [callback], limit_val_batches=2).validate(
+        _module_class(L)(), dataloaders=val
+    )
+
+    assert drain_step_time_batches() == []
+    assert len(timing._STEP_BUFFER) == 0
+    assert callback._suppress_cm is None
+    assert callback._suppress_depth == 0
+    assert callback._traceml_step_ctx is None
+
+
+def test_lightning_trainer_iterator_mode_uses_the_fallback_open(L):
+    # training_step(dataloader_iter): Lightning hands over the iterator and
+    # never calls strategy.batch_to_device, so the envelope must open at
+    # on_train_batch_start. The user's fetch then happens inside it, which
+    # the docs call out; this test pins that the step is still published.
+    traceml_lightning.init()
+    train, _ = _loaders()
+
+    class IterMode(L.LightningModule):
+        def __init__(self):
+            super().__init__()
+            self.net = nn.Linear(8, 4)
+
+        def forward(self, x):
+            return self.net(x)
+
+        def training_step(self, dataloader_iter):
+            # Lightning's iterator mode yields (batch, batch_idx, dl_idx).
+            batch, _, _ = next(dataloader_iter)
+            x, y = batch
+            return nn.functional.cross_entropy(self(x), y)
+
+        def configure_optimizers(self):
+            return torch.optim.SGD(self.parameters(), lr=0.1)
+
+    _trainer(L, [traceml_lightning.TraceMLCallback()], max_steps=2).fit(
+        IterMode(), train_dataloaders=train
+    )
+
+    batches = drain_step_time_batches()
+    assert [b.step for b in batches] == [1, 2]
+    assert _counts(batches, STEP) == [1, 1]
+    assert _counts(batches, FORWARD) == [1, 1]
+    assert _counts(batches, FETCH) == [1, 1]
 
 
 def test_lightning_trainer_callback_preserves_training(L):
