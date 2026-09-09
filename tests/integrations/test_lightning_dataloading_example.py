@@ -1,7 +1,8 @@
 """The Lightning data-loading example: smoke path, profiles, notebook copy."""
 
-import importlib.util
+import importlib
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -52,10 +53,11 @@ def _reset_traceml():
 
 
 def _example():
-    spec = importlib.util.spec_from_file_location("lightning_example", EXAMPLE)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    # Import under the file's real name from its own directory so DataLoader
+    # worker processes started with "spawn" can unpickle the dataset class.
+    if str(EXAMPLE.parent) not in sys.path:
+        sys.path.insert(0, str(EXAMPLE.parent))
+    return importlib.import_module(EXAMPLE.stem)
 
 
 def _counts(batches, name):
@@ -75,6 +77,56 @@ def test_smoke_profile_publishes_one_step_per_batch(tmp_path, monkeypatch):
     assert not list(tmp_path.iterdir()), "smoke mode must download nothing"
 
 
+def test_smoke_steps_across_an_epoch_boundary_keep_one_fetch_each(
+    tmp_path, monkeypatch
+):
+    # 32 synthetic samples at batch 4 is an 8-batch epoch; 12 steps cross
+    # the boundary, where Lightning re-creates the loader iterator.
+    monkeypatch.chdir(tmp_path)
+    example = _example()
+
+    example.main(["--smoke", "--max-steps", "12", "--batch-size", "4"])
+    batches = drain_step_time_batches()
+
+    assert [b.step for b in batches] == list(range(1, 13))
+    assert _counts(batches, FETCH) == [1] * 12
+    assert _counts(batches, STEP) == [1] * 12
+
+
+def test_smoke_with_workers_publishes_one_step_per_batch(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    example = _example()
+
+    example.main(
+        [
+            "--smoke",
+            "--num-workers",
+            "2",
+            "--max-steps",
+            "4",
+            "--batch-size",
+            "2",
+        ]
+    )
+    batches = drain_step_time_batches()
+
+    assert [b.step for b in batches] == [1, 2, 3, 4]
+    assert _counts(batches, FETCH) == [1, 1, 1, 1]
+
+
+def test_parser_maps_the_persistent_workers_flags():
+    parser = _example().build_parser()
+
+    assert parser.parse_args([]).persistent_workers is None
+    assert parser.parse_args(["--persistent-workers"]).persistent_workers
+    assert (
+        parser.parse_args(["--no-persistent-workers"]).persistent_workers
+        is False
+    )
+
+
 @pytest.mark.parametrize(
     "profile, kwargs, expected",
     [
@@ -87,7 +139,8 @@ def test_smoke_profile_publishes_one_step_per_batch(tmp_path, monkeypatch):
         ),
         ("optimized", {"num_workers": 0}, (0, True, False)),
         ("baseline", {"num_workers": 2}, (2, False, False)),
-        ("optimized", {"smoke": True, "num_workers": 4}, (0, False, False)),
+        ("optimized", {"smoke": True}, (0, False, False)),
+        ("optimized", {"smoke": True, "num_workers": 2}, (2, False, True)),
     ],
 )
 def test_loader_settings_follow_the_profile_table(profile, kwargs, expected):

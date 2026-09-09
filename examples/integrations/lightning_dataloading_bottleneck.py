@@ -6,7 +6,8 @@ two runs measure the loader change alone. TraceML reports whether each run
 waited on input or on compute; ``traceml compare`` shows where the
 difference occurred.
 
-Launch through ``traceml run`` (a bare ``python`` run trains untraced):
+Launch through ``traceml run`` (a bare ``python`` run trains untraced). The
+two profiles expect a CUDA device; on a CPU-only machine use ``--smoke``:
 
     traceml run --mode summary --logs-dir logs --run-name lightning_baseline \\
         lightning_dataloading_bottleneck.py \\
@@ -82,13 +83,14 @@ def loader_settings(
     batch in the training process, ``optimized`` lets up to four workers
     decode ahead, pins batches and keeps the workers alive between epochs.
     The two explicit arguments override the profile for extra runs. Smoke
-    mode always runs single-process on CPU.
+    mode runs on CPU without pinned memory and, unless ``num_workers`` is
+    given, single-process.
     """
     optimized = profile == "optimized"
-    if smoke:
-        workers = 0
-    elif num_workers is not None:
+    if num_workers is not None:
         workers = int(num_workers)
+    elif smoke:
+        workers = 0
     else:
         # Match workers to CPU cores; more workers than cores thrash
         # instead of overlapping (free Colab has two).
