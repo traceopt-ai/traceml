@@ -41,7 +41,7 @@ jobs:
       - name: Install TraceML and notebook runner
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[torch,hf]" nbconvert ipykernel
+          python -m pip install -e ".[torch,hf,lightning]" nbconvert ipykernel
       - name: Execute the PyTorch smoke notebook
         env:
           TRACEML_NOTEBOOK_MODE: smoke
@@ -70,3 +70,17 @@ jobs:
             --output=executed.ipynb
           test -f logs/hf_smoke/final_summary.json
           test -f logs/hf_smoke/final_summary.txt
+      - name: Execute the Lightning smoke notebook
+        env:
+          TRACEML_NOTEBOOK_MODE: smoke
+          TRACEML_NOTEBOOK_SKIP_INSTALL: '1'
+        run: |
+          set -euo pipefail
+          mkdir -p notebook-smoke/lightning
+          cp notebooks/lightning_dataloading_bottleneck.ipynb notebook-smoke/lightning/notebook.ipynb
+          cd notebook-smoke/lightning
+          jupyter nbconvert --to notebook --execute notebook.ipynb \
+            --ExecutePreprocessor.timeout=180 \
+            --output=executed.ipynb
+          test -f logs/lightning_smoke/final_summary.json
+          test -f logs/lightning_smoke/final_summary.txt

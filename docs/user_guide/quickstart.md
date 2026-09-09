@@ -111,6 +111,7 @@ artifacts. See [How to Read TraceML Output](reading-output.md#what-the-summary-c
 
 - Any PyTorch loop: data-loading bottleneck before and after [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/notebooks/data_loading_bottleneck.ipynb)
 - Hugging Face Trainer: data-loading bottleneck before and after [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/notebooks/huggingface_dataloading_bottleneck.ipynb)
+- PyTorch Lightning: data-loading bottleneck before and after, plus the per-step cost of every epoch's first batch [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/notebooks/lightning_dataloading_bottleneck.ipynb)
 
 </details>
 

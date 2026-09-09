@@ -17,6 +17,11 @@ which carry the full historical notes for versions predating this file.
   DataLoader-fetch or H2D stream dark. Real `Trainer.fit()` tests now run in
   CI for both the `lightning` and `pytorch_lightning` namespaces, and the
   Lightning conformance harness is registered.
+- PyTorch Lightning: new example `examples/integrations/lightning_dataloading_bottleneck.py`
+  (ResNet-18 on 320px Imagenette, `--profile` changes only the DataLoader) and
+  Colab notebook `notebooks/lightning_dataloading_bottleneck.ipynb`, which
+  compares the two runs and reads the per-step fetch wait to show the cold
+  first batch of every epoch; the notebook runs in the CPU notebook smoke job.
 - Step timing and memory now share one pending `StepCapture`. Successful steps
   publish once through the existing queues; exceptions propagated through
   `trace_step` discard partial measurements without advancing or reusing the
