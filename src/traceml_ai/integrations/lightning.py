@@ -539,7 +539,7 @@ class TraceMLCallback(_CallbackBase):
     ):
         if _traceml_disabled():
             # The kill switch was flipped during this batch. Close what was
-            # opened and drop what was buffered so the next batch starts on a
+            # opened and drop what it recorded so the next batch starts on a
             # fresh envelope instead of merging into this one.
             self._abandon_pending(pl_module)
             return

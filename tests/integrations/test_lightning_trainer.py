@@ -252,7 +252,7 @@ def test_lightning_trainer_second_fit_does_not_inherit_pending_events(L):
     callback = traceml_lightning.TraceMLCallback()
 
     # A full epoch exhausts the loader; the fetch that raises StopIteration
-    # is recorded after the last batch was flushed.
+    # is recorded after the last batch completed.
     _trainer(L, [callback], max_epochs=1).fit(
         _module_class(L)(), train_dataloaders=train
     )
