@@ -81,6 +81,18 @@ traceml run train.py --nproc-per-node=4
 For multi-node DDP launch commands, see
 [Distributed Training](../distributed-training.md).
 
+Always launch through `traceml run`. It starts the aggregator and spawns the
+ranks with `torchrun`, and Lightning picks that environment up. Two things
+follow:
+
+- Pass the process count to `traceml run` (`--nproc-per-node=N`) and the same
+  device count to the `Trainer` (`devices=N`). Lightning's own subprocess
+  launcher is not used under `torchrun`; a `Trainer(devices=2)` under
+  `traceml run` without `--nproc-per-node=2` stops with Lightning's
+  world-size mismatch error before training starts.
+- A bare `python train.py` finds no aggregator, prints a warning, and trains
+  without telemetry.
+
 For browser dashboard mode on single-node runs:
 
 ```bash
@@ -105,8 +117,22 @@ You keep the normal Lightning workflow. TraceML adds diagnosis around the traini
 
 `traceml_lightning.init()` enables PyTorch `DataLoader` fetch timing and
 installs the H2D `.to(...)` patch. `TraceMLCallback` records step, forward,
-backward, optimizer, and memory timing. It also scopes H2D timing around
-Lightning's internal `strategy.batch_to_device(...)` path.
+backward, optimizer, and memory timing.
+
+One TraceML step is one Lightning training batch. The traced step opens when
+Lightning moves the batch to the device (`strategy.batch_to_device`) and
+closes at `on_train_batch_end`, so the H2D transfer, the forward pass, the
+backward pass, and the optimizer step are all inside Traced Step Time. The
+DataLoader fetch that precedes the transfer is reported separately as Input
+Wait, and Step Time is the sum of the two.
+
+Only training batches are measured. The callback keeps a framework-level
+DataLoader timing policy active for the whole Trainer run and checks
+Lightning's current stage on every fetch. This is intentionally broader than
+the validation start/end hooks because Lightning can prefetch an unknown-length
+evaluation loader before `on_validation_start`. Fetches and transfers of the
+validation, sanity-check, test, and predict loaders therefore do not count
+toward Input Wait or H2D, and no step is published for them.
 
 Normal PyTorch `DataLoader` input timing is automatic after
 `traceml_lightning.init()`. If you pass Lightning a custom iterator or
@@ -114,9 +140,29 @@ non-PyTorch loader, wrap it with `traceml.wrap_dataloader_fetch(...)` before
 passing it to `trainer.fit(...)`. For Ray Data with Lightning, see
 [Ray Train](ray.md).
 
+For a DataLoader whose length is unknown, Lightning performs a one-batch
+look-ahead and probes the iterator for exhaustion. Input Wait reports those
+actual `DataLoader.__next__()` calls, so their distribution across steps can
+differ from the one-fetch-per-step shape of a sized DataLoader.
+
 Small batches may show `H2D 0.0ms` because the transfer is below display
 precision. The full example below uses a wider CPU tensor so H2D timing is
 visible.
+
+On Lightning the optimizer phase runs from `on_before_optimizer_step` to the
+end of the batch, so it also covers the step-interval learning-rate scheduler
+update. Under manual optimization each `optimizer.step()` call is one
+optimizer event. Under automatic optimization, accumulating micro-batches have
+no optimizer event, including for strategies such as DeepSpeed that route each
+micro-batch through an internal `engine.step()` call.
+
+If training raises, the callback discards the measurements of the batch that
+failed rather than publishing a partial step, restores the module and strategy
+it wrapped, and lets the exception propagate unchanged. If
+`traceml_lightning.init()` was not called, or TraceML was initialized in a
+mode that does not install the DataLoader-fetch or H2D patch, the callback
+logs a warning at the start of training naming the streams that will stay
+dark.
 
 ---
 
@@ -279,7 +325,14 @@ Use the delay flags only when you want to create a deliberate straggler.
 
 `TraceMLCallback` supports gradient accumulation.
 
-When Lightning uses `accumulate_grad_batches=N`, TraceML still preserves step alignment so the dashboard and summaries stay consistent.
+With `accumulate_grad_batches=N`, every micro-batch is still one TraceML step
+with its own step, forward, and backward timing, so the per-step series stays
+aligned with the batches Lightning ran. The optimizer phase is recorded only
+on the batches where the optimizer actually stepped; on the accumulating
+micro-batches it is absent, not zero. The run-level `optimizer_ms` average
+counts those absent batches as no optimizer work, so it reads as the
+optimizer cost per micro-batch, and `trainer.global_step` stays Lightning's
+count of optimizer steps.
 
 ---
 

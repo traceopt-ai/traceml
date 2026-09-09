@@ -125,7 +125,9 @@ jobs:
           # hf pulls transformers+accelerate so tests/integrations
           # actually RUNS the HuggingFace suite (incl. the #276 H2D
           # coverage-window regression tests) instead of skipping it.
-          pip install -e ".[torch,dashboard,hf]"
+          # lightning does the same for the real Trainer.fit() tests and
+          # the Lightning conformance harness.
+          pip install -e ".[torch,dashboard,hf,lightning]"
           pip install pytest
       - name: Run integration tests
         run: |
