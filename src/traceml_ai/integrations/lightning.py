@@ -378,9 +378,9 @@ class TraceMLCallback(_CallbackBase):
         self._original_batch_to_device = original
 
     def teardown(self, trainer, pl_module, stage=None):
-        # Events recorded after the last completed step (the fetch that raised
-        # StopIteration at the end of an epoch, or a batch cut short by the
-        # kill switch) must not leak into the next fit in this process.
+        # Anything recorded since the last completed step (a batch
+        # interrupted before its end, a tuner trial stopped mid-fit) must not
+        # leak into the next fit in this process.
         self._abandon_pending(pl_module)
         self._restore_forward()
         self._restore_batch_to_device()
