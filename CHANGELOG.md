@@ -7,6 +7,13 @@ which carry the full historical notes for versions predating this file.
 
 ## [Unreleased]
 
+- **Removed:** `traceml_ai.integrations.huggingface.TraceMLTrainer` and its
+  `traceml_enabled` argument. The wrapper only installed the callback. Call
+  `traceml_ai.integrations.huggingface.init()` and register
+  `TraceMLTrainerCallback()` with standard `transformers.Trainer` instead.
+  For optional tracing, register the callback conditionally. See the
+  [HF migration instructions](docs/user_guide/integrations/huggingface.md#migration)
+  for the replacement setup.
 - PyTorch Lightning: `TraceMLCallback` now opens the traced step when
   Lightning moves the batch to the device, so the H2D transfer is inside
   Traced Step Time and Step Time on GPU runs; fetches of validation,

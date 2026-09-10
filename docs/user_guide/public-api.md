@@ -249,8 +249,9 @@ matching integration guide for installation and runtime requirements.
 
 ### Hugging Face
 
-Preferred path: call the integration `init()` once and register
-`TraceMLTrainerCallback` with your existing `transformers.Trainer`.
+Call the integration `init()` once and register `TraceMLTrainerCallback` with
+your existing `transformers.Trainer`. See the
+[Hugging Face guide](integrations/huggingface.md) for setup and limitations.
 
 ::: traceml_ai.integrations.huggingface.init
     options:
@@ -258,17 +259,6 @@ Preferred path: call the integration `init()` once and register
       show_source: false
 
 ::: traceml_ai.integrations.huggingface.TraceMLTrainerCallback
-    options:
-      show_root_heading: true
-      show_source: false
-
-#### Legacy compatibility: `TraceMLTrainer`
-
-`TraceMLTrainer` remains supported for existing users. New code should prefer
-`TraceMLTrainerCallback`; see the [Hugging Face guide](integrations/huggingface.md)
-for its trade-offs.
-
-::: traceml_ai.integrations.huggingface.TraceMLTrainer
     options:
       show_root_heading: true
       show_source: false
