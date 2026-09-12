@@ -405,6 +405,187 @@ def test_hf_trainer_optional_callback_preserves_training():
     torch.testing.assert_close(traced[1], untraced[1])
 
 
+def test_hf_trainer_failure_aborts_capture_and_callback_can_be_reused(
+    tmp_path,
+):
+    """A failed group is discarded without changing the training exception."""
+    _reset_traceml_state()
+    init()
+
+    callback = TraceMLTrainerCallback()
+    expected_failure = RuntimeError("expected training failure")
+
+    class FailingTrainer(Trainer):
+        def training_step(self, *args, **kwargs):
+            super().training_step(*args, **kwargs)
+            raise expected_failure
+
+    failing_trainer = FailingTrainer(
+        model=_build_tiny_model(),
+        args=_build_training_args(
+            str(tmp_path / "failed"), max_steps=1, use_cpu=True
+        ),
+        train_dataset=_TinyTokenizedDataset(),
+        callbacks=[callback],
+    )
+
+    with pytest.raises(RuntimeError) as raised:
+        failing_trainer.train()
+
+    assert raised.value is expected_failure
+    assert callback._step_cm is None
+    assert _drain_step_time_queue() == []
+    assert _drain_step_memory_queue() == []
+
+    from traceml_ai.runtime.state import get_trace_session_state
+
+    assert get_trace_session_state().step == 0
+
+    # The same callback remains usable by a later Trainer run.
+    trainer = Trainer(
+        model=_build_tiny_model(),
+        args=_build_training_args(
+            str(tmp_path / "reused"), max_steps=1, use_cpu=True
+        ),
+        train_dataset=_TinyTokenizedDataset(),
+        callbacks=[callback],
+    )
+    trainer.train()
+
+    assert get_trace_session_state().step == 1
+    assert len(_drain_step_time_queue()) == 1
+    assert len(_drain_step_memory_queue()) == 1
+
+
+def test_hf_input_failure_before_step_begin_discards_pending_events(tmp_path):
+    """A failed batch fetch cannot leak timing into a later Trainer run."""
+    _reset_traceml_state()
+    init()
+    expected_failure = RuntimeError("expected input failure")
+
+    class FailingDataset(_TinyTokenizedDataset):
+        def __getitem__(self, index):
+            raise expected_failure
+
+    trainer = Trainer(
+        model=_build_tiny_model(),
+        args=_build_training_args(str(tmp_path), max_steps=1, use_cpu=True),
+        train_dataset=FailingDataset(),
+        callbacks=[TraceMLTrainerCallback()],
+    )
+
+    with pytest.raises(RuntimeError) as raised:
+        trainer.train()
+
+    assert raised.value is expected_failure
+    assert _drain_step_time_queue() == []
+    assert _drain_step_memory_queue() == []
+
+    from traceml_ai.instrumentation.step_events import begin_step_capture
+    from traceml_ai.runtime.state import get_trace_session_state
+
+    capture = begin_step_capture()
+    assert capture.timing_events == []
+    assert capture.memory_event is None
+    assert get_trace_session_state().step == 0
+
+
+def test_hf_auto_batch_size_retry_discards_failed_attempt(tmp_path):
+    """Cleanup occurs before Accelerate retries the inner training loop."""
+    _reset_traceml_state()
+    init()
+
+    class RetryOnceTrainer(Trainer):
+        attempts = 0
+
+        def training_step(self, *args, **kwargs):
+            loss = super().training_step(*args, **kwargs)
+            self.attempts += 1
+            if self.attempts == 1:
+                raise RuntimeError("CUDA out of memory.")
+            return loss
+
+    args = _build_training_args(
+        str(tmp_path), max_steps=1, batch_size=4, use_cpu=True
+    )
+    args.auto_find_batch_size = True
+    trainer = RetryOnceTrainer(
+        model=_build_tiny_model(),
+        args=args,
+        train_dataset=_TinyTokenizedDataset(),
+        callbacks=[TraceMLTrainerCallback()],
+    )
+    trainer.train()
+
+    from traceml_ai.runtime.state import get_trace_session_state
+
+    assert trainer.attempts == 2
+    assert trainer._train_batch_size < 4
+    assert get_trace_session_state().step == 1
+    batches = _drain_step_time_queue()
+    assert len(batches) == 1
+    assert (
+        sum(
+            event.name == "_traceml_internal:forward_time"
+            for event in batches[0].events
+        )
+        == 1
+    )
+    assert len(_drain_step_memory_queue()) == 1
+
+
+def test_hf_duplicate_callbacks_publish_each_step_once(tmp_path):
+    """Only the first TraceML callback owns a Trainer run."""
+    _reset_traceml_state()
+    init()
+    callbacks = [TraceMLTrainerCallback(), TraceMLTrainerCallback()]
+    trainer = Trainer(
+        model=_build_tiny_model(),
+        args=_build_training_args(str(tmp_path), max_steps=2, use_cpu=True),
+        train_dataset=_TinyTokenizedDataset(),
+        callbacks=callbacks,
+    )
+
+    trainer.train()
+
+    from traceml_ai.runtime.state import get_trace_session_state
+
+    assert get_trace_session_state().step == 2
+    assert len(_drain_step_time_queue()) == 2
+    assert len(_drain_step_memory_queue()) == 2
+
+
+def test_hf_stop_during_accumulation_discards_partial_group(tmp_path):
+    """Stopping between microbatches does not publish a completed step."""
+    _reset_traceml_state()
+    init()
+
+    class StopAfterSubstep(TrainerCallback):
+        def on_substep_end(self, args, state, control, **kwargs):
+            control.should_training_stop = True
+            return control
+
+    trainer = Trainer(
+        model=_build_tiny_model(),
+        args=_build_training_args(
+            str(tmp_path),
+            max_steps=2,
+            gradient_accumulation_steps=2,
+            use_cpu=True,
+        ),
+        train_dataset=_TinyTokenizedDataset(),
+        callbacks=[TraceMLTrainerCallback(), StopAfterSubstep()],
+    )
+    trainer.train()
+
+    from traceml_ai.runtime.state import get_trace_session_state
+
+    assert trainer.state.global_step == 0
+    assert get_trace_session_state().step == 0
+    assert _drain_step_time_queue() == []
+    assert _drain_step_memory_queue() == []
+
+
 def test_hf_trainer_callback_noop_when_disabled(monkeypatch):
     """
     With TRACEML_DISABLED=1 set after import, the callback must be a complete

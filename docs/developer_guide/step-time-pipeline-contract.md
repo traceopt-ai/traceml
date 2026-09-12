@@ -287,10 +287,10 @@ training step. The existing raw input event names are
 These gaps can omit transfers from Step Time or assign loader work to the
 wrong training step.
 
-If training is interrupted, callback cleanup can record an unfinished group
-as completed. This requires the separate lifecycle fix. See the
-[HF integration guide](../user_guide/integrations/huggingface.md#limitations)
-for user-facing limitations.
+If training is interrupted, the Trainer lifecycle guard aborts the open
+capture before the exception reaches Accelerate's automatic batch-size retry.
+The failed group is not published and does not advance TraceML's step counter.
+The original training exception continues unchanged.
 
 The boundary follows HF's
 [training loop](https://github.com/huggingface/transformers/blob/6622f6f781c9c0b1f2f5541a257943bee95ad586/src/transformers/trainer.py#L1791-L1892)
