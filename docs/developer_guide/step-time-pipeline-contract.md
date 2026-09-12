@@ -237,6 +237,68 @@ SQLite normalization. `_traceml_internal:step_time` is intentionally stable
 raw telemetry and storage vocabulary below that normalization boundary; it is
 not a public metric name or presentation label.
 
+## Hugging Face steps
+
+For normally completed HF training, one TraceML step contains the microbatches
+used for one optimizer update attempt. The callback opens `trace_step` at
+`on_step_begin` and closes it at `on_step_end`. Accumulating microbatches emit
+`on_substep_end`, which does not advance TraceML's counter.
+
+For example, ten microbatches with `gradient_accumulation_steps=4` produce
+three steps containing four, four, and two microbatches. TraceML IDs are local
+to the process; their increments match HF's for recorded, completed groups,
+but their absolute values can differ after checkpoint resume.
+
+### Timing and memory
+
+All timing events for a group are flushed together as one `StepTimeBatch`.
+`StepTimeSampler` sums repeated forward and backward events within that batch,
+keeping CPU and GPU durations separate. It does not merge separate batches
+that happen to have the same step number.
+
+`StepMemoryTracker` resets the tracked CUDA device's PyTorch peak counters
+once at the start of the group and reads peak allocated/reserved memory once
+at the end. The peak covers all microbatches and optimizer work in that window.
+`StepMemorySampler` stores the result without further aggregation. CPU runs
+report memory as unavailable. Temporary allocation peaks before the callback
+window are not captured, although inputs still resident at its start count
+toward the peak.
+
+The callback window includes gradient clipping, ordinary scheduler work, and
+gradient zeroing. These contribute to Traced Step Time but are outside the
+separately timed forward, backward, and optimizer calls. HF's subsequent
+logging, saving, and evaluation are outside this window. Other callbacks'
+work is included only when it runs inside the measured window.
+
+### Skipped optimizer updates
+
+HF still completes a step when AMP overflow prevents a parameter update.
+TraceML follows that completion event. If the scaler skips the optimizer call,
+no timing event is emitted. A fused optimizer can execute its call but skip updating
+parameters internally; that call still contributes measured optimizer time.
+Neither the step count nor an optimizer timing event proves parameters changed.
+
+### Current limitations
+
+HF requests prepared inputs before `on_step_begin`, so the current callback
+can miss input H2D transfers. Evaluation loader events can also reach the next
+training step. The existing raw input event names are
+`_traceml_internal:dataloader_next` and `_traceml_internal:h2d_time`.
+These gaps can omit transfers from Step Time or assign loader work to the
+wrong training step.
+
+If training is interrupted, the Trainer lifecycle guard aborts the open
+capture before the exception reaches Accelerate's automatic batch-size retry.
+The failed group is not published and does not advance TraceML's step counter.
+The original training exception continues unchanged.
+
+The boundary follows HF's
+[training loop](https://github.com/huggingface/transformers/blob/6622f6f781c9c0b1f2f5541a257943bee95ad586/src/transformers/trainer.py#L1791-L1892)
+and Accelerate's
+[optimizer wrapper](https://github.com/huggingface/accelerate/blob/9e5d1de5d2248a5f3ee8f2d9272ce88a686dc42d/src/accelerate/optimizer.py#L152-L203).
+`tests/integrations/test_hf_trainer.py` checks accumulation, partial groups, and
+scaler overflow. These CPU checks do not establish CUDA timing accuracy.
+
 ## Surface responsibilities
 
 | Surface | Loads | Diagnoses | Presents |

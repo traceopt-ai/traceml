@@ -1,5 +1,12 @@
+"""TraceML callbacks for the standard Hugging Face Trainer.
+
+The TraceMLTrainer wrapper was intentionally removed. Use init() and register
+TraceMLTrainerCallback with transformers.Trainer.
+"""
+
 import os
 import sys
+from functools import wraps
 
 from traceml_ai.sdk.instrumentation import trace_step
 
@@ -15,12 +22,11 @@ def _traceml_disabled() -> bool:
 
 
 try:
-    from transformers import Trainer, TrainerCallback
+    from transformers import TrainerCallback
 
     HAS_TRANSFORMERS = True
 except ImportError:
     HAS_TRANSFORMERS = False
-    Trainer = object  # Fallback for type hinting
     TrainerCallback = object  # Fallback for type hinting
 
 
@@ -38,14 +44,21 @@ def init():
     patches on its own; the auto-timers it arms are no-ops unless the matching
     patch is installed. ``init()`` is the recommended entry point so the
     DataLoader fetch patch in particular is installed deterministically rather
-    than relying on import order. This mirrors the PyTorch Lightning
-    integration's ``init()``; HF uses ``mode="auto"`` because ``trace_step``
-    drives forward/backward timing through the patch-gated auto-timers, whereas
-    Lightning's callback owns that timing directly.
+    than relying on import order. It also installs the narrow Trainer lifecycle
+    guard that aborts unfinished steps before an automatic batch-size retry.
+    This mirrors the PyTorch Lightning integration's ``init()``; HF uses
+    ``mode="auto"`` because ``trace_step`` drives forward/backward timing
+    through the patch-gated auto-timers, whereas Lightning's callback owns that
+    timing directly.
     """
     import traceml_ai as traceml
 
-    return traceml.init(mode="auto")
+    config = traceml.init(mode="auto")
+    try:
+        _install_trainer_lifecycle_guard()
+    except Exception as exc:
+        _log_hf_error("Trainer lifecycle guard installation failed", exc)
+    return config
 
 
 def _log_hf_error(message: str, exc: Exception) -> None:
@@ -68,22 +81,33 @@ def _log_hf_error(message: str, exc: Exception) -> None:
     print(f"[TraceML] {message}: {exc}", file=sys.stderr)
 
 
+class _TraceStepAbort(RuntimeError):
+    """Internal signal used to unwind an unfinished ``trace_step``."""
+
+
 class TraceMLTrainerCallback(TrainerCallback if HAS_TRANSFORMERS else object):
     """
-    Preferred Hugging Face integration for TraceML.
+    Hugging Face Trainer integration for TraceML.
 
     Register with ``Trainer(..., callbacks=[TraceMLTrainerCallback()])``.
 
-    The callback is a pure bracket around TraceML's ``trace_step`` context
-    manager: it opens ``trace_step`` in ``on_step_begin`` and closes it in
-    ``on_step_end``. ``trace_step`` owns the step memory tracker, the step
-    counter advance, the auto-timers for forward/backward/h2d, and the
-    per-step capture lifecycle. Nothing is duplicated here.
+    The callback brackets TraceML's ``trace_step`` context manager: it opens
+    ``trace_step`` in ``on_step_begin`` and completes it in ``on_step_end``.
+    The lifecycle guard installed by :func:`init` aborts an open context when
+    the Trainer attempt exits early. ``trace_step`` owns the step memory
+    tracker, step counter, auto-timers, and capture publication.
 
-    One TraceML step equals one optimizer step. With
-    ``gradient_accumulation_steps > 1``, forward and backward events from all
-    accumulated micro-batches fold into a single TraceML step. See the HF
-    integration docs for the full list of limitations vs. ``TraceMLTrainer``.
+    One completed TraceML step corresponds to one HF accumulation/update
+    boundary (``on_step_end``), including when AMP skips the parameter update.
+    ``on_substep_end`` does not advance the counter: forward and backward
+    events from the actual micro-batches in the group fold into one step,
+    including a shorter final group. Optimizer events describe calls that
+    actually run; their count does not drive TraceML's step counter.
+
+    TraceML step IDs remain process-local, so their increments match HF's
+    ``global_step`` increments during recorded, completed groups; their
+    absolute values need not match after checkpoint resume. See the HF
+    integration docs for the input-timing limitations and lifecycle behavior.
     """
 
     def __init__(self) -> None:
@@ -95,9 +119,16 @@ class TraceMLTrainerCallback(TrainerCallback if HAS_TRANSFORMERS else object):
             )
         super().__init__()
         self._step_cm = None
+        self._owns_run = True
 
-    def _close_step_cm_safely(self) -> None:
-        """Defensively exit any open trace_step context."""
+    def _set_run_owner(self, owns_run: bool) -> None:
+        """Select one TraceML callback when duplicate instances are present."""
+        if not owns_run:
+            self._abort_step_cm_safely()
+        self._owns_run = owns_run
+
+    def _complete_step_cm_safely(self) -> None:
+        """Complete and publish the currently open TraceML step."""
         cm = self._step_cm
         if cm is None:
             return
@@ -107,17 +138,30 @@ class TraceMLTrainerCallback(TrainerCallback if HAS_TRANSFORMERS else object):
         except Exception as exc:
             _log_hf_error("trace_step exit failed", exc)
 
+    def _abort_step_cm_safely(self) -> None:
+        """Unwind an unfinished TraceML step without publishing it."""
+        cm = self._step_cm
+        if cm is None:
+            return
+        self._step_cm = None
+        abort = _TraceStepAbort("Hugging Face training step did not complete")
+        try:
+            cm.__exit__(type(abort), abort, None)
+        except _TraceStepAbort:
+            # Defensive for context-manager implementations that propagate the
+            # injected signal instead of returning False from __exit__.
+            pass
+        except Exception as exc:
+            _log_hf_error("trace_step abort failed", exc)
+
     def on_train_begin(self, args, state, control, **kwargs):
-        if _traceml_disabled():
+        # A reused callback must never carry an unfinished prior run forward.
+        self._abort_step_cm_safely()
+        if _traceml_disabled() or not self._owns_run:
             return
 
-        # Fail-loud capability check (#88-class): warn, never raise,
-        # when the current init config leaves telemetry streams this
-        # integration owes dark. on_train_begin runs once per train()
-        # call, after user setup, so it reflects post-init() state and
-        # stays off the per-step hot path. Covers both the direct
-        # callback path and the TraceMLTrainer wrapper (which installs
-        # this callback).
+        # Check instrumentation once per train() call, after user setup.
+        # Missing streams should warn without interrupting training.
         try:
             from traceml_ai.integrations._capability import (
                 warn_if_missing_streams,
@@ -130,22 +174,12 @@ class TraceMLTrainerCallback(TrainerCallback if HAS_TRANSFORMERS else object):
         except Exception:
             pass
 
-        # Self-heal before training starts. If this callback instance is
-        # reused and a previous run crashed mid-step, the leaked trace_step is
-        # still suspended with its auto-timer flags armed. With
-        # eval_on_start=True, HF runs evaluation between here and the first
-        # on_step_begin, so those eval forward passes would otherwise be timed
-        # into the orphaned step. Closing here covers that window.
-        self._close_step_cm_safely()
-
     def on_step_begin(self, args, state, control, **kwargs):
-        if _traceml_disabled():
+        # If the prior boundary did not close, discard it before starting the
+        # next group. The lifecycle guard normally handles this on exceptions.
+        self._abort_step_cm_safely()
+        if _traceml_disabled() or not self._owns_run:
             return
-
-        # If a previous step raised, HF never fired on_step_end and the
-        # trace_step generator is still suspended. Close it before opening
-        # a new one so forward/backward auto-timer flags do not stay armed.
-        self._close_step_cm_safely()
 
         model = kwargs.get("model")
         if model is None:
@@ -162,50 +196,74 @@ class TraceMLTrainerCallback(TrainerCallback if HAS_TRANSFORMERS else object):
             _log_hf_error("trace_step enter failed", exc)
 
     def on_step_end(self, args, state, control, **kwargs):
-        if _traceml_disabled():
+        if _traceml_disabled() or not self._owns_run:
+            self._abort_step_cm_safely()
             return
-        self._close_step_cm_safely()
+        self._complete_step_cm_safely()
 
     def on_train_end(self, args, state, control, **kwargs):
-        # Bounds damage if training aborted mid-step.
-        self._close_step_cm_safely()
+        self._abort_step_cm_safely()
 
 
-class TraceMLTrainer(Trainer if HAS_TRANSFORMERS else object):
-    """
-    Thin wrapper around ``transformers.Trainer`` that auto-installs
-    ``TraceMLTrainerCallback``.
-
-    Kept for backward compatibility with users on the original TraceML HF
-    integration API. New code should prefer
-    ``Trainer(..., callbacks=[TraceMLTrainerCallback()])`` directly.
-    """
-
-    def __init__(
-        self,
-        *args,
-        traceml_enabled: bool = True,
-        **kwargs,
-    ):
-        if not HAS_TRANSFORMERS:
-            raise ImportError(
-                "TraceMLTrainer requires the Hugging Face integration. "
-                "Install it with `pip install 'traceml-ai[hf]'`."
-            )
-
-        super().__init__(*args, **kwargs)
-        self.traceml_enabled = traceml_enabled
-
-        if not traceml_enabled or _traceml_disabled():
-            return
-
-        # Dedup guard: a user passing callbacks=[TraceMLTrainerCallback()] to
-        # TraceMLTrainer would otherwise double-instrument every step.
-        existing = getattr(self.callback_handler, "callbacks", [])
-        if any(isinstance(cb, TraceMLTrainerCallback) for cb in existing):
-            return
-
-        self.add_callback(TraceMLTrainerCallback())
+def _traceml_callbacks(trainer) -> list[TraceMLTrainerCallback]:
+    """Return TraceML callbacks registered on one Trainer instance."""
+    handler = getattr(trainer, "callback_handler", None)
+    callbacks = getattr(handler, "callbacks", ())
+    return [
+        callback
+        for callback in callbacks
+        if isinstance(callback, TraceMLTrainerCallback)
+    ]
 
 
-__all__ = ["TraceMLTrainerCallback", "TraceMLTrainer", "init"]
+def _abort_pending_capture_safely() -> None:
+    """Discard step events left outside an open callback context."""
+    try:
+        from traceml_ai.instrumentation.step_events import (
+            abort_step_capture,
+            begin_step_capture,
+        )
+
+        abort_step_capture(begin_step_capture())
+    except Exception as exc:
+        _log_hf_error("pending step capture abort failed", exc)
+
+
+def _install_trainer_lifecycle_guard() -> None:
+    """Install failure cleanup inside HF's per-attempt retry boundary."""
+    if not HAS_TRANSFORMERS:
+        return
+
+    from transformers import Trainer
+
+    original = Trainer._inner_training_loop
+    if getattr(original, "_traceml_lifecycle_guard", False):
+        return
+
+    @wraps(original)
+    def guarded_inner_training_loop(trainer, *args, **kwargs):
+        callbacks = _traceml_callbacks(trainer)
+        if not callbacks:
+            return original(trainer, *args, **kwargs)
+
+        owner = callbacks[0]
+        for callback in callbacks:
+            callback._set_run_owner(callback is owner)
+
+        # Start every Trainer attempt with a clean capture. This also handles
+        # failures that happen while fetching inputs, before on_step_begin.
+        _abort_pending_capture_safely()
+        try:
+            return original(trainer, *args, **kwargs)
+        finally:
+            # This runs before Accelerate handles an OOM and retries the same
+            # inner loop, so a failed attempt cannot leak into the next one.
+            for callback in callbacks:
+                callback._abort_step_cm_safely()
+            _abort_pending_capture_safely()
+
+    guarded_inner_training_loop._traceml_lifecycle_guard = True
+    Trainer._inner_training_loop = guarded_inner_training_loop
+
+
+__all__ = ["TraceMLTrainerCallback", "init"]
