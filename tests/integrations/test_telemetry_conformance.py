@@ -83,13 +83,14 @@ def _run_huggingface() -> set[str]:
     from transformers import (
         BertConfig,
         BertForSequenceClassification,
+        Trainer,
         TrainingArguments,
     )
 
     from traceml_ai.integrations.huggingface import (
-        TraceMLTrainer,
+        TraceMLTrainerCallback,
+        init as hf_init,
     )
-    from traceml_ai.integrations.huggingface import init as hf_init
 
     class _TinyDS(torch.utils.data.Dataset):
         def __init__(self, n=20, seq=16, vocab=128, labels=4):
@@ -134,11 +135,11 @@ def _run_huggingface() -> set[str]:
             use_cpu=not torch.cuda.is_available(),
             save_strategy="no",
         )
-        TraceMLTrainer(
+        Trainer(
             model=model,
             args=args,
             train_dataset=_TinyDS(),
-            traceml_enabled=True,
+            callbacks=[TraceMLTrainerCallback()],
         ).train()
 
     return _drain_step_time_names()

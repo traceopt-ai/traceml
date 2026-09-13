@@ -28,10 +28,11 @@ class TraceSessionState:
     """
     Process-local state shared by TraceML instrumentation paths.
 
-    The first state carried here is the semantic training-step counter. It is
-    intentionally independent from framework-specific counters such as
-    Lightning's global step because TraceML also treats gradient-accumulation
-    micro-batches as distinct traceable steps.
+    The first state carried here is the semantic training-step counter. Each
+    integration defines the boundary of a completed trace_step: Hugging Face
+    uses an accumulation/update group, while Lightning uses a training batch.
+    This process-local counter is independent of framework counters and is
+    not automatically restored from a framework checkpoint.
     """
 
     initial_step: int = 0

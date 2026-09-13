@@ -2,11 +2,10 @@
 
 Use TraceML with Hugging Face `Trainer` without rewriting your training loop.
 
-The preferred integration is two steps: call
+The integration is two steps: call
 `traceml_ai.integrations.huggingface.init()` once, then pass
 `TraceMLTrainerCallback` (a standard `transformers.TrainerCallback`) to your
-existing `Trainer`. The legacy `TraceMLTrainer` subclass is still supported. It
-is now a thin wrapper that installs the same callback under the hood.
+existing `Trainer`.
 
 ## 1. Install
 
@@ -48,40 +47,9 @@ trainer = Trainer(
 trainer.train()
 ```
 
-`traceml_hf.init()` installs TraceML's process-wide instrumentation:
-`DataLoader` fetch timing, the H2D `Tensor.to` patch, and the
-forward/backward/optimizer auto-timers. The callback is a per-step bracket and
-cannot install these on its own, so calling `init()` first is what lets TraceML
-attribute `DataLoader` fetch time and host-to-device copies. It is idempotent
-and safe to call once at startup.
-
-You do not need to add `traceml.trace_step(...)` manually. The callback opens
-and closes `trace_step` around each optimizer step, and the auto-timers `init()`
-installed capture forward, backward, h2d, and optimizer phases inside that
-bracket.
-
-### Legacy `TraceMLTrainer`
-
-The `TraceMLTrainer(Trainer)` subclass remains supported for users who already
-adopted it. It is now a thin wrapper that auto-installs
-`TraceMLTrainerCallback` on construction and accepts `traceml_enabled` to turn
-step-level instrumentation on or off:
-
-```python
-from traceml_ai.integrations import huggingface as traceml_hf
-
-traceml_hf.init()
-
-trainer = traceml_hf.TraceMLTrainer(
-    model=model,
-    args=training_args,
-    train_dataset=train_dataset,
-    traceml_enabled=True,
-)
-trainer.train()
-```
-
-New code should prefer the direct callback registration shown above.
+`traceml_hf.init()` enables automatic timing. The callback groups timing and
+memory measurements into training steps. Use both; you do not need to add
+`traceml.trace_step(...)` to your training code.
 
 ## 3. Launch The Run
 
@@ -114,37 +82,36 @@ to read:
 TraceML can still run alongside W&B, MLflow, and TensorBoard. For tracker
 logging patterns, see [W&B / MLflow](wandb-mlflow.md).
 
+## What one step includes
+
+One TraceML step covers the microbatches used for one HF optimizer update
+attempt. With `gradient_accumulation_steps=4`, four microbatches share one step
+number. A final group can contain fewer microbatches.
+
+Forward and backward times are added across the group. CUDA memory reports
+the peak PyTorch allocated/reserved memory on the tracked device during that
+group, rather than adding memory values. CPU runs report this memory metric
+as unavailable.
+
+TraceML follows HF's completed-step count even when mixed-precision overflow
+skips a parameter update. Step numbers are local to the process, so they may
+differ from HF's `global_step` after checkpoint resume. See the
+[developer guide](../../developer_guide/step-time-pipeline-contract.md#hugging-face-steps)
+for the exact timing boundaries and optimizer behavior.
+
 ## Limitations
 
-The callback path is the right default for most users, but it has structural
-trade-offs vs. the legacy subclass that are worth knowing:
-
-- **Step granularity.** One TraceML step equals one optimizer step. With
-  `gradient_accumulation_steps=N`, forward and backward times from all `N`
-  accumulated micro-batches fold into a single TraceML step. The pre-refactor
-  `TraceMLTrainer.training_step` override counted each micro-batch as its own
-  TraceML step. If you need per-micro-batch attribution under gradient
-  accumulation, open an issue.
-- **Optimizer timing.** Captured by TraceML's global optimizer hooks, which
-  are installed automatically only when running under the default
-  `traceml.init(mode="auto")` path. Under `manual` or `selective` modes
-  optimizer events are not emitted, but this
-  applies consistently to every step, so dashboard step alignment still holds.
-- **Exception safety.** If `training_step` raises, Hugging Face does not call
-  `on_step_end`. The callback defensively closes the trace_step context on
-  the next `on_step_begin`, on `on_train_begin` (so a reused callback instance
-  whose previous run crashed mid-step does not bleed a leaked auto-timer flag
-  into an `eval_on_start=True` evaluation), and on `on_train_end`. Even so, the
-  step where the exception occurred may be reported with incomplete timing or
-  memory. The
-  legacy subclass's `with trace_step(model): super().training_step(...)`
-  pattern ran the `finally` cleanup deterministically. If you need precise
-  attribution on failing steps, the legacy `TraceMLTrainer` path is stricter.
-- **Callback registration timing.** Pass `TraceMLTrainerCallback()` at
-  `Trainer(...)` construction. Callbacks added via `trainer.add_callback(...)`
-  *after* `trainer.train()` has started will not receive `on_train_begin`,
-  which means the first step may be outside TraceML's callback-managed
-  `trace_step` bracket.
+- **Input timing.** Accelerate can transfer batches to the GPU before the
+  callback starts a step. Those H2D copies are currently missed, so Step Time
+  can omit pre-step transfers. Evaluation loader fetches can also be attributed
+  to the next training step.
+- **Memory window.** Temporary allocation peaks before the callback starts
+  a step are outside its memory measurement.
+- **Interrupted training.** If training raises, tracing can remain active
+  until a later cleanup call, which may record the unfinished group as a
+  completed step.
+- **Callback registration.** Register the callback before `trainer.train()`
+  so it receives the training events from the start.
 
 ## Troubleshooting
 
@@ -364,10 +331,34 @@ and returns the effective `TraceMLInitConfig`.
 `TraceMLTrainerCallback()` takes no TraceML-specific arguments and records
 standard step-level timing and memory.
 
-`TraceMLTrainer` (legacy thin wrapper) accepts:
+## Migration
 
-- everything that normal `transformers.Trainer` accepts
-- `traceml_enabled=True|False`
+`TraceMLTrainer` was intentionally removed because it only installed
+`TraceMLTrainerCallback`. Replace it with `transformers.Trainer`, call
+`traceml_hf.init()` once, and add `traceml_hf.TraceMLTrainerCallback()` to the
+Trainer's callbacks, as shown above. Keep the rest of your Trainer arguments.
+
+The `traceml_enabled` argument was removed with the wrapper. For optional
+tracing, control initialization and callback registration in your code:
+
+```python
+enable_tracing = True
+callbacks = []  # Add any other Trainer callbacks here.
+if enable_tracing:
+    traceml_hf.init()
+    callbacks.append(traceml_hf.TraceMLTrainerCallback())
+
+trainer = Trainer(
+    model=model,
+    args=training_args,
+    train_dataset=train_dataset,
+    callbacks=callbacks,
+)
+trainer.train()
+```
+
+To disable TraceML for an entire launched run, use `--disable-traceml` as
+shown in Troubleshooting.
 
 ## Next Steps
 
