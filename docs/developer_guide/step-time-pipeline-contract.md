@@ -292,6 +292,11 @@ capture before the exception reaches Accelerate's automatic batch-size retry.
 The failed group is not published and does not advance TraceML's step counter.
 The original training exception continues unchanged.
 
+This cleanup and duplicate-callback ownership require the guard installed by
+`traceml_ai.integrations.huggingface.init()`. They do not apply when installation
+fails or a custom `_inner_training_loop` bypasses the guarded parent method.
+Callback ownership is cleared when the guarded attempt exits.
+
 The boundary follows HF's
 [training loop](https://github.com/huggingface/transformers/blob/6622f6f781c9c0b1f2f5541a257943bee95ad586/src/transformers/trainer.py#L1791-L1892)
 and Accelerate's

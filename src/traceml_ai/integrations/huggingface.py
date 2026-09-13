@@ -147,10 +147,6 @@ class TraceMLTrainerCallback(TrainerCallback if HAS_TRANSFORMERS else object):
         abort = _TraceStepAbort("Hugging Face training step did not complete")
         try:
             cm.__exit__(type(abort), abort, None)
-        except _TraceStepAbort:
-            # Defensive for context-manager implementations that propagate the
-            # injected signal instead of returning False from __exit__.
-            pass
         except Exception as exc:
             _log_hf_error("trace_step abort failed", exc)
 
@@ -260,6 +256,8 @@ def _install_trainer_lifecycle_guard() -> None:
             # inner loop, so a failed attempt cannot leak into the next one.
             for callback in callbacks:
                 callback._abort_step_cm_safely()
+                # Ownership applies only to this attempt, not later reuse.
+                callback._set_run_owner(True)
             _abort_pending_capture_safely()
 
     guarded_inner_training_loop._traceml_lifecycle_guard = True

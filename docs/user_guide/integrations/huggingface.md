@@ -105,6 +105,11 @@ callback can be reused by a later Trainer run.
 
 ## Limitations
 
+- **Lifecycle guard.** Failure/retry cleanup and duplicate-callback handling
+  require `traceml_hf.init()` to install the Trainer lifecycle guard. If guard
+  installation fails, TraceML reports the error and training continues without
+  those guarantees. Custom `_inner_training_loop` overrides must call the
+  guarded parent implementation to receive this handling.
 - **Input timing.** Accelerate can transfer batches to the GPU before the
   callback starts a step. Those H2D copies are currently missed, so Step Time
   can omit pre-step transfers. Evaluation loader fetches can also be attributed

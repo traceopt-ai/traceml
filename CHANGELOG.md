@@ -7,9 +7,11 @@ which carry the full historical notes for versions predating this file.
 
 ## [Unreleased]
 
-- Hugging Face Trainer now discards unfinished step captures when training
-  raises, including before automatic batch-size retries. Reused and duplicate
-  TraceML callbacks cannot publish a failed group or count a step twice.
+- With the lifecycle guard installed by Hugging Face `init()`, Trainer
+  discards unfinished step captures when training raises, including before
+  automatic batch-size retries, and selects one TraceML callback per run to
+  prevent duplicate step counting. Callback ownership is reset after each
+  attempt so instances remain reusable.
 - **Removed:** `traceml_ai.integrations.huggingface.TraceMLTrainer` and its
   `traceml_enabled` argument. The wrapper only installed the callback. Call
   `traceml_ai.integrations.huggingface.init()` and register

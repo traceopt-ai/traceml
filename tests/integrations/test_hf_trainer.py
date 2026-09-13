@@ -405,15 +405,17 @@ def test_hf_trainer_optional_callback_preserves_training():
     torch.testing.assert_close(traced[1], untraced[1])
 
 
+@pytest.mark.parametrize("failure_type", [RuntimeError, KeyboardInterrupt])
 def test_hf_trainer_failure_aborts_capture_and_callback_can_be_reused(
     tmp_path,
+    failure_type,
 ):
     """A failed group is discarded without changing the training exception."""
     _reset_traceml_state()
     init()
 
     callback = TraceMLTrainerCallback()
-    expected_failure = RuntimeError("expected training failure")
+    expected_failure = failure_type("expected training failure")
 
     class FailingTrainer(Trainer):
         def training_step(self, *args, **kwargs):
@@ -429,7 +431,7 @@ def test_hf_trainer_failure_aborts_capture_and_callback_can_be_reused(
         callbacks=[callback],
     )
 
-    with pytest.raises(RuntimeError) as raised:
+    with pytest.raises(failure_type) as raised:
         failing_trainer.train()
 
     assert raised.value is expected_failure
@@ -535,7 +537,7 @@ def test_hf_auto_batch_size_retry_discards_failed_attempt(tmp_path):
 
 
 def test_hf_duplicate_callbacks_publish_each_step_once(tmp_path):
-    """Only the first TraceML callback owns a Trainer run."""
+    """Duplicate ownership ends with the run, allowing later callback reuse."""
     _reset_traceml_state()
     init()
     callbacks = [TraceMLTrainerCallback(), TraceMLTrainerCallback()]
@@ -553,6 +555,25 @@ def test_hf_duplicate_callbacks_publish_each_step_once(tmp_path):
     assert get_trace_session_state().step == 2
     assert len(_drain_step_time_queue()) == 2
     assert len(_drain_step_memory_queue()) == 2
+
+    # A custom loop can bypass the guard. Reusing the former non-owner must
+    # not silently disable a callback that would otherwise record steps.
+    class UnguardedTrainer(Trainer):
+        _inner_training_loop = Trainer._inner_training_loop.__wrapped__
+
+    reused = UnguardedTrainer(
+        model=_build_tiny_model(),
+        args=_build_training_args(
+            str(tmp_path / "reused"), max_steps=1, use_cpu=True
+        ),
+        train_dataset=_TinyTokenizedDataset(),
+        callbacks=[callbacks[1]],
+    )
+    reused.train()
+
+    assert get_trace_session_state().step == 3
+    assert [batch.step for batch in _drain_step_time_queue()] == [3]
+    assert len(_drain_step_memory_queue()) == 1
 
 
 def test_hf_stop_during_accumulation_discards_partial_group(tmp_path):
