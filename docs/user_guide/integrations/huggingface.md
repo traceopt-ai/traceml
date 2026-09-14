@@ -99,17 +99,23 @@ differ from HF's `global_step` after checkpoint resume. See the
 [developer guide](../../developer_guide/step-time-pipeline-contract.md#hugging-face-steps)
 for the exact timing boundaries and optimizer behavior.
 
+If training stops before an accumulation group completes, TraceML discards
+that group. Cleanup happens before an automatic batch-size retry, and the same
+callback can be reused by a later Trainer run.
+
 ## Limitations
 
+- **Lifecycle guard.** Failure/retry cleanup and duplicate-callback handling
+  require `traceml_hf.init()` to install the Trainer lifecycle guard. If guard
+  installation fails, TraceML reports the error and training continues without
+  those guarantees. Custom `_inner_training_loop` overrides must call the
+  guarded parent implementation to receive this handling.
 - **Input timing.** Accelerate can transfer batches to the GPU before the
   callback starts a step. Those H2D copies are currently missed, so Step Time
   can omit pre-step transfers. Evaluation loader fetches can also be attributed
   to the next training step.
 - **Memory window.** Temporary allocation peaks before the callback starts
   a step are outside its memory measurement.
-- **Interrupted training.** If training raises, tracing can remain active
-  until a later cleanup call, which may record the unfinished group as a
-  completed step.
 - **Callback registration.** Register the callback before `trainer.train()`
   so it receives the training events from the start.
 
