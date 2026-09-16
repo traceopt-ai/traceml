@@ -5,7 +5,7 @@ All notable changes to TraceML are documented here. This file follows
 should match the tags on [GitHub Releases](https://github.com/traceopt-ai/traceml/releases),
 which carry the full historical notes for versions predating this file.
 
-## [Unreleased]
+## [0.4.0] - 2026-09-16
 
 - With the lifecycle guard installed by Hugging Face `init()`, Trainer
   discards unfinished step captures when training raises, including before
