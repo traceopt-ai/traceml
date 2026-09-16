@@ -15,6 +15,9 @@ theme:
   name: material
   # logo: assets/logo.png        # uncomment when traceopt.ai logo is available
   # favicon: assets/favicon.png
+  font:
+    text: Geist
+    code: Geist Mono
   palette:
     - scheme: default
       primary: custom
@@ -78,6 +81,7 @@ markdown_extensions:
   - toc: { permalink: true }
 
 nav:
+  - Home: index.md
   - Guides:
       - Slow PyTorch Training: guides/slow-pytorch-training.md
       - Find Input Pipeline Bottlenecks: guides/pytorch-input-pipeline-bottleneck.md

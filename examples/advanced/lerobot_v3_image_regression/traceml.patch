@@ -1,0 +1,44 @@
+diff --git a/src/lerobot/scripts/lerobot_train.py b/src/lerobot/scripts/lerobot_train.py
+index 0cc6e037..85ae3bee 100644
+--- a/src/lerobot/scripts/lerobot_train.py
++++ b/src/lerobot/scripts/lerobot_train.py
+@@ -26,0 +27,2 @@ from torch.optim import Optimizer
++import traceml_ai as traceml
++
+@@ -154,0 +157,6 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
++    traceml.init(
++        mode="selective",
++        patch_dataloader=True,
++        patch_backward=True,
++        patch_h2d=True,
++    )
+@@ -299,0 +308,3 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
++    traced_policy = accelerator.unwrap_model(policy)
++    traceml.wrap_forward(traced_policy)
++    traceml.wrap_optimizer(optimizer)
+@@ -329,12 +341,13 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
+-        batch = preprocessor(batch)
+-        train_tracker.dataloading_s = time.perf_counter() - start_time
+-
+-        train_tracker, output_dict = update_policy(
+-            train_tracker,
+-            policy,
+-            batch,
+-            optimizer,
+-            cfg.optimizer.grad_clip_norm,
+-            accelerator=accelerator,
+-            lr_scheduler=lr_scheduler,
+-        )
++        with traceml.trace_step(traced_policy):
++            batch = preprocessor(batch)
++            train_tracker.dataloading_s = time.perf_counter() - start_time
++
++            train_tracker, output_dict = update_policy(
++                train_tracker,
++                policy,
++                batch,
++                optimizer,
++                cfg.optimizer.grad_clip_norm,
++                accelerator=accelerator,
++                lr_scheduler=lr_scheduler,
++            )

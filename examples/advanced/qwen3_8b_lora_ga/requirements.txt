@@ -1,0 +1,6 @@
+# PyTorch is supplied by the AWS Deep Learning AMI.
+accelerate==1.14.0
+datasets==5.0.1
+peft==0.20.0
+transformers==5.15.1
+trl==1.10.0

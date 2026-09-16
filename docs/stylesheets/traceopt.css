@@ -94,3 +94,10 @@ body,
   color: #ffa94d;
   opacity: 1;
 }
+
+/* Material's default h1 color (--md-default-fg-color--light) reads as
+   muted, low-contrast gray on the slate background. Reuse the full-contrast
+   foreground color already defined for this scheme instead. */
+[data-md-color-scheme="slate"] .md-typeset h1 {
+  color: var(--md-default-fg-color);
+}
