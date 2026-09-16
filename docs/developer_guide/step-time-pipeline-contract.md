@@ -237,6 +237,33 @@ SQLite normalization. `_traceml_internal:step_time` is intentionally stable
 raw telemetry and storage vocabulary below that normalization boundary; it is
 not a public metric name or presentation label.
 
+## Lightning steps
+
+Under automatic optimization, one completed TraceML step corresponds to one
+Lightning accumulation/update group. Each micro-batch opens and closes its own
+traced region, while the owning `StepCapture` and CUDA peak-memory window stay
+open until `trainer.fit_loop._should_accumulate()` becomes false. The callback
+then reads memory, advances the process-local counter, and publishes the group
+once. Lightning's default strategy completes a shorter final group. Strategies
+that own accumulation internally publish only groups for which they perform an
+update; an unfinished final group is discarded at teardown.
+
+The resulting `StepTimeBatch` contains repeated fetch, H2D, forward, backward,
+and traced-step events. `StepTimeSampler` sums repeated timing events within
+that batch. `StepMemoryTracker` resets once at group start and reads once at
+group end, so CUDA supplies the peak for the complete group; the memory sampler
+does not calculate another maximum. Separate completed batches with the same
+step number are not merged by either sampler.
+
+Manual optimization remains batch-scoped because Lightning does not define an
+automatic accumulation boundary for it. A manual batch can contain multiple
+optimizer and backward events in its single TraceML step. An exception aborts
+the entire capture accumulated since the prior completed update.
+
+`tests/integrations/test_lightning_trainer.py` checks full and partial
+accumulation groups against real Trainers from both the `lightning` and
+`pytorch_lightning` namespaces.
+
 ## Hugging Face steps
 
 For normally completed HF training, one TraceML step contains the microbatches

@@ -168,12 +168,13 @@ def _lightning_uses_cuda(trainer, pl_module) -> bool:
 
 
 def _lightning_is_accumulating(trainer, pl_module) -> bool:
-    """Return Lightning's update decision for automatic optimization.
+    """Return whether Lightning is still accumulating the current step.
 
-    Most strategies do not fire ``on_before_optimizer_step`` on accumulating
-    micro-batches. Strategies that own accumulation, including DeepSpeed, do;
-    Lightning's fit-loop decision is the authoritative way to distinguish
-    those internal calls from parameter-update batches.
+    This gates both optimizer-event recording and capture completion. Manual
+    optimization remains batch-scoped and returns ``False``. For automatic
+    optimization, Lightning's fit-loop decision accounts for accumulation
+    schedules and shorter final groups. It also distinguishes internal
+    strategy calls, including DeepSpeed, from parameter-update boundaries.
     """
     if not getattr(pl_module, "automatic_optimization", False):
         return False
@@ -196,14 +197,13 @@ class TraceMLCallback(_CallbackBase):
     """
     Official TraceML Callback for PyTorch Lightning.
 
-    One TraceML step is one Lightning training batch. The traced step opens
-    when Lightning moves the batch to the device (so the H2D transfer is
-    inside Traced Step Time) and closes at ``on_train_batch_end``. Forward,
-    backward and optimizer phases are timed individually. Under gradient
-    accumulation every micro-batch is still a step; the optimizer phase is
-    recorded only on batches where the optimizer ran, and absent on the
-    others. Fetches of validation, sanity-check, test and predict loaders are
-    kept out of Input Wait. A batch that raises is discarded, not published.
+    One TraceML step is one Lightning optimizer-update boundary. Without
+    gradient accumulation this is one training batch. With automatic gradient
+    accumulation, the capture remains open across the group's micro-batches;
+    their repeated timing events are aggregated by ``StepTimeSampler`` and the
+    memory tracker reports the peak across the group. Fetches of validation,
+    sanity-check, test and predict loaders are kept out of Input Wait. A group
+    that raises is discarded, not published.
     """
 
     def __init__(self):
@@ -226,6 +226,7 @@ class TraceMLCallback(_CallbackBase):
         self._dataloader_timing_scope = None
 
         self._mem_tracker = None
+        self._memory_window_attempted = False
 
     def _close_context(self, ctx_attr: str) -> None:
         ctx = getattr(self, ctx_attr, None)
@@ -247,15 +248,17 @@ class TraceMLCallback(_CallbackBase):
 
     def _open_step_region(self) -> None:
         """
-        Open the traced step once; later callers find it already open.
+        Open this micro-batch's traced region inside the active step capture.
 
-        Opening also takes the capture this batch completes. ``begin`` adopts
-        the active capture, so the fetch and H2D events recorded before this
-        point in the batch stay with it.
+        ``begin`` adopts input events recorded before this point. During
+        gradient accumulation, later micro-batches reuse the same capture but
+        receive their own timed region; the sampler sums those regions when
+        the completed group is published.
         """
         if self._traceml_step_ctx is not None:
             return
-        self._step_capture = begin_step_capture()
+        if self._step_capture is None:
+            self._step_capture = begin_step_capture()
         try:
             ctx = timed_region(
                 "_traceml_internal:step_time",
@@ -398,9 +401,9 @@ class TraceMLCallback(_CallbackBase):
         self._original_batch_to_device = original
 
     def teardown(self, trainer, pl_module, stage=None):
-        # Anything recorded since the last completed step (a batch
-        # interrupted before its end, a tuner trial stopped mid-fit) must not
-        # leak into the next fit in this process.
+        # Anything recorded since the last completed step (an accumulation
+        # group interrupted before its end, a tuner trial stopped mid-fit)
+        # must not leak into the next fit in this process.
         self._abandon_pending(pl_module)
         self._restore_forward()
         self._restore_batch_to_device()
@@ -418,22 +421,23 @@ class TraceMLCallback(_CallbackBase):
             self._close_all_contexts()
             capture = self._step_capture
             self._step_capture = None
+            self._mem_tracker = None
+            self._memory_window_attempted = False
             abort_step_capture(
                 capture if capture is not None else begin_step_capture()
             )
-            self._mem_tracker = None
         except Exception as e:
             _log_lightning_error("pending-step cleanup failed", e)
 
     def on_exception(self, trainer, pl_module, exception):
         """
-        Abandon the current batch without publishing it.
+        Abandon the current incomplete step without publishing it.
 
         Lightning calls this hook, not ``teardown``, when training raises.
-        The open timing regions are closed, the pending timing events and
-        memory snapshot are discarded, the step counter is left where it was,
-        and the wrappers are restored. The user's exception propagates
-        untouched.
+        The open timing regions are closed; every micro-batch accumulated
+        since the prior update, plus the pending memory snapshot, is discarded.
+        The step counter is left where it was, the wrappers are restored, and
+        the user's exception propagates untouched.
         """
         self._abandon_pending(pl_module)
         self._restore_forward()
@@ -485,7 +489,12 @@ class TraceMLCallback(_CallbackBase):
         # never call batch_to_device.
         self._open_step_region()
 
-        # Reset step memory
+        # Reset CUDA peak counters once per optimizer-update group. Keeping the
+        # tracker across accumulating micro-batches makes the final reading the
+        # peak for the complete TraceML step.
+        if self._memory_window_attempted:
+            return
+        self._memory_window_attempted = True
         try:
             mem_tracker = StepMemoryTracker(pl_module)
             mem_tracker.reset()
@@ -543,22 +552,27 @@ class TraceMLCallback(_CallbackBase):
             # fresh envelope instead of merging into this one.
             self._abandon_pending(pl_module)
             return
-        # Close the optimizer region, any backward region left open, and the
-        # step envelope. On an accumulating micro-batch no optimizer region
-        # was opened, so no optimizer event exists for this step: the
-        # reporting side treats that absence as "did not occur", never as a
-        # measured zero.
+        # Each micro-batch contributes a separate traced region to the current
+        # capture. Repeated forward, backward, H2D, fetch, and step events are
+        # summed when the completed capture reaches StepTimeSampler.
         self._close_all_contexts()
 
-        # Record step memory
-        if self._mem_tracker is not None:
+        # Lightning's own loop decision includes partial final groups. Keep
+        # their capture and CUDA peak window open until the update boundary.
+        if _lightning_is_accumulating(trainer, pl_module):
+            return
+
+        # Record one memory peak for the complete optimizer-update group.
+        mem_tracker, self._mem_tracker = self._mem_tracker, None
+        self._memory_window_attempted = False
+        if mem_tracker is not None:
             try:
-                self._mem_tracker.record()
+                mem_tracker.record()
             except Exception as e:
                 _log_lightning_error("record failed", e)
 
-        # Advance and complete the capture (treating every micro-batch as a step
-        # to preserve fine-grained forward/backward times)
+        # Advance once per completed optimizer-update group and publish all of
+        # its micro-batch events under that step number.
         trace_state = get_trace_session_state()
         trace_state.advance_step()
         capture, self._step_capture = self._step_capture, None
