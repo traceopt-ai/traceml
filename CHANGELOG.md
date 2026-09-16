@@ -5,8 +5,72 @@ All notable changes to TraceML are documented here. This file follows
 should match the tags on [GitHub Releases](https://github.com/traceopt-ai/traceml/releases),
 which carry the full historical notes for versions predating this file.
 
-## [Unreleased]
+## [0.4.0] - 2026-09-16
 
+- With the lifecycle guard installed by Hugging Face `init()`, Trainer
+  discards unfinished step captures when training raises, including before
+  automatic batch-size retries, and selects one TraceML callback per run to
+  prevent duplicate step counting. Callback ownership is reset after each
+  attempt so instances remain reusable.
+- **Removed:** `traceml_ai.integrations.huggingface.TraceMLTrainer` and its
+  `traceml_enabled` argument. The wrapper only installed the callback. Call
+  `traceml_ai.integrations.huggingface.init()` and register
+  `TraceMLTrainerCallback()` with standard `transformers.Trainer` instead.
+  For optional tracing, register the callback conditionally. See the
+  [HF migration instructions](docs/user_guide/integrations/huggingface.md#migration)
+  for the replacement setup.
+- PyTorch Lightning: tracing now starts before batch transfer, excludes
+  non-training loader fetches, and groups accumulated micro-batches into one
+  TraceML step per optimizer update. Timings are summed within the group, CUDA
+  memory reports its peak, and incomplete groups are discarded. Non-update
+  optimizer calls are omitted, missing fetch or H2D patches produce a warning,
+  and real `Trainer.fit()` tests cover both Lightning namespaces.
+- PyTorch Lightning: new example `examples/integrations/lightning_dataloading_bottleneck.py`
+  (ResNet-18 on 320px Imagenette, `--profile` changes only the DataLoader) and
+  Colab notebook `notebooks/lightning_dataloading_bottleneck.ipynb`, which
+  compares the two runs and reads the per-step fetch wait to show the cold
+  first batch of every epoch; the notebook runs in the CPU notebook smoke job.
+- Step timing and memory now share one pending `StepCapture`. Successful steps
+  publish once through the existing queues; exceptions propagated through
+  `trace_step` discard partial measurements without advancing or reusing the
+  previous step number. Framework-specific failure detection remains separate.
+- Memory events and wire records no longer include `model_id`. The previous
+  per-model pending keying is replaced by one process-local memory snapshot,
+  published through the shared step-event handoff. Device metadata,
+  peak-counter boundaries, timestamps, byte units, and the SQLite schema are
+  unchanged.
+- Timing event types and queue access now live in
+  `instrumentation/step_events.py`. Producers and the timing sampler share an
+  explicit handoff; measurement boundaries, CUDA FIFO processing, and stored
+  output are unchanged.
+- **Breaking:** TraceML implementation errors now have one structured owner:
+  `rank_<global_rank>/traceml_errors.log`,
+  `aggregator/traceml_errors.log`, or
+  `nodes/node_<node_rank>/launcher_errors.log`. New runs no longer create the
+  duplicate `torchrun_error.log`, `runtime_error.log`, or
+  `aggregator_error.log` files.
+- Launcher-owned aggregator stderr is now saved separately at
+  `logs/<run-name>/aggregator/process.stderr.log`. Summary and dashboard modes
+  mirror it live; CLI mode preserves the Rich display and reports the saved
+  path if telemetry fails.
+- Training stdout and stderr are now saved by default in separate node-scoped
+  files under `logs/<run-name>/nodes/node_<node-rank>/`. Summary and dashboard
+  modes mirror them live; CLI mode keeps the Rich display clean and prints a
+  bounded stderr excerpt when training fails. Use
+  `--no-save-training-output` to inherit terminal descriptors instead. Capture
+  preserves application buffering, so abrupt termination cannot recover
+  stdout bytes the application has not flushed.
+- **Breaking:** Removed `--capture-stderr` and
+  `TRACEML_CAPTURE_STDERR`. The default two-stream launcher capture supersedes
+  the optional bounded `crash_stderr.log` tail.
+- **Breaking:** New runs no longer replace Python stdout/stderr or produce
+  per-rank `stdout_stderr.log` telemetry. Existing artifacts remain readable.
+- Root `system_manifest.json` writes now come only from global rank 0, avoiding
+  nondeterministic node ownership on shared filesystems.
+- **Breaking:** `--summary-window-rows` and
+  `TRACEML_SUMMARY_WINDOW_ROWS` were removed. Use
+  `--history-retention`, `history_retention`, or
+  `TRACEML_HISTORY_RETENTION`; row counts are not converted to durations.
 - Step Time now has one typed `load -> analyze -> diagnose -> present`
   pipeline. CLI and dashboard share the live profile, the dashboard fans one
   analysis to both views, and final summary runs the summary profile once

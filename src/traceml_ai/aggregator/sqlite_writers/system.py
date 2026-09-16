@@ -44,7 +44,6 @@ from typing import Any, Dict, Optional
 from traceml_ai.telemetry.envelope import TelemetryEnvelope, TelemetryMeta
 
 SAMPLER_NAME = "SystemSampler"
-RETENTION_TABLES = ("system_samples",)
 
 
 def _optional_int(value: Any) -> Optional[int]:

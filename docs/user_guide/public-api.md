@@ -102,9 +102,50 @@ traceml watch <script>                # zero-code system/process summary
 traceml serve                         # standalone aggregator
 ```
 
+`run`, `watch`, and `serve` accept `--history-retention DURATION`. The default
+is `30m`; bare values are seconds, and `s`, `m`, `h`, and `d` suffixes are
+accepted. Step Time and Step Memory are pruned through the minimum step that is
+aligned across every expected rank in both streams and older than the selected
+duration. System, Process, and GPU history use that same step's timestamp.
+Later arrivals at or before a deleted step or timestamp are dropped before
+insertion. Use `--no-history` on `run` or `watch` when history should be
+disabled entirely.
+
+The same setting is available as `history_retention` in `traceml.yaml` and as
+`TRACEML_HISTORY_RETENTION`. Precedence remains CLI, environment, YAML, then
+the 30-minute built-in default.
+
 Summary mode is the default for every topology. Live `cli` and `dashboard`
 modes are intended for single-node runs. Use PyTorch Profiler or Nsight for
 operator- or kernel-level profiling.
+
+`run` and `watch` save the supervised training command's stdout and stderr by
+default in separate node-scoped files:
+
+```text
+logs/<run-name>/nodes/node_<node-rank>/training.stdout.log
+logs/<run-name>/nodes/node_<node-rank>/training.stderr.log
+```
+
+Summary and dashboard modes also mirror both streams to the terminal. CLI mode
+does not mirror while its Rich display is active; after a training failure it
+prints a bounded stderr excerpt, the saved paths, and the final outcome. Use
+`--no-save-training-output` to inherit stdout/stderr and create no training
+output files. Captured streams are pipes, so `isatty()` returns false. TraceML
+does not replace Python's `sys.stdout` or `sys.stderr` objects.
+
+`--no-save-training-output` controls only the supervised training streams. The
+owner launcher always saves raw aggregator diagnostics to
+`logs/<run-name>/aggregator/process.stderr.log`; only node 0 creates this file
+in a multi-node run. Summary and dashboard modes mirror it live, while CLI mode
+reports its path if telemetry fails. Aggregator stdout remains attached to the
+terminal and is not persisted.
+
+TraceML implementation errors are stored separately in
+`rank_<global_rank>/traceml_errors.log`,
+`aggregator/traceml_errors.log`, and
+`nodes/node_<node_rank>/launcher_errors.log`. User exceptions remain in the
+native training stderr artifacts above.
 
 ## Direct Launch with `traceml serve`
 
@@ -149,8 +190,30 @@ non-aggregator node needs the reachable node-0 address above.
 | `--mode` | `summary` (default), `cli`, or `dashboard`. |
 | `--logs-dir` | Directory for session logs. |
 | `--run-name` / `--session-id` | Shared run identity for worker artifacts. |
+| `--history-retention` | Aligned raw-history duration; default `30m`. |
 
 ### Missing-aggregator behavior
+
+`traceml run` and `traceml watch` are strict by default: if their aggregator
+cannot start or become ready, training is not launched. To explicitly continue
+under the normal supervised launcher without telemetry, use:
+
+```bash
+traceml run train.py --on-missing-aggregator=warn
+```
+
+The CLI policy resolves as the explicit flag,
+`TRACEML_ON_MISSING_AGGREGATOR`, then `raise`. A startup failure is recorded as
+`telemetry_status="unavailable"` by the aggregator-owning launcher; once
+training starts, a later telemetry or finalization failure is reported
+separately and does not replace the training exit code. In multi-node runs,
+only the node 0 launcher reports final aggregator health.
+
+After training starts, the aggregator-owning launcher prints one telemetry
+health line to stderr immediately before the final training result, including
+`[TraceML] Telemetry complete.` on a healthy run. This footer reports telemetry
+health only and never changes the training exit code. Non-owner nodes do not
+print an authoritative final telemetry footer.
 
 If the aggregator cannot be reached, `traceml.init(...)` retries for its
 bounded timeout, writes one stderr warning, and continues with tracing disabled
@@ -171,19 +234,13 @@ It is not read from `traceml.yaml`.
 `traceml.init(...)` arguments, then `TRACEML_*` environment variables, then
 `traceml.yaml`, then built-in defaults.
 
-### Matching display modes across processes
+### Training output with direct launches
 
-In direct-launch mode, set the aggregator display with `traceml serve --mode`
-and the worker display with `traceml.init(ui_mode=...)` or `TRACEML_UI_MODE`.
-Use `cli` for both when the live terminal panel should include worker output:
-
-```bash
-traceml serve --mode cli --run-name demo --aggregator-port 29765
-TRACEML_UI_MODE=cli TRACEML_SESSION_ID=demo python train.py
-```
-
-If the modes differ, telemetry, diagnosis, and final artifacts are unaffected;
-only worker stdout mirroring into the live panel is skipped.
+`traceml serve` owns only the aggregator and does not wrap worker descriptors.
+With a direct `python` or `torchrun` launch, stdout/stderr therefore remain
+owned by the terminal, scheduler, or container runtime. The node-scoped
+training output files above are created only by `traceml run` and
+`traceml watch`.
 
 ## Framework Integrations
 
@@ -192,8 +249,9 @@ matching integration guide for installation and runtime requirements.
 
 ### Hugging Face
 
-Preferred path: call the integration `init()` once and register
-`TraceMLTrainerCallback` with your existing `transformers.Trainer`.
+Call the integration `init()` once and register `TraceMLTrainerCallback` with
+your existing `transformers.Trainer`. See the
+[Hugging Face guide](integrations/huggingface.md) for setup and limitations.
 
 ::: traceml_ai.integrations.huggingface.init
     options:
@@ -201,17 +259,6 @@ Preferred path: call the integration `init()` once and register
       show_source: false
 
 ::: traceml_ai.integrations.huggingface.TraceMLTrainerCallback
-    options:
-      show_root_heading: true
-      show_source: false
-
-#### Legacy compatibility: `TraceMLTrainer`
-
-`TraceMLTrainer` remains supported for existing users. New code should prefer
-`TraceMLTrainerCallback`; see the [Hugging Face guide](integrations/huggingface.md)
-for its trade-offs.
-
-::: traceml_ai.integrations.huggingface.TraceMLTrainer
     options:
       show_root_heading: true
       show_source: false

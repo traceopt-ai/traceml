@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import socket
+import sys
 from dataclasses import dataclass
 from typing import Any
+from unittest.mock import Mock
+
+import pytest
 
 from traceml_ai.runtime import lifecycle
+from traceml_ai.runtime.runtime import TraceMLRuntime
 from traceml_ai.runtime.settings import AggregatorEndpoint, TraceMLSettings
 
 
@@ -70,6 +75,37 @@ def test_start_aggregator_returns_idempotent_handle(
     assert created[0].stops == 1
 
 
+def test_start_aggregator_logs_endpoint_failure_once(monkeypatch, tmp_path):
+    class _EndpointFailureAggregator(_FakeAggregator):
+        @property
+        def endpoint(self):
+            raise RuntimeError("endpoint unavailable")
+
+    created = []
+
+    def _factory(*, logger, stop_event, settings):
+        aggregator = _EndpointFailureAggregator(
+            logger=logger,
+            stop_event=stop_event,
+            settings=settings,
+        )
+        created.append(aggregator)
+        return aggregator
+
+    logger = Mock()
+    monkeypatch.setattr(lifecycle, "_build_aggregator", _factory)
+
+    with pytest.raises(RuntimeError, match="endpoint unavailable"):
+        lifecycle.start_aggregator(
+            TraceMLSettings(logs_dir=str(tmp_path), session_id="run"),
+            logger=logger,
+        )
+
+    logger.error.assert_called_once()
+    assert created[0].stop_event.is_set()
+    assert created[0].stops == 1
+
+
 class _FakeRuntime:
     """Minimal TraceMLRuntime stand-in for start_runtime() tests."""
 
@@ -82,6 +118,19 @@ class _FakeRuntime:
 
     def stop(self) -> None:
         self.stopped = True
+
+
+def test_runtime_start_does_not_replace_python_streams() -> None:
+    stdout = sys.stdout
+    stderr = sys.stderr
+    runtime = TraceMLRuntime.__new__(TraceMLRuntime)
+    runtime._exporter = Mock()
+    runtime._sampler_thread = Mock()
+
+    runtime.start()
+
+    assert sys.stdout is stdout
+    assert sys.stderr is stderr
 
 
 def test_wait_for_aggregator_true_when_listening() -> None:

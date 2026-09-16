@@ -16,7 +16,7 @@ The concepts are the same in both.
 
 ## Start with the diagnosis
 
-TraceML output has two layers:
+TraceML output has three layers:
 
 1. **Primary Diagnosis**
    - the first answer in the end-of-run summary
@@ -55,16 +55,68 @@ By default, `traceml run train.py` prints a compact final summary and writes
 
 The text summary is intentionally verdict-first:
 
-- `TraceML Verdict`: the promoted performance diagnosis and severity
+- the run context: run name, device and topology, analyzed steps, and duration
+- `Verdict`: the promoted performance diagnosis and severity
 - `Why`: the short evidence-backed reason
-- `Next`: the first action to try or inspect
-- `Section Status`: compact health/status across System, Process, Step Time,
-  and Step Memory
-- `System Evidence` and `Step Time Evidence`: the core numbers behind the
-  verdict
+- `Next`: the first action to try or inspect for that verdict, directly below
+  `Why`
+- the selected-clock step decomposition: a window average for one process, or
+  the median Step Time rank (including its node) for a distributed run
+- individual Forward, Backward, and Optimizer rows when those phases were
+  measured
+- diagnosed culprit/victim rank values in `Why` when a distributed straggler
+  has complete stored attribution evidence. In distributed output, `Scope: N
+  = node · R = global rank · G = GPU index` defines compact identities used
+  consistently in Why text, pane headings, evidence, and table cells
+- System, Process, and Step Memory status with the available measurements that
+  support each status. System uses node-average tables, while Process and Step
+  Memory use an `avg` table for one observed rank and a `median rank avg` /
+  `worst rank avg` table for multiple observed ranks. Step Timing and Step
+  Memory share fixed upper panes; System and Process use matching lower panes,
+  all separated by `||`. A non-normal resource section places its stored
+  Evidence directly below the heading; normal/balanced sections leave that
+  row blank
+- supplemental DataLoader fetch time when measured
+- additional warning or critical findings when they are present
+- `Full evidence`: the path to the structured JSON artifact and the optional
+  HTML-report hint
+
+For a distributed run, the median rank is the observed rank whose per-rank
+window-average Step Time is closest to the cross-rank median. Every displayed
+phase comes from that selected rank row; TraceML does not combine unrelated
+per-metric medians. The final report resolves one interval from the latest
+optimizer step completed across all observed ranks. System and Process query
+that same timestamp interval, while Step Memory uses the same step bounds.
+Their sample counts can differ because their sampling rates differ.
+Run and Watch share the same 156-column System/Process layout. Run also shows
+Step Timing, Step Memory, and a diagnostic `Verdict`/`Why`/`Next`. Watch omits
+those performance sections and instead points to `trace_step(model)` and
+`traceml run` for step-time measurement. Watch gets rank coverage from Process
+telemetry and node coverage from System telemetry; missing Process data stays
+at zero observed ranks rather than borrowing the expected world size. Its
+scope legend appears only when the card uses an `N`, `R`, or `G` identity.
+In the multi-node System table, each metric uses the median and worst
+node-average points already stored in the summary. “Worst” is not a temporal
+maximum, and different rows can identify different nodes. RAM and GPU-memory
+bytes/percent stay paired from the same selected node row.
+The Process table follows the same rule across observed ranks: every value is
+an observation-window average, each metric may name a different worst rank,
+and RSS and CUDA-reserved byte/percentage pairs come from one selected rank
+row. For non-normal System and Process statuses, `Evidence` uses a compact
+presentation of the stored structured trigger and scope, falling back to the
+stored diagnosis summary when needed. Normal statuses leave the evidence row
+blank. The table itself never labels its averages as peaks.
+Evidence and long values wrap within their pane and retain the fixed divider
+position.
+Unavailable measurements are omitted, while a measured zero remains visible.
+For older or partial artifacts that lack the stored fields needed by a
+structured scope, the renderer preserves the stored diagnosis summary instead
+of inferring new evidence.
 
 Detailed section prose remains in the `system.card`, `process.card`,
 `step_time.card`, and `step_memory.card` fields inside `final_summary.json`.
+If terminal-card rendering itself fails during shutdown, TraceML prints a
+minimal failure card and directs the user to the structured JSON evidence.
 
 ### Shareable HTML report
 
@@ -87,6 +139,18 @@ traceml view logs/<run_name>/final_summary.json --html out.html
 The HTML report is optional and additive: the JSON and TXT artifacts are
 unchanged whether or not you pass `--html-report`.
 
+`traceml view` prints the card that was stored with the run, so an artifact
+always reads back exactly as it was written. To read an older artifact in the
+current card layout, rebuild it from the same JSON:
+
+```bash
+traceml view logs/<run_name>/final_summary.json --re-render
+```
+
+This only changes what is printed. The stored artifact is not modified.
+Because earlier schemas use different Step Time meanings, payloads older than
+schema 1.7 keep their stored card instead of using the current renderer.
+
 ### Live CLI
 
 When launched with `--mode=cli`, the terminal shows live:
@@ -98,6 +162,70 @@ When launched with `--mode=cli`, the terminal shows live:
 
 Live CLI mode is intended for single-node runs, including single-node
 multi-GPU.
+
+### Training stdout and stderr
+
+`traceml run` and `traceml watch` save the supervised training command's raw
+streams by default:
+
+```text
+logs/<run-name>/nodes/node_<node-rank>/training.stdout.log
+logs/<run-name>/nodes/node_<node-rank>/training.stderr.log
+```
+
+These are node-scoped files because each node launcher owns one local torchrun
+process tree. They include bytes that reach that tree's OS pipes, including
+Python output, native file-descriptor writes, torchrun diagnostics, and output
+from local workers that inherit the descriptors. They are intentionally not
+per-rank files.
+
+Summary and dashboard modes mirror the saved streams live. CLI mode suppresses
+live mirroring so training output cannot corrupt the Rich display; if training
+fails, TraceML stops the display and prints at most the final 40 stderr lines
+and 8 KiB before the saved paths and final outcome.
+
+Use `--no-save-training-output` to inherit the terminal descriptors and create
+no training-output files. This is useful when a scheduler or container already
+owns the authoritative logs, or when a workload depends on terminal identity.
+With saving enabled the descriptors are pipes, so `isatty()` truthfully returns
+false. TraceML does not force unbuffered output and cannot recover bytes left
+in a process's user-space buffer after an abrupt crash. Applications that need
+every stdout write persisted before such a crash should flush explicitly, use
+`python -u`, or set `PYTHONUNBUFFERED=1` themselves.
+
+The launcher expects processes that inherit its output pipes to finish with
+the supervised training command. A deliberately detached process that may
+outlive training should redirect its own stdout and stderr, or the launch
+should use `--no-save-training-output`; otherwise the launcher eventually
+closes its output pipes during shutdown.
+
+The owner launcher also saves the aggregator's raw stderr separately:
+
+```text
+logs/<run-name>/aggregator/process.stderr.log
+```
+
+This file is a fallback for startup failures, native diagnostics, and errors
+emitted before structured logging is available. Summary and dashboard modes
+mirror it live. CLI mode does not mirror it over the Rich display; if telemetry
+fails, TraceML reports the saved path. This artifact is distinct from
+`aggregator/traceml_errors.log`, which contains structured TraceML log records.
+Aggregator stdout remains attached to the terminal and is not persisted.
+
+### TraceML internal error logs
+
+TraceML implementation failures are kept separate from workload output. Each
+owning process writes ERROR-level records to one rotating file:
+
+```text
+logs/<run-name>/rank_<global_rank>/traceml_errors.log
+logs/<run-name>/aggregator/traceml_errors.log
+logs/<run-name>/nodes/node_<node_rank>/launcher_errors.log
+```
+
+User exceptions remain in native training stderr and are not copied into these
+files. The internal logger does not add a terminal handler; terminal output
+continues to follow the launcher and display policies described above.
 
 Phases that were never measured in the current window are omitted from the
 live step-time table rather than shown as `0.0 ms`, and the diagnosis block
@@ -164,6 +292,10 @@ Residual = Traced Step Time − H2D − Forward − Backward − Optimizer
   counted twice.
 - `null` / `n/a` means a signal was not measured in the window. A measured
   `0.0 ms` remains a real zero.
+
+The Run terminal card keeps Traced Step Time in the structured summary but
+does not print that redundant subtotal. It shows Input Wait, Compute, H2D,
+and Residual directly beneath Step Time instead.
 
 Examples:
 
@@ -573,6 +705,13 @@ A good reading pattern is:
 
 The step-memory diagnosis explains memory pressure, imbalance, and drift over time.
 
+The end-of-run summary always includes Step Memory status, compact Evidence,
+and available allocated/reserved average-per-step-peak rows. On a distributed
+run, the stored median and worst reserved-memory points select grouped rank
+rows, and both Allocated and Reserved come from each selected row. If a
+reserved-memory selector is unavailable, its allocated-memory selector is
+used instead.
+
 It is based on:
 
 - memory peaks over the aligned step window
@@ -746,6 +885,14 @@ The system panel reports machine-level pressure and GPU-utilization symptoms.
 It is still context for the training diagnosis: low or moderate GPU
 utilization says the GPU was not fully busy, but it does not prove why.
 
+The end-of-run summary always includes the System status and available core
+CPU, RAM, GPU utilization, GPU memory, temperature, and power measurements.
+These are averages over the shared final-report timestamp interval. One
+observed node uses an `avg` column. Multiple
+observed nodes use `median node avg` and `worst node avg` columns, with the
+stored worst node shown per metric. This is a comparison of node averages, not
+peak values over time.
+
 It helps answer:
 
 - is the machine saturated?
@@ -761,6 +908,7 @@ Common fields:
 - GPU utilization
 - GPU memory
 - GPU temperature
+- GPU power
 - GPU headroom
 
 Use this panel to understand machine-level pressure around the training run.
@@ -783,17 +931,31 @@ the likely reason.
 
 The process panel shows what the training processes themselves are consuming.
 
+The end-of-run summary includes the Process status and available CPU capacity,
+RSS, CUDA allocated, and CUDA reserved measurements. One observed rank uses an
+`avg` column. Multiple observed ranks use `median rank avg` and
+`worst rank avg` columns, with stored worst-rank and node identities shown
+when available. These values cover the shared final-report timestamp interval;
+they may have a different sample count from Step Time and are not temporal
+peaks.
+
+For a non-normal status, `Evidence` shows the stored diagnostic trigger—for
+example, peak RSS pressure, CUDA memory pressure, allocator overhang, or
+cross-rank CUDA-memory imbalance. A normal Process status shows
+its measurements without a redundant evidence line.
+
 It helps answer:
 
-- how much CPU the worst rank is using
-- how much GPU memory the processes are using
+- how much CPU capacity the processes used on average
+- how much RSS and CUDA memory the processes used on average
 - whether process-level GPU memory is imbalanced
 
 Common fields:
 
-- worst-rank CPU
-- GPU memory used / reserved / total
-- GPU used imbalance
+- CPU capacity
+- RSS used
+- CUDA allocated
+- CUDA reserved, including device-capacity percentage when available
 
 Use this panel when:
 

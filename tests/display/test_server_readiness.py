@@ -12,8 +12,10 @@ import socket
 
 from traceml_ai.aggregator.display_drivers.server_readiness import (
     ServerReadiness,
+    ServerWatchOutcome,
     socket_is_listening,
     wait_for_server_ready,
+    watch_server_startup,
 )
 
 
@@ -103,3 +105,45 @@ def test_wait_timeout_when_never_ready() -> None:
         timeout=0.0,
     )
     assert result is ServerReadiness.TIMEOUT
+
+
+def test_watch_ready_late_when_listening_after_lifespan() -> None:
+    result = watch_server_startup(
+        is_listening=lambda: True,
+        is_alive=lambda: True,
+        lifespan_started=lambda: True,
+        grace=1.0,
+    )
+    assert result is ServerWatchOutcome.READY_LATE
+
+
+def test_watch_thread_died_without_binding() -> None:
+    result = watch_server_startup(
+        is_listening=lambda: False,
+        is_alive=lambda: False,
+        lifespan_started=lambda: True,
+        grace=1.0,
+    )
+    assert result is ServerWatchOutcome.THREAD_DIED
+
+
+def test_watch_still_not_listening_after_grace() -> None:
+    result = watch_server_startup(
+        is_listening=lambda: False,
+        is_alive=lambda: True,
+        lifespan_started=lambda: True,
+        grace=0.0,
+    )
+    assert result is ServerWatchOutcome.STILL_NOT_LISTENING
+
+
+def test_watch_foreign_listener_is_not_ready_before_lifespan() -> None:
+    # Same guard as wait_for_server_ready: a foreign listener on our port must
+    # not be reported as our late-but-ready server.
+    result = watch_server_startup(
+        is_listening=lambda: True,
+        is_alive=lambda: True,
+        lifespan_started=lambda: False,
+        grace=0.0,
+    )
+    assert result is ServerWatchOutcome.STILL_NOT_LISTENING

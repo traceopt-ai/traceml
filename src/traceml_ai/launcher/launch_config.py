@@ -21,7 +21,15 @@ import sys
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from traceml_ai.utils.torch_support import torch_available
+
 _RUN_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+
+TORCH_LAUNCHER_REQUIRED = (
+    "Multi-process launches require torch (torch.distributed.run). "
+    "Install it with: pip install 'traceml-ai[torch]', or run a single "
+    "process with --nnodes 1 --nproc-per-node 1."
+)
 
 
 def _positive_int(value: Any, name: str) -> int:
@@ -88,8 +96,23 @@ class TorchrunLaunchConfig:
             master_port=master_port,
         )
 
+    def requires_torch_launcher(self) -> bool:
+        """Return whether this topology needs ``torch.distributed.run``."""
+        return self.nnodes > 1 or self.nproc_per_node > 1
+
     def to_command(self) -> list[str]:
-        """Return the Python-module form of the torchrun command."""
+        """Return the launch command for the training runner.
+
+        Without torch, ``torch.distributed.run`` does not exist. Torch-free
+        single-process callers such as ``watch`` do not need it and start the
+        target directly. Multi-process topologies are rejected during argument
+        validation, before any process is started; the raise here is the
+        backstop for a caller that skipped validation.
+        """
+        if not torch_available():
+            if not self.requires_torch_launcher():
+                return [sys.executable]
+            raise ValueError(TORCH_LAUNCHER_REQUIRED)
         return [
             sys.executable,
             "-m",

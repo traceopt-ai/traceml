@@ -14,7 +14,10 @@ import time
 from collections import deque
 from typing import Any, Deque, List, Optional
 
-from traceml_ai.loggers.error_log import get_error_logger
+from traceml_ai.loggers.error_log import (
+    get_error_logger,
+    log_internal_exception,
+)
 
 DEFAULT_EXPORT_QUEUE_SIZE = 2048
 DEFAULT_EXPORT_DRAIN_TIMEOUT_SEC = 2.0
@@ -175,13 +178,8 @@ class TelemetryExporter:
             self._log_exception("TCPClient.send_batch failed", exc)
 
     def _log_exception(self, label: str, exc: Exception) -> None:
-        log = getattr(self._logger, "exception", None)
-        if callable(log):
-            log("[TraceML] %s: %s", label, exc)
-            return
-        fallback = getattr(self._logger, "error", None)
-        if callable(fallback):
-            fallback(f"[TraceML] {label}: {exc}")
+        """Log an exporter failure without inheriting caller context."""
+        log_internal_exception(self._logger, f"[TraceML] {label}", exc)
 
 
 __all__ = [

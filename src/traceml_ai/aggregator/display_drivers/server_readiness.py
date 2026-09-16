@@ -79,3 +79,45 @@ def wait_for_server_ready(
         if monotonic() >= deadline:
             return ServerReadiness.TIMEOUT
         sleep(interval)
+
+
+class ServerWatchOutcome(enum.Enum):
+    """Outcome of the post-timeout startup watchdog."""
+
+    READY_LATE = "ready_late"  # bound after start() had already returned
+    THREAD_DIED = "thread_died"  # the server thread exited without binding
+    STILL_NOT_LISTENING = "still_not_listening"  # alive, never bound
+
+
+def watch_server_startup(
+    *,
+    is_listening: Callable[[], bool],
+    is_alive: Callable[[], bool],
+    lifespan_started: Callable[[], bool],
+    grace: float,
+    interval: float = 0.5,
+    sleep: Callable[[float], None] = time.sleep,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> ServerWatchOutcome:
+    """Keep watching a server that ``wait_for_server_ready`` timed out on.
+
+    ``start()`` must return quickly, so it gives up confirming the bind after
+    a short timeout. That leaves a server that never binds indistinguishable
+    from one that is merely slow. This watchdog runs after ``start()`` has
+    returned and settles the question within ``grace`` seconds, so the
+    driver can log a real ERROR (with diagnostics) instead of a one-off
+    WARNING that the error log never sees.
+
+    Same READY guard as ``wait_for_server_ready``: a foreign listener on our
+    port is never reported as our server.
+    """
+    deadline = monotonic() + grace
+    while True:
+        alive = is_alive()
+        if alive and lifespan_started() and is_listening():
+            return ServerWatchOutcome.READY_LATE
+        if not alive:
+            return ServerWatchOutcome.THREAD_DIED
+        if monotonic() >= deadline:
+            return ServerWatchOutcome.STILL_NOT_LISTENING
+        sleep(interval)

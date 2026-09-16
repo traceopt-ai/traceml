@@ -4,6 +4,11 @@
 # you may not use this file except in compliance with the License.
 # SPDX-License-Identifier: Apache-2.0
 
+import io
+import logging
+
+import pytest
+
 from traceml_ai.runtime.sender import SenderIdentity, TelemetryPublisher
 
 
@@ -155,8 +160,9 @@ def test_publisher_logs_sender_attach_failures_and_continues() -> None:
 
     assert good_sender.sender is tcp_client
     assert good_sender.rank is None
-    assert len(logger.exceptions) == 1
-    assert "sender attach failed" in logger.exceptions[0][0]
+    assert len(logger.errors) == 1
+    assert "sender attach failed" in logger.errors[0]
+    assert "RuntimeError: attach failed" in logger.errors[0]
 
 
 def test_publisher_flushes_collects_and_sends_one_batch() -> None:
@@ -242,7 +248,7 @@ def test_publisher_logs_failures_and_continues() -> None:
 
     publisher.publish([good_sampler, bad_flush_sampler, bad_collect_sampler])
 
-    messages = [entry[0] for entry in logger.exceptions]
+    messages = logger.errors
     assert len(messages) == 3
     assert any("writer.flush failed" in message for message in messages)
     assert any("collect_payload failed" in message for message in messages)
@@ -273,11 +279,12 @@ def test_publisher_close_failure_is_logged_not_raised() -> None:
 
     publisher.close()
 
-    assert len(logger.exceptions) == 1
-    assert "TCPClient.close failed" in logger.exceptions[0][0]
+    assert len(logger.errors) == 1
+    assert "TCPClient.close failed" in logger.errors[0]
+    assert "RuntimeError: close failed" in logger.errors[0]
 
 
-def test_publisher_uses_error_logger_fallback_when_exception_missing() -> None:
+def test_publisher_supports_an_error_only_logger() -> None:
     class _ErrorOnlyLogger:
         def __init__(self) -> None:
             self.errors: list[str] = []
@@ -296,3 +303,30 @@ def test_publisher_uses_error_logger_fallback_when_exception_missing() -> None:
 
     assert len(logger.errors) == 1
     assert "TCPClient.send_batch failed" in logger.errors[0]
+
+
+def test_cleanup_log_excludes_an_active_user_exception() -> None:
+    stream = io.StringIO()
+    logger = logging.Logger("test-publisher-cleanup")
+    logger.setLevel(logging.ERROR)
+    logger.addHandler(logging.StreamHandler(stream))
+    publisher = TelemetryPublisher(
+        tcp_client=_FakeTCPClient(),
+        identity=SenderIdentity(global_rank=0, local_rank=0),
+        logger=logger,
+    )
+    sampler = _FakeSampler(
+        "BrokenSampler",
+        writer=_FakeWriter(fail_flush=True),
+    )
+
+    with pytest.raises(ValueError, match="private user failure"):
+        try:
+            raise ValueError("private user failure")
+        finally:
+            publisher.flush_writers([sampler])
+
+    content = stream.getvalue()
+    assert "BrokenSampler.writer.flush failed" in content
+    assert "RuntimeError: flush failed" in content
+    assert "private user failure" not in content

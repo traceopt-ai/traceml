@@ -96,7 +96,7 @@ see Limitations.
 
 ## Troubleshooting
 
-### The verdict says RESIDUAL-HEAVY / CRITICAL on the minimal example
+### The verdict says RESIDUAL-HEAVY (CRITICAL) on the minimal example
 
 This is expected on this specific example, not a sign of a problem. The
 synthetic `TinyMLP` finishes each step in roughly a millisecond, so ordinary
@@ -113,10 +113,10 @@ actually print or log, outside `trace_step`, as this example does. On the
 GPU-selected clock this does not change reported residual time, since that
 comes from CUDA event timestamps rather than CPU wall time.
 
-### Step Memory shows NO DATA
+### Step Memory shows NO GPU
 
-Step memory is only populated when running on GPU. On a CPU-only run this
-section is expected to be empty.
+Step Memory uses GPU telemetry. A CPU-only run is therefore expected to show
+`NO GPU`.
 
 ### Multi-GPU run only shows one rank
 

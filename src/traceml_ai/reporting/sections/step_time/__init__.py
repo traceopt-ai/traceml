@@ -19,10 +19,7 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 from traceml_ai.core.summaries import SummaryResult
-from traceml_ai.reporting.config import (
-    DEFAULT_SUMMARY_WINDOW_ROWS,
-    normalize_summary_window_rows,
-)
+from traceml_ai.reporting.analysis_window import AnalysisWindow
 from traceml_ai.reporting.sections.step_time.builder import (
     STEP_TIME_METRIC_NAMES,
     project_step_time_summary,
@@ -37,18 +34,32 @@ class StepTimeSummarySection:
     """Load, analyze, and project TraceML's final Step Time section once."""
 
     name: ClassVar[str] = "step_time"
-    max_rows: int = DEFAULT_SUMMARY_WINDOW_ROWS
+    analysis_window: AnalysisWindow | None = None
 
     def build(self, db_path: str) -> SummaryResult:
         """Build one schema-stable section from persisted telemetry."""
-        row_limit = normalize_summary_window_rows(self.max_rows)
         with closing(sqlite3.connect(db_path)) as connection:
             analysis = StepTimePipeline(
                 repository=SQLiteStepTimeRepository(connection),
                 profile="summary",
-            ).run(StepTimeLoadRequest(window_size=row_limit))
+            ).run(
+                StepTimeLoadRequest(
+                    start_step=(
+                        self.analysis_window.start_step
+                        if self.analysis_window is not None
+                        else None
+                    ),
+                    end_step=(
+                        self.analysis_window.end_step
+                        if self.analysis_window is not None
+                        else None
+                    ),
+                )
+            )
 
         payload = project_step_time_summary(analysis)
+        if self.analysis_window is not None:
+            payload["metadata"].update(self.analysis_window.metadata())
         return SummaryResult(
             section=self.name,
             payload=payload,

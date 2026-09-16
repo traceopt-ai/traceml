@@ -41,6 +41,9 @@ jobs:
       - name: Install dependencies
         run: pip install -e ".[docs,torch,lightning,hf]"
 
+      - name: Verify integration support evidence
+        run: python tools/integration_support_matrix.py --check
+
       - name: Build documentation
         run: mkdocs build --strict
 

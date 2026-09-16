@@ -112,25 +112,37 @@ def test_direct_runtime_settings_default_to_summary(
 def test_disabled_env_dynamically_silences_low_level_utilities(monkeypatch):
     import torch.nn as nn
 
-    from traceml_ai.utils.step_memory import (
-        StepMemoryTracker,
-        flush_step_memory_buffer,
-        step_memory_queue,
-    )
-    from traceml_ai.utils.timing import (
+    from traceml_ai.instrumentation.step_events import (
         TimeEvent,
         TimeScope,
-        flush_step_time_buffer,
-        get_step_time_queue,
-        record_event,
-        timed_region,
+        abort_step_capture,
+        begin_step_capture,
+        complete_step_capture,
+        drain_step_memory_events,
+        drain_step_time_batches,
     )
+    from traceml_ai.utils.step_memory import StepMemoryTracker
+    from traceml_ai.utils.timing import record_event, timed_region
 
-    step_time_queue = get_step_time_queue()
-    while not step_time_queue.empty():
-        step_time_queue.get_nowait()
-    while not step_memory_queue.empty():
-        step_memory_queue.get_nowait()
+    drain_step_time_batches()
+    drain_step_memory_events()
+    abort_step_capture(begin_step_capture())
+    capture = begin_step_capture()
+
+    # Measurements collected before a dynamic shutdown must not be published.
+    record_event(
+        TimeEvent(
+            name="pending_before_disable",
+            device="cpu",
+            cpu_start=0.0,
+            cpu_end=1.0,
+            scope=TimeScope.STEP,
+        )
+    )
+    model = nn.Linear(1, 1)
+    tracker = StepMemoryTracker(model)
+    tracker.reset()
+    tracker.record()
 
     monkeypatch.setenv("TRACEML_DISABLED", "1")
 
@@ -143,20 +155,16 @@ def test_disabled_env_dynamically_silences_low_level_utilities(monkeypatch):
             scope=TimeScope.STEP,
         )
     )
-    flush_step_time_buffer(1)
 
-    model = nn.Linear(1, 1)
-    tracker = StepMemoryTracker(model)
     tracker.reset()
     tracker.record()
-    flush_step_memory_buffer(model, 1)
 
     with timed_region("disabled_region"):
         pass
-    flush_step_time_buffer(2)
+    assert complete_step_capture(capture, 1)
 
-    assert step_time_queue.empty()
-    assert step_memory_queue.empty()
+    assert drain_step_time_batches() == []
+    assert drain_step_memory_events() == []
 
 
 def test_init_starts_runtime_when_aggregator_reachable(
@@ -335,14 +343,16 @@ def test_init_raises_when_aggregator_unreachable_and_strict(
     ],
 )
 def test_missing_aggregator_policy_precedence(
-    initialization, monkeypatch, env_value, explicit_value, expected
+    monkeypatch, env_value, explicit_value, expected
 ):
+    from traceml_ai.runtime.settings import resolve_on_missing_aggregator
+
     monkeypatch.delenv("TRACEML_ON_MISSING_AGGREGATOR", raising=False)
     if env_value is not None:
         monkeypatch.setenv("TRACEML_ON_MISSING_AGGREGATOR", env_value)
 
     assert (
-        initialization._resolve_on_missing_aggregator(explicit_value)
+        resolve_on_missing_aggregator(explicit_value, default="warn")
         == expected
     )
 

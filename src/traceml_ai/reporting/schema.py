@@ -215,7 +215,6 @@ class GlobalWindow:
     start_step: Optional[int] = None
     end_step: Optional[int] = None
     completed_step: Optional[int] = None
-    window_size: Optional[int] = None
 
     def to_json(self) -> JsonDict:
         """Serialize the global calculation window with stable keys."""
@@ -227,7 +226,6 @@ class GlobalWindow:
             "start_step": self.start_step,
             "end_step": self.end_step,
             "completed_step": self.completed_step,
-            "window_size": self.window_size,
         }
 
 

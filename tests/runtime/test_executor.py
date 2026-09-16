@@ -1,9 +1,16 @@
+import io
 import json
+import logging
+import os
+import subprocess
 import sys
 import types
 from pathlib import Path
+from unittest.mock import Mock
 
-ROOT = Path(__file__).resolve().parents[1]
+import pytest
+
+ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
@@ -30,12 +37,12 @@ sys.modules.setdefault(
     ),
 )
 
+import traceml_ai.runtime.executor as executor  # noqa: E402
 from traceml_ai.runtime.executor import (  # noqa: E402
     build_runtime_settings,
     extract_script_args,
     read_traceml_env,
     run_user_script,
-    write_user_error_log,
 )
 from traceml_ai.runtime.settings import (
     DEFAULT_FINALIZE_TIMEOUT_SEC,
@@ -178,7 +185,7 @@ def test_build_runtime_settings_carries_trace_max_steps():
             "enable_logging": False,
             "logs_dir": "./logs",
             "session_id": "test",
-            "summary_window_rows": 200,
+            "history_retention_s": 1800.0,
             "trace_max_steps": 5,
             "aggregator_host": "127.0.0.1",
             "aggregator_bind_host": "127.0.0.1",
@@ -191,14 +198,178 @@ def test_build_runtime_settings_carries_trace_max_steps():
     assert settings.expected_world_size == 1
 
 
-def test_write_user_error_log_records_error(tmp_path):
-    cfg = {"logs_dir": str(tmp_path), "session_id": "session-a"}
-    error = RuntimeError("boom")
+def test_runtime_start_and_stop_failures_use_internal_log(monkeypatch):
+    failures = []
+    startup_error = RuntimeError("startup failed")
+    shutdown_error = RuntimeError("shutdown failed")
+    runtime = Mock()
+    runtime.stop.side_effect = shutdown_error
 
-    write_user_error_log(cfg, "User script failed", error)
-
-    log_text = (tmp_path / "session-a" / "torchrun_error.log").read_text(
-        encoding="utf-8"
+    monkeypatch.setattr(
+        executor, "build_runtime_settings", lambda _cfg: object()
     )
-    assert "User script failed" in log_text
-    assert "RuntimeError: boom" in log_text
+    monkeypatch.setattr(
+        executor,
+        "start_runtime_handle",
+        Mock(side_effect=startup_error),
+    )
+    monkeypatch.setattr(
+        executor,
+        "_log_runtime_exception",
+        lambda message, error: failures.append((message, error)),
+    )
+
+    assert isinstance(executor.start_runtime({}), executor.NoOpRuntime)
+    executor.stop_runtime(runtime)
+
+    assert failures == [
+        ("Failed to start TraceMLRuntime", startup_error),
+        ("Error during TraceML runtime shutdown", shutdown_error),
+    ]
+
+
+def test_shutdown_log_excludes_active_user_exception(monkeypatch):
+    stream = io.StringIO()
+    logger = logging.Logger("test-runtime-error")
+    logger.addHandler(logging.StreamHandler(stream))
+    monkeypatch.setattr(executor, "setup_error_logger", lambda *, role: None)
+    monkeypatch.setattr(executor, "get_error_logger", lambda _name: logger)
+
+    with pytest.raises(ValueError, match="private user failure"):
+        try:
+            raise ValueError("private user failure")
+        finally:
+            try:
+                raise RuntimeError("TraceML shutdown failed")
+            except RuntimeError as error:
+                executor._log_runtime_exception("shutdown failed", error)
+
+    content = stream.getvalue()
+    assert "TraceML shutdown failed" in content
+    assert "private user failure" not in content
+
+
+def test_shutdown_log_keeps_explicit_cause_without_user_context(monkeypatch):
+    stream = io.StringIO()
+    logger = logging.Logger("test-runtime-error-with-cause")
+    logger.addHandler(logging.StreamHandler(stream))
+    monkeypatch.setattr(executor, "setup_error_logger", lambda *, role: None)
+    monkeypatch.setattr(executor, "get_error_logger", lambda _name: logger)
+
+    with pytest.raises(ValueError, match="private user failure"):
+        try:
+            raise ValueError("private user failure")
+        finally:
+            try:
+                try:
+                    raise OSError("TraceML socket failure")
+                except OSError as cause:
+                    raise RuntimeError("TraceML shutdown failed") from cause
+            except RuntimeError as error:
+                executor._log_runtime_exception("shutdown failed", error)
+
+    content = stream.getvalue()
+    assert "TraceML socket failure" in content
+    assert "TraceML shutdown failed" in content
+    assert "The above exception was the direct cause" in content
+    assert "private user failure" not in content
+
+
+@pytest.mark.parametrize(
+    "user_exit",
+    [SystemExit(7), KeyboardInterrupt()],
+)
+def test_execute_with_runtime_preserves_base_exceptions_without_user_log(
+    monkeypatch,
+    user_exit,
+):
+    cfg = {"script_path": "train.py"}
+    events = []
+
+    monkeypatch.setattr(executor, "read_traceml_env", lambda: cfg)
+    monkeypatch.setattr(executor, "start_runtime", lambda value: object())
+    monkeypatch.setattr(executor, "extract_script_args", lambda: [])
+
+    def exit_user_script(*_args):
+        raise user_exit
+
+    monkeypatch.setattr(executor, "run_user_script", exit_user_script)
+    monkeypatch.setattr(
+        executor,
+        "stop_runtime",
+        lambda *_args: events.append("stopped"),
+    )
+
+    with pytest.raises(type(user_exit)) as exc_info:
+        executor._execute_with_runtime()
+
+    assert exc_info.value is user_exit
+    assert events == ["stopped"]
+
+
+def test_torchelastic_record_wraps_entrypoint_when_configured(monkeypatch):
+    calls = []
+
+    def fake_record(entrypoint):
+        def wrapped():
+            calls.append("record")
+            return entrypoint()
+
+        return wrapped
+
+    monkeypatch.setenv("TORCHELASTIC_ERROR_FILE", "error.json")
+    monkeypatch.setitem(
+        sys.modules,
+        "torch.distributed.elastic.multiprocessing.errors",
+        types.SimpleNamespace(record=fake_record),
+    )
+
+    executor._run_with_torchelastic_record(lambda: calls.append("entrypoint"))
+
+    assert calls == ["record", "entrypoint"]
+
+
+@pytest.mark.parametrize("traceml_disabled", [True, False])
+def test_executor_user_failure_stays_native_and_out_of_internal_logs(
+    tmp_path,
+    traceml_disabled,
+):
+    script_path = tmp_path / "raise_error.py"
+    script_path.write_text(
+        "raise RuntimeError('subprocess boom')\n",
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env.pop("TORCHELASTIC_ERROR_FILE", None)
+    env.update(
+        {
+            "PYTHONPATH": str(SRC),
+            "TRACEML_SCRIPT_PATH": str(script_path),
+            "TRACEML_DISABLED": "1" if traceml_disabled else "0",
+            "TRACEML_LOGS_DIR": str(tmp_path / "logs"),
+            "TRACEML_SESSION_ID": "executor-test",
+        }
+    )
+    result = subprocess.run(
+        [sys.executable, "-m", "traceml_ai.runtime.executor"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env=env,
+    )
+
+    assert result.returncode == 1
+    assert "Traceback (most recent call last)" in result.stderr
+    assert "RuntimeError: subprocess boom" in result.stderr
+    run_root = tmp_path / "logs" / "executor-test"
+    assert not (run_root / "torchrun_error.log").exists()
+    assert not (run_root / "runtime_error.log").exists()
+    internal_logs = list(run_root.rglob("traceml_errors.log"))
+    if traceml_disabled:
+        assert not internal_logs
+    else:
+        assert len(internal_logs) == 1
+        assert "subprocess boom" not in internal_logs[0].read_text(
+            encoding="utf-8"
+        )

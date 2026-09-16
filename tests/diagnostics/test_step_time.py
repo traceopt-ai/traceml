@@ -909,15 +909,26 @@ def test_rank_straggler_requires_component_coverage_for_attribution(
     assert issue.evidence["component_coverage"][component] == pytest.approx(
         expected_coverage
     )
-    if component == "input":
+    if expected_kind == "STRAGGLER":
         expected_summary = (
-            "r0 has excess input wait burden relative to victim r1"
-            if expected_kind == "INPUT_STRAGGLER"
-            else "r0 is slower than victim r1"
+            "r1 spent 120.0 ms in Backward, compared with 20.0 ms on r0; "
+            "cause not measured."
         )
-        assert expected_summary in issue.summary
-        if expected_kind == "INPUT_STRAGGLER":
-            assert "~80.0% of visible wait cost" in issue.summary
+    elif expected_kind == "INPUT_STRAGGLER":
+        expected_summary = (
+            "r0 waited 80.0 ms for input, compared with 0.0 ms on r1."
+        )
+    elif expected_kind == "H2D_STRAGGLER":
+        expected_summary = (
+            f"r0 spent {excess:.1f} ms on H2D transfers, compared with "
+            "0.0 ms on r1."
+        )
+    else:
+        expected_summary = (
+            f"r0 spent {20.0 + excess:.1f} ms in Forward, compared with "
+            "20.0 ms on r1."
+        )
+    assert issue.summary == expected_summary
 
 
 def test_rank_straggler_keeps_confidence_and_fsdp_severity_caps() -> None:

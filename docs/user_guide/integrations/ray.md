@@ -204,6 +204,7 @@ TraceMLRayConfig(
     logs_dir="./logs",
     session_id="",
     sampler_interval_sec=2.0,
+    history_retention="30m",
     bind_host="0.0.0.0",
     port=0,
 )
@@ -216,6 +217,28 @@ rendering from the aggregator actor.
 ``sampler_interval_sec`` defaults to ``2.0`` seconds. It controls worker sampling
 and the aggregator actor's live UI refresh; incoming TCP telemetry is drained as
 soon as it arrives.
+
+``history_retention`` accepts positive seconds or durations such as ``"30m"``,
+``"2h"``, or ``"1d"``. It defaults to 30 minutes of final-report analysis
+history. Retention advances at completed, rank-aligned step boundaries and
+does not create a rollup.
+
+### Migrating from `summary_window_rows`
+
+The former row-count setting is no longer accepted. Configure the history
+duration instead:
+
+```python
+# Before: no longer supported.
+TraceMLRayConfig(summary_window_rows=1_000)
+
+# Now: retain the duration needed for analysis.
+TraceMLRayConfig(history_retention="30m")
+```
+
+A row count does not map to a fixed duration, so choose the duration explicitly
+for your workload. The default is `"30m"`; it is not an automatic conversion
+from 1,000 rows.
 
 ``init_mode`` is passed to ``traceml.init(mode="auto")`` inside each Ray
 worker. The Ray Data ``wrap_dataloader_fetch(...)`` pattern above works with
@@ -232,3 +255,7 @@ then stops the actor in a ``finally`` block. Each worker also stops its local
 TraceML runtime in a ``finally`` block. Normal exceptions and keyboard
 interrupts should therefore release TraceML resources. A hard ``SIGKILL`` cannot
 run Python cleanup code in any framework.
+
+If aggregator finalization fails, the actor records the failure in
+``aggregator/traceml_errors.log``. Cleanup remains best effort at the Ray driver
+boundary, so a TraceML shutdown failure does not replace the Ray Train result.

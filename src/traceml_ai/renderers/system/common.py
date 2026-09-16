@@ -4,25 +4,86 @@
 # you may not use this file except in compliance with the License.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Shared models and SQLite helpers for system telemetry."""
+"""Shared contracts and reporting helpers for System telemetry renderers.
 
-import sqlite3
+``SystemCLISnapshot`` defines the terminal payload. Reporting helpers are
+shared by the dashboard and terminal computations so both surfaces interpret
+missing GPU rows consistently. Rolling-series policy remains in
+``renderers.shared.run_series``.
+"""
+
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional
+
+
+def positive(value: Any) -> Optional[float]:
+    """A number above zero, or None."""
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return out if out > 0.0 else None
+
+
+def reading(value: Any) -> Optional[float]:
+    """A measurement, or None when there was not one.
+
+    A NULL column is the sampler saying it could not read the metric. The
+    difference from ``positive`` is that 0.0 is a real reading here: a
+    device can genuinely sit at 0% or 0 W, and only absence is None.
+
+    Lives here for the same reason ``gpu_reported`` does: the dashboard
+    computer and the terminal computer read the same rows, and a
+    coercion applied on one of them is half an answer.
+    ``SystemCLIClusterBuilder`` still carries its own equivalent, which
+    is already correct and is left alone rather than folded in here,
+    because its ``except`` is broader and proving that equivalence is
+    not free.
+    """
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def gpu_reported(row: Any) -> bool:
+    """Whether a GPU row contains a positive hardware-capacity signal.
+
+    The current sampler writes ``None`` when NVML cannot read a device.
+    Older traces may contain an all-zero placeholder for the same state;
+    neither form is a measurement of 0 W, 0 C, or 0 GB.
+
+    Lives here rather than in one computer because BOTH System surfaces
+    aggregate the same rows: the dashboard and the terminal card. When it
+    existed in only one of them, the terminal card averaged a failed
+    device in as a real zero and reported a healthy four-GPU host at 75%.
+    """
+    return (
+        positive(row["mem_total_bytes"]) is not None
+        or positive(row["power_limit_w"]) is not None
+    )
 
 
 @dataclass(frozen=True)
 class SystemCLISnapshot:
     """Compact CLI snapshot for system telemetry."""
 
-    cpu: float
-    ram_used: float
-    ram_total: float
+    # Host readings, absent when the sampler could not take them. 0.0 is
+    # a level a machine can genuinely be at, so it cannot also mean
+    # "not measured".
+    cpu: Optional[float]
+    ram_used: Optional[float]
+    ram_total: Optional[float]
 
     gpu_available: bool
     gpu_count: int
 
     gpu_util_total: Optional[float]
+    # The display-ready mean over `gpu_util_devices`. Compute owns this
+    # arithmetic; renderers only format the result.
+    gpu_util_avg: Optional[float]
     gpu_util_skew: Optional[float]
     gpu_mem_used: Optional[float]
     gpu_mem_total: Optional[float]
@@ -33,6 +94,12 @@ class SystemCLISnapshot:
     gpu_power_usage: Optional[float]
     gpu_power_limit: Optional[float]
 
+    # Devices the util total was summed over, which is NOT gpu_count when
+    # a device failed to report. Zero means the current sample had no util
+    # readings; None preserves compatibility with payloads that predate
+    # this field.
+    gpu_util_devices: Optional[int] = None
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "cpu": self.cpu,
@@ -41,6 +108,8 @@ class SystemCLISnapshot:
             "gpu_available": self.gpu_available,
             "gpu_count": self.gpu_count,
             "gpu_util_total": self.gpu_util_total,
+            "gpu_util_avg": self.gpu_util_avg,
+            "gpu_util_devices": self.gpu_util_devices,
             "gpu_mem_used": self.gpu_mem_used,
             "gpu_mem_total": self.gpu_mem_total,
             "gpu_temp_max": self.gpu_temp_max,
@@ -50,225 +119,3 @@ class SystemCLISnapshot:
             "gpu_mem_headroom_min": self.gpu_mem_headroom_min,
             "gpu_mem_headroom_min_idx": self.gpu_mem_headroom_min_idx,
         }
-
-
-@dataclass(frozen=True)
-class SystemDashboardPayload:
-    """Dashboard payload for system telemetry."""
-
-    window_len: int
-    gpu_available: bool
-    rollups: Dict[str, Any]
-    series: Dict[str, List[float]]
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "window_len": self.window_len,
-            "gpu_available": self.gpu_available,
-            "rollups": self.rollups,
-            "series": self.series,
-        }
-
-
-class SystemMetricsDB:
-    """
-    Shared SQLite access helper for system telemetry compute.
-
-    This class centralizes all SQLite reads used by both CLI and dashboard
-    compute layers. It keeps the implementation simple and avoids duplicating
-    query logic across files.
-
-    Parameters
-    ----------
-    db_path:
-        Path to the SQLite database file.
-    node_rank:
-        Optional node-rank filter. System telemetry is node-level, so filtered
-        reads are restricted to this distributed node identity.
-
-    Notes
-    -----
-    One short-lived connection per public compute call is preferred here:
-    it keeps thread behavior simple and avoids long-lived SQLite state.
-    """
-
-    def __init__(
-        self,
-        db_path: str,
-        node_rank: Optional[int] = None,
-    ) -> None:
-        self._db_path = str(db_path)
-        self._node_rank = node_rank
-
-    def connect(self) -> sqlite3.Connection:
-        """
-        Open a short-lived SQLite read connection.
-        """
-        conn = sqlite3.connect(self._db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
-
-    def node_rank_filter(self) -> tuple[str, tuple]:
-        """
-        Return SQL WHERE fragment and bound params for node-rank filtering.
-        """
-        if self._node_rank is None:
-            return "", ()
-        return "WHERE node_rank = ?", (int(self._node_rank),)
-
-    def fetch_latest_system_sample(
-        self,
-        conn: sqlite3.Connection,
-    ) -> Optional[sqlite3.Row]:
-        """
-        Fetch the latest system sample for the configured node filter.
-        """
-        where_sql, params = self.node_rank_filter()
-        sql = f"""
-            SELECT *
-            FROM system_samples
-            {where_sql}
-            ORDER BY id DESC
-            LIMIT 1;
-        """
-        return conn.execute(sql, params).fetchone()
-
-    def fetch_recent_system_samples(
-        self,
-        conn: sqlite3.Connection,
-        limit: int,
-    ) -> List[sqlite3.Row]:
-        """
-        Fetch the most recent system samples in ascending time order.
-
-        The inner query limits the read size first, then the outer query
-        restores ascending order for downstream time-series compute.
-        """
-        where_sql, params = self.node_rank_filter()
-        sql = f"""
-            SELECT *
-            FROM (
-                SELECT *
-                FROM system_samples
-                {where_sql}
-                ORDER BY id DESC
-                LIMIT ?
-            )
-            ORDER BY id ASC;
-        """
-        return conn.execute(sql, (*params, int(limit))).fetchall()
-
-    def fetch_gpu_rows_for_sample(
-        self,
-        conn: sqlite3.Connection,
-        *,
-        global_rank: Optional[int],
-        seq: Optional[int],
-    ) -> List[sqlite3.Row]:
-        """
-        Fetch GPU rows for one exact system sample.
-
-        Sample identity is matched by (global_rank, seq), which is unique for
-        multi-node jobs because `seq` is monotonic within each worker.
-        """
-        if seq is None:
-            return []
-
-        if global_rank is None:
-            sql = """
-                SELECT *
-                FROM system_gpu_samples
-                WHERE global_rank IS NULL
-                  AND seq = ?
-                ORDER BY gpu_idx ASC;
-            """
-            params = (int(seq),)
-        else:
-            sql = """
-                SELECT *
-                FROM system_gpu_samples
-                WHERE global_rank = ?
-                  AND seq = ?
-                ORDER BY gpu_idx ASC;
-            """
-            params = (int(global_rank), int(seq))
-
-        return conn.execute(sql, params).fetchall()
-
-    def fetch_gpu_rows_for_samples(
-        self,
-        conn: sqlite3.Connection,
-        sample_keys: List[Tuple[Optional[int], int]],
-    ) -> List[sqlite3.Row]:
-        """
-        Bulk-fetch GPU rows for many samples in one query.
-
-        Parameters
-        ----------
-        sample_keys:
-            List of (global_rank, seq) keys identifying system samples.
-
-        Returns
-        -------
-        list[sqlite3.Row]
-            Matching rows from `system_gpu_samples`.
-
-        Notes
-        -----
-        This performs one bounded bulk read for the full dashboard window,
-        which is faster than issuing one GPU query per sample.
-        """
-        if not sample_keys:
-            return []
-
-        non_null_global_rank_keys = [
-            (int(global_rank), int(seq))
-            for global_rank, seq in sample_keys
-            if global_rank is not None
-        ]
-        null_global_rank_seqs = [
-            int(seq) for global_rank, seq in sample_keys if global_rank is None
-        ]
-
-        clauses: List[str] = []
-        params: List[Any] = []
-
-        if non_null_global_rank_keys:
-            pair_clause = ",".join("(?, ?)" for _ in non_null_global_rank_keys)
-            clauses.append(f"(global_rank, seq) IN ({pair_clause})")
-            for global_rank, seq in non_null_global_rank_keys:
-                params.extend([global_rank, seq])
-
-        if null_global_rank_seqs:
-            seq_clause = ",".join("?" for _ in null_global_rank_seqs)
-            clauses.append(f"(global_rank IS NULL AND seq IN ({seq_clause}))")
-            params.extend(null_global_rank_seqs)
-
-        if not clauses:
-            return []
-
-        sql = f"""
-            SELECT *
-            FROM system_gpu_samples
-            WHERE {" OR ".join(clauses)}
-            ORDER BY seq ASC, gpu_idx ASC;
-        """
-        return conn.execute(sql, tuple(params)).fetchall()
-
-    @staticmethod
-    def group_gpu_rows_by_global_rank_seq(
-        rows: List[sqlite3.Row],
-    ) -> Dict[Tuple[Optional[int], int], List[sqlite3.Row]]:
-        """
-        Group GPU rows by (global_rank, seq) for fast per-sample lookup.
-
-        This avoids repeated scans of the GPU row list during dashboard compute.
-        """
-        out: Dict[Tuple[Optional[int], int], List[sqlite3.Row]] = {}
-        for row in rows:
-            seq = row["seq"]
-            if seq is None:
-                continue
-            key = (row["global_rank"], int(seq))
-            out.setdefault(key, []).append(row)
-        return out

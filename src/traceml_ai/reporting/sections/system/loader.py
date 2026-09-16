@@ -13,9 +13,8 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Dict, Optional
 
-from traceml_ai.reporting.config import normalize_summary_window_rows
+from traceml_ai.reporting.analysis_window import AnalysisWindow
 from traceml_ai.reporting.sections.system.model import (
-    MAX_SUMMARY_ROWS,
     PerGPUSummary,
     SystemClusterSummary,
     SystemNodeIdentity,
@@ -227,44 +226,47 @@ def _expected_nodes(rows: list[_SampleRow]) -> int:
     return max(1, len({_node_label(row) for row in rows}))
 
 
-def _recent_system_samples_cte(*, node_rank: Optional[int]) -> str:
+def _system_samples_cte(
+    *,
+    node_rank: Optional[int],
+    analysis_window: Optional[AnalysisWindow],
+) -> tuple[str, tuple[float | int, ...]]:
     """
-    Return the CTE used for the system summary window.
-
-    Cluster summaries keep the latest N samples per node. Scoped node
-    summaries keep the latest N samples for the requested node only.
+    Return the CTE used for the selected system history.
     """
-    where_clause = "WHERE node_rank = ?" if node_rank is not None else ""
+    predicates = []
+    params: list[float | int] = []
+    if node_rank is not None:
+        predicates.append("node_rank = ?")
+        params.append(int(node_rank))
+    if (
+        analysis_window is not None
+        and analysis_window.start_ts_s is not None
+        and analysis_window.end_ts_s is not None
+    ):
+        predicates.append("sample_ts_s BETWEEN ? AND ?")
+        params.extend((analysis_window.start_ts_s, analysis_window.end_ts_s))
+    where_clause = "WHERE " + " AND ".join(predicates) if predicates else ""
     return f"""
-        WITH recent_system_samples AS (
-            SELECT *
-            FROM (
-                SELECT
-                    s.*,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY COALESCE(s.node_rank, s.global_rank, 0)
-                        ORDER BY s.id DESC
-                    ) AS row_num
-                FROM system_samples AS s
-                {where_clause}
-            )
-            WHERE row_num <= ?
+        WITH selected_system_samples AS (
+            SELECT s.*
+            FROM system_samples AS s
+            {where_clause}
         )
-    """
+    """, tuple(
+        params
+    )
 
 
 def _sample_rows(
     conn: sqlite3.Connection,
     *,
     node_rank: Optional[int],
-    max_system_rows: int,
+    analysis_window: Optional[AnalysisWindow],
 ) -> list[_SampleRow]:
-
-    sample_cte = _recent_system_samples_cte(node_rank=node_rank)
-    params = (
-        (int(node_rank), int(max_system_rows))
-        if node_rank is not None
-        else (int(max_system_rows),)
+    sample_cte, params = _system_samples_cte(
+        node_rank=node_rank,
+        analysis_window=analysis_window,
     )
     rows = conn.execute(
         sample_cte
@@ -272,7 +274,7 @@ def _sample_rows(
         SELECT global_rank, local_rank, world_size, local_world_size,
                node_rank, hostname, sample_ts_s, seq, cpu_percent,
                ram_used_bytes, ram_total_bytes, gpu_available, gpu_count
-        FROM recent_system_samples
+        FROM selected_system_samples
         ORDER BY COALESCE(node_rank, global_rank, 0) ASC, id ASC;
         """,
         params,
@@ -301,18 +303,16 @@ def _gpu_rows(
     conn: sqlite3.Connection,
     *,
     node_rank: Optional[int],
-    max_system_rows: int,
+    analysis_window: Optional[AnalysisWindow],
 ) -> list[_GpuRow]:
     power_limit_expr = (
         "g.power_limit_w"
         if table_has_column(conn, "system_gpu_samples", "power_limit_w")
         else "NULL"
     )
-    sample_cte = _recent_system_samples_cte(node_rank=node_rank)
-    params = (
-        (int(node_rank), int(max_system_rows))
-        if node_rank is not None
-        else (int(max_system_rows),)
+    sample_cte, params = _system_samples_cte(
+        node_rank=node_rank,
+        analysis_window=analysis_window,
     )
     rows = conn.execute(
         sample_cte
@@ -321,7 +321,7 @@ def _gpu_rows(
                g.mem_used_bytes, g.mem_total_bytes, g.temperature_c,
                g.power_usage_w, {power_limit_expr}
         FROM system_gpu_samples AS g
-        INNER JOIN recent_system_samples AS recent
+        INNER JOIN selected_system_samples AS recent
             ON g.global_rank IS recent.global_rank
            AND g.node_rank IS recent.node_rank
            AND g.seq IS recent.seq
@@ -350,20 +350,20 @@ def _load_cluster_summary(
     conn: sqlite3.Connection,
     *,
     node_rank: Optional[int],
-    max_system_rows: int,
+    analysis_window: Optional[AnalysisWindow],
 ) -> SystemClusterSummary:
 
     # Load the bounded system rows, keeping the latest window per node.
     samples = _sample_rows(
         conn,
         node_rank=node_rank,
-        max_system_rows=max_system_rows,
+        analysis_window=analysis_window,
     )
     # Load GPU rows that belong to the same retained system samples.
     gpus = _gpu_rows(
         conn,
         node_rank=node_rank,
-        max_system_rows=max_system_rows,
+        analysis_window=analysis_window,
     )
 
     # GPU summary fields are derived from raw GPU rows at read time so the
@@ -404,18 +404,17 @@ def load_system_section_data(
     db_path: str,
     *,
     node_rank: Optional[int] = None,
-    max_system_rows: int = MAX_SUMMARY_ROWS,
+    analysis_window: Optional[AnalysisWindow] = None,
 ) -> SystemSectionData:
     """
     Load bounded system-section data from the SQLite history database.
     """
-    row_limit = normalize_summary_window_rows(max_system_rows)
     conn = sqlite3.connect(db_path)
     try:
         cluster = _load_cluster_summary(
             conn,
             node_rank=node_rank,
-            max_system_rows=row_limit,
+            analysis_window=analysis_window,
         )
     finally:
         conn.close()

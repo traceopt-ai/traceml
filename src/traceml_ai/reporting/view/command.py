@@ -20,22 +20,66 @@ def view_summary(
     summary_path: str | Path,
     *,
     print_to_stdout: bool = True,
+    re_render: bool = False,
 ) -> str:
     """
-    Print and return the stored terminal summary from a summary JSON artifact.
+    Print and return the terminal summary for a summary JSON artifact.
 
-    This is read-only: it does not regenerate diagnostics or read telemetry
-    databases. Rendering a derived HTML report is opt-in and handled
-    separately by ``traceml view <summary.json> --html`` (see
+    By default this prints the stored card verbatim, so an artifact always
+    reads back exactly as it was written.
+
+    With ``re_render=True`` the card is rebuilt from the payload with the
+    current renderer, which is how an artifact written before a card change
+    can be read in the current layout. The stored text is never modified.
+    The profile is inferred from the stored card's own title; artifacts
+    written before watch had its own card therefore re-render as run cards,
+    which is what they already stated.
+
+    Either way this is read-only: it does not regenerate diagnostics or read
+    telemetry databases. Rendering a derived HTML report is opt-in and
+    handled separately by ``traceml view <summary.json> --html`` (see
     ``reporting.html.render_html_report_from_file``).
     """
     payload = load_summary_artifact(summary_path)
     text = extract_summary_text(payload, path=summary_path)
 
+    if re_render:
+        text = _re_rendered_card(payload, stored_text=text)
+
     if print_to_stdout:
         print(text)
 
     return text
+
+
+def _re_rendered_card(payload: dict, *, stored_text: str) -> str:
+    """Rebuild the card from the payload, falling back to the stored text.
+
+    Pre-1.7 payloads use different Step Time field meanings, so rendering them
+    with the current card could mislabel historical timing. Keep their stored
+    card instead. Any other rendering failure also degrades to stored text.
+    """
+    try:
+        if float(payload.get("schema_version")) < 1.7:
+            return stored_text
+    except (TypeError, ValueError):
+        return stored_text
+
+    try:
+        from traceml_ai.reporting.terminal_card.card import (
+            build_card_from_payload,
+            card_profile_from_text,
+            card_to_plain,
+        )
+
+        return card_to_plain(
+            build_card_from_payload(
+                payload,
+                profile=card_profile_from_text(stored_text),
+            )
+        )
+    except Exception:
+        return stored_text
 
 
 __all__ = ["view_summary"]

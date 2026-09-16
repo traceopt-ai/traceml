@@ -13,14 +13,15 @@ accent, Geist + Geist Mono. Single source of truth for the dashboard's chrome.
 Functional data-viz colors (phase + severity) are kept as-is (they encode
 meaning) and pulled from the canonical phase keys, not re-hued.
 
-This module is pure styling + ECharts option builders + small format helpers;
-the per-section modules construct their UI with the CSS classes defined here.
+This module owns styling tokens, font registration, and shared dashboard
+markup. Chart construction lives in ``charting``; value formatting lives in
+``formatting``.
 """
 
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 # --- Brand chrome tokens (DESIGN.md) -------------------------------------
 BG = "#fffdfa"
@@ -137,6 +138,12 @@ body{{
 .verdict{{font-family:var(--sans); font-size:21px; font-weight:500; color:var(--ink); letter-spacing:-.01em;}}
 .sevpill{{font-family:var(--mono); font-size:10.5px; font-weight:600; padding:3px 9px; border-radius:999px; text-transform:uppercase; letter-spacing:.06em;}}
 /* KPI tiles */
+/* Tile row: a grid, not a wrapping flex row. Four equal columns that
+   become two equal columns when the card is narrow, so a tile can never
+   wrap alone and stretch to its max width. */
+.tilerow{{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:9px; width:100%;}}
+@media (max-width:1180px){{.tilerow{{grid-template-columns:repeat(2,minmax(0,1fr));}}}}
+@media (max-width:560px){{.tilerow{{grid-template-columns:minmax(0,1fr);}}}}
 .kpi{{position:relative; background:rgba(255,255,255,0.4); border:1px solid rgba(17,24,39,0.08); border-radius:13px; padding:11px 13px 10px; min-width:118px; transition:background .2s, transform .2s, box-shadow .2s;}}
 .kpi:hover{{background:rgba(255,255,255,0.72); transform:translateY(-2px); box-shadow:0 8px 20px rgba(17,24,39,0.07);}}
 .kpi::before{{content:''; position:absolute; left:0; top:0; height:100%; width:3px; background:var(--acc,var(--orange)); opacity:.85;}}
@@ -144,10 +151,21 @@ body{{
 .kq{{display:block; margin-top:2px; text-transform:none; letter-spacing:0; color:var(--muted); font-weight:500; font-size:9px;}}
 .kval{{font-family:var(--mono); font-size:19px; font-weight:600; color:var(--ink); font-variant-numeric:tabular-nums; margin-top:4px; line-height:1.1;}}
 .kunit{{font-size:0.62em; color:var(--muted); font-weight:500; margin-left:2px;}}
-.ksub{{font-family:var(--mono); font-size:10px; color:var(--muted); margin-top:2px;}}
+.ksub{{font-family:var(--mono); font-size:10px; color:var(--muted); margin-top:2px; min-height:13px;}}
 .diagrow{{display:flex; align-items:flex-start; gap:10px; padding:10px 0; border-top:1px solid rgba(17,24,39,0.07);}}
 .diagdot{{width:9px; height:9px; border-radius:999px; margin-top:5px; flex:none;}}
 .staleband{{font-family:var(--mono); font-size:11px; color:#b45309; background:rgba(239,108,0,0.10); border:1px solid rgba(239,108,0,0.22); padding:2px 9px; border-radius:999px;}}
+/* System block: estimator labels, per-GPU rows, disclosure header */
+.estlabel{{font-family:var(--mono); font-size:9.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted);}}
+.tml-gpus{{width:100%; border-collapse:collapse; font-family:var(--mono); font-size:11px; color:var(--ink); font-variant-numeric:tabular-nums;}}
+.tml-gpus th{{font-size:9.5px; font-weight:500; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); text-align:left; padding:4px 8px 5px;}}
+.tml-gpus td{{padding:4px 8px; border-top:1px solid rgba(17,24,39,0.07); white-space:nowrap;}}
+.tml-gpus td.tml-util{{font-weight:700;}}
+.tml-gpus tr.tml-mark td{{background:rgba(255,140,0,0.08);}}
+/* A rank that stopped reporting: kept in the table, dimmed, never coloured as a verdict. */
+.tml-gpus tr.tml-stale td{{color:var(--muted); opacity:.72;}}
+.tml-exp .q-item{{padding:4px 2px; min-height:0;}}
+.tml-exp .q-expansion-item__content{{padding:0 0 4px;}}
 </style>
 """
 
@@ -157,315 +175,3 @@ def kval(num: str, unit: str = "") -> str:
     """KPI value HTML with de-emphasized unit (big number, small muted unit)."""
     u = f"<span class='kunit'>{unit}</span>" if unit else ""
     return f"{num}{u}"
-
-
-def gb(b: Any) -> Optional[float]:
-    try:
-        return float(b) / 1e9
-    except Exception:
-        return None
-
-
-def nice_ymax(values: Any, floor: float = 10.0) -> float:
-    """A 'nice' rounded y-axis ceiling for the given values: ~20% headroom
-    above the peak, never below `floor`, snapped to a 5/10/25 step. Anchors
-    the axis at 0 so low usage still reads as low, while a narrow band still
-    fills the chart instead of hugging the bottom."""
-    vals = [float(v) for v in values if v is not None]
-    m = (max(vals) * 1.2) if vals else 0.0
-    m = max(m, floor)
-    step = 5.0 if m <= 50 else (10.0 if m <= 120 else 25.0)
-    n = int(m / step)
-    return float((n + 1) * step) if m > n * step else float(n * step)
-
-
-# --- ECharts option builders ---------------------------------------------
-_GRID = "rgba(17,24,39,0.05)"
-_AXIS = "rgba(17,24,39,0.14)"
-_TXT = "#9aa3af"
-
-
-def _area(c1: str, c2: str) -> Dict[str, Any]:
-    return {
-        "type": "linear",
-        "x": 0,
-        "y": 0,
-        "x2": 0,
-        "y2": 1,
-        "colorStops": [
-            {"offset": 0, "color": c1},
-            {"offset": 0.85, "color": c2},
-            {"offset": 1, "color": "rgba(255,255,255,0)"},
-        ],
-    }
-
-
-def _time_axis() -> Dict[str, Any]:
-    return {
-        "type": "time",
-        "boundaryGap": False,
-        "axisLabel": {
-            "hideOverlap": True,
-            "color": _TXT,
-            "fontFamily": "Geist Mono",
-            "fontSize": 10,
-            ":formatter": "v=>{const d=new Date(v);return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)+':'+('0'+d.getSeconds()).slice(-2);}",
-        },
-        "axisLine": {"lineStyle": {"color": _AXIS, "opacity": 0.5}},
-        "axisTick": {"show": False},
-        "splitLine": {"show": False},
-    }
-
-
-def dual_line_options(
-    left_name: str,
-    right_name: str,
-    left_col: str = C_CPU,
-    right_col: str = C_GPU,
-    unit: str = "%",
-    ymax: Optional[float] = None,
-) -> Dict[str, Any]:
-    """Dual-y-axis smooth area time-series (e.g. CPU/GPU or RAM/GPU-mem)."""
-
-    def yax(side: str, col: str) -> Dict[str, Any]:
-        ax = {
-            "type": "value",
-            "position": side,
-            "axisLabel": {
-                "color": _TXT,
-                "fontFamily": "Geist Mono",
-                "fontSize": 10,
-                ":formatter": f"v=>v+'{unit}'",
-            },
-            "axisLine": {
-                "show": True,
-                "lineStyle": {"color": col, "opacity": 0.4},
-            },
-            "axisTick": {"show": False},
-            "splitLine": {
-                "show": side == "left",
-                "lineStyle": {"color": _GRID},
-            },
-        }
-        ax["min"] = 0
-        if ymax is not None:
-            ax["max"] = ymax
-        return ax
-
-    def ln(name: str, col: str, idx: int, c1: str, c2: str) -> Dict[str, Any]:
-        return {
-            "name": name,
-            "type": "line",
-            "smooth": True,
-            "showSymbol": False,
-            "yAxisIndex": idx,
-            "lineStyle": {
-                "width": 2.4,
-                "color": col,
-                "shadowColor": "rgba(17,24,39,0.18)",
-                "shadowBlur": 4,
-                "shadowOffsetY": 2,
-            },
-            "endLabel": {
-                "show": True,
-                "color": col,
-                "fontFamily": "Geist Mono",
-                "fontSize": 10,
-                "fontWeight": 600,
-                ":formatter": f"p=>Math.round(p.value[1])+'{unit}'",
-            },
-            "areaStyle": {"color": _area(c1, c2)},
-            "data": [],
-        }
-
-    return {
-        "backgroundColor": "transparent",
-        "animationDuration": 600,
-        "color": [left_col, right_col],
-        "grid": {
-            "left": 4,
-            "right": 32,
-            "top": 12,
-            "bottom": 4,
-            "containLabel": True,
-        },
-        "tooltip": {
-            "trigger": "axis",
-            "backgroundColor": "rgba(255,253,250,0.97)",
-            "borderColor": BORDER,
-            "textStyle": {
-                "color": INK,
-                "fontFamily": "Geist Mono",
-                "fontSize": 11,
-            },
-            "axisPointer": {
-                "type": "line",
-                "lineStyle": {"color": _AXIS, "type": "dashed"},
-            },
-            ":valueFormatter": f"v=>(v==null?'-':Math.round(v)+'{unit}')",
-        },
-        "xAxis": _time_axis(),
-        "yAxis": [yax("left", left_col), yax("right", right_col)],
-        "series": [
-            ln(
-                left_name,
-                left_col,
-                0,
-                "rgba(37,99,235,0.16)",
-                "rgba(37,99,235,0.04)",
-            ),
-            ln(
-                right_name,
-                right_col,
-                1,
-                "rgba(255,140,0,0.24)",
-                "rgba(255,140,0,0.06)",
-            ),
-        ],
-    }
-
-
-def gauge_options() -> Dict[str, Any]:
-    """Single orange progress-ring gauge (0-100), big mono center value."""
-    return {
-        "backgroundColor": "transparent",
-        "series": [
-            {
-                "type": "gauge",
-                "startAngle": 218,
-                "endAngle": -38,
-                "min": 0,
-                "max": 100,
-                "radius": "94%",
-                "center": ["50%", "58%"],
-                "progress": {
-                    "show": True,
-                    "width": 13,
-                    "roundCap": True,
-                    "itemStyle": {
-                        "color": {
-                            "type": "linear",
-                            "x": 0,
-                            "y": 1,
-                            "x2": 1,
-                            "y2": 0,
-                            "colorStops": [
-                                {"offset": 0, "color": ORANGE_TOP},
-                                {"offset": 1, "color": ORANGE},
-                            ],
-                        },
-                        "shadowColor": "rgba(255,140,0,0.3)",
-                        "shadowBlur": 8,
-                    },
-                },
-                "axisLine": {
-                    "lineStyle": {
-                        "width": 13,
-                        "color": [[1, "rgba(17,24,39,0.07)"]],
-                    }
-                },
-                "pointer": {"show": False},
-                "axisTick": {"show": False},
-                "splitLine": {"show": False},
-                "axisLabel": {"show": False},
-                "anchor": {"show": False},
-                "title": {"show": False},
-                "detail": {
-                    "valueAnimation": True,
-                    "offsetCenter": [0, "2%"],
-                    "fontFamily": "Geist Mono",
-                    "fontSize": 32,
-                    "fontWeight": 600,
-                    "color": INK,
-                    ":formatter": "v=>Math.round(v)+'%'",
-                },
-                "data": [{"value": 0}],
-            }
-        ],
-    }
-
-
-def single_line_options(
-    name: str, col: str = ORANGE, unit: str = " GB"
-) -> Dict[str, Any]:
-    """Single smooth area line over an x index/step axis (e.g. step memory)."""
-    return {
-        "backgroundColor": "transparent",
-        "animationDuration": 600,
-        "color": [col],
-        "grid": {
-            "left": 4,
-            "right": 30,
-            "top": 14,
-            "bottom": 4,
-            "containLabel": True,
-        },
-        "tooltip": {
-            "trigger": "axis",
-            "backgroundColor": "rgba(255,253,250,0.97)",
-            "borderColor": BORDER,
-            "textStyle": {
-                "color": INK,
-                "fontFamily": "Geist Mono",
-                "fontSize": 11,
-            },
-            "axisPointer": {
-                "type": "line",
-                "lineStyle": {"color": _AXIS, "type": "dashed"},
-            },
-        },
-        "xAxis": {
-            "type": "category",
-            "boundaryGap": False,
-            "axisLabel": {
-                "color": _TXT,
-                "fontFamily": "Geist Mono",
-                "fontSize": 10,
-            },
-            "axisLine": {"lineStyle": {"color": _AXIS, "opacity": 0.5}},
-            "axisTick": {"show": False},
-            "splitLine": {"show": False},
-            "data": [],
-        },
-        "yAxis": {
-            "type": "value",
-            "scale": True,
-            "axisLabel": {
-                "color": _TXT,
-                "fontFamily": "Geist Mono",
-                "fontSize": 10,
-            },
-            "axisLine": {"show": False},
-            "axisTick": {"show": False},
-            "splitLine": {"lineStyle": {"color": _GRID}},
-        },
-        "series": [
-            {
-                "name": name,
-                "type": "line",
-                "smooth": True,
-                "showSymbol": False,
-                "lineStyle": {
-                    "width": 2.4,
-                    "color": col,
-                    "shadowColor": "rgba(17,24,39,0.18)",
-                    "shadowBlur": 4,
-                    "shadowOffsetY": 2,
-                },
-                "endLabel": {
-                    "show": True,
-                    "color": col,
-                    "fontFamily": "Geist Mono",
-                    "fontSize": 10,
-                    "fontWeight": 600,
-                    ":formatter": f"p=>p.value.toFixed(2)+'{unit}'",
-                },
-                "areaStyle": {
-                    "color": _area(
-                        "rgba(255,140,0,0.22)", "rgba(255,140,0,0.05)"
-                    )
-                },
-                "data": [],
-            }
-        ],
-    }

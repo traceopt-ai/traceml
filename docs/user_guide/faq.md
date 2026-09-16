@@ -65,7 +65,8 @@ with traceml.trace_step(model):
 
 For supported integrations:
 
-- Hugging Face: use `TraceMLTrainer`
+- Hugging Face: call `traceml_ai.integrations.huggingface.init()` and add
+  `TraceMLTrainerCallback()` to the standard `Trainer` callbacks.
 - Lightning: call `traceml_ai.integrations.lightning.init()` and add `TraceMLCallback()`
 
 The preferred public API is the top-level `traceml.*` API from
@@ -169,6 +170,11 @@ TraceML can surface:
 Single-node DDP supports live CLI/dashboard views and final summaries.
 Multi-node DDP is supported for end-of-run summary reports.
 
+Capacity-relative GPU memory diagnoses currently assume equal GPU memory
+capacity across ranks. Mixed-capacity runs still collect per-rank telemetry,
+but global `HIGH_PRESSURE`, `IMBALANCE`, and aggregate Process pressure
+diagnoses may be inaccurate.
+
 ---
 
 ## Does TraceML support multi-node?
@@ -207,9 +213,13 @@ Not yet.
 ## What is the difference between `watch` and `run`?
 
 `watch`
+
 - zero-code system and process visibility
+- the same terminal System/Process panes as `run`, without a performance
+  verdict or step measurements
 
 `run`
+
 - the default command
 - step-aware bottleneck diagnosis
 - the best place to start for most users
@@ -339,18 +349,21 @@ traceml run train.py --disable-traceml
 
 ---
 
-## How can I keep stderr from a native training crash?
+## Where are training stdout and stderr saved?
 
-Enable the opt-in bounded stderr tail:
+`traceml run` and `traceml watch` save both streams by default:
 
-```bash
-traceml run train.py --mode=summary --capture-stderr
+```text
+logs/<run-name>/nodes/node_<node-rank>/training.stdout.log
+logs/<run-name>/nodes/node_<node-rank>/training.stderr.log
 ```
 
-You can also set `TRACEML_CAPTURE_STDERR=1`. TraceML continues to print the
-child process's stderr to the terminal and stores only its last 64 KiB in
-`logs/<run-name>/crash_stderr.log` when the child exits. The file remains local
-and stderr capture is disabled by default.
+The node launcher owns these files, so they include Python output, native
+writes, torchrun diagnostics, and output from local workers that inherits the
+launcher's descriptors. CLI mode keeps the streams out of the live Rich
+display and shows a bounded stderr excerpt after a failure. Use
+`--no-save-training-output` when another system already captures the streams
+or when the workload requires a real terminal.
 
 ---
 

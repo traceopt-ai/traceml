@@ -81,6 +81,18 @@ traceml run train.py --nproc-per-node=4
 For multi-node DDP launch commands, see
 [Distributed Training](../distributed-training.md).
 
+Always launch through `traceml run`. It starts the aggregator and spawns the
+ranks with `torchrun`, and Lightning picks that environment up. Two things
+follow:
+
+- Pass the process count to `traceml run` (`--nproc-per-node=N`) and the same
+  device count to the `Trainer` (`devices=N`). Lightning's own subprocess
+  launcher is not used under `torchrun`; a `Trainer(devices=2)` under
+  `traceml run` without `--nproc-per-node=2` stops with Lightning's
+  world-size mismatch error before training starts.
+- A bare `python train.py` finds no aggregator, prints a warning, and trains
+  without telemetry.
+
 For browser dashboard mode on single-node runs:
 
 ```bash
@@ -105,8 +117,23 @@ You keep the normal Lightning workflow. TraceML adds diagnosis around the traini
 
 `traceml_lightning.init()` enables PyTorch `DataLoader` fetch timing and
 installs the H2D `.to(...)` patch. `TraceMLCallback` records step, forward,
-backward, optimizer, and memory timing. It also scopes H2D timing around
-Lightning's internal `strategy.batch_to_device(...)` path.
+backward, optimizer, and memory timing.
+
+With automatic optimization, one TraceML step is one Lightning optimizer
+update attempt. Without gradient accumulation this is one training batch. With
+accumulation, each micro-batch contributes its own fetch, H2D, forward,
+backward, and traced-region events to one open step capture. The capture is
+published at the update boundary, and repeated timing events are summed by the
+sampler. The DataLoader fetches are reported separately as Input Wait, and
+Step Time includes Input Wait plus Traced Step Time.
+
+Only training batches are measured. The callback keeps a framework-level
+DataLoader timing policy active for the whole Trainer run and checks
+Lightning's current stage on every fetch. This is intentionally broader than
+the validation start/end hooks because Lightning can prefetch an unknown-length
+evaluation loader before `on_validation_start`. Fetches and transfers of the
+validation, sanity-check, test, and predict loaders therefore do not count
+toward Input Wait or H2D, and no step is published for them.
 
 Normal PyTorch `DataLoader` input timing is automatic after
 `traceml_lightning.init()`. If you pass Lightning a custom iterator or
@@ -114,9 +141,31 @@ non-PyTorch loader, wrap it with `traceml.wrap_dataloader_fetch(...)` before
 passing it to `trainer.fit(...)`. For Ray Data with Lightning, see
 [Ray Train](ray.md).
 
+For a DataLoader whose length is unknown, Lightning performs a one-batch
+look-ahead and probes the iterator for exhaustion. Input Wait reports those
+actual `DataLoader.__next__()` calls, so their distribution across steps can
+differ from the one-fetch-per-step shape of a sized DataLoader.
+
 Small batches may show `H2D 0.0ms` because the transfer is below display
 precision. The full example below uses a wider CPU tensor so H2D timing is
 visible.
+
+On Lightning the optimizer phase runs from `on_before_optimizer_step` to the
+end of the batch, so it also covers the step-interval learning-rate scheduler
+update. Under manual optimization each `optimizer.step()` call is one
+optimizer event, and one training batch remains one TraceML step. Under
+automatic optimization, the accumulation group contains one optimizer event
+at its update boundary. Strategies such as DeepSpeed can route every
+micro-batch through an internal `engine.step()` call; TraceML omits those
+accumulating calls from the optimizer occurrence count.
+
+If training raises, the callback discards the incomplete accumulation group
+rather than publishing a partial step, restores the module and strategy it
+wrapped, and lets the exception propagate unchanged. If
+`traceml_lightning.init()` was not called, or TraceML was initialized in a
+mode that does not install the DataLoader-fetch or H2D patch, the callback
+logs a warning at the start of training naming the streams that will stay
+dark.
 
 ---
 
@@ -275,11 +324,46 @@ Use the delay flags only when you want to create a deliberate straggler.
 
 ---
 
+## Try it on a real workload
+
+`examples/integrations/lightning_dataloading_bottleneck.py` trains ResNet-18
+on the 320px Imagenette train split; its `--profile` flag changes the
+DataLoader settings and nothing else. Run it twice and compare:
+
+```bash
+traceml run --mode summary --logs-dir logs --run-name lightning_baseline \
+    examples/integrations/lightning_dataloading_bottleneck.py \
+    --args --profile baseline --max-steps 300 --batch-size 64
+traceml run --mode summary --logs-dir logs --run-name lightning_optimized \
+    examples/integrations/lightning_dataloading_bottleneck.py \
+    --args --profile optimized --max-steps 300 --batch-size 64
+traceml compare logs/lightning_baseline/final_summary.json \
+    logs/lightning_optimized/final_summary.json
+```
+
+The same experiment runs top to bottom on a free Colab T4, with a last
+section that reads the per-step DataLoader fetch wait (CPU) to show the cold
+first batch of every epoch:
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/notebooks/lightning_dataloading_bottleneck.ipynb)
+
 ## Gradient accumulation
 
 `TraceMLCallback` supports gradient accumulation.
 
-When Lightning uses `accumulate_grad_batches=N`, TraceML still preserves step alignment so the dashboard and summaries stay consistent.
+With `accumulate_grad_batches=N`, the micro-batches used for one optimizer
+update attempt share one TraceML step number. Their fetch, H2D, forward,
+backward, and traced-region times are added within that step. CUDA memory is
+reset once at the start of the group and read once at the end, so the reported
+value is the peak across the group rather than a sum. A shorter final group is
+completed when Lightning performs an update for it; strategies that own
+accumulation internally may leave an incomplete final group unpublished.
+
+For single-optimizer automatic optimization, TraceML advances at the same
+update boundaries as `trainer.global_step`. Manual optimization remains
+batch-scoped and can differ. Step IDs remain local to the TraceML process and
+are not restored from Lightning checkpoints. If training fails partway through
+a group, the incomplete group is discarded rather than published as a partial
+step.
 
 ---
 

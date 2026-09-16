@@ -2,15 +2,14 @@
 
 ## Dev setup
 
-```bash
-git clone https://github.com/traceopt-ai/traceml.git
-cd traceml
-pip install -e ".[dev,torch,lightning,hf,docs]"
-pre-commit install --install-hooks
-pre-commit install --hook-type pre-push
-```
+Follow the canonical
+[development setup](https://github.com/traceopt-ai/traceml/blob/main/CONTRIBUTING.md#development-setup)
+first. Documentation builds additionally require the `lightning`, `hf`, and
+`docs` extras:
 
-All extras are installed because the docs build imports every TraceML module.
+```bash
+pip install -e ".[lightning,hf,docs]"
+```
 
 ## Branch naming
 

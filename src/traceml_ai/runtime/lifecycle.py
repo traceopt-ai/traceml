@@ -157,8 +157,8 @@ def _apply_settings_env(
     os.environ["TRACEML_HISTORY_ENABLED"] = (
         "1" if settings.history_enabled else "0"
     )
-    os.environ["TRACEML_SUMMARY_WINDOW_ROWS"] = str(
-        settings.summary_window_rows
+    os.environ["TRACEML_HISTORY_RETENTION"] = str(
+        float(settings.history_retention_s)
     )
     os.environ["TRACEML_FINALIZE_TIMEOUT_SEC"] = str(
         settings.finalize_timeout_sec
@@ -196,37 +196,43 @@ def start_aggregator(
     _apply_settings_env(normalized)
 
     if logger is None:
-        setup_error_logger(is_aggregator=True)
+        setup_error_logger(role="aggregator")
         logger = get_error_logger("TraceMLAggregatorLifecycle")
 
-    session_root = Path(str(normalized.logs_dir)).resolve() / session_id
-    aggregator_dir = session_root / "aggregator"
-    aggregator_dir.mkdir(parents=True, exist_ok=True)
-
-    db_path = (
-        Path(str(normalized.db_path))
-        if normalized.db_path
-        else aggregator_dir / "telemetry"
-    )
-    normalized = replace(normalized, db_path=str(db_path))
-
     event = stop_event or threading.Event()
-    aggregator = _build_aggregator(
-        logger=logger,
-        stop_event=event,
-        settings=normalized,
-    )
+    aggregator = None
     try:
+        session_root = Path(str(normalized.logs_dir)).resolve() / session_id
+        aggregator_dir = session_root / "aggregator"
+        aggregator_dir.mkdir(parents=True, exist_ok=True)
+        db_path = (
+            Path(str(normalized.db_path))
+            if normalized.db_path
+            else aggregator_dir / "telemetry"
+        )
+        normalized = replace(normalized, db_path=str(db_path))
+        aggregator = _build_aggregator(
+            logger=logger,
+            stop_event=event,
+            settings=normalized,
+        )
         aggregator.start()
-    except BaseException:
-        event.set()
+        os.environ["TRACEML_AGGREGATOR_PORT"] = str(aggregator.endpoint.port)
+    except BaseException as exc:
         try:
-            aggregator.stop(timeout_sec=1.0)
+            logger.error(
+                "[TraceML] Aggregator startup failed",
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
         except Exception:
             pass
+        event.set()
+        if aggregator is not None:
+            try:
+                aggregator.stop(timeout_sec=1.0)
+            except Exception:
+                pass
         raise
-
-    os.environ["TRACEML_AGGREGATOR_PORT"] = str(aggregator.endpoint.port)
 
     return AggregatorHandle(
         settings=normalized,

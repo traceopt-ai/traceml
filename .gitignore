@@ -48,6 +48,12 @@ compare/
 # Local ML datasets, checkpoints, model weights, and export archives
 
 data/
+# The integration-support manifest is documentation source, not a local
+# training dataset. Keep this exception narrow so other docs/data artifacts
+# remain ignored by the generic data/ rule above.
+!docs/data/
+docs/data/*
+!docs/data/integration_support.json
 mnist/
 checkpoints/
 *_agnews_ddp/

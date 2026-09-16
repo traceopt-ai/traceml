@@ -10,7 +10,72 @@ For the public final-summary shape, see
 For user-facing timing definitions, see the
 [Step Time glossary](../user_guide/reading-output.md#step-time-glossary).
 
-## Current flow
+## Training-to-sampler handoff
+
+`instrumentation/step_events.py` owns `StepCapture`, the timing and memory event
+contracts, and two private queues. The measurement utilities submit events to
+one active capture. Input timing recorded before a framework's explicit step
+callback stays in that capture and is attributed at the next step boundary.
+
+```text
+timed regions / optimizer hooks ─┐
+                                ├─> active StepCapture
+memory tracker ─────────────────┘          │
+                                ┌─────────┴─────────┐
+                         complete(step)          abort()
+                                │                   │
+                    ┌───────────┴───────────┐   discard
+                    ▼                       ▼
+             timing batch queue       memory event queue
+                    ▼                       ▼
+             StepTimeSampler         StepMemorySampler
+```
+
+On success, completion detaches the capture, assigns one step number, and
+publishes its timing batch and final memory snapshot. An exception propagated
+through `trace_step` aborts the partial capture without advancing the step
+counter. Repeated completion or abort calls on the detached capture do nothing,
+so an old caller cannot finalize a later step. If recording is disabled before
+completion, the capture is detached and discarded instead of being published.
+
+The producer lifecycle is sequential: close the step's timing regions, then
+call `complete_step_capture()` or `abort_step_capture()`, then begin the next
+step. Timing regions must not span capture boundaries. These module helpers
+own finalization and replacement of the active capture; integrations should
+not call the capture's private finalization methods. CUDA resolution may finish
+later in the sampler because queued events already carry their step number.
+
+Publication and reading transfer references, not copies. After publication,
+the producer must not change event membership or step identity. Only the timing
+sampler resolves CUDA events.
+
+Each queue retains its existing capacity of 2,048 items and drops incoming
+items when full: timing items are batches; memory items are device snapshots.
+The timing sampler keeps its existing pending FIFO: an unresolved earlier
+CUDA batch holds back later batches. Both readers continue after recording
+stops so already-published measurements can drain. No GPU synchronization is
+added.
+
+Memory uses `publish_step_memory_event()` and `drain_step_memory_events()`.
+Its peak values describe the process's PyTorch allocator on a tracked device;
+the model selects that device but is not the owner of the measured memory.
+Memory events and wire records therefore do not include `model_id`. The SQLite
+projection already stores device and rank identity without that field.
+
+The active capture keeps one memory snapshot per process for one active step on
+one tracked device. `record()` replaces that snapshot. The memory queue retains
+all completed steps until the sampler drains them. There is no model or device
+key; `device` stays as snapshot metadata. Device selection and labels,
+reset/read boundaries, measurement timestamps, byte units, and `None` values
+for non-CUDA devices are unchanged.
+
+Timing and memory drain independently and may reach different steps on the
+same sampler tick; queue delivery is not an atomic transaction across both
+queues. Existing framework boundaries still define a step, CUDA timing remains
+asynchronous, and global timing is currently not persisted. Framework-specific
+exception callbacks and HF input attribution remain separate integration work.
+
+## Analysis and presentation flow
 
 ```mermaid
 flowchart LR
@@ -171,6 +236,100 @@ instrumented duration that becomes canonical Traced Step Time only after
 SQLite normalization. `_traceml_internal:step_time` is intentionally stable
 raw telemetry and storage vocabulary below that normalization boundary; it is
 not a public metric name or presentation label.
+
+## Lightning steps
+
+Under automatic optimization, one completed TraceML step corresponds to one
+Lightning accumulation/update group. Each micro-batch opens and closes its own
+traced region, while the owning `StepCapture` and CUDA peak-memory window stay
+open until `trainer.fit_loop._should_accumulate()` becomes false. The callback
+then reads memory, advances the process-local counter, and publishes the group
+once. Lightning's default strategy completes a shorter final group. Strategies
+that own accumulation internally publish only groups for which they perform an
+update; an unfinished final group is discarded at teardown.
+
+The resulting `StepTimeBatch` contains repeated fetch, H2D, forward, backward,
+and traced-step events. `StepTimeSampler` sums repeated timing events within
+that batch. `StepMemoryTracker` resets once at group start and reads once at
+group end, so CUDA supplies the peak for the complete group; the memory sampler
+does not calculate another maximum. Separate completed batches with the same
+step number are not merged by either sampler.
+
+Manual optimization remains batch-scoped because Lightning does not define an
+automatic accumulation boundary for it. A manual batch can contain multiple
+optimizer and backward events in its single TraceML step. An exception aborts
+the entire capture accumulated since the prior completed update.
+
+`tests/integrations/test_lightning_trainer.py` checks full and partial
+accumulation groups against real Trainers from both the `lightning` and
+`pytorch_lightning` namespaces.
+
+## Hugging Face steps
+
+For normally completed HF training, one TraceML step contains the microbatches
+used for one optimizer update attempt. The callback opens `trace_step` at
+`on_step_begin` and closes it at `on_step_end`. Accumulating microbatches emit
+`on_substep_end`, which does not advance TraceML's counter.
+
+For example, ten microbatches with `gradient_accumulation_steps=4` produce
+three steps containing four, four, and two microbatches. TraceML IDs are local
+to the process; their increments match HF's for recorded, completed groups,
+but their absolute values can differ after checkpoint resume.
+
+### Timing and memory
+
+All timing events for a group are flushed together as one `StepTimeBatch`.
+`StepTimeSampler` sums repeated forward and backward events within that batch,
+keeping CPU and GPU durations separate. It does not merge separate batches
+that happen to have the same step number.
+
+`StepMemoryTracker` resets the tracked CUDA device's PyTorch peak counters
+once at the start of the group and reads peak allocated/reserved memory once
+at the end. The peak covers all microbatches and optimizer work in that window.
+`StepMemorySampler` stores the result without further aggregation. CPU runs
+report memory as unavailable. Temporary allocation peaks before the callback
+window are not captured, although inputs still resident at its start count
+toward the peak.
+
+The callback window includes gradient clipping, ordinary scheduler work, and
+gradient zeroing. These contribute to Traced Step Time but are outside the
+separately timed forward, backward, and optimizer calls. HF's subsequent
+logging, saving, and evaluation are outside this window. Other callbacks'
+work is included only when it runs inside the measured window.
+
+### Skipped optimizer updates
+
+HF still completes a step when AMP overflow prevents a parameter update.
+TraceML follows that completion event. If the scaler skips the optimizer call,
+no timing event is emitted. A fused optimizer can execute its call but skip updating
+parameters internally; that call still contributes measured optimizer time.
+Neither the step count nor an optimizer timing event proves parameters changed.
+
+### Current limitations
+
+HF requests prepared inputs before `on_step_begin`, so the current callback
+can miss input H2D transfers. Evaluation loader events can also reach the next
+training step. The existing raw input event names are
+`_traceml_internal:dataloader_next` and `_traceml_internal:h2d_time`.
+These gaps can omit transfers from Step Time or assign loader work to the
+wrong training step.
+
+If training is interrupted, the Trainer lifecycle guard aborts the open
+capture before the exception reaches Accelerate's automatic batch-size retry.
+The failed group is not published and does not advance TraceML's step counter.
+The original training exception continues unchanged.
+
+This cleanup and duplicate-callback ownership require the guard installed by
+`traceml_ai.integrations.huggingface.init()`. They do not apply when installation
+fails or a custom `_inner_training_loop` bypasses the guarded parent method.
+Callback ownership is cleared when the guarded attempt exits.
+
+The boundary follows HF's
+[training loop](https://github.com/huggingface/transformers/blob/6622f6f781c9c0b1f2f5541a257943bee95ad586/src/transformers/trainer.py#L1791-L1892)
+and Accelerate's
+[optimizer wrapper](https://github.com/huggingface/accelerate/blob/9e5d1de5d2248a5f3ee8f2d9272ce88a686dc42d/src/accelerate/optimizer.py#L152-L203).
+`tests/integrations/test_hf_trainer.py` checks accumulation, partial groups, and
+scaler overflow. These CPU checks do not establish CUDA timing accuracy.
 
 ## Surface responsibilities
 

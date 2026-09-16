@@ -1,47 +1,38 @@
+"""Step memory measurement for TraceML instrumentation.
+
+Each read submits an allocator snapshot to the active ``StepCapture``. The
+capture retains the final snapshot until the caller completes or aborts the
+step. Device identity stays in the event. This path assumes one sequential
+training-step producer and one tracked device per process.
+"""
+
 import os
-import sys
-from dataclasses import dataclass
-from queue import Full, Queue
-from typing import Dict, Optional
+import time
 
 import torch
 import torch.nn as nn
 
+from traceml_ai.instrumentation.step_events import (
+    StepMemoryEvent,
+    record_step_memory_event,
+)
 from traceml_ai.runtime.state import should_record_trace_events
-
-step_memory_queue: Queue = Queue(maxsize=2048)
-
-_temp_step_memory_buffer: Dict = {}
 
 
 def _traceml_disabled() -> bool:
     return os.environ.get("TRACEML_DISABLED") == "1"
 
 
-@dataclass
-class StepMemoryEvent:
-    """
-    Peak GPU memory during a TraceML step.
-    """
-
-    step: int
-    model_id: int
-    device: str
-    peak_allocated: Optional[float]
-    peak_reserved: Optional[float]
-
-
 class StepMemoryTracker:
-    """
-    Tracks peak CUDA memory across a train step.
+    """Track process allocator peaks on the model's device across a step.
+
+    The model selects the device; these counters do not measure memory owned
+    by an individual model.
     """
 
     def __init__(self, model: nn.Module):
         if _traceml_disabled() or not should_record_trace_events():
             return  # BYPASS: Do not attach any trackers
-
-        self.model = model
-        self.model_id = id(model)
 
         try:
             self.device = next(model.parameters()).device
@@ -80,35 +71,19 @@ class StepMemoryTracker:
             peak_allocated = None
             peak_reserved = None
 
-        evt = StepMemoryEvent(
-            model_id=self.model_id,
-            device=str(self.device),
-            peak_allocated=(
-                float(peak_allocated) if peak_allocated is not None else None
-            ),
-            peak_reserved=(
-                float(peak_reserved) if peak_reserved is not None else None
-            ),
-            step=-1,  # filled during flush
-        )
-        _temp_step_memory_buffer[self.model_id] = evt
-
-
-def flush_step_memory_buffer(model: nn.Module, step: int) -> None:
-    if _traceml_disabled() or not should_record_trace_events():
-        return
-
-    model_id = id(model)
-
-    evt = _temp_step_memory_buffer.pop(model_id, None)
-    if evt is None:
-        return
-
-    evt.step = step
-    try:
-        step_memory_queue.put_nowait(evt)
-    except Full:
-        print(
-            f"[TraceML:StepMemory] Queue full, dropping event for model {evt.model_id}",
-            file=sys.stderr,
+        record_step_memory_event(
+            StepMemoryEvent(
+                device=str(self.device),
+                peak_allocated=(
+                    float(peak_allocated)
+                    if peak_allocated is not None
+                    else None
+                ),
+                peak_reserved=(
+                    float(peak_reserved) if peak_reserved is not None else None
+                ),
+                step=-1,  # assigned when the capture completes
+                # Capture occurrence time here; queue draining can happen later.
+                timestamp=time.time(),
+            )
         )

@@ -147,7 +147,7 @@ def _benchmark_rank_count(
             lookback_factor=4,
         ),
     )
-    summary = StepTimeSummarySection(max_rows=window_size)
+    summary = StepTimeSummarySection()
 
     def live_cache_miss():
         live._last_observed = None

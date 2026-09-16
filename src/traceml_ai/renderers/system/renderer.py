@@ -9,14 +9,14 @@ System renderer.
 
 Presentation logic for system-level telemetry:
 - CLI rendering (Rich)
-- Dashboard payload (dict)
+- Dashboard payload (typed)
 - Summary logging (optional)
 
 All metric computation is delegated to SystemMetricsComputer.
 """
 
 import shutil
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from rich.panel import Panel
 from rich.table import Table
@@ -27,6 +27,7 @@ from traceml_ai.renderers.base_renderer import BaseRenderer
 from traceml_ai.utils.formatting import fmt_mem_new, fmt_percent
 
 from .computer import SystemMetricsComputer
+from .dashboard_models import SystemDashboardPayload
 
 
 class SystemRenderer(BaseRenderer):
@@ -40,16 +41,23 @@ class SystemRenderer(BaseRenderer):
 
     NAME = "System"
 
-    def __init__(self, db_path) -> None:
+    def __init__(
+        self, db_path, sampler_interval_s: Optional[float] = None
+    ) -> None:
         super().__init__(name=self.NAME, layout_section_name=SYSTEM_LAYOUT)
         self.db_path = db_path
         self._logger = get_error_logger(self.NAME + "Renderer")
-        self._computer = SystemMetricsComputer(db_path=self.db_path)
+        self._computer = SystemMetricsComputer(
+            db_path=self.db_path,
+            sampler_interval_s=sampler_interval_s,
+        )
 
     def _compute_cli(self) -> Dict[str, Any]:
         return self._computer.compute_cli()
 
-    def _compute_dashboard(self, window_n: int = 100) -> Dict[str, Any]:
+    def _compute_dashboard(
+        self, window_n: int = 100
+    ) -> SystemDashboardPayload:
         return self._computer.compute_dashboard(window_n=window_n)
 
     def get_panel_renderable(self) -> Panel:
@@ -66,10 +74,12 @@ class SystemRenderer(BaseRenderer):
 
     def _single_node_panel(self, data: Dict[str, Any], grid: Table) -> Panel:
         """Render the single-node terminal system view."""
-        ram_pct_str = ""
-        if data["ram_total"]:
-            ram_pct = data["ram_used"] * 100.0 / data["ram_total"]
-            ram_pct_str = fmt_percent(ram_pct)
+        # A share needs both readings. Either one absent means there is
+        # no percentage to state, which is not the same as 0%.
+        used = data["ram_used"]
+        total = data["ram_total"]
+        if used is not None and total:
+            ram_pct_str = fmt_percent(used * 100.0 / total)
         else:
             ram_pct_str = "N/A"
 
@@ -83,12 +93,9 @@ class SystemRenderer(BaseRenderer):
                 "[bold green]GPU[/bold green]", "[red]Not available[/red]"
             )
         else:
-            util_total = data.get("gpu_util_total")
-            avg = (
-                util_total / max(data["gpu_count"], 1)
-                if util_total is not None
-                else None
-            )
+            # Metric meaning belongs to SystemCLIComputer. This layer only
+            # turns its optional average into terminal text.
+            avg = data.get("gpu_util_avg")
             util_str = fmt_percent(avg) if avg is not None else "N/A"
 
             grid.add_row(
@@ -201,7 +208,7 @@ class SystemRenderer(BaseRenderer):
             width=panel_width,
         )
 
-    def get_dashboard_renderable(self) -> Dict[str, Any]:
+    def get_dashboard_renderable(self) -> SystemDashboardPayload:
         """
         Return a compact dashboard payload.
 

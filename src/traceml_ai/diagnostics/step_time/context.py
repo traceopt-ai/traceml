@@ -53,6 +53,8 @@ class _RankStragglerEvidence:
     step_time_ms: float
     component_excesses_ms: Dict[str, float]
     component_coverage: Dict[str, float]
+    component_culprit_ms: float
+    component_victim_ms: float
 
 
 @dataclass(frozen=True)
@@ -234,23 +236,24 @@ def _build_rank_straggler_evidence(
     if score < non_negative_finite(score_threshold):
         return None, len(eligible)
 
-    component_excesses = {
-        "input": max(
-            0.0,
-            _rank_value(culprit, "input_wait")
-            - _rank_value(victim, "input_wait"),
-        )
-    }
+    input_culprit = _rank_value(culprit, "input_wait")
+    input_victim = _rank_value(victim, "input_wait")
+    component_values = {"input": (input_culprit, input_victim)}
+    component_excesses = {"input": max(0.0, input_culprit - input_victim)}
     if _measured(culprit, "h2d") and _measured(victim, "h2d"):
+        h2d_culprit = _rank_value(culprit, "h2d")
+        h2d_victim = _rank_value(victim, "h2d")
+        component_values["h2d"] = (h2d_culprit, h2d_victim)
         component_excesses["h2d"] = max(
             0.0,
-            _rank_value(culprit, "h2d") - _rank_value(victim, "h2d"),
+            h2d_culprit - h2d_victim,
         )
     if fsdp:
         component_excesses["compute"] = 0.0
     elif _measured(culprit, "forward") and _measured(victim, "forward"):
         culprit_forward = _rank_value(culprit, "forward")
         victim_forward = _rank_value(victim, "forward")
+        component_values["compute"] = (culprit_forward, victim_forward)
         component_excesses["compute"] = (
             max(0.0, culprit_forward - victim_forward)
             if culprit_forward > 0.0 and victim_forward > 0.0
@@ -305,6 +308,11 @@ def _build_rank_straggler_evidence(
             "sync",
         )
 
+    component_culprit, component_victim = component_values.get(
+        cause,
+        (pair.culprit_value_ms, pair.victim_value_ms),
+    )
+
     return _RankStragglerEvidence(
         kind=kind,
         status=status,
@@ -321,6 +329,8 @@ def _build_rank_straggler_evidence(
         step_time_ms=step_time,
         component_excesses_ms=component_excesses,
         component_coverage=coverage,
+        component_culprit_ms=component_culprit,
+        component_victim_ms=component_victim,
     ), len(eligible)
 
 

@@ -110,6 +110,7 @@ def _build_step_memory_payload(
             global_ranks_used=0,
             training_total_steps=training_steps,
             training_latest_step=latest_step_observed,
+            samples=0,
             section_metric_names=STEP_MEMORY_METRIC_NAMES,
         )
         summary = BaseSectionPayload(
@@ -173,6 +174,7 @@ def _build_step_memory_payload(
         global_ranks_used=global_ranks_used,
         training_total_steps=training_steps,
         training_latest_step=latest_step_observed,
+        samples=steps_used * global_ranks_used,
         section_metric_names=STEP_MEMORY_METRIC_NAMES,
     )
     summary = BaseSectionPayload(

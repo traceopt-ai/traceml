@@ -56,8 +56,8 @@ def _positive_control_ms(num_bytes_mb: int = 64) -> float | None:
     """Move a tensor INSIDE trace_step; TraceML should capture this one."""
     import torch
 
+    from traceml_ai.instrumentation.step_events import drain_step_time_batches
     from traceml_ai.sdk.instrumentation import trace_step
-    from traceml_ai.utils.timing import get_step_time_queue
 
     model = torch.nn.Linear(4, 4).cuda()
     host = torch.empty(num_bytes_mb * 1024 * 1024 // 4, dtype=torch.float32)
@@ -66,9 +66,7 @@ def _positive_control_ms(num_bytes_mb: int = 64) -> float | None:
         torch.cuda.synchronize()
 
     captured = None
-    queue = get_step_time_queue()
-    while not queue.empty():
-        batch = queue.get_nowait()
+    for batch in drain_step_time_batches():
         for evt in getattr(batch, "events", []):
             if evt.name == "_traceml_internal:h2d_time":
                 captured = float(getattr(evt, "gpu_ms", 0.0) or 0.0)
@@ -87,8 +85,8 @@ def _traceml_reported_h2d(grad_accum: int = 2) -> float | None:
         TrainingArguments,
     )
 
+    from traceml_ai.instrumentation.step_events import drain_step_time_batches
     from traceml_ai.integrations.huggingface import TraceMLTrainerCallback
-    from traceml_ai.utils.timing import get_step_time_queue
 
     class _DS(torch.utils.data.Dataset):
         def __len__(self):
@@ -128,9 +126,7 @@ def _traceml_reported_h2d(grad_accum: int = 2) -> float | None:
         trainer.train()
 
     reported = None
-    queue = get_step_time_queue()
-    while not queue.empty():
-        batch = queue.get_nowait()
+    for batch in drain_step_time_batches():
         vals = [
             float(getattr(evt, "gpu_ms", 0.0) or 0.0)
             for evt in getattr(batch, "events", [])

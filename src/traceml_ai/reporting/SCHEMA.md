@@ -1,10 +1,12 @@
 # Final Summary JSON
 
-TraceML writes one end-of-run JSON file. The current schema version is `1.7`.
+TraceML writes one end-of-run JSON file. The current schema version is `1.8`.
 Each section has the same outer shape so the output is easy to store, diff, and
 consume from tooling.
 
-Schema `1.7` publishes canonical Step Time vocabulary. Every public timing
+Schema `1.8` adds one shared time-bounded analysis window and per-section
+observations. It retains the canonical Step Time vocabulary introduced
+in schema `1.7`. Every public timing
 metric is nullable: `null` means the
 underlying timing signal was never measured in the analyzed window (missing
 instrumentation), while a measured zero stays `0.0`. Null metrics are
@@ -27,9 +29,25 @@ Sections:
 
 ```json
 {
-  "schema_version": 1.7,
+  "schema_version": 1.8,
   "generated_at": "...",
   "duration_s": null,
+  "analysis_window": {
+    "anchor": "step_time | periodic_telemetry | null",
+    "retention_s": 1800.0,
+    "start_ts_s": null,
+    "end_ts_s": null,
+    "duration_s": null,
+    "start_step": null,
+    "end_step": null,
+    "sections": {
+      "system": {
+        "samples": 0,
+        "observed_start_ts_s": null,
+        "observed_end_ts_s": null
+      }
+    }
+  },
   "meta": {
     "run_name": null,
     "mode": "single_node | multi_node | no_data",
@@ -46,17 +64,58 @@ Sections:
 }
 ```
 
+`analysis_window` is resolved once for the complete report. When Step Time is
+available, its latest optimizer step completed on every observed rank is the
+anchor; all common completed steps from the preceding retention duration set
+the snapped timestamp and step bounds. System and Process use those inclusive
+timestamp bounds, and Step Memory uses the same inclusive step bounds. Without
+Step Time, the latest System/Process timestamp anchors a time-only window and
+the step bounds remain `null`.
+
+Each section reports its sample count and observed timestamp bounds. The same
+analysis bounds also appear in every section's `metadata`.
+
+Retention advances through one shared frontier: the minimum of the latest
+rank-aligned Step Time step, latest rank-aligned Step Memory step, and the
+latest aligned step older than `retention_s`. Periodic telemetry is pruned
+through that step's completion timestamp.
+
+Top-level `duration_s` is full training lifecycle duration when genuine
+launcher start/end timestamps are available. Otherwise it is `null`; section
+or analysis-window durations are never substituted for the full run.
+
 `meta` contains run-level identity and observed topology. Section-level
 `metadata` remains section-specific coverage and metric-contract information.
+The terminal card labels a GPU count as observed only when it comes from
+`system.metadata.gpus_observed`; it does not assert that every observed GPU
+was used by the workload.
 
 `primary_diagnosis` is a top-level performance finding promoted from existing
 section diagnoses. It answers "why was training slow?" and is intentionally
 narrower than section-level health/resource diagnoses.
 
-`text` is a compact human-readable verdict report. It is presentation text for
-the CLI/TXT artifact, not a structured contract for downstream parsers. It
-starts with `TraceML Verdict`, `Why`, and `Next`, then shows compact section
-status plus System and Step Time evidence tables. Detailed section prose
+`text` is a compact human-readable CLI/TXT card, not a parser contract. Run
+renders `Verdict`, `Why`, and `Next`, followed by fixed Step Timing/Step Memory
+and System/Process panes. Watch uses the same 156-column header, System/Process
+panes, scope legend, secondary findings, and footer, but omits the performance
+verdict and both step sections. A short `Next` line before the footer directs
+users to `trace_step(model)` and `traceml run` for step-time measurement. Its
+rank coverage comes from Process metadata;
+when that count is unavailable, grouped Process rows provide the observed
+count, and an empty Process section represents zero observed ranks rather than
+borrowing `meta.world_size`. System node coverage is resolved independently.
+Run rank and step coverage come from Step Time. The card uses only stored
+summary values: a distributed timing tree reads the rank at
+`global.median.step_time_ms.idx`, resource tables use stored average or
+median/worst points, and `Why` reads attributed culprit/victim rows. Values are
+not recomputed. Watch prints
+`Scope: N = node · R = global rank · G = GPU index` only when visible
+System/Process content uses one of those compact identities; Run retains its
+distributed scope legend. Normal resources leave the evidence row blank, and
+non-normal resources show compact stored evidence with the available scope.
+
+`text` is profile-aware: `traceml watch` renders only System and Process
+because Watch does not collect usable step timing. Detailed section prose
 remains in each section-local `card` field.
 
 ## Primary Diagnosis Shape
@@ -99,10 +158,10 @@ Selection policy:
   diagnosis evidence lists `missing_signals` plus per-signal
   `signal_coverage`.
 - Step Time may emit warning-only bottleneck diagnoses before its confident
-  threshold; critical Step Time diagnoses require the confident window size.
+  threshold; critical Step Time diagnoses require enough aligned steps.
   Live and summary use the same global-rank Step Time SQLite window loader;
-  summary uses a larger selected-clock window, but not a separate Step Time
-  diagnosis gate.
+  the summary is bounded by `analysis_window`, not by a row count, and does
+  not use a separate Step Time diagnosis gate.
 - Step Time diagnosis may consume advisory runtime training strategy context
   when available. This does not add a public summary metric; missing or
   unrecognized strategy metadata defaults to `ddp`. FSDP Step Time diagnosis
@@ -185,7 +244,11 @@ Fallback evidence types are:
     "global_ranks_used": null,
     "training_total_steps": null,
     "training_latest_step": null,
-    "section_metric_names": []
+    "section_metric_names": [],
+    "analysis_start_ts_s": null,
+    "analysis_end_ts_s": null,
+    "analysis_start_step": null,
+    "analysis_end_step": null
   },
   "diagnosis": {
     "kind": "...",
@@ -226,8 +289,7 @@ Fallback evidence types are:
       "steps_analyzed": null,
       "start_step": null,
       "end_step": null,
-      "completed_step": null,
-      "window_size": null
+      "completed_step": null
     },
     "average": {"<metric_name>": null},
     "median": {"<metric_name>": {"value": null, "idx": null}},
@@ -288,6 +350,23 @@ Fallback evidence types are:
 `step_time` and `step_memory` use `common_steps` alignment. If a rank does not
 have the common step window, it can be counted in `global_ranks_seen` but not
 in `global_ranks_used`.
+
+The distributed Run card resolves
+`step_time.global.median.step_time_ms.idx` to one grouped row and reads all
+displayed phases from that row. Its upper-pane Step Memory table reads
+the median and worst reserved-memory point indexes and reads Allocated and
+Reserved from each selected grouped row. If a reserved-memory selector is
+unavailable, the corresponding allocated-memory point selects the row.
+All displayed values remain averages of per-step peaks over the aligned
+window. These are presentation selection rules; they do not add aggregates to
+the schema.
+
+`system` and `process` may contain different sample counts from Step Time, but
+their inclusive timestamp bounds come from the same `analysis_window`.
+The Process table reads RSS and CUDA-reserved byte/percentage pairs from one
+grouped rank row, anchored by the stored percentage point with the byte point
+as a null-percentage fallback. These are presentation selection rules and do
+not create new aggregates or diagnoses.
 
 ## Metric Names
 
@@ -401,7 +480,7 @@ step_time_ms = complete selected-clock step duration
 diagnosis_clock = "cpu" | "gpu"
 ```
 
-Schema `1.7` does not publish historical timing aliases. Readers that support
+Schema `1.8` does not publish historical timing aliases. Readers that support
 older summary files must use an explicit schema-versioned compatibility adapter
 at their input boundary; new output remains canonical.
 

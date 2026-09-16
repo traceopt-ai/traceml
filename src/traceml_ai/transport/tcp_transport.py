@@ -220,8 +220,8 @@ class TCPClient:
             header = struct.pack("!I", len(data))
             with self._lock:
                 self._sock.sendall(header + data)
-        except Exception:
-            self._close()
+        except Exception as exc:
+            self._handle_send_failure("send", exc)
 
     def send_batch(self, payloads: list) -> None:
         """
@@ -250,11 +250,23 @@ class TCPClient:
             header = struct.pack("!I", len(data))
             with self._lock:
                 self._sock.sendall(header + data)
-        except Exception:
-            self._close()
+        except Exception as exc:
+            self._handle_send_failure("send_batch", exc)
 
     def close(self) -> None:
         self._close()
+
+    def _handle_send_failure(self, operation: str, exc: Exception) -> None:
+        """Close the broken connection and record why telemetry was lost."""
+        self._close()
+        self.logger.error(
+            "[TraceML] TCP telemetry %s failed for %s:%s: %s: %s",
+            operation,
+            self.cfg.host,
+            self.cfg.port,
+            type(exc).__name__,
+            exc,
+        )
 
     def _ensure_connected(self) -> None:
         if self._connected:

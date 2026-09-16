@@ -252,6 +252,8 @@ class SQLiteStepTimeRepository:
         request: StepTimeLoadRequest,
     ) -> tuple[int, Optional[tuple[int, ...]]]:
         """Normalize a request into a lookback and optional rank set."""
+        if request.window_size is None:
+            raise ValueError("Live Step Time reads require window_size")
         window_size = max(1, int(request.window_size))
         lookback = window_size * max(1, int(request.lookback_factor))
         ranks = (
@@ -356,11 +358,26 @@ class SQLiteStepTimeRepository:
         self,
         request: StepTimeLoadRequest,
     ) -> list[sqlite3.Row | tuple[Any, ...]]:
-        """Select bounded rows plus the metadata required by final summary."""
+        """Select all summary rows plus final-report identity metadata."""
         columns = self._table_columns()
-        lookback, ranks = self._selection_parameters(request)
+        ranks = (
+            tuple(sorted({int(rank) for rank in request.rank_filter}))
+            if request.rank_filter is not None
+            else None
+        )
         rank_cte, parameters = self._rank_universe_cte(ranks)
-        parameters.append(lookback)
+        step_predicates = []
+        if request.start_step is not None:
+            step_predicates.append("candidate.step >= ?")
+            parameters.append(int(request.start_step))
+        if request.end_step is not None:
+            step_predicates.append("candidate.step <= ?")
+            parameters.append(int(request.end_step))
+        step_filter = (
+            "\n                          AND " + " AND ".join(step_predicates)
+            if step_predicates
+            else ""
+        )
 
         projected = [
             f"identity.{name}" if name in columns else f"NULL AS {name}"
@@ -374,7 +391,7 @@ class SQLiteStepTimeRepository:
         )
         query = f"""
             WITH RECURSIVE {rank_cte},
-            bounded AS (
+            selected AS (
                 SELECT
                     ranks.global_rank,
                     sample.id,
@@ -389,9 +406,8 @@ class SQLiteStepTimeRepository:
                           AND candidate.step IS NOT NULL
                           AND candidate.events_json IS NOT NULL
                           AND candidate.events_json != ''
+                          {step_filter}
                         GROUP BY candidate.step
-                        ORDER BY candidate.step DESC
-                        LIMIT ?
                   )
                 WHERE ranks.global_rank IS NOT NULL
             ),
@@ -416,16 +432,16 @@ class SQLiteStepTimeRepository:
                 FROM "{self._table}"
             )
             SELECT
-                bounded.global_rank,
-                bounded.id,
-                bounded.step,
-                bounded.events_json,
+                selected.global_rank,
+                selected.id,
+                selected.step,
+                selected.events_json,
                 {identity_projection},
                 progress.latest_step,
                 progress.last_row_id
-            FROM bounded
+            FROM selected
             LEFT JOIN identity_ids
-              ON identity_ids.global_rank = bounded.global_rank
+              ON identity_ids.global_rank = selected.global_rank
             LEFT JOIN "{self._table}" AS identity
               ON identity.id = identity_ids.id
             CROSS JOIN progress

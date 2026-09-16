@@ -371,8 +371,8 @@ def test_step_time_input_straggler_card_shows_rank_evidence() -> None:
     _assert_public_step_metrics_are_canonical(payload)
     assert "- Ranks: median/worst |" in payload["card"]
     assert (
-        "- Why: r1 has excess input wait burden relative to victim r0 "
-        "(~24.0% impact; ~100.0% of visible wait cost)." in payload["card"]
+        "- Why: r1 waited 70.0 ms for input, compared with 10.0 ms on r0."
+        in payload["card"]
     )
     assert "issues" not in payload["groups"]["rows"]["1"]
     assert {issue["kind"] for issue in payload["issues"]} == {
@@ -392,6 +392,6 @@ def test_step_time_generic_straggler_card_uses_canonical_summary() -> None:
 
     assert payload["diagnosis"]["kind"] == "STRAGGLER"
     assert (
-        "- Why: r0 is slower than victim r1 (~34.5% impact); no measured "
-        "component explains 80.0% of visible wait cost." in payload["card"]
+        "- Why: r1 spent 100.0 ms in Backward, compared with 50.0 ms on r0; "
+        "cause not measured." in payload["card"]
     )

@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import time
-from typing import Any, Optional
-
+from traceml_ai.instrumentation.step_events import (
+    StepMemoryEvent,
+    drain_step_memory_events,
+)
 from traceml_ai.samplers.base_sampler import BaseSampler
 from traceml_ai.samplers.schema.step_memory import StepMemorySample
-from traceml_ai.samplers.utils import drain_queue_nowait
-from traceml_ai.utils.step_memory import step_memory_queue
 
 
 class StepMemorySampler(BaseSampler):
@@ -25,33 +24,21 @@ class StepMemorySampler(BaseSampler):
         """
         Drain entire step memory queue.
         """
-        for event in drain_queue_nowait(step_memory_queue):
+        for event in drain_step_memory_events():
             sample = self._event_to_sample(event)
-            if sample is None:
-                continue
             self._add_record(sample.to_wire())
 
-    def _event_to_sample(self, event: Any) -> Optional[StepMemorySample]:
+    def _event_to_sample(self, event: StepMemoryEvent) -> StepMemorySample:
         """
         Convert a raw queue event to a StepMemorySample.
         """
-        ts = time.time()
-
-        model_id = getattr(event, "model_id", None)
-        device = getattr(event, "device", None)
-        step = getattr(event, "step", None)
-
-        peak_alloc = getattr(event, "peak_allocated", None)
-        peak_resv = getattr(event, "peak_reserved", None)
-
         return StepMemorySample(
             sample_idx=self.sample_idx,
-            timestamp=ts,
-            model_id=model_id,
-            device=device,
-            step=step,
-            peak_allocated=peak_alloc,
-            peak_reserved=peak_resv,
+            timestamp=float(event.timestamp),
+            device=event.device,
+            step=event.step,
+            peak_allocated=event.peak_allocated,
+            peak_reserved=event.peak_reserved,
         )
 
     def sample(self) -> None:

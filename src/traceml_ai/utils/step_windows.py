@@ -8,12 +8,12 @@
 
 from __future__ import annotations
 
-from typing import Mapping
+from typing import Mapping, Optional
 
 
 def common_suffix_steps(
     per_rank_steps: Mapping[int, Mapping[int, object]],
-    max_rows: int,
+    max_rows: Optional[int] = None,
 ) -> list[int]:
     """Return the latest step ids present for every observed rank."""
     if not per_rank_steps:
@@ -30,6 +30,8 @@ def common_suffix_steps(
         return []
 
     steps = sorted(common)
+    if max_rows is None:
+        return steps
     return steps[-max(1, int(max_rows)) :]
 
 

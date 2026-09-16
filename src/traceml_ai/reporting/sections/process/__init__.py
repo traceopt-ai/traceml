@@ -20,6 +20,7 @@ from traceml_ai.diagnostics.process.context import (
     ProcessDiagnosisInput,
     ProcessRankDiagnosisInput,
 )
+from traceml_ai.reporting.analysis_window import AnalysisWindow
 from traceml_ai.reporting.sections.base import BaseSummarySection
 from traceml_ai.reporting.sections.process.builder import build_process_payload
 from traceml_ai.reporting.sections.process.formatter import (
@@ -29,10 +30,7 @@ from traceml_ai.reporting.sections.process.loader import (
     ProcessSectionData,
     load_process_section_data,
 )
-from traceml_ai.reporting.sections.process.model import (
-    MAX_SUMMARY_ROWS,
-    PerRankProcessSummary,
-)
+from traceml_ai.reporting.sections.process.model import PerRankProcessSummary
 from traceml_ai.reporting.summaries.summary_formatting import (
     duration_from_bounds,
 )
@@ -73,13 +71,13 @@ class ProcessSummarySection(
     """Build TraceML's final-report process section."""
 
     name: ClassVar[str] = "process"
-    max_process_rows: int = MAX_SUMMARY_ROWS
+    analysis_window: AnalysisWindow | None = None
 
     def load(self, db_path: str) -> ProcessSectionData:
-        """Load the bounded process telemetry window."""
+        """Load process telemetry for the final report."""
         return load_process_section_data(
             db_path,
-            max_process_rows=self.max_process_rows,
+            analysis_window=self.analysis_window,
         )
 
     def to_diagnosis_input(
@@ -122,6 +120,8 @@ class ProcessSummarySection(
     ) -> SummaryResult:
         """Assemble the Process summary payload and display text."""
         payload = build_process_payload(data, diagnosis_result)
+        if self.analysis_window is not None:
+            payload["metadata"].update(self.analysis_window.metadata())
         return SummaryResult(
             section=self.name,
             payload=payload,

@@ -5,11 +5,6 @@ from transformers import Trainer, TrainingArguments
 
 from traceml_ai.integrations import huggingface as traceml_hf
 
-# Legacy path still works:
-#   trainer = traceml_hf.TraceMLTrainer(...)
-# TraceMLTrainer is now a thin wrapper that auto-installs
-# TraceMLTrainerCallback under the hood.
-
 SEED = 42
 INPUT_DIM = 128
 HIDDEN_DIM = 256

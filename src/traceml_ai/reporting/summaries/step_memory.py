@@ -6,19 +6,15 @@ from typing import Any, Dict
 
 from traceml_ai.reporting.sections.output import persist_section_summary
 from traceml_ai.reporting.sections.step_memory import StepMemorySummarySection
-from traceml_ai.reporting.sections.step_memory.model import (
-    MAX_SUMMARY_WINDOW_ROWS,
-)
 
 
 def generate_step_memory_summary_card(
     db_path: str,
     *,
-    window_size: int = MAX_SUMMARY_WINDOW_ROWS,
     print_to_stdout: bool = True,
 ) -> Dict[str, Any]:
     """Generate and persist the end-of-run step-memory summary."""
-    result = StepMemorySummarySection(window_size=window_size).build(db_path)
+    result = StepMemorySummarySection().build(db_path)
     summary = result.payload
 
     persist_section_summary(
@@ -35,6 +31,5 @@ def generate_step_memory_summary_card(
 
 
 __all__ = [
-    "MAX_SUMMARY_WINDOW_ROWS",
     "generate_step_memory_summary_card",
 ]

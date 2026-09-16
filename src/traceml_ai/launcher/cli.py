@@ -18,11 +18,11 @@ from traceml_ai.launcher.commands import (
     run_with_tracing,
     validate_launch_args,
 )
-from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 from traceml_ai.runtime.settings import (
     DEFAULT_FINALIZE_TIMEOUT_SEC,
     DEFAULT_INTERVAL_SEC,
 )
+from traceml_ai.telemetry.retention import parse_history_retention
 
 
 def _add_launch_args(parser: argparse.ArgumentParser) -> None:
@@ -108,13 +108,14 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
-        "--summary-window-rows",
-        type=int,
-        default=DEFAULT_SUMMARY_WINDOW_ROWS,
+        "--history-retention",
+        type=parse_history_retention,
+        default=None,
+        metavar="DURATION",
         help=(
-            "Rows used per node/rank for final summaries. SQLite retains "
-            "1.5x this value for alignment. Default: "
-            f"{DEFAULT_SUMMARY_WINDOW_ROWS}."
+            "Raw telemetry history available to analysis (for example 30m, "
+            "2h, or 1d). Step Time and Step Memory are pruned through one "
+            "shared aligned step boundary. Default: 30m."
         ),
     )
     parser.add_argument(
@@ -185,6 +186,15 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--on-missing-aggregator",
+        choices=["raise", "warn"],
+        default=None,
+        help=(
+            "Policy when the aggregator cannot start or become ready. "
+            "Default: raise. Use warn to continue with telemetry disabled."
+        ),
+    )
+    parser.add_argument(
         "--args",
         nargs=argparse.REMAINDER,
         help=(
@@ -217,11 +227,13 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
-        "--capture-stderr",
-        action="store_true",
+        "--save-training-output",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help=(
-            "Tee child stderr to the console and retain its last 64 KiB in "
-            "logs/<run-name>/crash_stderr.log. Default: disabled."
+            "Save node-scoped training stdout and stderr files. Use "
+            "--no-save-training-output to inherit the terminal directly. "
+            "Default: enabled."
         ),
     )
 
@@ -321,6 +333,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Enable TraceML logging output.",
     )
     serve_parser.add_argument(
+        "--history-retention",
+        type=parse_history_retention,
+        default=None,
+        metavar="DURATION",
+        help="Raw telemetry analysis history. Default: 30m.",
+    )
+    serve_parser.add_argument(
         "--aggregator-host",
         type=str,
         default=None,
@@ -377,6 +396,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to a TraceML summary JSON file.",
     )
     view_parser.add_argument(
+        "--re-render",
+        action="store_true",
+        help=(
+            "Rebuild the card from the summary JSON with the current "
+            "renderer instead of printing the stored text. Use this to read "
+            "an older artifact in the current card layout. The stored "
+            "artifact is not modified."
+        ),
+    )
+    view_parser.add_argument(
         "--html",
         nargs="?",
         const="",
@@ -420,3 +449,10 @@ def main() -> None:
     else:
         parser.print_help()
         raise SystemExit(1)
+
+
+if __name__ == "__main__":
+    # Without this guard, `python -m traceml_ai.launcher.cli run train.py`
+    # imports the module and exits 0 without running anything, silently
+    # swallowing the user's command.
+    main()

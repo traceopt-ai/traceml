@@ -49,15 +49,15 @@ _VALUE_FIELDS: Mapping[str, str] = {
 class StepTimeLoadRequest:
     """Selection parameters for one bounded Step Time repository read.
 
-    ``window_size`` is the final analysis window. ``lookback_factor`` expands
-    the distinct per-rank steps returned to the alignment layer without
-    changing that final size. ``rank_filter=None`` selects every global rank;
-    an empty tuple deliberately selects none.
+    ``window_size`` bounds live reads. Summary reads use ``None`` and select
+    all rows in their separately resolved time/step interval.
     """
 
-    window_size: int
+    window_size: Optional[int] = None
     lookback_factor: int = 1
     rank_filter: Optional[tuple[int, ...]] = None
+    start_step: Optional[int] = None
+    end_step: Optional[int] = None
 
 
 class StepTimeClockValues(NamedTuple):

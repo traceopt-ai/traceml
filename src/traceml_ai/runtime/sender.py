@@ -11,7 +11,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional
 
-from traceml_ai.loggers.error_log import get_error_logger
+from traceml_ai.loggers.error_log import (
+    get_error_logger,
+    log_internal_exception,
+)
 
 
 @dataclass(frozen=True)
@@ -153,15 +156,8 @@ class TelemetryPublisher:
             self._log_exception("TCPClient.close failed", exc)
 
     def _log_exception(self, label: str, exc: Exception) -> None:
-        """Log an exception without raising."""
-        log = getattr(self._logger, "exception", None)
-        if callable(log):
-            log("[TraceML] %s: %s", label, exc)
-            return
-
-        fallback = getattr(self._logger, "error", None)
-        if callable(fallback):
-            fallback(f"[TraceML] {label}: {exc}")
+        """Log a publisher failure without inheriting user context."""
+        log_internal_exception(self._logger, f"[TraceML] {label}", exc)
 
     @staticmethod
     def _sampler_name(sampler: Any) -> str:

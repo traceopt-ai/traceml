@@ -13,7 +13,8 @@ Semantics
 import time
 from typing import Any, Dict, Optional
 
-from .common import ProcessCLISnapshot, ProcessMetricsDB
+from .common import ProcessCLISnapshot
+from .repository import ProcessRepository
 
 
 class ProcessCLIComputer:
@@ -34,7 +35,7 @@ class ProcessCLIComputer:
         db_path: str,
         stale_ttl_s: Optional[float] = 30.0,
     ) -> None:
-        self._db = ProcessMetricsDB(db_path=db_path)
+        self._db = ProcessRepository(db_path=db_path)
         self._last_ok: Optional[Dict[str, Any]] = None
         self._last_ok_ts: float = 0.0
         self._stale_ttl_s: Optional[float] = (

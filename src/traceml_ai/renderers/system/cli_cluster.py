@@ -14,7 +14,7 @@ from dataclasses import asdict, dataclass
 from statistics import median
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
-from .common import SystemMetricsDB
+from .repository import SystemRepository
 
 CLI_CLUSTER_COVERAGE_RATIO = 0.90
 CLI_CLUSTER_WINDOW_ROWS = 1_000
@@ -62,7 +62,7 @@ class SystemCLIClusterBuilder:
     used as the denominator to avoid overstating coverage.
     """
 
-    def __init__(self, db: SystemMetricsDB) -> None:
+    def __init__(self, db: SystemRepository) -> None:
         self._db = db
 
     def select(self, rows: Sequence[Any]) -> SystemCLIClusterSelection:

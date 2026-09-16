@@ -125,7 +125,7 @@ def test_step_time_section_uses_summary_pipeline_and_sqlite_fixture(
     monkeypatch.setattr(section_module.StepTimePipeline, "run", capture_run)
     result = StepTimeSummarySection().build(str(db_path))
 
-    assert calls == [("summary", StepTimeSummarySection().max_rows)]
+    assert calls == [("summary", None)]
     assert result.section == "step_time"
     assert result.payload["metadata"]["training_total_steps"] == 3
     assert result.payload["metadata"]["training_latest_step"] == 2
@@ -159,11 +159,11 @@ def test_distributed_step_time_scope_shows_actual_analyzed_steps() -> None:
     }
     window = window_from_events(
         per_rank_steps,
-        max_rows=10000,
+        max_rows=128,
         expected_ranks=range(4),
     )
     analysis = StepTimeAnalysis(
-        request=StepTimeLoadRequest(window_size=10000),
+        request=StepTimeLoadRequest(),
         snapshot=StepTimeRepositorySnapshot(
             cursor=StepTimeSourceCursor(latest_step=128),
         ),
@@ -177,9 +177,8 @@ def test_distributed_step_time_scope_shows_actual_analyzed_steps() -> None:
     card = summary["card"]
 
     assert "compared over last 128 aligned steps across 4 global ranks" in card
-    assert "10000 steps" not in card
     assert summary["global"]["window"]["steps_analyzed"] == 128
-    assert summary["global"]["window"]["window_size"] == 10000
+    assert "window_size" not in summary["global"]["window"]
     assert "aligned_steps_analyzed" not in summary["metadata"]
     assert "steps_analyzed_min_per_global_rank" not in summary["metadata"]
     assert "steps_analyzed_max_per_global_rank" not in summary["metadata"]

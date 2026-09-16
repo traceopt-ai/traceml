@@ -236,14 +236,27 @@ TraceML should not break user training because optional telemetry, rendering,
 or reporting failed. Existing code logs advisory failures through
 `traceml_ai.loggers.error_log.get_error_logger`.
 
+Process entrypoints configure that logger once with the `rank`, `aggregator`,
+or `launcher` role. Components should request a named child logger rather than
+adding handlers or choosing paths themselves. Internal logs accept ERROR-level
+TraceML implementation failures only; do not send user exceptions or workload
+stderr to them. Use `log_internal_exception` when recording a caught exception;
+it preserves explicit TraceML causes without copying implicit context from a
+user exception that is already unwinding.
+
 Use that pattern for non-critical paths:
 
 ```python
+from traceml_ai.loggers.error_log import (
+    get_error_logger,
+    log_internal_exception,
+)
+
 logger = get_error_logger("MyComponent")
 try:
     ...
 except Exception as exc:
-    logger.exception("[TraceML] MyComponent failed: %s", exc)
+    log_internal_exception(logger, "[TraceML] MyComponent failed", exc)
 ```
 
 Prefer returning an empty payload, `NO DATA` diagnosis, or fallback text over

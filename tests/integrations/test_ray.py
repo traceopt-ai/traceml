@@ -1,5 +1,8 @@
 import importlib
 import sys
+from unittest.mock import Mock
+
+import pytest
 
 from traceml_ai.integrations.ray import (
     TraceMLRayConfig,
@@ -88,6 +91,57 @@ def test_worker_settings_connect_to_actor_endpoint():
     assert settings.sampler_interval_sec == 2.0
     assert settings.aggregator.connect_host == "10.0.0.9"
     assert settings.aggregator.port == 34567
+
+
+def test_ray_actor_logs_finalization_failure_once(monkeypatch):
+    import traceml_ai.integrations.ray as ray_integration
+
+    failure = RuntimeError("summary generation failed")
+    handle = Mock()
+    handle.stop.side_effect = failure
+    logger = Mock()
+    fake_ray = Mock()
+    fake_ray.util.get_node_ip_address.return_value = "10.0.0.9"
+    start_aggregator = Mock(return_value=handle)
+    get_error_logger = Mock(return_value=logger)
+    monkeypatch.setitem(sys.modules, "ray", fake_ray)
+    monkeypatch.setattr(ray_integration, "start_aggregator", start_aggregator)
+    monkeypatch.setattr(ray_integration, "get_error_logger", get_error_logger)
+
+    actor = ray_integration._TraceMLAggregatorActor(
+        TraceMLRayConfig(session_id="ray-run", stop_timeout_sec=7.5)
+    )
+
+    with pytest.raises(RuntimeError) as raised:
+        actor.stop()
+
+    assert raised.value is failure
+    start_aggregator.assert_called_once()
+    get_error_logger.assert_called_once_with("TraceMLRayAggregator")
+    handle.stop.assert_called_once_with(timeout_sec=7.5)
+    logger.error.assert_called_once()
+    log_message = logger.error.call_args.args[0]
+    assert "[TraceML] Ray aggregator finalization failed" in log_message
+    assert "RuntimeError: summary generation failed" in log_message
+
+    # A failed stop is still terminal; cleanup must not log or stop twice.
+    actor.stop()
+    handle.stop.assert_called_once()
+    logger.error.assert_called_once()
+
+
+def test_ray_actor_stop_remains_best_effort_at_driver_boundary():
+    import traceml_ai.integrations.ray as ray_integration
+
+    actor = Mock()
+    actor.stop.remote.return_value = "stop-ref"
+    ray = Mock()
+    ray.get.side_effect = RuntimeError("remote finalization failed")
+
+    ray_integration._stop_actor_best_effort(ray, actor)
+
+    ray.get.assert_called_once_with("stop-ref")
+    ray.kill.assert_called_once_with(actor, no_restart=True)
 
 
 def test_ray_disabled_delegates_to_native_torch_trainer(monkeypatch):

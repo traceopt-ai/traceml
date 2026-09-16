@@ -33,6 +33,7 @@ diagnosis or symptom.
 | What you see | Start here |
 |---|---|
 | Step Time says `INPUT-BOUND` | [Find Input Pipeline Bottlenecks](pytorch-input-pipeline-bottleneck.md) |
+| Step Time says `H2D-BOUND` | [Read the H2D diagnosis](../user_guide/reading-output.md#h2d-bound) |
 | System says `LOW_GPU_UTILIZATION` or `MODERATE_GPU_UTILIZATION` | [Debug Low GPU Utilization](low-gpu-utilization-pytorch.md) |
 | Step Time says `INPUT STRAGGLER`, `COMPUTE STRAGGLER`, `H2D STRAGGLER`, or `STRAGGLER` | [Debug DDP Rank Stragglers](ddp-slow-training-rank-straggler.md) |
 | Step Memory says `MEMORY CREEP` or `MEMORY RISING` | [Find PyTorch Memory Creep](pytorch-memory-creep.md) |
@@ -44,6 +45,10 @@ diagnosis or symptom.
 `INPUT-BOUND` means Input Wait is taking a large share of selected-clock Step
 Time.
 Confirm the input path before tuning model compute.
+
+`H2D-BOUND` means host-to-device transfer is taking a large share of the
+selected-clock Step Time. Inspect pinned memory, batch transfer placement, and
+non-blocking copies before changing model compute.
 
 `LOW_GPU_UTILIZATION` and `MODERATE_GPU_UTILIZATION` are system-level symptoms.
 They say the GPU was not fully busy, not why it was not fully busy. Pair them

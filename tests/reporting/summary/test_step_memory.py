@@ -121,8 +121,8 @@ def test_step_memory_section_loader_and_builder_use_sqlite_fixture(tmp_path):
     db_path = tmp_path / "memory.db"
     _create_step_memory_db(str(db_path))
 
-    data = load_step_memory_section_data(str(db_path), window_size=3)
-    result = StepMemorySummarySection(window_size=3).build(str(db_path))
+    data = load_step_memory_section_data(str(db_path))
+    result = StepMemorySummarySection().build(str(db_path))
 
     assert data.training_steps == 4
     assert data.latest_step_observed == 3
@@ -170,7 +170,7 @@ def test_step_memory_section_diagnosis_input_uses_summary_policy(tmp_path):
     db_path = tmp_path / "memory.db"
     _create_step_memory_db(str(db_path))
 
-    section = StepMemorySummarySection(window_size=3)
+    section = StepMemorySummarySection()
     data = section.load(str(db_path))
     diagnosis_input = section.to_diagnosis_input(data)
 
@@ -192,7 +192,7 @@ def test_step_memory_section_reports_no_gpu_without_memory_rows(tmp_path):
     finally:
         conn.close()
 
-    result = StepMemorySummarySection(window_size=3).build(str(db_path))
+    result = StepMemorySummarySection().build(str(db_path))
 
     assert result.payload["metadata"]["mode"] == "no_data"
     assert result.payload["diagnosis"] == result.payload["issues"][0]
@@ -283,7 +283,11 @@ def test_step_memory_loader_uses_latest_common_steps_per_global_rank(tmp_path):
     finally:
         conn.close()
 
-    data = load_step_memory_section_data(str(db_path), window_size=2)
+    data = load_step_memory_section_data(
+        str(db_path),
+        start_step=2,
+        end_step=3,
+    )
 
     assert data.aligned_window.steps == (2, 3)
     assert data.aligned_window.global_ranks_seen == 2
@@ -298,7 +302,6 @@ def test_step_memory_summary_wrapper_delegates_to_section_path(tmp_path):
 
     summary = generate_step_memory_summary_card(
         str(db_path),
-        window_size=3,
         print_to_stdout=False,
     )
 

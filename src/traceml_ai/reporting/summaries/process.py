@@ -12,19 +12,15 @@ from typing import Any, Dict
 
 from traceml_ai.reporting.sections.output import persist_section_summary
 from traceml_ai.reporting.sections.process import ProcessSummarySection
-from traceml_ai.reporting.sections.process.model import MAX_SUMMARY_ROWS
 
 
 def generate_process_summary_card(
     db_path: str,
     *,
     print_to_stdout: bool = True,
-    max_process_rows: int = MAX_SUMMARY_ROWS,
 ) -> Dict[str, Any]:
     """Generate and persist the end-of-run process summary."""
-    result = ProcessSummarySection(
-        max_process_rows=max_process_rows,
-    ).build(db_path)
+    result = ProcessSummarySection().build(db_path)
     summary = result.payload
 
     persist_section_summary(
@@ -41,6 +37,5 @@ def generate_process_summary_card(
 
 
 __all__ = [
-    "MAX_SUMMARY_ROWS",
     "generate_process_summary_card",
 ]

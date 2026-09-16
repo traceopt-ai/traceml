@@ -21,6 +21,7 @@ from traceml_ai.diagnostics.step_memory import (
     StepMemoryDiagnosisInput,
     diagnose_step_memory_summary,
 )
+from traceml_ai.reporting.analysis_window import AnalysisWindow
 from traceml_ai.reporting.sections.base import BaseSummarySection
 from traceml_ai.reporting.sections.step_memory.builder import (
     build_step_memory_section_payload,
@@ -31,9 +32,6 @@ from traceml_ai.reporting.sections.step_memory.formatter import (
 from traceml_ai.reporting.sections.step_memory.loader import (
     StepMemorySectionData,
     load_step_memory_section_data,
-)
-from traceml_ai.reporting.sections.step_memory.model import (
-    MAX_SUMMARY_WINDOW_ROWS,
 )
 
 
@@ -48,13 +46,32 @@ class StepMemorySummarySection(
     """Build TraceML's final-report step-memory section."""
 
     name: ClassVar[str] = "step_memory"
-    window_size: int = MAX_SUMMARY_WINDOW_ROWS
+    analysis_window: AnalysisWindow | None = None
 
     def load(self, db_path: str) -> StepMemorySectionData:
-        """Load the bounded, aligned Step Memory telemetry window."""
+        """Load aligned Step Memory telemetry for the final report."""
         return load_step_memory_section_data(
             db_path,
-            window_size=self.window_size,
+            start_step=(
+                self.analysis_window.start_step
+                if self.analysis_window is not None
+                else None
+            ),
+            end_step=(
+                self.analysis_window.end_step
+                if self.analysis_window is not None
+                else None
+            ),
+            start_ts_s=(
+                self.analysis_window.start_ts_s
+                if self.analysis_window is not None
+                else None
+            ),
+            end_ts_s=(
+                self.analysis_window.end_ts_s
+                if self.analysis_window is not None
+                else None
+            ),
         )
 
     def to_diagnosis_input(
@@ -83,6 +100,8 @@ class StepMemorySummarySection(
     ) -> SummaryResult:
         """Assemble the Step Memory summary payload and display text."""
         payload = build_step_memory_section_payload(data, diagnosis_result)
+        if self.analysis_window is not None:
+            payload["metadata"].update(self.analysis_window.metadata())
         return SummaryResult(
             section=self.name,
             payload=payload,

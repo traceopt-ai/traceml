@@ -6,8 +6,9 @@ from torch.optim.optimizer import (
     register_optimizer_step_pre_hook,
 )
 
+from traceml_ai.instrumentation.step_events import TimeEvent, TimeScope
 from traceml_ai.utils.cuda_event_pool import get_cuda_event
-from traceml_ai.utils.timing import TimeEvent, TimeScope, record_event
+from traceml_ai.utils.timing import record_event
 
 # Per-optimizer in-flight timing state
 _OPT_INFLIGHT = {}

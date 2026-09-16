@@ -170,7 +170,6 @@ def _global_rollup(
         start_step=start_step,
         end_step=end_step,
         completed_step=end_step,
-        window_size=int(window.coverage.expected_steps),
     ).to_json()
     window_json["diagnosis_clock"] = window.clock
 
@@ -378,6 +377,7 @@ def project_step_time_summary(analysis: StepTimeAnalysis) -> Dict[str, Any]:
         global_ranks_used=len(ranks_used),
         training_total_steps=training_steps,
         training_latest_step=latest_step,
+        samples=len(snapshot.rows),
         section_metric_names=STEP_TIME_METRIC_NAMES,
     )
     rank_json = {

@@ -44,6 +44,7 @@ class StepMemoryRichFormatter(Formatter[StepMemoryCombinedResult, Panel]):
 
         diag = build_step_memory_diagnosis(
             metrics,
+            gpu_total_bytes=payload.gpu_total_bytes,
             thresholds=LIVE_STEP_MEMORY_POLICY.thresholds,
         )
         diag_text = format_cli_diagnosis(diag)

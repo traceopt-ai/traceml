@@ -20,7 +20,10 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Mapping, Optional
 
-from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
+from traceml_ai.loggers.error_log import (
+    get_error_logger,
+    log_internal_exception,
+)
 from traceml_ai.runtime.lifecycle import RuntimeHandle, start_aggregator
 from traceml_ai.runtime.lifecycle import start_runtime as start_runtime_handle
 from traceml_ai.runtime.settings import (
@@ -28,6 +31,10 @@ from traceml_ai.runtime.settings import (
     AggregatorEndpoint,
     AggregatorTransportSettings,
     TraceMLSettings,
+)
+from traceml_ai.telemetry.retention import (
+    DurationValue,
+    parse_history_retention,
 )
 
 TrainLoop = Callable[[Dict[str, Any]], Any]
@@ -63,8 +70,9 @@ class TraceMLRayConfig:
     sampler_interval_sec:
         Background sampler cadence in seconds. The aggregator actor uses the
         same value for its live UI refresh cadence; TCP ingestion is immediate.
-    summary_window_rows:
-        Number of recent history rows used by final summary generation.
+    history_retention:
+        Raw telemetry analysis history as seconds or a duration such as
+        ``"30m"`` or ``"2h"``.
     bind_host:
         Host interface used by the aggregator actor. Use ``"0.0.0.0"`` for
         multi-node Ray clusters so workers on other nodes can connect.
@@ -84,7 +92,7 @@ class TraceMLRayConfig:
     logs_dir: str = "./logs"
     session_id: str = ""
     sampler_interval_sec: float = DEFAULT_INTERVAL_SEC
-    summary_window_rows: int = DEFAULT_SUMMARY_WINDOW_ROWS
+    history_retention: DurationValue = "30m"
     bind_host: str = "0.0.0.0"
     port: int = 0
     stop_timeout_sec: float = 5.0
@@ -140,7 +148,7 @@ def _build_aggregator_settings(
         render_interval_sec=float(config.sampler_interval_sec),
         logs_dir=str(config.logs_dir),
         session_id=str(config.session_id),
-        summary_window_rows=int(config.summary_window_rows),
+        history_retention_s=parse_history_retention(config.history_retention),
         aggregator=AggregatorTransportSettings(
             connect_host=str(connect_host),
             bind_host=str(config.bind_host),
@@ -161,7 +169,7 @@ def _build_worker_settings(
         sampler_interval_sec=float(config.sampler_interval_sec),
         logs_dir=str(config.logs_dir),
         session_id=str(endpoint.session_id),
-        summary_window_rows=int(config.summary_window_rows),
+        history_retention_s=parse_history_retention(config.history_retention),
         aggregator=AggregatorTransportSettings(
             connect_host=str(endpoint.host),
             bind_host=str(config.bind_host),
@@ -219,6 +227,7 @@ class _TraceMLAggregatorActor:
                 connect_host=self._node_ip,
             )
         )
+        self._logger = get_error_logger("TraceMLRayAggregator")
 
     def endpoint(self) -> dict[str, Any]:
         """Return the reachable aggregator endpoint for Ray Train workers."""
@@ -230,11 +239,21 @@ class _TraceMLAggregatorActor:
         }
 
     def stop(self) -> None:
-        """Stop the TraceML aggregator once."""
+        """Stop the aggregator once and record a finalization failure."""
         if self._closed:
             return
         self._closed = True
-        self._handle.stop(timeout_sec=float(self._config.stop_timeout_sec))
+        try:
+            self._handle.stop(timeout_sec=float(self._config.stop_timeout_sec))
+        except BaseException as exc:
+            # Ray actors use the lifecycle handle directly, so they do not pass
+            # through aggregator_main's process-level failure log boundary.
+            log_internal_exception(
+                self._logger,
+                "[TraceML] Ray aggregator finalization failed",
+                exc,
+            )
+            raise
 
 
 @dataclass(frozen=True)
@@ -275,6 +294,8 @@ def _stop_actor_best_effort(ray: Any, actor: Any) -> None:
     try:
         ray.get(actor.stop.remote())
     except Exception:
+        # The actor records its own finalization failure before the RPC fails.
+        # Keep cleanup from replacing the Ray Train result at the driver.
         pass
 
     try:
