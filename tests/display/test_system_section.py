@@ -377,10 +377,10 @@ def test_whole_run_charts_share_one_clock_axis() -> None:
     # The duration is the strip's fact; the labels say the view, not the
     # length.
     assert panel["cpu_label"].text == (
-        "host cpu util · avg across cores · whole run · rolling 2 min"
+        "host cpu util · avg across cores · recent history · rolling 2 min"
     )
     assert panel["power_label"].text == (
-        "gpu power · per GPU vs 70 W limit · whole run · "
+        "gpu power · per GPU vs 70 W limit · recent history · "
         "average and lowest every 2 min"
     )
     assert "min," not in panel["cpu_label"].text

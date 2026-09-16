@@ -532,11 +532,12 @@ def _update_cpu_chart(
     span_words = format_span(span)
     if whole_run:
         window = format_window(run.window_s)
-        panel["cpu_label"].text = f"{CPU_LABEL} · whole run" + (
+        panel["cpu_label"].text = f"{CPU_LABEL} · recent history" + (
             f" · rolling {window}" if window else ""
         )
         panel["cpu_label"].tooltip(
-            f"Whole run, {format_span(run_span)[5:]}. Each point shows "
+            f"Available history, {format_span(run_span)[5:]}. "
+            "Each point shows "
             f"average host CPU use over the previous {window}. 100% means "
             "all logical CPU cores are fully used."
         )
@@ -777,11 +778,12 @@ def _update_power_chart(
     )
     if whole_run:
         window = format_window(float(run[0].get("window_s") or 0.0))
-        panel["power_label"].text = f"{head} · whole run" + (
+        panel["power_label"].text = f"{head} · recent history" + (
             f" · average and lowest every {window}" if window else ""
         )
         panel["power_label"].tooltip(
-            f"Whole run, {format_span(run_span)[5:]}. Solid lines show each "
+            f"Available history, {format_span(run_span)[5:]}. "
+            "Solid lines show each "
             f"GPU's average power every {window}; faint lines show the "
             "lowest reading during the same interval."
         )
