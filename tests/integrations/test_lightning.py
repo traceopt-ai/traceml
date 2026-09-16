@@ -306,16 +306,132 @@ def test_lightning_batch_to_device_opens_the_step_envelope_first(monkeypatch):
     callback.teardown(trainer, module)
 
 
-def test_lightning_accumulating_batch_records_no_optimizer_event(monkeypatch):
+def test_lightning_accumulation_keeps_one_capture_until_update(monkeypatch):
     _enable_callback_without_lightning(monkeypatch)
     monkeypatch.setattr(step_events, "_ACTIVE_STEP_CAPTURE", StepCapture())
-    # The fake regions record nothing, so anything left in the capture
-    # after the batch would be a fabricated event.
     monkeypatch.setattr(
         lightning_integration, "timed_region", _ordered_fake_timed_region([])
     )
+
+    trackers = []
+
+    class FakeMemoryTracker(_FakeMemoryTracker):
+        def __init__(self, module):
+            super().__init__(module)
+            self.resets = 0
+            self.records = 0
+            trackers.append(self)
+
+        def reset(self):
+            self.resets += 1
+
+        def record(self):
+            self.records += 1
+
     monkeypatch.setattr(
-        lightning_integration, "StepMemoryTracker", _FakeMemoryTracker
+        lightning_integration, "StepMemoryTracker", FakeMemoryTracker
+    )
+    completed = []
+    monkeypatch.setattr(
+        lightning_integration,
+        "complete_step_capture",
+        lambda capture, step: completed.append((capture, step)),
+    )
+    flushed = []
+    monkeypatch.setattr(
+        lightning_integration,
+        "mark_trace_step_flushed",
+        flushed.append,
+    )
+    trace_state = SimpleNamespace(step=0)
+
+    def advance_step():
+        trace_state.step += 1
+
+    trace_state.advance_step = advance_step
+    monkeypatch.setattr(
+        lightning_integration,
+        "get_trace_session_state",
+        lambda: trace_state,
+    )
+
+    accumulating = True
+    trainer = SimpleNamespace(
+        training=True,
+        strategy=None,
+        fit_loop=SimpleNamespace(_should_accumulate=lambda: accumulating),
+    )
+    module = nn.Linear(2, 2)
+    module.automatic_optimization = True
+    callback = lightning_integration.TraceMLCallback()
+
+    callback.on_train_batch_start(trainer, module, batch=None, batch_idx=0)
+    capture = callback._step_capture
+    tracker = callback._mem_tracker
+    callback.on_before_backward(trainer, module, loss=None)
+    callback.on_after_backward(trainer, module)
+    callback.on_train_batch_end(
+        trainer, module, outputs=None, batch=None, batch_idx=0
+    )
+
+    assert callback._step_capture is capture
+    assert callback._mem_tracker is tracker
+    assert trace_state.step == 0
+    assert completed == []
+    assert flushed == []
+
+    accumulating = False
+    callback.on_train_batch_start(trainer, module, batch=None, batch_idx=1)
+    callback.on_before_optimizer_step(trainer, module, optimizer=None)
+    callback.on_train_batch_end(
+        trainer, module, outputs=None, batch=None, batch_idx=1
+    )
+
+    assert trackers == [tracker]
+    assert tracker.resets == 1
+    assert tracker.records == 1
+    assert trace_state.step == 1
+    assert completed == [(capture, 1)]
+    assert flushed == [1]
+    assert callback._step_capture is None
+    assert callback._mem_tracker is None
+    assert callback._memory_window_attempted is False
+
+
+def test_lightning_memory_reset_failure_is_not_retried_mid_group(monkeypatch):
+    _enable_callback_without_lightning(monkeypatch)
+    attempts = []
+
+    class FailingMemoryTracker:
+        def __init__(self, module):
+            attempts.append(module)
+
+        def reset(self):
+            raise RuntimeError("reset failed")
+
+    monkeypatch.setattr(
+        lightning_integration, "StepMemoryTracker", FailingMemoryTracker
+    )
+    monkeypatch.setattr(
+        lightning_integration, "_log_lightning_error", lambda *a: None
+    )
+
+    accumulating = True
+    monkeypatch.setattr(
+        lightning_integration,
+        "_lightning_is_accumulating",
+        lambda *a: accumulating,
+    )
+    trace_state = SimpleNamespace(step=0)
+
+    def advance_step():
+        trace_state.step += 1
+
+    trace_state.advance_step = advance_step
+    monkeypatch.setattr(
+        lightning_integration,
+        "get_trace_session_state",
+        lambda: trace_state,
     )
     monkeypatch.setattr(
         lightning_integration, "complete_step_capture", lambda *a: None
@@ -323,21 +439,30 @@ def test_lightning_accumulating_batch_records_no_optimizer_event(monkeypatch):
     monkeypatch.setattr(
         lightning_integration, "mark_trace_step_flushed", lambda *a: None
     )
+
     trainer = SimpleNamespace(training=True, strategy=None)
     module = nn.Linear(2, 2)
     callback = lightning_integration.TraceMLCallback()
+    monkeypatch.setattr(callback, "_open_step_region", lambda: None)
+    monkeypatch.setattr(callback, "_close_all_contexts", lambda: None)
 
     callback.on_train_batch_start(trainer, module, batch=None, batch_idx=0)
-    callback.on_before_backward(trainer, module, loss=None)
-    callback.on_after_backward(trainer, module)
-    # No on_before_optimizer_step: this micro-batch only accumulated.
     callback.on_train_batch_end(
         trainer, module, outputs=None, batch=None, batch_idx=0
     )
+    callback.on_train_batch_start(trainer, module, batch=None, batch_idx=1)
 
-    assert (
-        step_events.begin_step_capture().timing_events == []
-    ), "an accumulating batch must not fabricate events"
+    assert attempts == [module]
+    assert callback._memory_window_attempted is True
+
+    accumulating = False
+    callback.on_train_batch_end(
+        trainer, module, outputs=None, batch=None, batch_idx=1
+    )
+    assert callback._memory_window_attempted is False
+    callback.on_train_batch_start(trainer, module, batch=None, batch_idx=2)
+
+    assert attempts == [module, module]
 
 
 def test_lightning_second_optimizer_step_closes_the_previous_region(

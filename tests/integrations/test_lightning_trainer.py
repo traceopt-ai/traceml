@@ -162,9 +162,18 @@ def _counts(batches, name):
     return [sum(e.name == name for e in b.events) for b in batches]
 
 
-def test_lightning_trainer_accumulation_emits_optimizer_only_on_updates(L):
+@pytest.mark.parametrize(
+    ("rows", "microbatches_per_step"),
+    [
+        pytest.param(ROWS, [2, 2], id="full-groups"),
+        pytest.param(12, [2, 1], id="partial-final-group"),
+    ],
+)
+def test_lightning_trainer_accumulation_groups_microbatches(
+    L, rows, microbatches_per_step
+):
     traceml_lightning.init()
-    train, _ = _loaders()
+    train, _ = _loaders(rows=rows)
     model = _module_class(L)()
     trainer = _trainer(
         L, [traceml_lightning.TraceMLCallback()], accumulate_grad_batches=2
@@ -172,12 +181,16 @@ def test_lightning_trainer_accumulation_emits_optimizer_only_on_updates(L):
 
     trainer.fit(model, train_dataloaders=train)
     batches = drain_step_time_batches()
+    memory = drain_step_memory_events()
 
-    assert [b.step for b in batches] == [1, 2, 3, 4]
-    assert _counts(batches, FORWARD) == [1, 1, 1, 1]
-    assert _counts(batches, BACKWARD) == [1, 1, 1, 1]
-    assert _counts(batches, STEP) == [1, 1, 1, 1]
-    assert _counts(batches, OPTIMIZER) == [0, 1, 0, 1]
+    expected_steps = list(range(1, len(microbatches_per_step) + 1))
+    assert [b.step for b in batches] == expected_steps
+    assert [event.step for event in memory] == expected_steps
+    assert _counts(batches, FETCH) == microbatches_per_step
+    assert _counts(batches, FORWARD) == microbatches_per_step
+    assert _counts(batches, BACKWARD) == microbatches_per_step
+    assert _counts(batches, STEP) == microbatches_per_step
+    assert _counts(batches, OPTIMIZER) == [1] * len(expected_steps)
     zero_length = [
         e
         for b in batches
@@ -185,7 +198,8 @@ def test_lightning_trainer_accumulation_emits_optimizer_only_on_updates(L):
         if e.name == OPTIMIZER and e.cpu_start == 0.0 and e.cpu_end == 0.0
     ]
     assert zero_length == [], "no fabricated optimizer measurements"
-    assert trainer.global_step == 2
+    assert trainer.global_step == len(expected_steps)
+    assert get_trace_session_state().step == trainer.global_step
 
 
 def test_lightning_trainer_validation_fetches_stay_out_of_input_wait(L):
@@ -255,19 +269,29 @@ def test_lightning_trainer_envelope_opens_before_the_batch_transfer(L):
     assert _counts(drain_step_time_batches(), STEP) == [1, 1]
 
 
-def test_lightning_trainer_injected_failure_discards_the_partial_step(L):
+@pytest.mark.parametrize("accumulate_grad_batches", [1, 2])
+def test_lightning_trainer_injected_failure_discards_the_partial_step(
+    L, accumulate_grad_batches
+):
     traceml_lightning.init()
     train, _ = _loaders()
     callback = traceml_lightning.TraceMLCallback()
     model = _module_class(L)(fail_at_batch=2)
-    trainer = _trainer(L, [callback])
+    trainer = _trainer(
+        L,
+        [callback],
+        accumulate_grad_batches=accumulate_grad_batches,
+    )
 
     with pytest.raises(RuntimeError, match="injected failure"):
         trainer.fit(model, train_dataloaders=train)
 
+    completed_steps = 2 // accumulate_grad_batches
+    expected = list(range(1, completed_steps + 1))
     batches = drain_step_time_batches()
-    assert [b.step for b in batches] == [1, 2]
-    assert get_trace_session_state().step == 2
+    assert [b.step for b in batches] == expected
+    assert [event.step for event in drain_step_memory_events()] == expected
+    assert get_trace_session_state().step == completed_steps
     assert begin_step_capture().timing_events == []
     assert begin_step_capture().memory_event is None
     assert callback._traceml_step_ctx is None
@@ -277,12 +301,19 @@ def test_lightning_trainer_injected_failure_discards_the_partial_step(L):
 
     # A fresh fit after the failure starts clean.
     fresh = _module_class(L)()
-    _trainer(L, [callback], max_steps=2).fit(fresh, train_dataloaders=train)
+    _trainer(
+        L,
+        [callback],
+        max_steps=2,
+        accumulate_grad_batches=accumulate_grad_batches,
+    ).fit(fresh, train_dataloaders=train)
     later = drain_step_time_batches()
-    assert [b.step for b in later] == [3, 4]
-    assert _counts(later, FETCH) == [1, 1]
-    assert _counts(later, FORWARD) == [1, 1]
-    assert _counts(later, STEP) == [1, 1]
+    later_steps = list(range(completed_steps + 1, completed_steps + 3))
+    assert [b.step for b in later] == later_steps
+    assert [event.step for event in drain_step_memory_events()] == later_steps
+    assert _counts(later, FETCH) == [accumulate_grad_batches] * 2
+    assert _counts(later, FORWARD) == [accumulate_grad_batches] * 2
+    assert _counts(later, STEP) == [accumulate_grad_batches] * 2
 
 
 def test_lightning_trainer_second_fit_does_not_inherit_pending_events(L):

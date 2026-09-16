@@ -119,12 +119,13 @@ You keep the normal Lightning workflow. TraceML adds diagnosis around the traini
 installs the H2D `.to(...)` patch. `TraceMLCallback` records step, forward,
 backward, optimizer, and memory timing.
 
-One TraceML step is one Lightning training batch. The traced step opens when
-Lightning moves the batch to the device (`strategy.batch_to_device`) and
-closes at `on_train_batch_end`, so the H2D transfer, the forward pass, the
-backward pass, and the optimizer step are all inside Traced Step Time. The
-DataLoader fetch that precedes the transfer is reported separately as Input
-Wait, and Step Time is the sum of the two.
+With automatic optimization, one TraceML step is one Lightning optimizer
+update attempt. Without gradient accumulation this is one training batch. With
+accumulation, each micro-batch contributes its own fetch, H2D, forward,
+backward, and traced-region events to one open step capture. The capture is
+published at the update boundary, and repeated timing events are summed by the
+sampler. The DataLoader fetches are reported separately as Input Wait, and
+Step Time includes Input Wait plus Traced Step Time.
 
 Only training batches are measured. The callback keeps a framework-level
 DataLoader timing policy active for the whole Trainer run and checks
@@ -152,13 +153,15 @@ visible.
 On Lightning the optimizer phase runs from `on_before_optimizer_step` to the
 end of the batch, so it also covers the step-interval learning-rate scheduler
 update. Under manual optimization each `optimizer.step()` call is one
-optimizer event. Under automatic optimization, accumulating micro-batches have
-no optimizer event, including for strategies such as DeepSpeed that route each
-micro-batch through an internal `engine.step()` call.
+optimizer event, and one training batch remains one TraceML step. Under
+automatic optimization, the accumulation group contains one optimizer event
+at its update boundary. Strategies such as DeepSpeed can route every
+micro-batch through an internal `engine.step()` call; TraceML omits those
+accumulating calls from the optimizer occurrence count.
 
-If training raises, the callback discards the measurements of the batch that
-failed rather than publishing a partial step, restores the module and strategy
-it wrapped, and lets the exception propagate unchanged. If
+If training raises, the callback discards the incomplete accumulation group
+rather than publishing a partial step, restores the module and strategy it
+wrapped, and lets the exception propagate unchanged. If
 `traceml_lightning.init()` was not called, or TraceML was initialized in a
 mode that does not install the DataLoader-fetch or H2D patch, the callback
 logs a warning at the start of training naming the streams that will stay
@@ -347,14 +350,18 @@ first batch of every epoch:
 
 `TraceMLCallback` supports gradient accumulation.
 
-With `accumulate_grad_batches=N`, every micro-batch is still one TraceML step
-with its own step, forward, and backward timing, so the per-step series stays
-aligned with the batches Lightning ran. The optimizer phase is recorded only
-on the batches where the optimizer actually stepped; on the accumulating
-micro-batches it is absent, not zero. The run-level `optimizer_ms` average
-counts those absent batches as no optimizer work, so it reads as the
-optimizer cost per micro-batch, and `trainer.global_step` stays Lightning's
-count of optimizer steps.
+With `accumulate_grad_batches=N`, the micro-batches used for one optimizer
+update attempt share one TraceML step number. Their fetch, H2D, forward,
+backward, and traced-region times are added within that step. CUDA memory is
+reset once at the start of the group and read once at the end, so the reported
+value is the peak across the group rather than a sum. A shorter final group is
+completed normally.
+
+TraceML advances only when Lightning finishes the accumulation group, so its
+recorded step count advances with `trainer.global_step` during a run. Step IDs
+remain local to the TraceML process and are not restored from Lightning
+checkpoints. If training fails partway through a group, the incomplete group
+is discarded rather than published as a partial step.
 
 ---
 
