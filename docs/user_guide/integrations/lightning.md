@@ -355,13 +355,15 @@ update attempt share one TraceML step number. Their fetch, H2D, forward,
 backward, and traced-region times are added within that step. CUDA memory is
 reset once at the start of the group and read once at the end, so the reported
 value is the peak across the group rather than a sum. A shorter final group is
-completed normally.
+completed when Lightning performs an update for it; strategies that own
+accumulation internally may leave an incomplete final group unpublished.
 
-TraceML advances only when Lightning finishes the accumulation group, so its
-recorded step count advances with `trainer.global_step` during a run. Step IDs
-remain local to the TraceML process and are not restored from Lightning
-checkpoints. If training fails partway through a group, the incomplete group
-is discarded rather than published as a partial step.
+For single-optimizer automatic optimization, TraceML advances at the same
+update boundaries as `trainer.global_step`. Manual optimization remains
+batch-scoped and can differ. Step IDs remain local to the TraceML process and
+are not restored from Lightning checkpoints. If training fails partway through
+a group, the incomplete group is discarded rather than published as a partial
+step.
 
 ---
 

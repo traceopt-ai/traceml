@@ -19,18 +19,12 @@ which carry the full historical notes for versions predating this file.
   For optional tracing, register the callback conditionally. See the
   [HF migration instructions](docs/user_guide/integrations/huggingface.md#migration)
   for the replacement setup.
-- PyTorch Lightning: `TraceMLCallback` now opens the traced step when
-  Lightning moves the batch to the device, so the H2D transfer is inside
-  Traced Step Time and Step Time on GPU runs; fetches of validation,
-  sanity-check, test and predict loaders no longer count toward Input Wait;
-  accumulating micro-batches no longer carry a zero-length optimizer event;
-  strategy-owned accumulation also omits non-update optimizer occurrences;
-  unknown-length evaluation prefetches stay outside training Input Wait;
-  a batch that raises is discarded instead of being published under the
-  previous step; and the callback warns when the init config would leave the
-  DataLoader-fetch or H2D stream dark. Real `Trainer.fit()` tests now run in
-  CI for both the `lightning` and `pytorch_lightning` namespaces, and the
-  Lightning conformance harness is registered.
+- PyTorch Lightning: tracing now starts before batch transfer, excludes
+  non-training loader fetches, and groups accumulated micro-batches into one
+  TraceML step per optimizer update. Timings are summed within the group, CUDA
+  memory reports its peak, and incomplete groups are discarded. Non-update
+  optimizer calls are omitted, missing fetch or H2D patches produce a warning,
+  and real `Trainer.fit()` tests cover both Lightning namespaces.
 - PyTorch Lightning: new example `examples/integrations/lightning_dataloading_bottleneck.py`
   (ResNet-18 on 320px Imagenette, `--profile` changes only the DataLoader) and
   Colab notebook `notebooks/lightning_dataloading_bottleneck.ipynb`, which

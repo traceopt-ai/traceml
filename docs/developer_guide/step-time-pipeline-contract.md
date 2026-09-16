@@ -244,7 +244,9 @@ Lightning accumulation/update group. Each micro-batch opens and closes its own
 traced region, while the owning `StepCapture` and CUDA peak-memory window stay
 open until `trainer.fit_loop._should_accumulate()` becomes false. The callback
 then reads memory, advances the process-local counter, and publishes the group
-once. Lightning's final-batch decision completes a shorter final group.
+once. Lightning's default strategy completes a shorter final group. Strategies
+that own accumulation internally publish only groups for which they perform an
+update; an unfinished final group is discarded at teardown.
 
 The resulting `StepTimeBatch` contains repeated fetch, H2D, forward, backward,
 and traced-step events. `StepTimeSampler` sums repeated timing events within
