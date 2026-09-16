@@ -2,7 +2,7 @@
 
 # TraceML
 
-**Find out why your PyTorch training is slow—before it wastes GPU hours.**
+**Find out if your GPU is waiting for data during PyTorch training.**
 
 [![PyPI version](https://img.shields.io/pypi/v/traceml-ai.svg)](https://pypi.org/project/traceml-ai/)
 [![CI](https://github.com/traceopt-ai/traceml/actions/workflows/ci.yml/badge.svg)](https://github.com/traceopt-ai/traceml/actions/workflows/ci.yml)
@@ -18,12 +18,17 @@
 
 </div>
 
-**TraceML is an open-source tool that explains why PyTorch training is slow.**
+**TraceML is an open-source tool designed for lightweight, always-on diagnostics
+during PyTorch training.**
+See how much time is spent waiting for the next batch, where step time goes,
+and whether a slow worker is holding up a distributed run.
+
 At the end of a run, it gives you:
 
-- **A diagnosis:** data loading, GPU compute, waiting, memory growth, or a slow
-  distributed worker.
-- **The evidence:** timing, CPU/GPU usage, memory, and per-worker measurements.
+- **A diagnosis:** waiting for input, costly data transfers, compute-heavy steps,
+  or a likely slow distributed worker.
+- **The evidence:** step timings, CPU/GPU usage, memory trends, and
+  per-worker comparisons.
 - **The next step:** what part of your training setup to investigate first.
 
 ### Example diagnosis
