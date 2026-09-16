@@ -220,8 +220,25 @@ soon as it arrives.
 
 ``history_retention`` accepts positive seconds or durations such as ``"30m"``,
 ``"2h"``, or ``"1d"``. It defaults to 30 minutes of final-report analysis
-history. TraceML keeps five additional raw minutes internally for delayed
-telemetry, then discards older raw rows without creating a rollup.
+history. Retention advances at completed, rank-aligned step boundaries and
+does not create a rollup.
+
+### Migrating from `summary_window_rows`
+
+The former row-count setting is no longer accepted. Configure the history
+duration instead:
+
+```python
+# Before: no longer supported.
+TraceMLRayConfig(summary_window_rows=1_000)
+
+# Now: retain the duration needed for analysis.
+TraceMLRayConfig(history_retention="30m")
+```
+
+A row count does not map to a fixed duration, so choose the duration explicitly
+for your workload. The default is `"30m"`; it is not an automatic conversion
+from 1,000 rows.
 
 ``init_mode`` is passed to ``traceml.init(mode="auto")`` inside each Ray
 worker. The Ray Data ``wrap_dataloader_fetch(...)`` pattern above works with
