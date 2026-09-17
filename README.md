@@ -342,6 +342,7 @@ For remote browser access and SSH tunneling, see the
   or [Slurm](https://traceopt-ai.github.io/traceml/user_guide/slurm/)
 - **Frameworks:** [Hugging Face](https://traceopt-ai.github.io/traceml/user_guide/integrations/huggingface/),
   [PyTorch Lightning](https://traceopt-ai.github.io/traceml/user_guide/integrations/lightning/),
+  [RF-DETR](https://traceopt-ai.github.io/traceml/user_guide/integrations/rfdetr/),
   [Ray Train](https://traceopt-ai.github.io/traceml/user_guide/integrations/ray/),
   and [DeepSpeed](https://traceopt-ai.github.io/traceml/user_guide/integrations/deepspeed/)
 - **Trackers:** [W&B and MLflow](https://traceopt-ai.github.io/traceml/user_guide/integrations/wandb-mlflow/)

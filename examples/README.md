@@ -31,6 +31,7 @@ These are the main user-facing examples.
 | `integrations/huggingface_trainer_minimal.py` | Minimal Hugging Face `TraceMLTrainerCallback` example | CPU / CUDA | No model download required |
 | `integrations/accelerate_minimal.py` | Minimal Hugging Face `Accelerate` loop wrapped with `traceml.trace_step(...)` | CPU / CUDA | No model download required |
 | `integrations/lightning_minimal.py` | Minimal Lightning integration init + `TraceMLCallback` example | CPU / CUDA | No dataset download required |
+| `integrations/rfdetr_minimal.py` | RF-DETR Nano with automatic tracing; compare two DataLoader worker counts | CPU / CUDA recipe | Requires `rfdetr[train]==1.10.1` and a local COCO export; downloads pretrained weights on first use; see the [guide](../docs/user_guide/integrations/rfdetr.md) |
 | `integrations/lightning_dataloading_bottleneck.py` | ResNet-18 on 320px Imagenette under Lightning; `--profile` flips the DataLoader settings and nothing else, so two runs plus `traceml compare` isolate the loader change | CPU (`--smoke`) / CUDA | Downloads 326 MB on first use; `--smoke` runs a synthetic CPU check; companion Colab notebook in `notebooks/` |
 | `integrations/deepspeed_minimal.py` | Minimal DeepSpeed loop wrapped with `traceml.trace_step(...)` | CUDA | Requires `deepspeed`; exits cleanly without it |
 

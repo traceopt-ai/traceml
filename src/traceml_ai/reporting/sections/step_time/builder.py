@@ -346,7 +346,9 @@ def project_step_time_summary(analysis: StepTimeAnalysis) -> Dict[str, Any]:
     window = analysis.window
     identities = snapshot.identities
     latest_step = snapshot.cursor.latest_step
-    training_steps = latest_step + 1 if latest_step is not None else 0
+    # SDK captures advance before publishing: step 1 means one completed step.
+    # Use that counter, not retained row count, when history has been pruned.
+    training_steps = max(0, latest_step) if latest_step is not None else 0
 
     rows = {
         facts.global_rank: _public_metric_values(facts.average)

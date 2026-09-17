@@ -301,13 +301,22 @@ class TraceMLCallback(_CallbackBase):
     def setup(self, trainer, pl_module, stage=None):
         if _traceml_disabled():
             return
+        # Data previews/tuning before fit are outside the training measurement.
+        # In particular, RF-DETR can fetch dataset grids before Trainer exists.
+        self._abandon_pending(pl_module)
         self._enter_dataloader_timing_scope(trainer)
-        self._wrap_forward(trainer, pl_module)
         self._wrap_batch_to_device(trainer, pl_module)
 
     def on_train_start(self, trainer, pl_module):
         if _traceml_disabled():
             return
+        # EMA callbacks deepcopy the model during setup/on_fit_start. A copied
+        # function closure would still call the live model's bound forward.
+        # Attach only after those copies and checkpoint restoration are done.
+        try:
+            self._wrap_forward(trainer, self._forward_target(pl_module))
+        except Exception as e:
+            _log_lightning_error("forward timing unavailable", e)
         # Fail loud (never raise) when the init config will not capture the
         # patch-gated streams this callback owes. Forward, backward, optimizer
         # and the step envelope are timed by the callback itself.
@@ -332,6 +341,10 @@ class TraceMLCallback(_CallbackBase):
                 file=sys.stderr,
             )
 
+    def _forward_target(self, pl_module):
+        """Return the module actually called by the framework's training step."""
+        return pl_module
+
     def _wrap_forward(self, trainer, pl_module) -> None:
         if self._original_forward is not None:
             return
@@ -345,7 +358,11 @@ class TraceMLCallback(_CallbackBase):
 
         @functools.wraps(original_forward)
         def wrapped_forward(*args, **kwargs):
-            if _traceml_disabled() or not getattr(trainer, "training", False):
+            if (
+                _traceml_disabled()
+                or not getattr(trainer, "training", False)
+                or self._step_capture is None
+            ):
                 return original_forward(*args, **kwargs)
 
             # A forward after an optimizer step (manual optimization with

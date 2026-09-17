@@ -75,8 +75,14 @@ def test_lightning_forward_wrapper_times_only_forward(monkeypatch):
     assert "forward" not in module.__dict__
 
     callback.setup(trainer, module)
+    assert "forward" not in module.__dict__
+    callback.on_train_start(trainer, module)
     assert "forward" in module.__dict__
 
+    # Even a training-stage forward outside a batch must not become a step.
+    assert module(0) == 1
+    assert calls == []
+    callback._step_capture = step_events.begin_step_capture()
     assert module(1) == 2
     trainer.training = False
     assert module(2) == 3
@@ -509,6 +515,8 @@ def test_lightning_next_forward_closes_an_open_optimizer_region(monkeypatch):
     callback = lightning_integration.TraceMLCallback()
     callback.setup(trainer, module)
 
+    callback.on_train_start(trainer, module)
+    callback._step_capture = step_events.begin_step_capture()
     callback.on_before_optimizer_step(trainer, module, optimizer=None)
     module(1)  # the next forward (manual optimization, second step)
 
@@ -556,6 +564,9 @@ def test_lightning_on_exception_discards_and_restores(monkeypatch):
     module = FakeModule()
     callback = lightning_integration.TraceMLCallback()
     callback.setup(trainer, module)
+    assert discarded == ["discard"]  # discard any pre-fit events
+    discarded.clear()
+    callback.on_train_start(trainer, module)
     callback.on_train_batch_start(trainer, module, batch=None, batch_idx=0)
     callback.on_before_backward(trainer, module, loss=None)
     assert callback._traceml_step_ctx is not None
@@ -728,7 +739,7 @@ def test_lightning_teardown_discards_whatever_is_still_pending(monkeypatch):
 
     callback.teardown(trainer, module)
 
-    assert discarded == ["discard"]
+    assert discarded == ["discard", "discard"]  # setup and teardown
     assert "forward" not in module.__dict__
 
 

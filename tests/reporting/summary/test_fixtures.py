@@ -24,6 +24,7 @@ from tests.sqlite_fixtures import (
     insert_system_sample as _insert_system_sample,
     summary_database,
 )
+from traceml_ai.reporting.analysis_window import AnalysisWindow
 from traceml_ai.reporting.schema import BaseSectionPayload
 from traceml_ai.reporting.sections.process import ProcessSummarySection
 from traceml_ai.reporting.sections.step_memory import StepMemorySummarySection
@@ -103,6 +104,44 @@ ISSUE_KEYS = {
     "ranks",
     "evidence",
 }
+
+
+@pytest.mark.parametrize(
+    "steps,total",
+    [((), 0), ((1,), 1), ((1, 2, 3), 3), ((98, 99, 100), 100)],
+)
+def test_step_totals_use_completed_counter_not_retained_window(
+    tmp_path, steps, total
+):
+    db_path = tmp_path / "step_counts.db"
+    with summary_database(db_path) as conn:
+        for row_id, step in enumerate(steps, start=1):
+            _insert_step_time_sample(
+                conn, row_id=row_id, rank=0, step=step, traced_step_time=10.0
+            )
+            _insert_step_memory_sample(
+                conn,
+                row_id=row_id,
+                rank=0,
+                step=step,
+                alloc=100.0,
+                reserved=200.0,
+            )
+
+    # A retained tail and a narrower reporting window must not reset the
+    # process-local completed-step counter to the number of visible rows.
+    window = AnalysisWindow(
+        retention_s=30.0,
+        start_step=steps[-1] if steps else None,
+        end_step=steps[-1] if steps else None,
+    )
+    for section in (StepTimeSummarySection, StepMemorySummarySection):
+        payload = section(analysis_window=window).build(str(db_path)).payload
+        assert payload["metadata"]["training_total_steps"] == total
+        assert payload["metadata"]["training_latest_step"] == (
+            steps[-1] if steps else None
+        )
+        assert payload["global"]["window"]["steps_analyzed"] == bool(steps)
 
 
 def _assert_section_shape(payload: dict, *, group_by: str) -> None:
@@ -428,7 +467,7 @@ def test_step_memory_section_reports_no_gpu_without_throwing(
 
     payload = StepMemorySummarySection().build(str(db_path)).payload
 
-    assert payload["metadata"]["training_total_steps"] == 2
+    assert payload["metadata"]["training_total_steps"] == 1
     assert payload["diagnosis"]["status"] == "NO GPU"
     assert payload["diagnosis"]["action"]
     assert payload["diagnosis"] == payload["issues"][0]

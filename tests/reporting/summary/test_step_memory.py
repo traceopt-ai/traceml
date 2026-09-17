@@ -124,7 +124,7 @@ def test_step_memory_section_loader_and_builder_use_sqlite_fixture(tmp_path):
     data = load_step_memory_section_data(str(db_path))
     result = StepMemorySummarySection().build(str(db_path))
 
-    assert data.training_steps == 4
+    assert data.training_steps == 3
     assert data.latest_step_observed == 3
     assert [metric.metric for metric in data.metrics] == [
         "peak_allocated",

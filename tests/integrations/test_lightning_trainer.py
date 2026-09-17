@@ -248,6 +248,50 @@ def test_unsized_validation_prefetch_stays_out_of_input_wait(L):
     assert _counts(batches, FETCH) == [1, 1, 1, 1]
 
 
+def test_lightning_forward_setup_failure_preserves_training(L, capsys):
+    traceml_lightning.init()
+
+    class UnavailableTarget(traceml_lightning.TraceMLCallback):
+        def _forward_target(self, pl_module):
+            raise AttributeError("forward target unavailable")
+
+    train, _ = _loaders()
+    model = _module_class(L)()
+    initial_weight = model.net.weight.detach().clone()
+    trainer = _trainer(L, [UnavailableTarget()], max_steps=2)
+    trainer.fit(model, train_dataloaders=train)
+
+    assert trainer.global_step == 2
+    assert len(model.losses) == 2
+    assert not torch.equal(model.net.weight, initial_weight)
+    assert "forward timing unavailable" in capsys.readouterr().err
+    batches = drain_step_time_batches()
+    # Failed instrumentation leaves forward absent, not a fabricated zero.
+    assert _counts(batches, FORWARD) == [0, 0]
+    assert _counts(batches, BACKWARD) == [1, 1]
+    assert _counts(batches, OPTIMIZER) == [1, 1]
+    assert "forward" not in model.__dict__
+
+
+def test_lightning_model_forward_failure_still_propagates(L):
+    traceml_lightning.init()
+    failure = RuntimeError("model forward failed")
+
+    class BrokenModel(_module_class(L)):
+        def forward(self, x):
+            raise failure
+
+    train, _ = _loaders()
+    model = BrokenModel()
+    trainer = _trainer(L, [traceml_lightning.TraceMLCallback()], max_steps=2)
+    with pytest.raises(RuntimeError) as caught:
+        trainer.fit(model, train_dataloaders=train)
+
+    assert caught.value is failure
+    assert drain_step_time_batches() == []
+    assert "forward" not in model.__dict__
+
+
 def test_lightning_trainer_envelope_opens_before_the_batch_transfer(L):
     traceml_lightning.init()
     callback = traceml_lightning.TraceMLCallback()
