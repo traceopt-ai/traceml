@@ -142,7 +142,7 @@ remains in each section-local `card` field.
 ```
 
 `primary_diagnosis` is derived from already-built section payloads. It does not
-read telemetry tables or recompute diagnostics. In schema `1.6`, Step Time
+read telemetry tables or recompute diagnostics. In schema `1.8`, Step Time
 diagnoses drive primary performance diagnosis. System GPU utilization is only
 supporting evidence, except for the fallback
 `LOW_GPU_UTILIZATION_UNEXPLAINED` when Step Time has no useful performance
@@ -177,7 +177,7 @@ Selection policy:
 
 High temperature, memory pressure, memory creep, high RSS, high CPU, and other
 resource-health findings are not promoted into `primary_diagnosis` in schema
-`1.6`. They remain available under their section's `diagnosis` and `issues`.
+`1.8`. They remain available under their section's `diagnosis` and `issues`.
 
 Primary diagnosis evidence uses a small union:
 
