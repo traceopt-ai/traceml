@@ -1,29 +1,21 @@
 # Case studies
 
-Measured before/after case studies where TraceML diagnosed a bottleneck in a
-training run, a targeted intervention was applied, and the result was evaluated
-using wall-clock measurements.
-
-Each case study is a subfolder with its own write-up: the setup, what TraceML
-found, the fix, and the measured before/after.
+Reproducible training investigations using TraceML measurements. Each study
+records its workload, environment, measurement method, result and limits.
 
 ## Index
 
-| Case study | Model | Bottleneck | Result |
+| Case study | Workload | Finding | Result |
 |---|---|---|---|
-| [resnet18_input_bound](resnet18_input_bound/) | ResNet-18 (single T4) | Input-bound data loading | 43.8% lower step time; median GPU utilization 51% to 100% |
-
-## Investigations awaiting measurements
-
-| Investigation | Model | Question | Status |
-|---|---|---|---|
-| [rfdetr_nano_training](rfdetr_nano_training/) | RF-DETR Nano (single GPU; optional DDP) | Where does native COCO training time go? Upstream issue #1410 | Reproducible protocol; GPU results pending |
+| [ResNet-18 input pipeline](resnet18_input_bound/) | ResNet-18, single T4 | Synchronous image loading left the GPU idle | 43.8% lower step time after fixing the input pipeline |
+| [RF-DETR Nano training](rfdetr_nano_training/) | RF-DETR Nano with COCO, single T4 | Input loading kept up; backward was the largest measured phase | 18.5 images/s; 0.23 ms/step exposed input wait |
 
 ## Adding a case study
 
-1. Run a training job under TraceML and identify the bottleneck from phase timing.
-2. Apply one targeted intervention, holding unrelated workload settings constant
-   so the before/after comparison isolates that intervention.
-3. Write up the before/after using wall-clock metrics: step cadence, run duration,
-   GPU utilization, and TraceML's verdict.
-4. Keep raw telemetry out of git; commit the write-up and small summaries only.
+A case study should state the question, record the exact workload and
+environment, explain the measurement boundaries, and report the result with its
+limits. When it evaluates a change, hold unrelated settings constant and include
+the before/after wall-clock measurement.
+
+Keep datasets and raw telemetry out of git. Commit the reproduction code and the
+small result needed to support the write-up.
