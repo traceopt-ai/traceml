@@ -301,9 +301,9 @@ class TraceMLCallback(_CallbackBase):
     def setup(self, trainer, pl_module, stage=None):
         if _traceml_disabled():
             return
-        # Data previews/tuning before fit are outside the training measurement.
-        # In particular, RF-DETR can fetch dataset grids before Trainer exists.
-        self._abandon_pending(pl_module)
+        if stage == "fit":
+            # Preview/tuning fetches are outside the training measurement.
+            self._abandon_pending(pl_module)
         self._enter_dataloader_timing_scope(trainer)
         self._wrap_batch_to_device(trainer, pl_module)
 
@@ -342,7 +342,7 @@ class TraceMLCallback(_CallbackBase):
             )
 
     def _forward_target(self, pl_module):
-        """Return the module actually called by the framework's training step."""
+        """Return the module called by the framework's training step."""
         return pl_module
 
     def _wrap_forward(self, trainer, pl_module) -> None:

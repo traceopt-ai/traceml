@@ -124,7 +124,7 @@
       "stack": "RF-DETR",
       "recommended_api": "traceml_ai.integrations.rfdetr.init() + model.train()",
       "guide": "user_guide/integrations/rfdetr.md",
-      "tested_dependency_range": "Dedicated CPU CI pins rfdetr[train]==1.10.1. CPU correctness, offline Nano and Gloo checks also passed locally against development commit 0ed5be8 with torch 2.11 / Lightning 2.6.1; this is not a broad compatibility range.",
+      "tested_dependency_range": "Dedicated CPU CI pins rfdetr[train]==1.10.1. CPU correctness, offline Nano and Gloo checks also passed locally against RF-DETR development commit 0ed5be8 with torch 2.11 / Lightning 2.6.1; this is not a broad compatibility range.",
       "coverage": {
         "cpu": {
           "status": "CI tested",

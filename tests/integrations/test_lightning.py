@@ -2,6 +2,7 @@ from contextlib import contextmanager
 from queue import Queue
 from types import SimpleNamespace
 
+import pytest
 import torch.nn as nn
 
 from traceml_ai.instrumentation import step_events
@@ -19,6 +20,26 @@ def _enable_callback_without_lightning(monkeypatch):
         "IS_LIGHTNING_AVAILABLE",
         True,
     )
+
+
+@pytest.mark.parametrize("stage", ["validate", "test", "predict", None])
+def test_non_fit_setup_preserves_pending_capture(monkeypatch, stage):
+    _enable_callback_without_lightning(monkeypatch)
+    capture = step_events.begin_step_capture()
+    event = TimeEvent("other work", "cpu", 1.0, 2.0)
+    capture.record_timing(event)
+    callback = lightning_integration.TraceMLCallback()
+    try:
+        callback.setup(
+            SimpleNamespace(training=False, strategy=None),
+            nn.Linear(2, 2),
+            stage=stage,
+        )
+        assert step_events.begin_step_capture() is capture
+        assert event in capture.timing_events
+    finally:
+        callback._exit_dataloader_timing_scope()
+        step_events.abort_step_capture(capture)
 
 
 def test_lightning_callback_base_combines_distinct_namespaces() -> None:
@@ -74,7 +95,7 @@ def test_lightning_forward_wrapper_times_only_forward(monkeypatch):
 
     assert "forward" not in module.__dict__
 
-    callback.setup(trainer, module)
+    callback.setup(trainer, module, stage="fit")
     assert "forward" not in module.__dict__
     callback.on_train_start(trainer, module)
     assert "forward" in module.__dict__
@@ -137,7 +158,7 @@ def test_lightning_disabled_after_import_does_not_wrap_or_record(monkeypatch):
     module = FakeModule()
     callback = lightning_integration.TraceMLCallback()
 
-    callback.setup(trainer, module)
+    callback.setup(trainer, module, stage="fit")
     assert "forward" not in module.__dict__
     assert (
         strategy.batch_to_device.__func__ is original_batch_to_device.__func__
@@ -290,7 +311,7 @@ def test_lightning_batch_to_device_opens_the_step_envelope_first(monkeypatch):
     trainer = SimpleNamespace(training=True, strategy=strategy)
     module = nn.Linear(2, 2)
     callback = lightning_integration.TraceMLCallback()
-    callback.setup(trainer, module)
+    callback.setup(trainer, module, stage="fit")
 
     strategy.batch_to_device(object())
     callback.on_train_batch_start(trainer, module, batch=None, batch_idx=0)
@@ -513,7 +534,7 @@ def test_lightning_next_forward_closes_an_open_optimizer_region(monkeypatch):
     trainer = SimpleNamespace(training=True, strategy=None)
     module = FakeModule()
     callback = lightning_integration.TraceMLCallback()
-    callback.setup(trainer, module)
+    callback.setup(trainer, module, stage="fit")
 
     callback.on_train_start(trainer, module)
     callback._step_capture = step_events.begin_step_capture()
@@ -563,7 +584,7 @@ def test_lightning_on_exception_discards_and_restores(monkeypatch):
 
     module = FakeModule()
     callback = lightning_integration.TraceMLCallback()
-    callback.setup(trainer, module)
+    callback.setup(trainer, module, stage="fit")
     assert discarded == ["discard"]  # discard any pre-fit events
     discarded.clear()
     callback.on_train_start(trainer, module)
@@ -619,7 +640,7 @@ def test_lightning_dataloader_scope_tracks_the_trainer_stage(monkeypatch):
     callback = lightning_integration.TraceMLCallback()
     trainer.callbacks = [callback]
 
-    callback.setup(trainer, module)
+    callback.setup(trainer, module, stage="fit")
     assert events == ["enter"]
     assert predicates[0]() is False
 
@@ -735,7 +756,7 @@ def test_lightning_teardown_discards_whatever_is_still_pending(monkeypatch):
     trainer = SimpleNamespace(training=True, strategy=None)
     module = nn.Linear(2, 2)
     callback = lightning_integration.TraceMLCallback()
-    callback.setup(trainer, module)
+    callback.setup(trainer, module, stage="fit")
 
     callback.teardown(trainer, module)
 
@@ -752,7 +773,7 @@ def test_lightning_warns_when_the_transfer_wrapper_is_missing(
     trainer = SimpleNamespace(training=True, strategy=None)
     module = nn.Linear(2, 2)
     callback = lightning_integration.TraceMLCallback()
-    callback.setup(trainer, module)
+    callback.setup(trainer, module, stage="fit")
     assert callback._original_batch_to_device is None
 
     callback.on_train_start(trainer, module)

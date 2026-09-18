@@ -14,6 +14,14 @@ excluded from `global.average`, `global.median`, and `global.worst` and from
 rank median/worst selection; a rank with only some metrics measured (for
 example an H2D-only rank) keeps its row with `null` for the others.
 
+For Step Time and Step Memory, `training_total_steps` is the highest observed
+completed-step counter (`0` with no steps), independent of retained row count.
+`training_latest_step` is that counter, or `null` with no steps. Completed steps
+are numbered from one. Earlier releases incorrectly added one to a nonempty
+counter; regenerated summaries correct this, including for older telemetry.
+The schema remains `1.8`: this fixes the calculation without changing fields or
+types. Previously written summary files are not modified.
+
 For user-facing definitions and examples, see the
 [Step Time glossary](../../../docs/user_guide/reading-output.md#step-time-glossary).
 

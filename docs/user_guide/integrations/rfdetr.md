@@ -118,14 +118,20 @@ The first integration covers eager object detection with automatic optimization
 on CPU/CUDA, single process or ordinary DDP. It does not support segmentation,
 keypoints, `torch.compile`, CUDA graphs, FSDP/DeepSpeed, TPU/MPS, notebook process
 spawning, or automatic attachment to the separate `rfdetr fit` CLI. Known
-unsupported configurations fail before fitting; untested versions warn.
+unsupported configurations and adapter setup failures warn to stderr and skip
+the RF-DETR callback. Training and existing callbacks continue unchanged;
+native RF-DETR errors still propagate. Untested versions also warn.
+Ordinary DDP includes `ddp_find_unused_parameters_true` and `_false` aliases.
+The CUDA-graph guard reads `ModelConfig.cuda_graphs` on newer revisions; that
+option is absent in 1.10.1 and the development revision tested below.
 
 The dedicated CPU CI job pins RF-DETR 1.10.1 and exercises numerical parity,
 EMA independence, timing boundaries and two-process Gloo collection. The Nano
 smoke uses real model kernels, reduced image/query counts and random weights
 without downloads; Gloo tests use a tiny detector with RF-DETR's real training
-components. These checks also passed locally against development commit
-`0ed5be8` with PyTorch 2.11 and Lightning 2.6.1. This is not a broad version matrix.
+components. These checks also passed locally against RF-DETR development commit
+[`0ed5be8`](https://github.com/roboflow/rf-detr/commit/0ed5be8e8d6762c4978a11671cbf34cfc0595e25)
+with PyTorch 2.11 and Lightning 2.6.1. This is not a broad version matrix.
 CUDA/NCCL and physical multi-node recipes remain unverified until those hardware
 runs are completed; CPU tests do not establish GPU coverage. See the
 [support matrix](../integrations.md#integration-support-matrix) for evidence.

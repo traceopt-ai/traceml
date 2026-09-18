@@ -5,13 +5,17 @@ from __future__ import annotations
 import importlib
 import inspect
 import os
-import warnings
+import sys
 from functools import wraps
 from importlib.metadata import PackageNotFoundError, version
 
 __all__ = ["init"]
 
 _TraceMLCallback = None
+
+
+def _warn(message):
+    print(f"[TraceML] RF-DETR: {message}", file=sys.stderr)
 
 
 def _callback_class():
@@ -40,16 +44,14 @@ def _callback_class():
 def _validate_mode(train_config, model_config, accelerator, trainer_kwargs):
     """Reject modes whose phase measurements this adapter does not support."""
     unsupported = []
-    if getattr(model_config, "compile", False):
+    if model_config.compile:
         unsupported.append("compiled training")
-    if getattr(model_config, "segmentation_head", False):
+    if model_config.segmentation_head:
         unsupported.append("segmentation")
-    if getattr(model_config, "use_grouppose_keypoints", False):
+    if model_config.use_grouppose_keypoints:
         unsupported.append("keypoint training")
-    if any(
-        getattr(config, "cuda_graphs", False)
-        for config in (train_config, model_config)
-    ):
+    # Added after RF-DETR 1.10.1; absent on the pinned eager-only revision.
+    if getattr(model_config, "cuda_graphs", False):
         unsupported.append("CUDA graphs")
 
     accelerator = accelerator or getattr(train_config, "accelerator", "auto")
@@ -59,7 +61,12 @@ def _validate_mode(train_config, model_config, accelerator, trainer_kwargs):
         "strategy", getattr(train_config, "strategy", "auto")
     )
     if isinstance(strategy, str):
-        supported_strategy = strategy.lower() in {"auto", "ddp"}
+        supported_strategy = strategy.lower() in {
+            "auto",
+            "ddp",
+            "ddp_find_unused_parameters_true",
+            "ddp_find_unused_parameters_false",
+        }
     else:
         # Explicit DDPStrategy instances are supported by build_trainer's
         # lower-level API; other strategies need separate timing validation.
@@ -74,11 +81,8 @@ def _validate_mode(train_config, model_config, accelerator, trainer_kwargs):
 
     if unsupported:
         raise ValueError(
-            "TraceML's RF-DETR integration supports eager detection on CPU "
-            "or CUDA with single-device or ordinary DDP training; "
-            f"unsupported: {', '.join(unsupported)}. Use a supported "
-            "configuration or remove traceml_rfdetr.init() to train without "
-            "this integration. Launch DDP through traceml run."
+            "requires eager detection on CPU/CUDA with single-device or "
+            f"ordinary DDP training; unsupported: {', '.join(unsupported)}"
         )
 
 
@@ -98,43 +102,46 @@ def _install_factory(training, original):
             and not lightning._traceml_disabled()
         )
         if enabled:
-            _validate_mode(
-                bound.arguments["train_config"],
-                bound.arguments["model_config"],
-                bound.arguments["accelerator"],
-                bound.arguments.get("trainer_kwargs", {}),
-            )
+            try:
+                _validate_mode(
+                    bound.arguments["train_config"],
+                    bound.arguments["model_config"],
+                    bound.arguments["accelerator"],
+                    bound.arguments.get("trainer_kwargs", {}),
+                )
+            except Exception as exc:
+                _warn(f"skipping instrumentation: {exc}")
+                enabled = False
+        # Native factory errors must propagate, even when tracing is skipped.
         trainer = original(*args, **kwargs)
         if not enabled:
             return trainer
 
-        device = getattr(trainer.strategy, "root_device", None)
-        if getattr(device, "type", str(device).split(":")[0]) not in {
-            "cpu",
-            "cuda",
-        }:
-            raise ValueError(
-                "TraceML's RF-DETR integration requires a CPU or CUDA "
-                f"device; RF-DETR selected {device!r}. Set accelerator "
-                "explicitly or remove traceml_rfdetr.init()."
-            )
-        callbacks = trainer.callbacks
-        trace_callbacks = [
-            callback
-            for callback in callbacks
-            if isinstance(callback, lightning.TraceMLCallback)
-        ]
-        if trace_callbacks:
-            if len(trace_callbacks) == 1 and isinstance(
-                trace_callbacks[0], callback_class
-            ):
-                return trainer
-            raise ValueError(
-                "RF-DETR already has a TraceML callback. Remove the generic "
-                "Lightning callback or duplicate callbacks; "
-                "traceml_rfdetr.init() installs the RF-DETR callback."
-            )
-        callbacks.append(callback_class())
+        try:
+            device = getattr(trainer.strategy, "root_device", None)
+            if getattr(device, "type", str(device).split(":")[0]) not in {
+                "cpu",
+                "cuda",
+            }:
+                raise ValueError(f"unsupported resolved device {device!r}")
+            callbacks = trainer.callbacks
+            trace_callbacks = [
+                callback
+                for callback in callbacks
+                if isinstance(callback, lightning.TraceMLCallback)
+            ]
+            if trace_callbacks:
+                if len(trace_callbacks) == 1 and isinstance(
+                    trace_callbacks[0], callback_class
+                ):
+                    return trainer
+                raise ValueError(
+                    "existing generic or duplicate TraceML callbacks; "
+                    "remove them to use the RF-DETR callback"
+                )
+            callbacks.append(callback_class())
+        except Exception as exc:
+            _warn(f"skipping instrumentation: {exc}")
         return trainer
 
     build_trainer._traceml_rfdetr_factory = True
@@ -165,42 +172,40 @@ def init():
         ):
             raise ImportError(
                 "RF-DETR training dependencies are required. Install "
-                "`pip install 'rfdetr[train]==1.10.1'`."
+                "`pip install 'rfdetr[train]==1.10.1'`, or the exact "
+                "development revision specified by your case study."
             ) from exc
         raise
-
-    original = getattr(training, "build_trainer", None)
-    required_parameters = {
-        "train_config",
-        "model_config",
-        "accelerator",
-        "include_training_callbacks",
-        "trainer_kwargs",
-    }
-    if not callable(original) or not required_parameters.issubset(
-        inspect.signature(original).parameters
-    ):
-        raise RuntimeError(
-            "Unsupported RF-DETR training interface. This integration "
-            "requires the Lightning build_trainer API from rfdetr==1.10.1."
-        )
 
     from traceml_ai.integrations import lightning
 
     config = lightning.init()
+    original = getattr(training, "build_trainer", None)
     if config.disabled or getattr(original, "_traceml_rfdetr_factory", False):
         return config
     try:
-        installed_version = version("rfdetr")
-    except PackageNotFoundError:
-        installed_version = "unknown"
-    if installed_version != "1.10.1":
-        warnings.warn(
-            f"RF-DETR {installed_version} has not been qualified with this "
-            "TraceML adapter. Use rfdetr==1.10.1 for the documented example; "
-            "development support is limited to the documented source revision.",
-            UserWarning,
-            stacklevel=2,
-        )
-    _install_factory(training, original)
+        required_parameters = {
+            "train_config",
+            "model_config",
+            "accelerator",
+            "include_training_callbacks",
+            "trainer_kwargs",
+        }
+        if not callable(original) or not required_parameters.issubset(
+            inspect.signature(original).parameters
+        ):
+            raise ValueError("unsupported build_trainer interface")
+        try:
+            installed_version = version("rfdetr")
+        except PackageNotFoundError:
+            installed_version = "unknown"
+        if installed_version != "1.10.1":
+            _warn(
+                f"version {installed_version} is outside the pinned 1.10.1 "
+                "release. Development support is limited to the RF-DETR "
+                "commit in docs/user_guide/integrations/rfdetr.md."
+            )
+        _install_factory(training, original)
+    except Exception as exc:
+        _warn(f"skipping instrumentation: {exc}")
     return config

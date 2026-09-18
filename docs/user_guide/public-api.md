@@ -275,6 +275,16 @@ your existing `transformers.Trainer`. See the
       show_root_heading: true
       show_source: false
 
+### RF-DETR
+
+Call `init()` before the existing `model.train()` call. See the
+[RF-DETR guide](integrations/rfdetr.md) for setup and supported modes.
+
+::: traceml_ai.integrations.rfdetr.init
+    options:
+      show_root_heading: true
+      show_source: false
+
 ### Ray Train
 
 ::: traceml_ai.integrations.ray.TraceMLTorchTrainer

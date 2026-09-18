@@ -5,6 +5,17 @@ All notable changes to TraceML are documented here. This file follows
 should match the tags on [GitHub Releases](https://github.com/traceopt-ai/traceml/releases),
 which carry the full historical notes for versions predating this file.
 
+## [Unreleased]
+
+- Added opt-in RF-DETR instrumentation for eager detection. Unsupported
+  configurations or adapter failures warn and leave native training intact.
+- Lightning timing excludes pre-fit loader previews and out-of-batch forwards;
+  forward instrumentation attaches after EMA initialization.
+- Corrected Step Time and Step Memory `training_total_steps`: three completed
+  steps now report `3`, previously `4`. The count uses the completed-step
+  counter even when history is pruned. Existing summary files are unchanged;
+  regenerated summaries use the corrected count. JSON schema remains `1.8`.
+
 ## [0.4.0] - 2026-09-16
 
 - With the lifecycle guard installed by Hugging Face `init()`, Trainer
