@@ -27,6 +27,7 @@ def load(name):
 
 training = load("train")
 reporting = load("summarize")
+comparison = load("compare_revisions")
 
 
 def telemetry(path, *, ranks=1, missing=None):
@@ -60,7 +61,16 @@ def telemetry(path, *, ranks=1, missing=None):
                 )
 
 
-def run_files(path, mode, *, ranks=1):
+def run_files(
+    path,
+    mode,
+    *,
+    ranks=1,
+    commit=training.RFDETR_COMMIT,
+    elapsed_s=None,
+    peak_allocated_bytes=1024,
+    peak_reserved_bytes=2048,
+):
     path.mkdir()
     run = {
         "mode": mode,
@@ -72,6 +82,7 @@ def run_files(path, mode, *, ranks=1):
             "batch_size": 4,
             "num_workers": 2,
             "seed": 42,
+            "multi_scale": False,
         },
         "model_config": {"resolution": 384},
         "configuration_overrides": {
@@ -82,7 +93,7 @@ def run_files(path, mode, *, ranks=1):
         "trainer_precision": "16-mixed",
         "trace_db": "telemetry" if mode == "traced" else None,
         "sources": {
-            "rfdetr": {"commit": training.RFDETR_COMMIT},
+            "rfdetr": {"commit": commit, "dirty": False},
             "traceml": {"commit": "fixture"},
         },
         "environment": {
@@ -100,9 +111,16 @@ def run_files(path, mode, *, ranks=1):
                 "rank": rank,
                 "completed_steps": 50,
                 "measured_steps": 40,
-                "elapsed_s": (4 if mode == "baseline" else 4.4) + rank,
+                "elapsed_s": (
+                    (4 if mode == "baseline" else 4.4)
+                    if elapsed_s is None
+                    else elapsed_s
+                )
+                + rank,
                 "final_loss": 1.0,
                 "precision": "16-mixed",
+                "peak_allocated_bytes": peak_allocated_bytes,
+                "peak_reserved_bytes": peak_reserved_bytes,
                 "gpu": "test fixture",
             },
         )
@@ -317,6 +335,23 @@ def test_vcs_install_inside_another_repo_uses_package_commit(
     assert training.source_identity(module, "rfdetr")["commit"] is None
 
 
+def test_expected_rfdetr_revision_must_be_clean():
+    training.validate_rfdetr_source(
+        {"commit": comparison.BEFORE_COMMIT, "dirty": False},
+        comparison.BEFORE_COMMIT,
+    )
+    with pytest.raises(ValueError, match="clean RF-DETR commit"):
+        training.validate_rfdetr_source(
+            {"commit": comparison.AFTER_COMMIT, "dirty": False},
+            comparison.BEFORE_COMMIT,
+        )
+    with pytest.raises(ValueError, match="clean RF-DETR commit"):
+        training.validate_rfdetr_source(
+            {"commit": comparison.BEFORE_COMMIT, "dirty": True},
+            comparison.BEFORE_COMMIT,
+        )
+
+
 def test_cpu_identity_excludes_dynamic_frequency(monkeypatch):
     rows = {
         "lscpu": [
@@ -383,7 +418,10 @@ def test_native_profiler_covers_fast_path_and_fallback(
                     wait=20, warmup=5, active=10, repeat=1
                 ),
                 on_trace_ready=lambda prof: training.export_profile(
-                    prof, tmp_path, 0
+                    prof,
+                    tmp_path,
+                    0,
+                    scopes=training.CRITERION_PROFILE_SCOPES,
                 ),
             ) as profiler,
             training.criterion_scopes(module),
@@ -604,3 +642,197 @@ def test_native_nano_cpu_smoke_preserves_callbacks(
         drain_step_time_batches()
         drain_step_memory_events()
         reset_trace_session_state()
+
+
+def revision_pairs(tmp_path, *, mode, count):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    pairs = []
+    for repeat in range(1, count + 1):
+        before = tmp_path / f"{mode}-{repeat}-before"
+        after = tmp_path / f"{mode}-{repeat}-after"
+        run_files(
+            before,
+            mode,
+            ranks=4,
+            commit=comparison.BEFORE_COMMIT,
+            elapsed_s=8,
+            peak_allocated_bytes=3 * 1024**3,
+            peak_reserved_bytes=4 * 1024**3,
+        )
+        run_files(
+            after,
+            mode,
+            ranks=4,
+            commit=comparison.AFTER_COMMIT,
+            elapsed_s=7,
+            peak_allocated_bytes=2.5 * 1024**3,
+            peak_reserved_bytes=3.5 * 1024**3,
+        )
+        pairs.append((before, after))
+    return pairs
+
+
+def profiler_files(path, commit):
+    run_files(path, "profiler", ranks=4, commit=commit)
+    for rank in range(4):
+        training.write_json(
+            path / f"profile-summary-rank-{rank}.json",
+            {
+                "rank": rank,
+                "start_step": 26,
+                "end_step": 35,
+                "active_steps": 10,
+                "collectives": {
+                    "available": True,
+                    "calls": 20,
+                    "cuda_total_ms": 30,
+                    "names": ["ncclKernel_AllReduce"],
+                },
+                "scopes": {
+                    name: {
+                        "calls": 10,
+                        "cpu_total_ms": 20,
+                        "cuda_total_ms": 10,
+                    }
+                    for name in training.PROFILE_SCOPES
+                },
+            },
+        )
+
+
+def test_revision_report_validates_five_pairs_and_profiler(tmp_path):
+    native = revision_pairs(tmp_path / "native", mode="baseline", count=5)
+    traced = revision_pairs(tmp_path / "traced", mode="traced", count=3)
+    profile_before = tmp_path / "profile-before"
+    profile_after = tmp_path / "profile-after"
+    profiler_files(profile_before, comparison.BEFORE_COMMIT)
+    profiler_files(profile_after, comparison.AFTER_COMMIT)
+
+    text = comparison.make_report(
+        native, traced, profile_before, profile_after
+    )
+
+    assert "Result: **IMPROVEMENT**" in text
+    assert "Median paired change: **-" in text
+    assert "Peak allocated | 3072.0 MiB | 2560.0 MiB" in text
+    assert "Broad optimizer region" in text
+    assert "Optimizer step" in text
+    assert "Explicit collective kernels" in text
+    assert "| Before | 2.0 | 3.000 |" in text
+    assert "TraceML does not measure NCCL collectives directly" in text
+
+
+@pytest.mark.parametrize("change", ["config", "rank", "revision", "dirty"])
+def test_revision_comparison_rejects_invalid_inputs(tmp_path, change):
+    pairs = revision_pairs(tmp_path, mode="baseline", count=5)
+    target = pairs[0][1]
+    if change == "rank":
+        (target / "rank-3.json").unlink()
+    else:
+        run = json.loads((target / "run.json").read_text())
+        if change == "config":
+            run["train_config"]["num_workers"] = 4
+        elif change == "revision":
+            run["sources"]["rfdetr"]["commit"] = "wrong"
+        else:
+            run["sources"]["rfdetr"]["dirty"] = True
+        training.write_json(target / "run.json", run)
+
+    with pytest.raises(ValueError):
+        comparison.make_report(pairs)
+
+
+def test_collective_summary_distinguishes_unavailable_and_zero():
+    unavailable = training._collective_summary([])
+    measured_zero = training._collective_summary(
+        [
+            {
+                "name": "ncclKernel_AllReduce",
+                "cat": "kernel",
+                "ph": "X",
+                "dur": 0,
+            }
+        ]
+    )
+
+    assert unavailable == {
+        "available": False,
+        "calls": None,
+        "cuda_total_ms": None,
+        "names": [],
+    }
+    assert measured_zero["available"] is True
+    assert measured_zero["calls"] == 1
+    assert measured_zero["cuda_total_ms"] == 0
+
+
+def test_detailed_profiler_scopes_wrap_and_restore_methods():
+    torch = pytest.importorskip("torch")
+
+    class Matcher:
+        def forward(self):
+            return 1
+
+    class Criterion:
+        def __init__(self):
+            self.matcher = Matcher()
+
+        def forward(self):
+            return self.matcher.forward()
+
+    class Optimizer:
+        def step(self):
+            return 2
+
+    class EMA:
+        def _update_ema_for_step(self):
+            return 3
+
+    class Scheduler:
+        def step(self):
+            return 4
+
+    module = SimpleNamespace(criterion=Criterion())
+    optimizer, ema, scheduler = Optimizer(), EMA(), Scheduler()
+    originals = (
+        optimizer.step,
+        ema._update_ema_for_step,
+        scheduler.step,
+    )
+    trainer = SimpleNamespace(
+        optimizers=[optimizer],
+        callbacks=[ema],
+        lr_scheduler_configs=[SimpleNamespace(scheduler=scheduler)],
+    )
+
+    with torch.profiler.profile(
+        activities=[torch.profiler.ProfilerActivity.CPU]
+    ) as profiler:
+        with training.profiler_scopes(trainer, module):
+            module.criterion.forward()
+            optimizer.step()
+            ema._update_ema_for_step()
+            scheduler.step()
+
+    names = {event.key for event in profiler.key_averages()}
+    assert set(training.PROFILE_SCOPES) <= names
+    assert optimizer.step == originals[0]
+    assert ema._update_ema_for_step == originals[1]
+    assert scheduler.step == originals[2]
+
+
+def test_profiler_summary_requires_all_detailed_scopes(tmp_path):
+    native = revision_pairs(tmp_path / "native", mode="baseline", count=5)
+    profile = tmp_path / "profile"
+    profiler_files(profile, comparison.BEFORE_COMMIT)
+    path = profile / "profile-summary-rank-0.json"
+    payload = json.loads(path.read_text())
+    del payload["scopes"]["rfdetr/ema_update"]
+    training.write_json(path, payload)
+
+    with pytest.raises(ValueError, match="missing profiler scopes"):
+        comparison._profiler_summary(
+            profile,
+            comparison.BEFORE_COMMIT,
+            comparison._native_results(native)[0][0]["before_run"],
+        )

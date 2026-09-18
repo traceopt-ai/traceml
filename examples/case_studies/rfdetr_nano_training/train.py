@@ -13,12 +13,31 @@ import subprocess
 import sys
 import time
 from contextlib import ExitStack, contextmanager, nullcontext
+from functools import wraps
 from pathlib import Path
 from unittest.mock import patch
 
 RFDETR_COMMIT = "0ed5be8e8d6762c4978a11671cbf34cfc0595e25"
 PROFILE_WAIT, PROFILE_WARMUP, PROFILE_ACTIVE = 20, 5, 10
-PROFILE_SCOPES = ("rfdetr/criterion_including_matcher", "rfdetr/matcher")
+CRITERION_PROFILE_SCOPES = (
+    "rfdetr/criterion_including_matcher",
+    "rfdetr/matcher",
+)
+TRAINING_PROFILE_SCOPES = (
+    "rfdetr/optimizer_step",
+    "rfdetr/ema_update",
+    "rfdetr/lr_scheduler_step",
+)
+PROFILE_SCOPES = CRITERION_PROFILE_SCOPES + TRAINING_PROFILE_SCOPES
+COLLECTIVE_TOKENS = (
+    "nccl",
+    "allreduce",
+    "all_reduce",
+    "reduce_scatter",
+    "reducescatter",
+    "all_gather",
+    "allgather",
+)
 
 
 def build_parser():
@@ -33,6 +52,16 @@ def build_parser():
     parser.add_argument("--steps", type=int, default=50)
     parser.add_argument("--warmup-steps", type=int, default=10)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--expected-rfdetr-commit",
+        default=RFDETR_COMMIT,
+        help="Require this clean RF-DETR source revision",
+    )
+    parser.add_argument(
+        "--multi-scale",
+        action="store_true",
+        help="Use RF-DETR's native multi-scale and expanded-scale defaults",
+    )
     parser.add_argument(
         "--profile",
         action="store_true",
@@ -97,12 +126,20 @@ def source_identity(module, distribution):
             except subprocess.CalledProcessError:
                 break  # A virtualenv inside a repo does not belong to that repo.
             diff = command("git", "-C", str(root), "diff", "HEAD", "--", ".")
+            status = command(
+                "git",
+                "-C",
+                str(root),
+                "status",
+                "--porcelain",
+                "--untracked-files=normal",
+            )
             return {
                 "commit": command("git", "-C", str(root), "rev-parse", "HEAD"),
                 "tracked_diff_sha256": hashlib.sha256(
                     diff.encode()
                 ).hexdigest(),
-                "dirty": bool(diff),
+                "dirty": bool(status),
             }
     installed = importlib.metadata.distribution(distribution)
     direct = installed.read_text("direct_url.json")
@@ -131,7 +168,38 @@ def config_changes(config, defaults):
     }
 
 
-def export_profile(profiler, output, rank):
+def _collective_summary(trace_events):
+    """Summarize explicit collective CUDA kernels without inferring gaps."""
+    kernels = []
+    for event in trace_events:
+        name = str(event.get("name", ""))
+        category = str(event.get("cat", "")).lower()
+        duration = event.get("dur")
+        if (
+            event.get("ph") == "X"
+            and ("kernel" in category or "gpu" in category)
+            and any(token in name.lower() for token in COLLECTIVE_TOKENS)
+            and isinstance(duration, (int, float))
+            and math.isfinite(duration)
+            and duration >= 0
+        ):
+            kernels.append((name, float(duration)))
+    if not kernels:
+        return {
+            "available": False,
+            "calls": None,
+            "cuda_total_ms": None,
+            "names": [],
+        }
+    return {
+        "available": True,
+        "calls": len(kernels),
+        "cuda_total_ms": sum(duration for _, duration in kernels) / 1000,
+        "names": sorted({name for name, _ in kernels}),
+    }
+
+
+def export_profile(profiler, output, rank, scopes=PROFILE_SCOPES):
     """Save the raw trace and inclusive scope totals from its active window."""
     from torch.profiler import ProfilerActivity
 
@@ -146,13 +214,11 @@ def export_profile(profiler, output, rank):
             and event.get("cat") == "user_annotation"
             and event.get("ph") == "X"
         ]
-        for name in PROFILE_SCOPES
+        for name in scopes
     }
     events = {event.key: event for event in profiler.key_averages()}
     missing = {
-        name
-        for name in PROFILE_SCOPES
-        if name not in events or not cpu_events[name]
+        name for name in scopes if name not in events or not cpu_events[name]
     }
     if missing:
         raise RuntimeError(f"Profiler is missing RF-DETR scopes: {missing}")
@@ -164,6 +230,7 @@ def export_profile(profiler, output, rank):
             "start_step": PROFILE_WAIT + PROFILE_WARMUP + 1,
             "end_step": PROFILE_WAIT + PROFILE_WARMUP + PROFILE_ACTIVE,
             "active_steps": PROFILE_ACTIVE,
+            "collectives": _collective_summary(trace["traceEvents"]),
             "scopes": {
                 name: {
                     "calls": events[name].count,
@@ -177,7 +244,7 @@ def export_profile(profiler, output, rank):
                         events[name].device_time_total / 1000 if cuda else None
                     ),
                 }
-                for name in PROFILE_SCOPES
+                for name in scopes
             },
         },
     )
@@ -195,6 +262,8 @@ def make_window_callback(warmup_steps, steps, profiler=None):
             self.completed_steps = 0
             self.last_loss = None
             self.scopes = None
+            self.peak_allocated_bytes = None
+            self.peak_reserved_bytes = None
 
         def synchronize(self, module):
             if module.device.type == "cuda":
@@ -203,12 +272,14 @@ def make_window_callback(warmup_steps, steps, profiler=None):
         def start(self, trainer, module):
             self.synchronize(module)
             trainer.strategy.barrier()
+            if module.device.type == "cuda":
+                torch.cuda.reset_peak_memory_stats(module.device)
             self.started = time.perf_counter()
 
         def on_train_start(self, trainer, pl_module):
             if profiler is not None:
                 # Install after EMA copies the module so its copy stays unwrapped.
-                self.scopes = criterion_scopes(pl_module)
+                self.scopes = profiler_scopes(trainer, pl_module)
                 self.scopes.__enter__()
             if warmup_steps == 0:
                 self.start(trainer, pl_module)
@@ -236,6 +307,13 @@ def make_window_callback(warmup_steps, steps, profiler=None):
             elif step == steps:
                 self.synchronize(pl_module)
                 self.elapsed_s = time.perf_counter() - self.started
+                if pl_module.device.type == "cuda":
+                    self.peak_allocated_bytes = (
+                        torch.cuda.max_memory_allocated(pl_module.device)
+                    )
+                    self.peak_reserved_bytes = torch.cuda.max_memory_reserved(
+                        pl_module.device
+                    )
             if profiler is not None:
                 profiler.step()
 
@@ -260,6 +338,8 @@ def make_window_callback(warmup_steps, steps, profiler=None):
                 "elapsed_s": self.elapsed_s,
                 "final_loss": loss,
                 "precision": trainer.precision,
+                "peak_allocated_bytes": self.peak_allocated_bytes,
+                "peak_reserved_bytes": self.peak_reserved_bytes,
                 "gpu": (
                     torch.cuda.get_device_name(trainer.strategy.root_device)
                     if trainer.strategy.root_device.type == "cuda"
@@ -307,6 +387,68 @@ def criterion_scopes(module):
                 patch.object(matcher_type, "_match_many", batched_matcher)
             )
         yield
+
+
+def _patch_profiled_method(stack, target, attribute, name):
+    """Wrap one bound method in a PyTorch Profiler annotation."""
+    from torch.profiler import record_function
+
+    original = getattr(target, attribute)
+
+    @wraps(original)
+    def profiled(*args, **kwargs):
+        with record_function(name):
+            return original(*args, **kwargs)
+
+    stack.enter_context(patch.object(target, attribute, profiled))
+
+
+@contextmanager
+def profiler_scopes(trainer, module):
+    """Label criterion and post-backward work only for profiler runs."""
+    with ExitStack() as stack:
+        stack.enter_context(criterion_scopes(module))
+        if len(trainer.optimizers) != 1:
+            raise RuntimeError("Expected exactly one optimizer for profiling")
+        _patch_profiled_method(
+            stack,
+            trainer.optimizers[0],
+            "step",
+            "rfdetr/optimizer_step",
+        )
+
+        ema_callbacks = [
+            callback
+            for callback in trainer.callbacks
+            if callable(getattr(callback, "_update_ema_for_step", None))
+        ]
+        if len(ema_callbacks) != 1:
+            raise RuntimeError("Expected exactly one RF-DETR EMA callback")
+        _patch_profiled_method(
+            stack,
+            ema_callbacks[0],
+            "_update_ema_for_step",
+            "rfdetr/ema_update",
+        )
+
+        scheduler_configs = list(trainer.lr_scheduler_configs)
+        if len(scheduler_configs) != 1:
+            raise RuntimeError("Expected exactly one learning-rate scheduler")
+        _patch_profiled_method(
+            stack,
+            scheduler_configs[0].scheduler,
+            "step",
+            "rfdetr/lr_scheduler_step",
+        )
+        yield
+
+
+def validate_rfdetr_source(source, expected_commit):
+    """Require the requested clean RF-DETR worktree revision."""
+    if source.get("commit") != expected_commit or source.get("dirty"):
+        raise ValueError(
+            f"use the clean RF-DETR commit {expected_commit}; found {source}"
+        )
 
 
 def main(argv=None):
@@ -368,10 +510,10 @@ def main(argv=None):
     if precision == "bf16" and not bf16:
         parser.error("BF16 is not supported natively on this GPU; use fp16")
     source = source_identity(rfdetr, "rfdetr")
-    if source["commit"] != RFDETR_COMMIT or source["dirty"]:
-        parser.error(
-            f"install the clean RF-DETR commit {RFDETR_COMMIT}; found {source}"
-        )
+    try:
+        validate_rfdetr_source(source, args.expected_rfdetr_commit)
+    except ValueError as exc:
+        parser.error(str(exc))
     output = args.output_dir.expanduser().resolve()
     if rank == 0:
         for split, count in (("train2017", 118287), ("val2017", 5000)):
@@ -397,6 +539,13 @@ def main(argv=None):
     mc = RFDETRNanoConfig(
         device=f"cuda:{local_rank}", compile=False, resolution=384
     )
+    training_options = {}
+    if not args.multi_scale:
+        training_options.update(
+            multi_scale=False,
+            expanded_scales=False,
+            do_random_resize_via_padding=False,
+        )
     tc = TrainConfig(
         dataset_file="coco",
         dataset_dir=str(dataset),
@@ -406,9 +555,6 @@ def main(argv=None):
         seed=args.seed,
         grad_accum_steps=1,
         amp_dtype=precision,
-        multi_scale=False,
-        expanded_scales=False,
-        do_random_resize_via_padding=False,
         augmentation_backend="torchvision",
         devices=world,
         num_nodes=1,
@@ -420,6 +566,7 @@ def main(argv=None):
         progress_bar=None,
         run_test=False,
         save_dataset_grids=False,
+        **training_options,
     )
     trainer_overrides = dict(
         max_steps=args.steps,
