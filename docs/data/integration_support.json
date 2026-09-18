@@ -124,7 +124,7 @@
       "stack": "RF-DETR",
       "recommended_api": "traceml_ai.integrations.rfdetr.init() + model.train()",
       "guide": "user_guide/integrations/rfdetr.md",
-      "tested_dependency_range": "Dedicated CPU CI pins rfdetr[train]==1.10.1. CPU correctness, offline Nano and Gloo checks also passed locally against RF-DETR development commit 0ed5be8 with torch 2.11 / Lightning 2.6.1; this is not a broad compatibility range.",
+      "tested_dependency_range": "Dedicated CPU CI pins rfdetr[train]==1.10.1. A reproducible one- and four-T4 case study uses RF-DETR development commit 0ed5be8 with torch 2.9.1; this is not a broad compatibility range.",
       "coverage": {
         "cpu": {
           "status": "CI tested",
@@ -132,7 +132,7 @@
         },
         "gpu": {
           "status": "Documented recipe",
-          "detail": "no CUDA/NCCL validation"
+          "detail": "one- and four-T4 case study; no CUDA CI"
         },
         "single_process": {
           "status": "CI tested",
@@ -140,14 +140,14 @@
         },
         "multi_process": {
           "status": "CI tested",
-          "detail": "two CPU/Gloo ranks with lightweight RF-DETR fixture"
+          "detail": "two CPU/Gloo ranks in CI; four-T4 NCCL case study"
         },
         "multi_node": {
           "status": "Experimental",
           "detail": "no physical multi-node validation"
         }
       },
-      "emitted_signals": "CPU tests assert training step, inner-model forward, backward, optimizer and DataLoader fetch, excluding evaluation. H2D and CUDA memory require GPU validation.",
+      "emitted_signals": "CPU tests assert training step, inner-model forward, backward, optimizer and DataLoader fetch, excluding evaluation. The T4 case study records H2D and CUDA phase timing on one and four GPUs.",
       "example": "examples/integrations/rfdetr_minimal.py",
       "validation_level": "CI tested",
       "ci_evidence": {
@@ -161,7 +161,7 @@
       },
       "limitations": {
         "guide_label": "RF-DETR limitations",
-        "guide": "user_guide/integrations/rfdetr.md#limitations-and-validation",
+        "guide": "user_guide/integrations/rfdetr.md#limitations",
         "issues": [141, 323]
       }
     },
