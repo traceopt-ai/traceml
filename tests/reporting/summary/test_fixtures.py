@@ -141,7 +141,9 @@ def test_step_totals_use_completed_counter_not_retained_window(
         assert payload["metadata"]["training_latest_step"] == (
             steps[-1] if steps else None
         )
-        assert payload["global"]["window"]["steps_analyzed"] == bool(steps)
+        assert payload["global"]["window"]["steps_analyzed"] == (
+            1 if steps else 0
+        )
 
 
 def _assert_section_shape(payload: dict, *, group_by: str) -> None:

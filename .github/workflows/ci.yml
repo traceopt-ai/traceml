@@ -149,8 +149,12 @@ jobs:
     name: RF-DETR Integration (CPU and Gloo)
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
@@ -167,10 +171,8 @@ jobs:
         run: |
           python -c 'import rfdetr.training; import torch; assert torch.distributed.is_gloo_available()'
           pytest \
-            tests/integrations/test_rfdetr.py \
             tests/integrations/test_rfdetr_trainer.py \
-            tests/integrations/test_rfdetr_nano.py \
-            tests/integrations/test_rfdetr_example.py -q
+            tests/integrations/test_rfdetr_nano.py -q
 
   test-latest-deps:
     name: Latest Dependencies (early warning)

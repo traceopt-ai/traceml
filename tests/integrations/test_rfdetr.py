@@ -50,6 +50,7 @@ def rf_factory(monkeypatch):
     monkeypatch.setitem(sys.modules, "rfdetr.training", training)
     monkeypatch.setattr(lightning, "IS_LIGHTNING_AVAILABLE", True)
     effective = SimpleNamespace(disabled=False)
+    native_init = lightning.init
     monkeypatch.setattr(lightning, "init", lambda: effective)
     monkeypatch.setattr(rfdetr, "version", lambda package: "1.10.1")
     return SimpleNamespace(
@@ -59,8 +60,13 @@ def rf_factory(monkeypatch):
         defaults=default_callbacks,
         calls=calls,
         effective=effective,
+        native_init=native_init,
         train_config=SimpleNamespace(accelerator="cpu", strategy="auto"),
-        model_config=SimpleNamespace(),
+        model_config=SimpleNamespace(
+            compile=False,
+            segmentation_head=False,
+            use_grouppose_keypoints=False,
+        ),
     )
 
 
@@ -184,60 +190,94 @@ def test_factory_honors_disabled_after_init(rf_factory, monkeypatch):
         ("model_config", "compile", True, "compiled training"),
         ("model_config", "segmentation_head", True, "segmentation"),
         ("model_config", "use_grouppose_keypoints", True, "keypoint"),
-        ("train_config", "cuda_graphs", True, "CUDA graphs"),
+        ("model_config", "cuda_graphs", True, "CUDA graphs"),
         ("train_config", "strategy", "ddp_spawn", "ddp_spawn"),
         ("train_config", "strategy", "ddp_notebook", "ddp_notebook"),
+        ("train_config", "strategy", "ddp_fork", "ddp_fork"),
         ("train_config", "strategy", "fsdp", "fsdp"),
         ("train_config", "accelerator", "mps", "mps"),
         ("train_config", "accelerator", "tpu", "tpu"),
     ],
 )
-def test_unsupported_modes_fail_before_building_trainer(
-    rf_factory, target, field, value, message
+def test_unsupported_modes_warn_and_preserve_native_trainer(
+    rf_factory, capsys, target, field, value, message
 ):
     rfdetr.init()
     setattr(getattr(rf_factory, target), field, value)
-    with pytest.raises(ValueError, match=message):
-        rf_factory.training.build_trainer(
+    returned = rf_factory.training.build_trainer(
+        rf_factory.train_config, rf_factory.model_config
+    )
+    assert returned is rf_factory.trainer
+    assert len(rf_factory.calls) == 1
+    assert rf_factory.trainer.callbacks == rf_factory.defaults
+    error = capsys.readouterr().err
+    assert "[TraceML] RF-DETR: skipping instrumentation" in error
+    assert message in error
+
+
+def test_trainer_keyword_overrides_are_checked(rf_factory, capsys):
+    rfdetr.init()
+    returned = rf_factory.training.build_trainer(
+        rf_factory.train_config,
+        rf_factory.model_config,
+        strategy="deepspeed",
+    )
+    assert returned.callbacks == rf_factory.defaults
+    assert rf_factory.calls[0][-1] == {"strategy": "deepspeed"}
+    assert "deepspeed" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("error", [ValueError, BrokenPipeError])
+def test_warning_output_failure_preserves_native_trainer(
+    rf_factory, monkeypatch, error
+):
+    def failed_write(message):
+        raise error("stderr unavailable")
+
+    rfdetr.init()
+    rf_factory.model_config.compile = True
+    with monkeypatch.context() as patch:
+        patch.setattr(sys, "stderr", SimpleNamespace(write=failed_write))
+        returned = rf_factory.training.build_trainer(
             rf_factory.train_config, rf_factory.model_config
         )
-    assert not rf_factory.calls
-    assert rf_factory.trainer.callbacks == rf_factory.defaults
+    assert returned is rf_factory.trainer
+    assert len(rf_factory.calls) == 1
+    assert returned.callbacks == rf_factory.defaults
 
 
-def test_trainer_keyword_overrides_are_checked(rf_factory):
+@pytest.mark.parametrize(
+    "field", ["compile", "segmentation_head", "use_grouppose_keypoints"]
+)
+def test_missing_mode_field_skips_instrumentation(rf_factory, capsys, field):
+    delattr(rf_factory.model_config, field)
     rfdetr.init()
-    with pytest.raises(ValueError, match="deepspeed"):
-        rf_factory.training.build_trainer(
-            rf_factory.train_config,
-            rf_factory.model_config,
-            strategy="deepspeed",
-        )
-    assert not rf_factory.calls
+    returned = rf_factory.training.build_trainer(
+        rf_factory.train_config, rf_factory.model_config
+    )
+    assert returned.callbacks == rf_factory.defaults
+    assert len(rf_factory.calls) == 1
+    assert field in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("start_method", ["popen", "spawn", "fork"])
 def test_explicit_ddp_strategy_requires_ordinary_launcher(
-    rf_factory, start_method
+    rf_factory, capsys, start_method
 ):
     strategies = pytest.importorskip("pytorch_lightning.strategies")
     strategy = strategies.DDPStrategy(start_method=start_method)
     rfdetr.init()
+    returned = rf_factory.training.build_trainer(
+        rf_factory.train_config,
+        rf_factory.model_config,
+        strategy=strategy,
+    )
+    assert len(rf_factory.calls) == 1
     if start_method == "popen":
-        returned = rf_factory.training.build_trainer(
-            rf_factory.train_config,
-            rf_factory.model_config,
-            strategy=strategy,
-        )
         assert isinstance(returned.callbacks[-1], rfdetr._callback_class())
     else:
-        with pytest.raises(ValueError, match="ordinary DDP"):
-            rf_factory.training.build_trainer(
-                rf_factory.train_config,
-                rf_factory.model_config,
-                strategy=strategy,
-            )
-        assert not rf_factory.calls
+        assert returned.callbacks == rf_factory.defaults
+        assert "ordinary DDP" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("device", ["cpu", "cuda:0"])
@@ -250,40 +290,49 @@ def test_supported_resolved_device(rf_factory, device):
     assert isinstance(returned.callbacks[-1], rfdetr._callback_class())
 
 
-def test_auto_accelerator_cannot_silently_trace_unsupported_device(rf_factory):
+def test_auto_accelerator_cannot_silently_trace_unsupported_device(
+    rf_factory, capsys
+):
     rf_factory.train_config.accelerator = "auto"
     rf_factory.trainer.strategy.root_device = "mps:0"
     rfdetr.init()
-    with pytest.raises(ValueError, match="selected 'mps:0'"):
-        rf_factory.training.build_trainer(
-            rf_factory.train_config, rf_factory.model_config
-        )
+    returned = rf_factory.training.build_trainer(
+        rf_factory.train_config, rf_factory.model_config
+    )
+    assert returned is rf_factory.trainer
+    assert len(rf_factory.calls) == 1
     assert rf_factory.trainer.callbacks == rf_factory.defaults
+    assert "unsupported resolved device 'mps:0'" in capsys.readouterr().err
 
 
 def test_generic_callback_conflict_is_actionable_and_does_not_mutate(
-    rf_factory,
+    rf_factory, capsys
 ):
     generic = lightning.TraceMLCallback()
     rf_factory.trainer.callbacks.append(generic)
     before = list(rf_factory.trainer.callbacks)
     rfdetr.init()
-    with pytest.raises(ValueError, match="Remove the generic"):
-        rf_factory.training.build_trainer(
-            rf_factory.train_config, rf_factory.model_config
-        )
+    returned = rf_factory.training.build_trainer(
+        rf_factory.train_config, rf_factory.model_config
+    )
+    assert returned is rf_factory.trainer
     assert rf_factory.trainer.callbacks == before
+    assert "existing generic or duplicate" in capsys.readouterr().err
 
 
-def test_duplicate_rf_callbacks_are_rejected(rf_factory):
+def test_duplicate_rf_callbacks_warn_without_adding_another(
+    rf_factory, capsys
+):
     rf_factory.trainer.callbacks.extend(
         [rfdetr._callback_class()(), rfdetr._callback_class()()]
     )
+    before = list(rf_factory.trainer.callbacks)
     rfdetr.init()
-    with pytest.raises(ValueError, match="duplicate callbacks"):
-        rf_factory.training.build_trainer(
-            rf_factory.train_config, rf_factory.model_config
-        )
+    returned = rf_factory.training.build_trainer(
+        rf_factory.train_config, rf_factory.model_config
+    )
+    assert returned.callbacks == before
+    assert "duplicate TraceML callbacks" in capsys.readouterr().err
 
 
 def test_callback_selects_inner_model(rf_factory):
@@ -318,18 +367,20 @@ def test_internal_rf_import_error_is_not_misreported(rf_factory, monkeypatch):
     assert captured.value is error
 
 
-def test_incompatible_factory_fails_without_patching(rf_factory):
+def test_incompatible_factory_warns_without_patching(rf_factory, capsys):
     def unsupported():
         return None
 
     rf_factory.training.build_trainer = unsupported
-    with pytest.raises(RuntimeError, match="Unsupported RF-DETR"):
-        rfdetr.init()
+    assert rfdetr.init() is rf_factory.effective
     assert rf_factory.training.build_trainer is unsupported
+    assert "unsupported build_trainer interface" in capsys.readouterr().err
 
 
-def test_factory_error_propagates_unchanged(rf_factory):
+@pytest.mark.parametrize("unsupported", [False, True])
+def test_factory_error_propagates_unchanged(rf_factory, unsupported):
     error = RuntimeError("training configuration failed")
+    calls = []
 
     def failing(
         train_config,
@@ -339,43 +390,110 @@ def test_factory_error_propagates_unchanged(rf_factory):
         include_training_callbacks=True,
         **trainer_kwargs,
     ):
+        calls.append(True)
         raise error
 
     rf_factory.training.build_trainer = failing
+    rf_factory.model_config.segmentation_head = unsupported
     rfdetr.init()
     with pytest.raises(RuntimeError) as captured:
         rf_factory.training.build_trainer(
             rf_factory.train_config, rf_factory.model_config
         )
     assert captured.value is error
+    assert calls == [True]
 
 
-def test_qualified_release_has_no_version_warning(rf_factory):
-    with warnings.catch_warnings(record=True) as captured:
-        warnings.simplefilter("always")
+def test_factory_setup_failure_warns_without_patching(
+    rf_factory, monkeypatch, capsys
+):
+    def unavailable():
+        raise RuntimeError("callback unavailable")
+
+    monkeypatch.setattr(rfdetr, "_callback_class", unavailable)
+    assert rfdetr.init() is rf_factory.effective
+    assert rf_factory.training.build_trainer is rf_factory.original
+    assert "callback unavailable" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "failure", ["mode", "device", "callback", "interface", "install", "eval"]
+)
+def test_skipped_adapter_does_not_accumulate_fetches(
+    rf_factory, monkeypatch, failure
+):
+    from torch.utils.data import DataLoader
+
+    from traceml_ai.instrumentation.step_events import (
+        abort_step_capture,
+        begin_step_capture,
+        drain_step_time_batches,
+    )
+    from traceml_ai.runtime.arming import is_tracing_armed
+
+    def unavailable(*args, **kwargs):
+        raise RuntimeError("injected adapter failure")
+
+    monkeypatch.setattr(lightning, "init", rf_factory.native_init)
+    if failure == "mode":
+        rf_factory.model_config.compile = True
+    elif failure == "device":
+        rf_factory.trainer.strategy.root_device = "mps:0"
+    elif failure == "callback":
+        monkeypatch.setattr(rfdetr._callback_class(), "__init__", unavailable)
+    elif failure == "interface":
+        rf_factory.training.build_trainer = lambda: rf_factory.trainer
+    elif failure == "install":
+        monkeypatch.setattr(rfdetr, "_callback_class", unavailable)
+
+    abort_step_capture(begin_step_capture())
+    drain_step_time_batches()
+    try:
         rfdetr.init()
-    assert not captured
+        if failure == "interface":
+            trainer = rf_factory.training.build_trainer()
+        else:
+            trainer = rf_factory.training.build_trainer(
+                rf_factory.train_config,
+                rf_factory.model_config,
+                include_training_callbacks=failure != "eval",
+            )
+        assert trainer.callbacks == rf_factory.defaults
+        assert is_tracing_armed()
+        assert len(list(DataLoader(range(200), batch_size=1))) == 200
+        assert begin_step_capture().timing_events == []
+        assert drain_step_time_batches() == []
+    finally:
+        abort_step_capture(begin_step_capture())
+
+
+def test_qualified_release_has_no_version_warning(rf_factory, capsys):
+    rfdetr.init()
+    assert not capsys.readouterr().err
 
 
 @pytest.mark.parametrize("installed_version", ["1.11.0.dev0", "1.12.0"])
 def test_unqualified_version_warns_once_without_blocking(
-    rf_factory, monkeypatch, installed_version
+    rf_factory, monkeypatch, capsys, installed_version
 ):
     monkeypatch.setattr(rfdetr, "version", lambda package: installed_version)
-    with pytest.warns(UserWarning, match="has not been qualified"):
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
         rfdetr.init()
-    with warnings.catch_warnings(record=True) as captured:
-        warnings.simplefilter("always")
+        assert (
+            "[TraceML] RF-DETR: version " + installed_version
+            in capsys.readouterr().err
+        )
         rfdetr.init()
-    assert not captured
+    assert not capsys.readouterr().err
 
 
 def test_source_checkout_without_package_metadata_warns(
-    rf_factory, monkeypatch
+    rf_factory, monkeypatch, capsys
 ):
     def missing_version(package):
         raise rfdetr.PackageNotFoundError(package)
 
     monkeypatch.setattr(rfdetr, "version", missing_version)
-    with pytest.warns(UserWarning, match="RF-DETR unknown"):
-        rfdetr.init()
+    rfdetr.init()
+    assert "[TraceML] RF-DETR: version unknown" in capsys.readouterr().err

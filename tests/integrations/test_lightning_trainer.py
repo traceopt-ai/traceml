@@ -202,6 +202,88 @@ def test_lightning_trainer_accumulation_groups_microbatches(
     assert get_trace_session_state().step == trainer.global_step
 
 
+def test_lightning_prefit_fetches_stay_out_of_input_wait(L):
+    traceml_lightning.init()
+    train, _ = _loaders()
+    preview = iter(train)
+    next(preview)
+    next(preview)
+    trainer = _trainer(L, [traceml_lightning.TraceMLCallback()], max_steps=3)
+    trainer.fit(_module_class(L)(), train_dataloaders=train)
+    batches = drain_step_time_batches()
+    assert [batch.step for batch in batches] == [1, 2, 3]
+    assert _counts(batches, FETCH) == [1, 1, 1]
+
+
+def test_lightning_completed_step_counts_reach_summary(L, tmp_path):
+    from tests.sqlite_fixtures import summary_database
+    from traceml_ai.aggregator.sqlite_writers import step_memory, step_time
+    from traceml_ai.reporting.sections.step_memory import (
+        StepMemorySummarySection,
+    )
+    from traceml_ai.reporting.sections.step_time import StepTimeSummarySection
+    from traceml_ai.samplers.step_memory_sampler import StepMemorySampler
+    from traceml_ai.samplers.step_time_sampler import StepTimeSampler
+    from traceml_ai.telemetry.envelope import normalize_telemetry_envelope
+
+    traceml_lightning.init()
+    train, _ = _loaders()
+    trainer = _trainer(L, [traceml_lightning.TraceMLCallback()], max_steps=3)
+    trainer.fit(_module_class(L)(), train_dataloaders=train)
+    assert trainer.global_step == 3
+
+    path = tmp_path / "summary.db"
+    with summary_database(path) as conn:
+        for sampler, writer in (
+            (StepTimeSampler(), step_time),
+            (StepMemorySampler(), step_memory),
+        ):
+            sampler.sample()
+            sampler.sender.rank = 0
+            envelope = normalize_telemetry_envelope(
+                sampler.sender.collect_payload()
+            )
+            assert envelope is not None
+            rows_by_table = writer.build_rows(envelope, recv_ts_ns=1)
+            assert sum(map(len, rows_by_table.values())) == 3
+            writer.insert_rows(conn, rows_by_table)
+    for section in (StepTimeSummarySection, StepMemorySummarySection):
+        payload = section().build(str(path)).payload
+        assert (
+            payload["metadata"]["training_total_steps"] == trainer.global_step
+        )
+        assert (
+            payload["metadata"]["training_latest_step"] == trainer.global_step
+        )
+
+
+def test_lightning_out_of_batch_forwards_are_not_charged_to_steps(L):
+    traceml_lightning.init()
+
+    class ExtraForwards(L.Callback):
+        def on_train_epoch_start(self, trainer, module):
+            assert trainer.training
+            with torch.no_grad():
+                module(torch.zeros(1, 8))
+
+        def on_train_batch_end(
+            self, trainer, module, outputs, batch, batch_idx
+        ):
+            assert trainer.training
+            with torch.no_grad():
+                module(batch[0])
+
+    train, _ = _loaders()
+    trainer = _trainer(
+        L, [traceml_lightning.TraceMLCallback(), ExtraForwards()], max_steps=3
+    )
+    trainer.fit(_module_class(L)(), train_dataloaders=train)
+    batches = drain_step_time_batches()
+    assert [batch.step for batch in batches] == [1, 2, 3]
+    assert _counts(batches, FORWARD) == [1, 1, 1]
+    assert _counts(batches, BACKWARD) == [1, 1, 1]
+
+
 def test_lightning_trainer_validation_fetches_stay_out_of_input_wait(L):
     traceml_lightning.init()
     train, val = _loaders()

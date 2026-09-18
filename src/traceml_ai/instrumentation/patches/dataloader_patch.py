@@ -30,12 +30,21 @@ def _timing_allowed() -> bool:
 
     enabled = getattr(_DL_TLS, "_traceml_dl_enabled", None)
     if enabled is None:
-        return True
+        return not getattr(_DL_TLS, "_traceml_dl_require_scope", False)
     try:
         return bool(enabled())
     except Exception:
         # Instrumentation policy must never interrupt the DataLoader.
         return False
+
+
+def require_dataloader_timing_scope() -> None:
+    """Record fetches only within a callback's timing scope on this thread.
+
+    Persists for this thread's lifetime, including subsequent manual
+    ``trace_step`` loops, whose fetches remain untimed without a timing scope.
+    """
+    _DL_TLS._traceml_dl_require_scope = True
 
 
 class suppress_dataloader_timing:

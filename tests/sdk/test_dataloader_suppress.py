@@ -7,8 +7,10 @@ torch = pytest.importorskip("torch")
 from torch.utils.data import DataLoader, TensorDataset  # noqa: E402
 
 from traceml_ai.instrumentation.patches.dataloader_patch import (  # noqa: E402
+    _DL_TLS,
     dataloader_timing_scope,
     patch_dataloader,
+    require_dataloader_timing_scope,
     suppress_dataloader_timing,
 )
 from traceml_ai.instrumentation.step_events import (  # noqa: E402
@@ -27,6 +29,9 @@ _FETCH = "_traceml_internal:dataloader_next"
 @pytest.fixture(autouse=True)
 def _armed_and_clean(monkeypatch):
     monkeypatch.delenv("TRACEML_DISABLED", raising=False)
+    monkeypatch.setattr(
+        _DL_TLS, "_traceml_dl_require_scope", False, raising=False
+    )
     previous = is_tracing_armed()
     patch_dataloader()
     _set_tracing_armed(True)
@@ -52,6 +57,28 @@ def test_fetches_are_timed_when_not_suppressed():
         next(it)
 
     assert _fetch_events() == 3
+
+
+def test_required_scope_preserves_active_capture_and_stops_idle_fetches():
+    it = iter(_loader(8))
+    with dataloader_timing_scope(lambda: True):
+        next(it)
+        capture = begin_step_capture()
+        require_dataloader_timing_scope()
+        next(it)
+        assert begin_step_capture() is capture
+        assert _fetch_events() == 2
+
+    next(it)
+    assert _fetch_events() == 2
+    abort_step_capture(capture)
+    with dataloader_timing_scope(lambda: True):
+        next(it)
+        assert _fetch_events() == 1
+    abort_step_capture(begin_step_capture())
+    next(it)
+    assert _fetch_events() == 0
+    assert is_tracing_armed()
 
 
 def test_suppressed_fetches_record_nothing():

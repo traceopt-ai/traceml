@@ -4,6 +4,14 @@
 
 **Find out if your GPU is waiting for data during PyTorch training.**
 
+**Works with:** [PyTorch](https://traceopt-ai.github.io/traceml/user_guide/quickstart/) ·
+[Hugging Face Trainer](https://traceopt-ai.github.io/traceml/user_guide/integrations/huggingface/) ·
+[PyTorch Lightning](https://traceopt-ai.github.io/traceml/user_guide/integrations/lightning/) ·
+[RF-DETR](https://traceopt-ai.github.io/traceml/user_guide/integrations/rfdetr/) ·
+[Ray Train](https://traceopt-ai.github.io/traceml/user_guide/integrations/ray/) ·
+[Slurm](https://traceopt-ai.github.io/traceml/user_guide/slurm/)
+([support details](https://traceopt-ai.github.io/traceml/user_guide/integrations/))
+
 [![PyPI version](https://img.shields.io/pypi/v/traceml-ai.svg)](https://pypi.org/project/traceml-ai/)
 [![CI](https://github.com/traceopt-ai/traceml/actions/workflows/ci.yml/badge.svg)](https://github.com/traceopt-ai/traceml/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)

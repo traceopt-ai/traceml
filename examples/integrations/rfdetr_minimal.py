@@ -34,7 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-dir",
         required=True,
         type=Path,
-        help="New directory for RF-DETR checkpoints and training configuration",
+        help="New directory for RF-DETR checkpoints and training config",
     )
     parser.add_argument("--epochs", type=_positive_int, default=2)
     parser.add_argument("--batch-size", type=_positive_int, default=2)
@@ -101,7 +101,8 @@ def main(argv: list[str] | None = None) -> None:
             output_dir.mkdir(parents=True, exist_ok=False)
         except FileExistsError:
             parser.error(
-                f"output directory already exists; choose a new path: {output_dir}"
+                "output directory already exists; choose a new path: "
+                f"{output_dir}"
             )
 
     torch.manual_seed(42)
