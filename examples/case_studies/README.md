@@ -13,6 +13,12 @@ found, the fix, and the measured before/after.
 |---|---|---|---|
 | [resnet18_input_bound](resnet18_input_bound/) | ResNet-18 (single T4) | Input-bound data loading | 43.8% lower step time; median GPU utilization 51% to 100% |
 
+## Investigations awaiting measurements
+
+| Investigation | Model | Question | Status |
+|---|---|---|---|
+| [rfdetr_nano_training](rfdetr_nano_training/) | RF-DETR Nano (single GPU; optional DDP) | Where does native COCO training time go? Upstream issue #1410 | Reproducible protocol; GPU results pending |
+
 ## Adding a case study
 
 1. Run a training job under TraceML and identify the bottleneck from phase timing.
