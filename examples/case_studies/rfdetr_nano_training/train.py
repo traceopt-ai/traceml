@@ -135,9 +135,25 @@ def export_profile(profiler, output, rank):
     """Save the raw trace and inclusive scope totals from its active window."""
     from torch.profiler import ProfilerActivity
 
-    profiler.export_chrome_trace(str(output / f"profile-rank-{rank}.json"))
+    trace_path = output / f"profile-rank-{rank}.json"
+    profiler.export_chrome_trace(str(trace_path))
+    trace = json.loads(trace_path.read_text())
+    cpu_events = {
+        name: [
+            event
+            for event in trace["traceEvents"]
+            if event.get("name") == name
+            and event.get("cat") == "user_annotation"
+            and event.get("ph") == "X"
+        ]
+        for name in PROFILE_SCOPES
+    }
     events = {event.key: event for event in profiler.key_averages()}
-    missing = set(PROFILE_SCOPES) - events.keys()
+    missing = {
+        name
+        for name in PROFILE_SCOPES
+        if name not in events or not cpu_events[name]
+    }
     if missing:
         raise RuntimeError(f"Profiler is missing RF-DETR scopes: {missing}")
     cuda = ProfilerActivity.CUDA in profiler.activities
@@ -151,7 +167,12 @@ def export_profile(profiler, output, rank):
             "scopes": {
                 name: {
                     "calls": events[name].count,
-                    "cpu_total_ms": events[name].cpu_time_total / 1000,
+                    # PyTorch 2.9 reports zero cpu_time_total for these user
+                    # annotations even though their Chrome events have duration.
+                    "cpu_total_ms": sum(
+                        event["dur"] for event in cpu_events[name]
+                    )
+                    / 1000,
                     "cuda_total_ms": (
                         events[name].device_time_total / 1000 if cuda else None
                     ),

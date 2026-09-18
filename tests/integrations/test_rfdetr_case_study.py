@@ -239,6 +239,55 @@ def test_separate_profiler_attribution_validated(tmp_path, change):
         )
 
 
+def test_profiler_cpu_time_falls_back_to_raw_annotations(tmp_path):
+    base, trace, profile = (
+        tmp_path / name for name in ("base", "trace", "profile")
+    )
+    run_files(base, "baseline")
+    run_files(trace, "traced")
+    run_files(profile, "profiler")
+    scopes = {}
+    events = []
+    for name, durations, cuda_ms in (
+        ("rfdetr/criterion_including_matcher", [38_000] * 10, 320),
+        ("rfdetr/matcher", [20_000] * 10, 160),
+    ):
+        scopes[name] = {
+            "calls": 10,
+            "cpu_total_ms": 0,
+            "cuda_total_ms": cuda_ms,
+        }
+        events.extend(
+            {
+                "name": name,
+                "cat": "user_annotation",
+                "ph": "X",
+                "dur": duration,
+            }
+            for duration in durations
+        )
+    training.write_json(
+        profile / "profile-summary-rank-0.json",
+        {
+            "rank": 0,
+            "start_step": 26,
+            "end_step": 35,
+            "active_steps": 10,
+            "scopes": scopes,
+        },
+    )
+    training.write_json(
+        profile / "profile-rank-0.json", {"traceEvents": events}
+    )
+
+    text = reporting.make_report([(base, trace)], profile)
+
+    assert "Criterion (including matcher) | 10 | 38.000 | 32.000" in text
+    assert (
+        "Matcher (batched and fallback calls) | 10 | 20.000 | 16.000" in text
+    )
+
+
 def test_vcs_install_inside_another_repo_uses_package_commit(
     tmp_path, monkeypatch
 ):

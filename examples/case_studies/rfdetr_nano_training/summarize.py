@@ -109,6 +109,30 @@ def window_ms(run, ranks):
     )
 
 
+def raw_cpu_scope_total(directory, rank, name, calls):
+    """Read CPU user-annotation duration from the portable Chrome trace."""
+    path = Path(directory) / f"profile-rank-{rank}.json"
+    try:
+        events = json.loads(path.read_text())["traceEvents"]
+    except (OSError, KeyError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Missing usable profiler trace: {path}") from exc
+    durations = [
+        event.get("dur")
+        for event in events
+        if event.get("name") == name
+        and event.get("cat") == "user_annotation"
+        and event.get("ph") == "X"
+    ]
+    if len(durations) != calls or any(
+        not isinstance(value, (int, float))
+        or not math.isfinite(value)
+        or value < 0
+        for value in durations
+    ):
+        raise ValueError(f"{path}: incomplete CPU annotations for {name}")
+    return sum(durations) / 1000
+
+
 def profiler_table(directory, reference, reference_ranks):
     run, ranks = read_run(directory, "profiler")
     if comparison_config(run) != comparison_config(reference) or [
@@ -157,6 +181,8 @@ def profiler_table(directory, reference, reference_ranks):
             cells = []
             for key in ("cpu_total_ms", "cuda_total_ms"):
                 value = metrics[key]
+                if key == "cpu_total_ms" and value == 0:
+                    value = raw_cpu_scope_total(directory, rank, name, calls)
                 if value is None and key == "cuda_total_ms":
                     cells.append("n/a")
                 elif value is None or not math.isfinite(value) or value < 0:
