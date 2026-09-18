@@ -6,10 +6,12 @@ contributes the T4 baseline and step attribution requested in
 [RF-DETR issue #1410](https://github.com/roboflow/rf-detr/issues/1410).
 
 One T4 sustained about **18.5 images/s**; four-T4 DDP sustained about
-**60.5 images/s**, a **3.26x** throughput increase with **81.5%** scaling
-efficiency. Mean input waiting remained below 0.25 ms/step. Backward was the
-largest measured phase and increased under DDP, consistent with synchronization
-and gradient communication occurring in that region.
+**60.5 images/s**, a **3.26x** throughput increase with **81.5% weak-scaling
+efficiency** at a fixed batch of four per GPU. The global batch grows from 4 to
+16. Mean input waiting remained below
+0.25 ms/step. Backward was the largest measured phase and increased under DDP,
+consistent with synchronization and gradient communication occurring in that
+region.
 
 ## Results
 
