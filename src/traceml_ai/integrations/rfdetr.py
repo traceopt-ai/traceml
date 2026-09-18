@@ -175,8 +175,7 @@ def init():
         ):
             raise ImportError(
                 "RF-DETR training dependencies are required. Install "
-                "`pip install 'rfdetr[train]==1.10.1'`, or the exact "
-                "development revision specified by your case study."
+                "them with `pip install 'rfdetr[train]==1.10.1'`."
             ) from exc
         raise
 
@@ -211,9 +210,9 @@ def init():
             installed_version = "unknown"
         if installed_version != "1.10.1":
             _warn(
-                f"version {installed_version} is outside the pinned 1.10.1 "
-                "release. Development support is limited to the RF-DETR "
-                "commit in docs/user_guide/integrations/rfdetr.md."
+                f"version {installed_version} has not been validated with "
+                "this integration. Tested versions are listed in "
+                "docs/user_guide/integrations/rfdetr.md."
             )
         _install_factory(training, original)
     except Exception as exc:
