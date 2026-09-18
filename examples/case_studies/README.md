@@ -8,7 +8,7 @@ records its workload, environment, measurement method, result and limits.
 | Case study | Workload | Finding | Result |
 |---|---|---|---|
 | [ResNet-18 input pipeline](resnet18_input_bound/) | ResNet-18, single T4 | Synchronous image loading left the GPU idle | 43.8% lower step time after fixing the input pipeline |
-| [RF-DETR Nano training](rfdetr_nano_training/) | RF-DETR Nano with COCO, single T4 | Input loading kept up; backward was the largest measured phase | 18.5 images/s; 0.23 ms/step exposed input wait |
+| [RF-DETR Nano training](rfdetr_nano_training/) | RF-DETR Nano with COCO, one and four T4s | Input loading kept up; DDP added time mainly in backward | 60.5 images/s on four T4s; 3.26x throughput scaling |
 
 ## Adding a case study
 

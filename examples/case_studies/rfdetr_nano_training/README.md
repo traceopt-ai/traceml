@@ -1,16 +1,19 @@
-# RF-DETR Nano training on a single T4
+# RF-DETR Nano training on T4 GPUs
 
 This case study measures where time goes in eager RF-DETR Nano training on a
-Tesla T4 with real COCO train2017 batches. It contributes the T4 baseline and
-step attribution requested in
+single Tesla T4 and with four-T4 DDP, using real COCO train2017 batches. It
+contributes the T4 baseline and step attribution requested in
 [RF-DETR issue #1410](https://github.com/roboflow/rf-detr/issues/1410).
 
-The run sustained about **18.5 images/s**. Input waiting averaged only
-**0.23 ms/step**, so two DataLoader workers were already keeping up. Backward
-was the largest measured phase, while criterion and matcher also accounted for
-meaningful work.
+One T4 sustained about **18.5 images/s**; four-T4 DDP sustained about
+**60.5 images/s**, a **3.26x** throughput increase with **81.5%** scaling
+efficiency. Mean input waiting remained below 0.25 ms/step. Backward was the
+largest measured phase and increased under DDP, consistent with synchronization
+and gradient communication occurring in that region.
 
 ## Results
+
+### Single GPU
 
 Three independent native runs used 50 optimizer steps, discarded steps 1–10,
 and measured steps 11–50.
@@ -51,6 +54,39 @@ for this CUDA input and used its SciPy fallback.
 TraceML added a median 5.6 ms/step (2.55%) across the three matched
 native/traced pairs.
 
+### Four-GPU DDP
+
+The DDP runs used the same model and per-GPU batch size, for a global batch of
+16. Each row is an independent native run.
+
+| Run | Wall time/step | Images/s |
+|---:|---:|---:|
+| 1 | 263.7 ms | 60.67 |
+| 2 | 272.1 ms | 58.80 |
+| 3 | 264.3 ms | 60.53 |
+
+Mean phase times across all ranks and traced runs:
+
+| Region | Single T4 | Four-T4 DDP |
+|---|---:|---:|
+| Step envelope | 221.3 ms | 269.6 ms |
+| Forward | 44.3 ms | 46.7 ms |
+| Backward | 79.3 ms | 114.7 ms |
+| Optimizer region | 56.2 ms | 56.6 ms |
+| Residual | 39.7 ms | 49.7 ms |
+| Input wait | 0.23 ms | 0.24 ms |
+| Host-to-device | 1.57 ms | 1.63 ms |
+
+Median native throughput increased from 18.56 to 60.53 images/s. The four-rank
+step envelopes stayed closely aligned: the largest difference between ranks in
+any traced run was 1.6 ms. The main phase-level change was backward, which rose
+by about 35 ms/step. These timings locate the added cost within the backward
+region but do not isolate individual NCCL operations.
+
+TraceML's median measured overhead in the DDP pairs was 2.70%; the individual
+pairs ranged from -1.88% to +3.63%, indicating run-to-run noise at this sample
+size.
+
 ## Setup
 
 | | Configuration |
@@ -58,7 +94,7 @@ native/traced pairs.
 | GPU | Tesla T4, 16 GB; driver 595.71.05 |
 | CPU | Intel Xeon Platinum 8259CL; 24 physical cores |
 | RF-DETR | [`0ed5be8`](https://github.com/roboflow/rf-detr/tree/0ed5be8e8d6762c4978a11671cbf34cfc0595e25) |
-| TraceML | `622399cccc67f5c81b44096a3c47169134bd13a2` |
+| TraceML | `622399c` (single GPU); `8549e91` (DDP) |
 | PyTorch | 2.9.1+cu128 |
 | Model | RF-DETR Nano, pretrained weights, resolution 384 |
 | Dataset | COCO train2017 |
@@ -73,6 +109,8 @@ Throughput is CUDA-synchronized wall time across the complete measurement
 window. TraceML records asynchronous CUDA events for GPU regions and resolves
 them later without synchronizing the training loop; input wait uses host time.
 Criterion and matcher attribution comes from the separate PyTorch Profiler run.
+The TraceML revisions differ only in documentation and integration messaging;
+the training and timing implementation is unchanged.
 
 ## Reproduce
 
@@ -114,6 +152,7 @@ set -e
 CASE=examples/case_studies/rfdetr_nano_training
 DATASET="$PWD/data/coco2017"
 BATCH="$PWD/logs/rfdetr-nano/t4-01"
+NPROC=1
 export CUDA_VISIBLE_DEVICES=0
 export OMP_NUM_THREADS=2
 
@@ -123,13 +162,25 @@ for repeat in 1 2 3; do
   for mode in $modes; do
     disable=()
     if [ "$mode" = baseline ]; then disable=(--disable-traceml); fi
-    traceml run "$CASE/train.py" --mode summary --nproc-per-node 1 \
+    traceml run "$CASE/train.py" --mode summary --nproc-per-node "$NPROC" \
       --logs-dir "$BATCH/telemetry" --run-name "pair-$repeat-$mode" \
       "${disable[@]}" --args \
       --dataset-dir "$DATASET" --output-dir "$BATCH/pair-$repeat-$mode"
   done
 done
 ```
+
+For four-GPU DDP, repeat the paired loop with a new output directory and four
+processes:
+
+```bash
+BATCH="$PWD/logs/rfdetr-nano/t4-ddp-01"
+NPROC=4
+export CUDA_VISIBLE_DEVICES=0,1,2,3
+```
+
+The batch size remains four per rank, giving a global batch of 16. Generate the
+DDP report with the same `summarize.py` command and omit `--profile-dir`.
 
 Run the profiler separately, then generate the report:
 
@@ -151,6 +202,6 @@ traces remain in the selected `BATCH` directory.
 
 ## Scope
 
-This is an eager-training baseline on one T4. It does not evaluate
-`torch.compile`, CUDA graphs, DDP or model accuracy, and it makes no claim about
-those configurations.
+This is an eager-training baseline on one node with one or four T4 GPUs. It does
+not evaluate `torch.compile`, CUDA graphs, multi-node training or model accuracy,
+and it makes no claim about those configurations.

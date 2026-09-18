@@ -123,11 +123,12 @@ reason and RF-DETR continues with its existing callbacks. Native RF-DETR errors
 still propagate.
 
 RF-DETR 1.10.1 is pinned in CI for single-process training and two-process Gloo
-coverage. The [single-T4 RF-DETR Nano case study](https://github.com/traceopt-ai/traceml/tree/main/examples/case_studies/rfdetr_nano_training)
-also exercises eager CUDA training against development commit
+coverage. The [RF-DETR Nano case study](https://github.com/traceopt-ai/traceml/tree/main/examples/case_studies/rfdetr_nano_training)
+also exercises eager CUDA training on one and four T4 GPUs against development
+commit
 [`0ed5be8`](https://github.com/roboflow/rf-detr/commit/0ed5be8e8d6762c4978a11671cbf34cfc0595e25).
-This evidence is not a broad compatibility matrix. CUDA CI, NCCL DDP and
-physical multi-node execution have not yet been validated. See the
+This evidence is not a broad compatibility matrix. CUDA CI and physical
+multi-node execution have not yet been validated. See the
 [support matrix](../integrations.md#integration-support-matrix) for the current
 coverage.
 
