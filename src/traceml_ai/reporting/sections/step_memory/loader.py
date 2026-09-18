@@ -261,8 +261,11 @@ def load_step_memory_section_data(
 
     try:
         latest_step_observed = _load_latest_step_observed(conn)
+        # Completed captures are one-based; the counter survives retention.
         training_steps = (
-            latest_step_observed + 1 if latest_step_observed is not None else 0
+            max(0, latest_step_observed)
+            if latest_step_observed is not None
+            else 0
         )
 
         gpu_total_bytes = load_gpu_total_bytes(conn)

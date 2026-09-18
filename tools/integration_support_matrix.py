@@ -14,7 +14,6 @@ import sys
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-
 REPOSITORY_URL = "https://github.com/traceopt-ai/traceml/blob/main/"
 ISSUE_URL = "https://github.com/traceopt-ai/traceml/issues/"
 REQUIRED_IDS = {
@@ -22,6 +21,7 @@ REQUIRED_IDS = {
     "huggingface-trainer",
     "accelerate",
     "lightning",
+    "rfdetr",
     "ray-train",
     "deepspeed",
     "wandb-mlflow",
