@@ -50,6 +50,7 @@ def rf_factory(monkeypatch):
     monkeypatch.setitem(sys.modules, "rfdetr.training", training)
     monkeypatch.setattr(lightning, "IS_LIGHTNING_AVAILABLE", True)
     effective = SimpleNamespace(disabled=False)
+    native_init = lightning.init
     monkeypatch.setattr(lightning, "init", lambda: effective)
     monkeypatch.setattr(rfdetr, "version", lambda package: "1.10.1")
     return SimpleNamespace(
@@ -59,6 +60,7 @@ def rf_factory(monkeypatch):
         defaults=default_callbacks,
         calls=calls,
         effective=effective,
+        native_init=native_init,
         train_config=SimpleNamespace(accelerator="cpu", strategy="auto"),
         model_config=SimpleNamespace(
             compile=False,
@@ -223,6 +225,25 @@ def test_trainer_keyword_overrides_are_checked(rf_factory, capsys):
     assert returned.callbacks == rf_factory.defaults
     assert rf_factory.calls[0][-1] == {"strategy": "deepspeed"}
     assert "deepspeed" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("error", [ValueError, BrokenPipeError])
+def test_warning_output_failure_preserves_native_trainer(
+    rf_factory, monkeypatch, error
+):
+    def failed_write(message):
+        raise error("stderr unavailable")
+
+    rfdetr.init()
+    rf_factory.model_config.compile = True
+    with monkeypatch.context() as patch:
+        patch.setattr(sys, "stderr", SimpleNamespace(write=failed_write))
+        returned = rf_factory.training.build_trainer(
+            rf_factory.train_config, rf_factory.model_config
+        )
+    assert returned is rf_factory.trainer
+    assert len(rf_factory.calls) == 1
+    assert returned.callbacks == rf_factory.defaults
 
 
 @pytest.mark.parametrize(
@@ -393,6 +414,57 @@ def test_factory_setup_failure_warns_without_patching(
     assert rfdetr.init() is rf_factory.effective
     assert rf_factory.training.build_trainer is rf_factory.original
     assert "callback unavailable" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "failure", ["mode", "device", "callback", "interface", "install", "eval"]
+)
+def test_skipped_adapter_does_not_accumulate_fetches(
+    rf_factory, monkeypatch, failure
+):
+    from torch.utils.data import DataLoader
+
+    from traceml_ai.instrumentation.step_events import (
+        abort_step_capture,
+        begin_step_capture,
+        drain_step_time_batches,
+    )
+    from traceml_ai.runtime.arming import is_tracing_armed
+
+    def unavailable(*args, **kwargs):
+        raise RuntimeError("injected adapter failure")
+
+    monkeypatch.setattr(lightning, "init", rf_factory.native_init)
+    if failure == "mode":
+        rf_factory.model_config.compile = True
+    elif failure == "device":
+        rf_factory.trainer.strategy.root_device = "mps:0"
+    elif failure == "callback":
+        monkeypatch.setattr(rfdetr._callback_class(), "__init__", unavailable)
+    elif failure == "interface":
+        rf_factory.training.build_trainer = lambda: rf_factory.trainer
+    elif failure == "install":
+        monkeypatch.setattr(rfdetr, "_callback_class", unavailable)
+
+    abort_step_capture(begin_step_capture())
+    drain_step_time_batches()
+    try:
+        rfdetr.init()
+        if failure == "interface":
+            trainer = rf_factory.training.build_trainer()
+        else:
+            trainer = rf_factory.training.build_trainer(
+                rf_factory.train_config,
+                rf_factory.model_config,
+                include_training_callbacks=failure != "eval",
+            )
+        assert trainer.callbacks == rf_factory.defaults
+        assert is_tracing_armed()
+        assert len(list(DataLoader(range(200), batch_size=1))) == 200
+        assert begin_step_capture().timing_events == []
+        assert drain_step_time_batches() == []
+    finally:
+        abort_step_capture(begin_step_capture())
 
 
 def test_qualified_release_has_no_version_warning(rf_factory, capsys):

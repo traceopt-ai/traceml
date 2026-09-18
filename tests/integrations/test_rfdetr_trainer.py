@@ -104,10 +104,49 @@ def test_adapter_failure_preserves_native_training(
         assert not torch.equal(module.model.projection.weight, before)
         assert torch.isfinite(trainer.callback_metrics["train/loss"])
         assert drain_step_time_batches() == []
+        assert begin_step_capture().timing_events == []
         assert (
-            "[TraceML] RF-DETR: skipping instrumentation: injected adapter failure"
-            in capsys.readouterr().err
+            "[TraceML] RF-DETR: skipping instrumentation: "
+            "injected adapter failure" in capsys.readouterr().err
         )
+
+
+@pytest.mark.parametrize("existing_callback", [False, True])
+def test_training_records_after_skipped_adapter(
+    tmp_path, monkeypatch, existing_callback
+):
+    from traceml_ai.integrations.lightning import TraceMLCallback
+
+    tracing.init()
+    from rfdetr.training import build_trainer
+
+    with fixture.components(tmp_path, accumulation=1) as (module, data):
+        kwargs = dict(
+            max_steps=2,
+            limit_val_batches=0,
+            num_sanity_val_steps=0,
+            logger=False,
+            enable_model_summary=False,
+        )
+        with monkeypatch.context() as patch:
+            patch.setattr(module.model_config, "compile", True)
+            skipped = build_trainer(
+                module.train_config, module.model_config, **kwargs
+            )
+        assert not any(
+            isinstance(cb, TraceMLCallback) for cb in skipped.callbacks
+        )
+        if existing_callback:
+            kwargs["callbacks"] = [TraceMLCallback()]
+        trainer = build_trainer(
+            module.train_config, module.model_config, **kwargs
+        )
+        trainer.fit(module, datamodule=data)
+        batches = drain_step_time_batches()
+        assert [batch.step for batch in batches] == [1, 2]
+        assert counts(batches, "dataloader_next") == [1, 1]
+        assert trainer.global_step == 2
+        assert begin_step_capture().timing_events == []
 
 
 @pytest.mark.parametrize(

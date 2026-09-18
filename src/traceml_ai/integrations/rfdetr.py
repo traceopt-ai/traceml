@@ -15,7 +15,10 @@ _TraceMLCallback = None
 
 
 def _warn(message):
-    print(f"[TraceML] RF-DETR: {message}", file=sys.stderr)
+    try:
+        print(f"[TraceML] RF-DETR: {message}", file=sys.stderr)
+    except Exception:
+        pass
 
 
 def _callback_class():
@@ -180,6 +183,13 @@ def init():
     from traceml_ai.integrations import lightning
 
     config = lightning.init()
+    if not config.disabled:
+        from traceml_ai.instrumentation.patches.dataloader_patch import (
+            require_dataloader_timing_scope,
+        )
+
+        # A skipped adapter has no callback to complete DataLoader captures.
+        require_dataloader_timing_scope()
     original = getattr(training, "build_trainer", None)
     if config.disabled or getattr(original, "_traceml_rfdetr_factory", False):
         return config

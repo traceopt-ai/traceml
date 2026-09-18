@@ -9,6 +9,8 @@ which carry the full historical notes for versions predating this file.
 
 - Added opt-in RF-DETR instrumentation for eager detection. Unsupported
   configurations or adapter failures warn and leave native training intact.
+  Skipped instrumentation no longer accumulates DataLoader timing records.
+- RF-DETR and Lightning diagnostics cannot interrupt training when stderr fails.
 - Lightning timing excludes pre-fit loader previews and out-of-batch forwards;
   forward instrumentation attaches after EMA initialization.
 - Corrected Step Time and Step Memory `training_total_steps`: three completed

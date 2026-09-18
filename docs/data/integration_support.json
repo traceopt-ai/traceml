@@ -162,7 +162,7 @@
       "limitations": {
         "guide_label": "RF-DETR limitations",
         "guide": "user_guide/integrations/rfdetr.md#limitations-and-validation",
-        "issues": []
+        "issues": [141, 323]
       }
     },
     {

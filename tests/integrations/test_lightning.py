@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 from queue import Queue
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 import torch.nn as nn
@@ -20,6 +21,28 @@ def _enable_callback_without_lightning(monkeypatch):
         "IS_LIGHTNING_AVAILABLE",
         True,
     )
+
+
+@pytest.mark.parametrize("error", [ValueError, BrokenPipeError])
+@pytest.mark.parametrize("logger_fails", [False, True])
+def test_lightning_error_reporting_never_raises(
+    monkeypatch, error, logger_fails
+):
+    from traceml_ai.loggers import error_log
+
+    logger = Mock()
+    if logger_fails:
+        logger.exception.side_effect = OSError("log unavailable")
+    monkeypatch.setattr(error_log, "get_error_logger", lambda name: logger)
+    stream = Mock()
+    stream.write.side_effect = error("stderr unavailable")
+    with monkeypatch.context() as patch:
+        patch.setattr(lightning_integration.sys, "stderr", stream)
+        lightning_integration._log_lightning_error(
+            "test diagnostic", RuntimeError("adapter failure")
+        )
+    logger.exception.assert_called_once_with("[TraceML] %s", "test diagnostic")
+    assert stream.write.called
 
 
 @pytest.mark.parametrize("stage", ["validate", "test", "predict", None])

@@ -106,7 +106,9 @@ TraceML final summary. Use homogeneous GPU hardware when comparing rank timing.
 One TraceML step is one optimizer-update attempt. With gradient accumulation,
 micro-batch measurements are combined, including a shorter final group.
 Validation, sanity checks, dataset previews and final evaluation are excluded
-from training-step measurements. Whole-process duration still includes startup,
+from training-step measurements. RF-DETR initialization limits DataLoader timing
+to a callback's active scope, so skipped instrumentation retains no fetch records.
+Whole-process duration still includes startup,
 evaluation and checkpoint work. Short runs include warm-up effects; compare
 enough steps to avoid treating startup as steady-state performance.
 `--trace-max-steps` caps recording, **not training**; use `--epochs` to limit this
