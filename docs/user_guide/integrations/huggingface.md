@@ -97,7 +97,10 @@ Accelerate prepares each training batch before the Trainer's step callback.
 TraceML measures those host-to-device transfers as short parts of Traced Step
 Time and combines them with the later forward, backward, and optimizer work.
 DataLoader waiting remains separate Input Wait, including blocking look-ahead
-fetches, and is not included in the transfer regions.
+fetches, and is not included in the transfer regions. The timing scope opens
+only while the standard Trainer requests training batches; evaluation and
+prediction input work is excluded, including direct `trainer.evaluate()` and
+`trainer.predict(...)` calls made outside training.
 
 TraceML follows HF's completed-step count even when mixed-precision overflow
 skips a parameter update. Step numbers are local to the process, so they may
@@ -111,21 +114,18 @@ callback can be reused by a later Trainer run.
 
 ## Limitations
 
-- **Transformers version.** Pre-step training H2D timing requires
+- **Transformers version.** Training Input Wait and pre-step H2D timing require
   `transformers>=4.46`, where `Trainer.get_batch_samples` is available. Older
-  versions warn once and continue training without that signal.
+  versions warn once and continue training without those signals.
 - **Lifecycle guard.** Failure/retry cleanup and duplicate-callback handling
   require `traceml_hf.init()` to install the Trainer lifecycle guard. If guard
   installation fails, TraceML reports the error and training continues without
   those guarantees. Custom `_inner_training_loop` overrides must call the
   guarded parent implementation to receive this handling.
-- **Evaluation input timing.** Evaluation loader fetches can be attributed to
-  the next training step. Training-batch H2D is scoped through
-  `Trainer.get_batch_samples`; evaluation transfers are not included in that
-  training H2D window.
 - **Custom batch collection.** A Trainer subclass that overrides
-  `get_batch_samples` bypasses the standard pre-step H2D hook. TraceML warns
-  once for the affected Trainer class and continues without that guarantee.
+  `get_batch_samples` bypasses the standard training-input hook. TraceML warns
+  once for the affected Trainer class and continues without training Input
+  Wait or pre-step H2D signals rather than reporting partial measurements.
 - **Memory window.** Temporary allocation peaks before the callback starts
   a step are outside its memory measurement.
 - **Callback registration.** Register the callback before `trainer.train()`

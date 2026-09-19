@@ -55,7 +55,16 @@ from traceml_ai.instrumentation.patches.h2d_auto_timer_patch import (  # noqa: E
     _enabled,
     _include_step_time,
 )
+from traceml_ai.instrumentation.patches.dataloader_patch import (  # noqa: E402,E501
+    _timing_allowed,
+)
+from traceml_ai.instrumentation.step_events import (  # noqa: E402
+    abort_step_capture,
+    begin_step_capture,
+    drain_step_time_batches,
+)
 from traceml_ai.integrations import huggingface as hf  # noqa: E402
+from traceml_ai.runtime.state import reset_trace_session_state  # noqa: E402
 from traceml_ai.sdk.instrumentation import trace_step  # noqa: E402
 from tests.step_time.factories import (  # noqa: E402
     rank_average,
@@ -114,10 +123,41 @@ class _FetchSpy:
         return getattr(self._inner, name)
 
 
+class _PhaseSpy:
+    """Record integration gates where Trainer consumes a prepared loader."""
+
+    def __init__(self, inner, phase, log):
+        self._inner = inner
+        self._phase = phase
+        self._log = log
+
+    def __iter__(self):
+        iterator = iter(self._inner)
+        while True:
+            self._log.append(
+                (
+                    self._phase,
+                    _timing_allowed(),
+                    _enabled(),
+                    _include_step_time(),
+                )
+            )
+            try:
+                yield next(iterator)
+            except StopIteration:
+                return
+
+    def __len__(self):
+        return len(self._inner)
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
 def _run_trainer(gradient_accumulation_steps: int, max_steps: int = 2):
     """Run a real Trainer and return the ordered (event, armed) log."""
     log: list[tuple[str, bool, bool]] = []
-    hf._install_batch_collection_h2d_timing()
+    hf._install_training_batch_timing()
     callback = hf.TraceMLTrainerCallback()
 
     begin, end = callback.on_step_begin, callback.on_step_end
@@ -210,10 +250,17 @@ def test_in_window_transfer_is_covered_positive_control() -> None:
 
 
 def test_batch_collection_hook_installation_is_idempotent() -> None:
-    hf._install_batch_collection_h2d_timing()
+    hf._install_training_batch_timing()
     installed = Trainer.get_batch_samples
-    hf._install_batch_collection_h2d_timing()
+    hf._install_training_batch_timing()
     assert Trainer.get_batch_samples is installed
+
+
+def test_non_training_input_scope_installation_is_idempotent() -> None:
+    hf._install_non_training_input_scopes()
+    installed = (Trainer.evaluate, Trainer.predict)
+    hf._install_non_training_input_scopes()
+    assert (Trainer.evaluate, Trainer.predict) == installed
 
 
 def test_missing_get_batch_samples_warns_once_and_skips_installation(
@@ -224,16 +271,17 @@ def test_missing_get_batch_samples_warns_once_and_skips_installation(
     monkeypatch.delattr(Trainer, "get_batch_samples")
 
     with caplog.at_level(logging.WARNING, logger=hf.__name__):
-        hf._install_batch_collection_h2d_timing()
-        hf._install_batch_collection_h2d_timing()
+        hf._install_training_batch_timing()
+        hf._install_training_batch_timing()
 
     messages = [record.getMessage() for record in caplog.records]
     unsupported = [
         message
         for message in messages
-        if "requires transformers>=4.46" in message
+        if "require transformers>=4.46" in message
     ]
     assert len(unsupported) == 1
+    assert "training Input Wait and pre-step H2D" in unsupported[0]
 
 
 def test_custom_batch_collection_override_warns_once(
@@ -247,8 +295,8 @@ def test_custom_batch_collection_override_warns_once(
 
     trainer = CustomTrainer()
     with caplog.at_level(logging.WARNING, logger=hf.__name__):
-        hf._warn_if_batch_collection_h2d_is_bypassed(trainer)
-        hf._warn_if_batch_collection_h2d_is_bypassed(trainer)
+        hf._warn_if_training_batch_timing_is_bypassed(trainer)
+        hf._warn_if_training_batch_timing_is_bypassed(trainer)
 
     messages = [record.getMessage() for record in caplog.records]
     bypassed = [
@@ -264,18 +312,148 @@ def test_installed_batch_collection_hook_does_not_warn(
     monkeypatch, caplog
 ) -> None:
     monkeypatch.setattr(hf, "_WARNED_CAPABILITIES", set())
-    hf._install_batch_collection_h2d_timing()
+    hf._install_training_batch_timing()
 
     class InheritedTrainer(Trainer):
         pass
 
     trainer = object.__new__(InheritedTrainer)
     with caplog.at_level(logging.WARNING, logger=hf.__name__):
-        hf._warn_if_batch_collection_h2d_is_bypassed(trainer)
+        hf._warn_if_training_batch_timing_is_bypassed(trainer)
 
     assert "cannot guarantee pre-step H2D timing" not in " ".join(
         record.getMessage() for record in caplog.records
     )
+
+
+def test_training_collection_excludes_evaluation_fetches(tmp_path) -> None:
+    """Only the standard training iterator opens the input timing gates."""
+    reset_trace_session_state()
+    abort_step_capture(begin_step_capture())
+    drain_step_time_batches()
+    hf.init()
+
+    log: list[tuple[str, bool, bool, bool]] = []
+    trainer = Trainer(
+        model=_Tiny(),
+        args=TrainingArguments(
+            output_dir=str(tmp_path),
+            per_device_train_batch_size=4,
+            per_device_eval_batch_size=4,
+            max_steps=2,
+            eval_strategy="steps",
+            eval_steps=1,
+            logging_strategy="no",
+            save_strategy="no",
+            report_to=[],
+            disable_tqdm=True,
+            use_cpu=True,
+        ),
+        train_dataset=_Batches(),
+        eval_dataset=_Batches(),
+        callbacks=[hf.TraceMLTrainerCallback()],
+    )
+
+    real_train_loader = trainer.get_train_dataloader
+    real_eval_loader = trainer.get_eval_dataloader
+    trainer.get_train_dataloader = lambda: _PhaseSpy(
+        real_train_loader(), "train", log
+    )
+    trainer.get_eval_dataloader = lambda *args, **kwargs: _PhaseSpy(
+        real_eval_loader(*args, **kwargs), "eval", log
+    )
+
+    trainer.train()
+
+    training = [entry[1:] for entry in log if entry[0] == "train"]
+    evaluation = [entry[1:] for entry in log if entry[0] == "eval"]
+    assert training and evaluation
+    assert all(
+        input_wait and h2d and step_time
+        for input_wait, h2d, step_time in training
+    )
+    assert all(
+        not input_wait and not h2d and not step_time
+        for input_wait, h2d, step_time in evaluation
+    )
+
+    batches = drain_step_time_batches()
+    assert [batch.step for batch in batches] == [1, 2]
+    assert begin_step_capture().timing_events == []
+
+
+def test_collection_bookkeeping_runs_outside_timing_gates(tmp_path) -> None:
+    """Token accounting after each fetch is not mislabeled as input or H2D."""
+    reset_trace_session_state()
+    abort_step_capture(begin_step_capture())
+    drain_step_time_batches()
+    hf.init()
+
+    states: list[tuple[bool, bool, bool]] = []
+
+    class BookkeepingTrainer(Trainer):
+        def _get_num_items_in_batch(self, *args, **kwargs):
+            states.append(
+                (_timing_allowed(), _enabled(), _include_step_time())
+            )
+            return super()._get_num_items_in_batch(*args, **kwargs)
+
+    trainer = BookkeepingTrainer(
+        model=_Tiny(),
+        args=TrainingArguments(
+            output_dir=str(tmp_path),
+            per_device_train_batch_size=4,
+            max_steps=1,
+            logging_strategy="no",
+            save_strategy="no",
+            report_to=[],
+            disable_tqdm=True,
+            use_cpu=True,
+        ),
+        train_dataset=_Batches(),
+        callbacks=[hf.TraceMLTrainerCallback()],
+    )
+    trainer.train()
+
+    assert states
+    assert all(
+        not input_wait and not h2d and not step_time
+        for input_wait, h2d, step_time in states
+    )
+
+
+@pytest.mark.parametrize("method_name", ["evaluate", "predict"])
+def test_standalone_non_training_input_leaves_no_pending_events(
+    tmp_path, method_name
+) -> None:
+    """Public non-training loops cannot contaminate a later traced step."""
+    reset_trace_session_state()
+    abort_step_capture(begin_step_capture())
+    drain_step_time_batches()
+    hf.init()
+
+    trainer = Trainer(
+        model=_Tiny(),
+        args=TrainingArguments(
+            output_dir=str(tmp_path),
+            per_device_eval_batch_size=4,
+            logging_strategy="no",
+            save_strategy="no",
+            report_to=[],
+            disable_tqdm=True,
+            use_cpu=True,
+        ),
+        eval_dataset=_Batches(),
+        callbacks=[hf.TraceMLTrainerCallback()],
+    )
+
+    if method_name == "evaluate":
+        trainer.evaluate()
+    else:
+        trainer.predict(_Batches())
+
+    assert drain_step_time_batches() == []
+    assert begin_step_capture().timing_events == []
 
 
 # ---------------------------------------------------------------------------

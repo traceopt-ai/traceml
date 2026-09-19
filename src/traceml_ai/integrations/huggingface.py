@@ -9,6 +9,12 @@ import os
 import sys
 from functools import wraps
 
+from traceml_ai.instrumentation.patches.dataloader_patch import (
+    dataloader_timing_scope,
+)
+from traceml_ai.instrumentation.patches.h2d_auto_timer_patch import (
+    h2d_auto_timer,
+)
 from traceml_ai.sdk.instrumentation import trace_step
 
 logger = logging.getLogger(__name__)
@@ -50,11 +56,11 @@ def init():
     DataLoader fetch patch in particular is installed deterministically rather
     than relying on import order. It also installs the narrow Trainer lifecycle
     guard that aborts unfinished steps before an automatic batch-size retry,
-    plus the collection hook needed to observe Accelerate's pre-callback H2D
-    transfers. This mirrors the PyTorch Lightning integration's ``init()``; HF
-    uses ``mode="auto"`` because ``trace_step`` drives forward/backward timing
-    through the patch-gated auto-timers, whereas Lightning's callback owns that
-    timing directly.
+    plus the collection hook needed to isolate training Input Wait and observe
+    Accelerate's pre-callback H2D transfers. This mirrors the PyTorch Lightning
+    integration's ``init()``; HF uses ``mode="auto"`` because ``trace_step``
+    drives forward/backward timing through the patch-gated auto-timers, whereas
+    Lightning's callback owns that timing directly.
     """
     import traceml_ai as traceml
 
@@ -64,9 +70,13 @@ def init():
     except Exception as exc:
         _log_hf_error("Trainer lifecycle guard installation failed", exc)
     try:
-        _install_batch_collection_h2d_timing()
+        _install_training_batch_timing()
     except Exception as exc:
-        _log_hf_error("Batch collection H2D timing installation failed", exc)
+        _log_hf_error("Training batch timing installation failed", exc)
+    try:
+        _install_non_training_input_scopes()
+    except Exception as exc:
+        _log_hf_error("Non-training input scope installation failed", exc)
     return config
 
 
@@ -242,14 +252,43 @@ def _abort_pending_capture_safely() -> None:
         _log_hf_error("pending step capture abort failed", exc)
 
 
-def _install_batch_collection_h2d_timing() -> None:
-    """Include Trainer-prepared input transfers in the coming TraceML step.
+class _TrainingBatchIterator:
+    """Expose timing only while HF requests a training microbatch.
+
+    ``Trainer.get_batch_samples`` is the standard Trainer's collection seam:
+    training batches pass through it, while evaluation and prediction consume
+    their dataloaders directly. Accelerate performs device placement inside
+    the iterator's ``next`` call, so this proxy scopes the existing DataLoader
+    and H2D instrumentation to exactly that call.
+
+    The surrounding Trainer lifecycle keeps DataLoader timing disabled by
+    default. The nested scope restores that policy after every fetch, including
+    when fetching raises, and leaves collection-side bookkeeping outside both
+    the input-wait and H2D regions.
+    """
+
+    def __init__(self, iterator):
+        self._iterator = iterator
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        with dataloader_timing_scope(lambda: True):
+            with h2d_auto_timer(include_step_time=True):
+                return next(self._iterator)
+
+
+def _install_training_batch_timing() -> None:
+    """Measure Trainer training fetches and prepared input transfers.
 
     Accelerate moves each returned training batch to the device inside the
     ``next()`` calls made by ``Trainer.get_batch_samples``. Those transfers
     occur before ``on_step_begin`` opens the main ``trace_step`` envelope.
-    Arming the H2D patch here gives each transfer a matching short step-time
-    segment while leaving the surrounding DataLoader fetch in Input Wait.
+    The iterator proxy enables the existing DataLoader timing policy only for
+    those training fetches and gives each transfer a matching short step-time
+    segment. Evaluation and prediction do not use this collection path and
+    remain disabled by the surrounding Trainer lifecycle scope.
 
     The events remain in the active pending capture. ``on_step_end`` still
     owns the only counter advance and publication for the accumulation group.
@@ -263,36 +302,75 @@ def _install_batch_collection_h2d_timing() -> None:
     if not callable(original):
         _warn_hf_once(
             "missing-get-batch-samples",
-            "Hugging Face pre-step H2D timing requires transformers>=4.46; "
-            "training will continue without that signal.",
+            "Hugging Face training Input Wait and pre-step H2D timing require "
+            "transformers>=4.46; training will continue without those "
+            "signals.",
         )
         return
-    if getattr(original, "_traceml_batch_collection_h2d_timing", False):
+    if getattr(original, "_traceml_training_batch_timing", False):
         return
 
     @wraps(original)
-    def timed_get_batch_samples(trainer, *args, **kwargs):
+    def timed_get_batch_samples(trainer, epoch_iterator, *args, **kwargs):
         if _traceml_disabled() or not _traceml_callbacks(trainer):
-            return original(trainer, *args, **kwargs)
+            return original(trainer, epoch_iterator, *args, **kwargs)
 
-        from traceml_ai.instrumentation.patches.h2d_auto_timer_patch import (
-            h2d_auto_timer,
+        return original(
+            trainer,
+            _TrainingBatchIterator(epoch_iterator),
+            *args,
+            **kwargs,
         )
 
-        with h2d_auto_timer(include_step_time=True):
-            return original(trainer, *args, **kwargs)
-
-    timed_get_batch_samples._traceml_batch_collection_h2d_timing = True
+    timed_get_batch_samples._traceml_training_batch_timing = True
     Trainer.get_batch_samples = timed_get_batch_samples
 
 
-def _warn_if_batch_collection_h2d_is_bypassed(trainer) -> None:
+def _scoped_non_training_input(original):
+    """Wrap one synchronous Trainer entry point with input timing disabled."""
+
+    @wraps(original)
+    def wrapped(trainer, *args, **kwargs):
+        if _traceml_disabled() or not _traceml_callbacks(trainer):
+            return original(trainer, *args, **kwargs)
+        with dataloader_timing_scope(lambda: False):
+            return original(trainer, *args, **kwargs)
+
+    wrapped._traceml_non_training_input_scope = True
+    return wrapped
+
+
+def _install_non_training_input_scopes() -> None:
+    """Keep standalone evaluation and prediction input out of step captures.
+
+    Evaluation triggered from ``train`` is already covered by the lifecycle's
+    disabled-by-default policy. These narrow public-method wrappers apply the
+    same policy when users call ``Trainer.evaluate`` or ``Trainer.predict``
+    directly, preventing their fetches from remaining in the process-wide
+    pending capture.
+    """
+    if not HAS_TRANSFORMERS:
+        return
+
+    from transformers import Trainer
+
+    for method_name in ("evaluate", "predict"):
+        original = getattr(Trainer, method_name, None)
+        if not callable(original) or getattr(
+            original, "_traceml_non_training_input_scope", False
+        ):
+            continue
+
+        setattr(Trainer, method_name, _scoped_non_training_input(original))
+
+
+def _warn_if_training_batch_timing_is_bypassed(trainer) -> None:
     """Warn when a Trainer override bypasses the installed collection hook."""
     method = getattr(trainer, "get_batch_samples", None)
     function = getattr(method, "__func__", method)
     if not callable(function) or getattr(
         function,
-        "_traceml_batch_collection_h2d_timing",
+        "_traceml_training_batch_timing",
         False,
     ):
         return
@@ -302,7 +380,8 @@ def _warn_if_batch_collection_h2d_is_bypassed(trainer) -> None:
     _warn_hf_once(
         f"get-batch-samples-override:{name}",
         "%s overrides get_batch_samples, so TraceML cannot guarantee "
-        "pre-step H2D timing for this Trainer; training will continue.",
+        "training Input Wait or pre-step H2D timing for this Trainer; "
+        "training will continue without those signals.",
         name,
     )
 
@@ -324,7 +403,7 @@ def _install_trainer_lifecycle_guard() -> None:
         if not callbacks:
             return original(trainer, *args, **kwargs)
 
-        _warn_if_batch_collection_h2d_is_bypassed(trainer)
+        _warn_if_training_batch_timing_is_bypassed(trainer)
         owner = callbacks[0]
         for callback in callbacks:
             callback._set_run_owner(callback is owner)
@@ -333,7 +412,12 @@ def _install_trainer_lifecycle_guard() -> None:
         # failures that happen while fetching inputs, before on_step_begin.
         _abort_pending_capture_safely()
         try:
-            return original(trainer, *args, **kwargs)
+            # HF has no reliable public training-loader flag at fetch time:
+            # get_batch_samples runs before training_step calls model.train().
+            # Keep timing off for the attempt and let the training iterator
+            # proxy enable it narrowly around each real training fetch.
+            with dataloader_timing_scope(lambda: False):
+                return original(trainer, *args, **kwargs)
         finally:
             # This runs before Accelerate handles an OOM and retries the same
             # inner loop, so a failed attempt cannot leak into the next one.

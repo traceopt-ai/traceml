@@ -281,10 +281,20 @@ but their absolute values can differ after checkpoint resume.
 All timing events for a group are flushed together as one `StepTimeBatch`.
 Before the callback opens the main `trace_step`, Accelerate moves the batches
 returned by `Trainer.get_batch_samples` to the device. The HF integration arms
-H2D timing only for that collection call. Each observed transfer records its
-H2D phase plus a matching short traced-step segment; DataLoader fetch work is
-outside those segments and remains Input Wait. The later callback region still
-covers forward, backward, collective, and optimizer work.
+DataLoader and H2D timing only around each training iterator `next()` made by
+that method. Each observed transfer records its H2D phase plus a matching short
+traced-step segment; DataLoader fetch work is outside those transfer segments
+and remains Input Wait. The later callback region still covers forward,
+backward, collective, and optimizer work.
+
+The Trainer lifecycle holds the existing DataLoader timing scope disabled by
+default. A small iterator proxy temporarily enables it for those training
+`next()` calls and restores the outer policy afterward. Evaluation and
+prediction consume their dataloaders directly, so their fetches and transfers
+remain outside the training capture without requiring sampler or diagnosis
+special cases. The public `evaluate` and `predict` entry points apply the same
+disabled scope when invoked outside `train`, preventing non-training fetches
+from remaining in the process-wide pending capture.
 
 `StepTimeSampler` sums the repeated transfer segments with the callback region,
 and sums repeated H2D, forward, and backward events while keeping CPU and GPU
@@ -328,10 +338,11 @@ Neither the step count nor an optimizer timing event proves parameters changed.
 
 ### Current limitations
 
-Evaluation loader events can reach the next training step. Training H2D timing
-is limited to the standard `Trainer.get_batch_samples` path; a custom Trainer
-that overrides that method also bypasses the collection window and produces a
-one-time warning. The existing raw input event names are
+Training input timing is limited to the standard
+`Trainer.get_batch_samples` path. A custom Trainer that overrides that method
+also bypasses the collection window and produces a one-time warning; TraceML
+then omits both training Input Wait and pre-step H2D rather than publishing a
+partial input measurement. The existing raw input event names are
 `_traceml_internal:dataloader_next` and `_traceml_internal:h2d_time`.
 
 If training is interrupted, the Trainer lifecycle guard aborts the open
