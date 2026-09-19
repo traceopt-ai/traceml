@@ -163,6 +163,7 @@ class TestH2DAutoTimerPatch:
         self._mod = _reload_h2d_patch()
         # Reset the TLS flag directly.
         self._mod._H2D_TLS._traceml_h2d_enabled = False
+        self._mod._H2D_TLS._traceml_h2d_include_step_time = False
 
     def test_disabled_outside_context_manager(self):
         assert self._mod._enabled() is False
@@ -248,6 +249,81 @@ class TestH2DAutoTimerPatch:
                 self._mod._traceml_tensor_to(tensor, "cuda:0")
 
         assert recorded == ["_traceml_internal:h2d_time"]
+
+    def test_include_step_time_wraps_each_h2d_transfer(self):
+        """An out-of-envelope H2D contributes one matching step segment."""
+        tensor = torch.ones(4)
+        calls = []
+
+        @contextmanager
+        def fake_timed_region(name, scope, record_gpu_events):
+            calls.append(("enter", name))
+            try:
+                yield
+            finally:
+                calls.append(("exit", name))
+
+        with patch.object(self._mod, "_ORIG_TENSOR_TO", _fake_tensor_to):
+            with patch.object(
+                self._mod,
+                "timed_region",
+                side_effect=fake_timed_region,
+            ):
+                with self._mod.h2d_auto_timer(include_step_time=True):
+                    self._mod._traceml_tensor_to(tensor, "cuda:0")
+
+        assert calls == [
+            ("enter", "_traceml_internal:step_time"),
+            ("enter", "_traceml_internal:h2d_time"),
+            ("exit", "_traceml_internal:h2d_time"),
+            ("exit", "_traceml_internal:step_time"),
+        ]
+
+    def test_nested_timers_restore_the_previous_state(self):
+        assert self._mod._enabled() is False
+        assert self._mod._include_step_time() is False
+
+        with self._mod.h2d_auto_timer():
+            assert self._mod._enabled() is True
+            assert self._mod._include_step_time() is False
+            with self._mod.h2d_auto_timer(include_step_time=True):
+                assert self._mod._enabled() is True
+                assert self._mod._include_step_time() is True
+            assert self._mod._enabled() is True
+            assert self._mod._include_step_time() is False
+
+        assert self._mod._enabled() is False
+        assert self._mod._include_step_time() is False
+
+    def test_paired_regions_close_when_transfer_raises(self):
+        tensor = torch.ones(4)
+        calls = []
+
+        @contextmanager
+        def fake_timed_region(name, scope, record_gpu_events):
+            calls.append(("enter", name))
+            try:
+                yield
+            finally:
+                calls.append(("exit", name))
+
+        def failing_tensor_to(*args, **kwargs):
+            raise RuntimeError("transfer failed")
+
+        with patch.object(self._mod, "_ORIG_TENSOR_TO", failing_tensor_to):
+            with patch.object(
+                self._mod,
+                "timed_region",
+                side_effect=fake_timed_region,
+            ):
+                with pytest.raises(RuntimeError, match="transfer failed"):
+                    with self._mod.h2d_auto_timer(include_step_time=True):
+                        self._mod._traceml_tensor_to(tensor, "cuda:0")
+
+        assert calls[-2:] == [
+            ("exit", "_traceml_internal:h2d_time"),
+            ("exit", "_traceml_internal:step_time"),
+        ]
 
     def test_c1_d2d_skips_timing_when_source_is_cuda(self):
         """
@@ -367,6 +443,22 @@ class TestH2DStepScoping:
             events = _recorded_h2d_events(buf)
 
         assert events == []
+
+    def test_paired_step_segment_uses_the_same_pending_capture(self):
+        tensor = torch.ones(4)
+
+        with _fresh_step_capture() as buf:
+            with h2d_auto_timer(include_step_time=True):
+                with patch(
+                    "traceml_ai.instrumentation.patches.h2d_auto_timer_patch._ORIG_TENSOR_TO",
+                    _fake_tensor_to,
+                ):
+                    _traceml_tensor_to(tensor, "cuda:0")
+
+            assert [event.name for event in buf] == [
+                "_traceml_internal:h2d_time",
+                "_traceml_internal:step_time",
+            ]
 
 
 # wrap_h2d()

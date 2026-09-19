@@ -279,9 +279,30 @@ but their absolute values can differ after checkpoint resume.
 ### Timing and memory
 
 All timing events for a group are flushed together as one `StepTimeBatch`.
-`StepTimeSampler` sums repeated forward and backward events within that batch,
-keeping CPU and GPU durations separate. It does not merge separate batches
-that happen to have the same step number.
+Before the callback opens the main `trace_step`, Accelerate moves the batches
+returned by `Trainer.get_batch_samples` to the device. The HF integration arms
+H2D timing only for that collection call. Each observed transfer records its
+H2D phase plus a matching short traced-step segment; DataLoader fetch work is
+outside those segments and remains Input Wait. The later callback region still
+covers forward, backward, collective, and optimizer work.
+
+`StepTimeSampler` sums the repeated transfer segments with the callback region,
+and sums repeated H2D, forward, and backward events while keeping CPU and GPU
+durations separate. All events receive the optimizer-group step number only
+when `on_step_end` publishes the capture. The sampler does not merge separate
+batches that happen to have the same step number.
+
+Accelerate may fetch one CPU batch ahead while yielding the current prepared
+batch. Any blocking wait observed there is attributed to the current step's
+input-pipeline stall because it delays delivery to the training loop. Input
+Wait event counts therefore describe observed iterator waits, not an exact
+one-event-per-microbatch identity mapping.
+
+Other collection-side bookkeeping in `get_batch_samples`, such as token
+counting and an optional cross-rank item-count gather, is currently outside
+both Input Wait and Traced Step Time. HF Step Time is therefore the sum of the
+instrumented input-wait and traced regions, not a full training-loop wall-clock
+measurement.
 
 `StepMemoryTracker` resets the tracked CUDA device's PyTorch peak counters
 once at the start of the group and reads peak allocated/reserved memory once
@@ -307,12 +328,11 @@ Neither the step count nor an optimizer timing event proves parameters changed.
 
 ### Current limitations
 
-HF requests prepared inputs before `on_step_begin`, so the current callback
-can miss input H2D transfers. Evaluation loader events can also reach the next
-training step. The existing raw input event names are
+Evaluation loader events can reach the next training step. Training H2D timing
+is limited to the standard `Trainer.get_batch_samples` path; a custom Trainer
+that overrides that method also bypasses the collection window and produces a
+one-time warning. The existing raw input event names are
 `_traceml_internal:dataloader_next` and `_traceml_internal:h2d_time`.
-These gaps can omit transfers from Step Time or assign loader work to the
-wrong training step.
 
 If training is interrupted, the Trainer lifecycle guard aborts the open
 capture before the exception reaches Accelerate's automatic batch-size retry.

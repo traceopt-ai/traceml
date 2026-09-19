@@ -10,14 +10,14 @@ Reported from a Colab reproduction on the Hugging Face forum: under
 ``Trainer`` + Accelerate, independent CUDA-event timing showed a real
 CPU->CUDA transfer while TraceML reported ``H2D: 0.0 ms``.
 
-The mechanism is a COVERAGE-WINDOW gap, not a broken timer. Accelerate's
+The mechanism was a COVERAGE-WINDOW gap, not a broken timer. Accelerate's
 prepared dataloader performs device placement while the batch is FETCHED,
 and the fetch happens between steps: after ``on_step_end`` of the previous
-step and before ``on_step_begin`` of the next. The H2D auto-timer is armed
-only inside the ``trace_step`` bracket that ``on_step_begin`` opens, so the
-transfer is never observed. Under gradient accumulation the effect scales:
-GA microbatches are fetched per optimizer step, so GA transfers land
-outside the window.
+step and before ``on_step_begin`` of the next. The main ``trace_step`` bracket
+still opens at ``on_step_begin``, but the HF integration now arms H2D timing
+while ``get_batch_samples`` performs those fetches. Each transfer receives a
+matching short step-time segment and remains in the same pending capture as
+the later compute region.
 
 These tests pin the ordering with a REAL ``Trainer`` and a REAL prepared
 dataloader rather than a hand-called callback, because the defect is in the
@@ -26,15 +26,15 @@ CPU; the end-to-end CUDA reproduction that compares TraceML's reported value
 against independent CUDA-event timing lives in
 ``src/dev/repro/hf_accelerate_h2d_window.py`` and needs a GPU.
 
-What this file does NOT do is widen the window. Timing Accelerate's device
-placement as its own pre-step phase is deliberately left as follow-up work
-on #276, so the optimizer-step definition does not change silently. The
-guarantee asserted here is the honest one: the transfer is outside the
-window, therefore H2D is reported as unavailable rather than as a measured
-zero, and no H2D-based verdict may rest on evidence that was never captured.
+The optimizer-step definition does not change: ``on_step_end`` still publishes
+one capture. The final tests also retain the fallback contract for paths where
+H2D is genuinely unobserved: absence remains unavailable rather than a
+measured zero.
 """
 
 from __future__ import annotations
+
+import logging
 
 import pytest
 
@@ -53,6 +53,7 @@ from traceml_ai.diagnostics.step_time.policy import (  # noqa: E402
 )
 from traceml_ai.instrumentation.patches.h2d_auto_timer_patch import (  # noqa: E402,E501
     _enabled,
+    _include_step_time,
 )
 from traceml_ai.integrations import huggingface as hf  # noqa: E402
 from traceml_ai.sdk.instrumentation import trace_step  # noqa: E402
@@ -100,7 +101,7 @@ class _FetchSpy:
     def __iter__(self):
         iterator = iter(self._inner)
         while True:
-            self._log.append(("fetch", _enabled()))
+            self._log.append(("fetch", _enabled(), _include_step_time()))
             try:
                 yield next(iterator)
             except StopIteration:
@@ -115,18 +116,19 @@ class _FetchSpy:
 
 def _run_trainer(gradient_accumulation_steps: int, max_steps: int = 2):
     """Run a real Trainer and return the ordered (event, armed) log."""
-    log: list[tuple[str, bool]] = []
+    log: list[tuple[str, bool, bool]] = []
+    hf._install_batch_collection_h2d_timing()
     callback = hf.TraceMLTrainerCallback()
 
     begin, end = callback.on_step_begin, callback.on_step_end
 
     def _begin(*args, **kwargs):
         result = begin(*args, **kwargs)
-        log.append(("window_open", _enabled()))
+        log.append(("window_open", _enabled(), _include_step_time()))
         return result
 
     def _end(*args, **kwargs):
-        log.append(("window_close", _enabled()))
+        log.append(("window_close", _enabled(), _include_step_time()))
         return end(*args, **kwargs)
 
     callback.on_step_begin = _begin
@@ -155,27 +157,41 @@ def _run_trainer(gradient_accumulation_steps: int, max_steps: int = 2):
 
 
 # ---------------------------------------------------------------------------
-# The regression: batch fetch lands outside the step window (GA=1 and GA=2)
+# The fix: batch transfers are covered before the main step window
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("ga", [1, 2])
-def test_accelerate_batch_fetch_is_outside_the_step_window(ga: int) -> None:
+def test_accelerate_batch_transfer_is_covered_during_collection(
+    ga: int,
+) -> None:
     log = _run_trainer(gradient_accumulation_steps=ga)
 
-    fetch_states = [armed for event, armed in log if event == "fetch"]
+    fetch_states = [
+        (armed, includes_step)
+        for event, armed, includes_step in log
+        if event == "fetch"
+    ]
     assert fetch_states, "no batch fetch observed"
-    # The defect, stated positively: not one fetch is covered by the window.
-    assert not any(fetch_states)
+    assert all(
+        armed and includes_step for armed, includes_step in fetch_states
+    )
 
-    # ... while the window itself really does arm the timer, so this is a
-    # coverage gap and not a dead timer.
-    window_states = [armed for event, armed in log if event == "window_open"]
-    assert window_states and all(window_states)
+    # The main callback window covers compute without asking each in-window
+    # transfer to contribute another standalone step-time segment.
+    window_states = [
+        (armed, includes_step)
+        for event, armed, includes_step in log
+        if event == "window_open"
+    ]
+    assert window_states
+    assert all(
+        armed and not includes_step for armed, includes_step in window_states
+    )
 
     # Under accumulation the exposure scales with GA: every microbatch for
     # the next optimizer step is fetched before that step's window opens.
-    events = [event for event, _ in log]
+    events = [event for event, _, _ in log]
     first_open = events.index("window_open")
     assert events[:first_open].count("fetch") == ga
 
@@ -185,9 +201,81 @@ def test_in_window_transfer_is_covered_positive_control() -> None:
     # DOES cover work performed inside the bracket. Without this a reader
     # cannot tell a coverage gap from an instrumentation that never works.
     assert _enabled() is False
+    assert _include_step_time() is False
     with trace_step(_Tiny()):
         assert _enabled() is True
+        assert _include_step_time() is False
     assert _enabled() is False
+    assert _include_step_time() is False
+
+
+def test_batch_collection_hook_installation_is_idempotent() -> None:
+    hf._install_batch_collection_h2d_timing()
+    installed = Trainer.get_batch_samples
+    hf._install_batch_collection_h2d_timing()
+    assert Trainer.get_batch_samples is installed
+
+
+def test_missing_get_batch_samples_warns_once_and_skips_installation(
+    monkeypatch,
+    caplog,
+) -> None:
+    monkeypatch.setattr(hf, "_WARNED_CAPABILITIES", set())
+    monkeypatch.delattr(Trainer, "get_batch_samples")
+
+    with caplog.at_level(logging.WARNING, logger=hf.__name__):
+        hf._install_batch_collection_h2d_timing()
+        hf._install_batch_collection_h2d_timing()
+
+    messages = [record.getMessage() for record in caplog.records]
+    unsupported = [
+        message
+        for message in messages
+        if "requires transformers>=4.46" in message
+    ]
+    assert len(unsupported) == 1
+
+
+def test_custom_batch_collection_override_warns_once(
+    monkeypatch, caplog
+) -> None:
+    monkeypatch.setattr(hf, "_WARNED_CAPABILITIES", set())
+
+    class CustomTrainer:
+        def get_batch_samples(self):
+            return []
+
+    trainer = CustomTrainer()
+    with caplog.at_level(logging.WARNING, logger=hf.__name__):
+        hf._warn_if_batch_collection_h2d_is_bypassed(trainer)
+        hf._warn_if_batch_collection_h2d_is_bypassed(trainer)
+
+    messages = [record.getMessage() for record in caplog.records]
+    bypassed = [
+        message
+        for message in messages
+        if "overrides get_batch_samples" in message
+    ]
+    assert len(bypassed) == 1
+    assert "CustomTrainer" in bypassed[0]
+
+
+def test_installed_batch_collection_hook_does_not_warn(
+    monkeypatch, caplog
+) -> None:
+    monkeypatch.setattr(hf, "_WARNED_CAPABILITIES", set())
+    hf._install_batch_collection_h2d_timing()
+
+    class InheritedTrainer(Trainer):
+        pass
+
+    trainer = object.__new__(InheritedTrainer)
+    with caplog.at_level(logging.WARNING, logger=hf.__name__):
+        hf._warn_if_batch_collection_h2d_is_bypassed(trainer)
+
+    assert "cannot guarantee pre-step H2D timing" not in " ".join(
+        record.getMessage() for record in caplog.records
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -249,6 +337,15 @@ def test_uncaptured_h2d_reports_unavailable_not_measured_zero() -> None:
     # Twin: an in-window transfer that really measured 0.0 stays 0.0.
     measured = _gpu_window(h2d_value=0.0)
     assert rank_average(measured, 0).h2d_ms == 0.0
+
+
+def test_captured_h2d_is_already_part_of_traced_step_time() -> None:
+    measured = _gpu_window()
+    average = rank_average(measured, 0)
+
+    assert average.h2d_ms == pytest.approx(2.0)
+    assert average.traced_step_time_ms == pytest.approx(66.0)
+    assert average.residual_ms == pytest.approx(4.0)
 
 
 def test_uncaptured_h2d_cannot_produce_an_h2d_verdict() -> None:
