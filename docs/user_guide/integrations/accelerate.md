@@ -90,6 +90,12 @@ see Limitations.
   window to be one step, and place `trace_step` accordingly — this guide
   does not prescribe one, since the right choice depends on what you're
   trying to measure.
+- **Prepared-loader H2D happens before `trace_step`.** By default, an
+  Accelerate-prepared DataLoader moves each batch to the device while the
+  `for` loop requests it, before the documented `trace_step` block opens.
+  Standalone Accelerate therefore does not report that transfer as H2D. To
+  include it, prepare the DataLoader with `device_placement=False` and move
+  the returned tensors to `accelerator.device` inside `trace_step`.
 - **DeepSpeed and FSDP configurations routed through Accelerate are out of
   scope for this first version.** This guide covers the plain `Accelerator()`
   path only. Tune DeepSpeed/FSDP independently of TraceML for now.

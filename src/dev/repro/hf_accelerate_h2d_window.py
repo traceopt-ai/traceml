@@ -4,27 +4,23 @@
 # you may not use this file except in compliance with the License.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Reproduce the Hugging Face + Accelerate H2D coverage-window gap (#276).
+"""Validate Hugging Face + Accelerate pre-step H2D coverage (#276).
 
 Reported on the HF forum: with the Trainer + Accelerate path and gradient
-accumulation, a real CPU->CUDA transfer happens while TraceML reports
-``H2D: 0.0 ms`` (pre-#274) or ``H2D: n/a`` (with #274).
+accumulation, a real CPU->CUDA transfer previously happened while TraceML
+reported ``H2D: 0.0 ms`` or ``H2D: n/a``.
 
 Mechanism, measured rather than assumed (see
 ``tests/integrations/test_hf_h2d_window.py``, which pins it on CPU): the
-transfer is performed by Accelerate's PREPARED DATALOADER, which places the
-batch on the device inside ``__next__``. The fetch happens between steps,
-after the previous ``on_step_end`` and before the next ``on_step_begin``,
-so it falls outside the ``trace_step`` bracket that arms the H2D timer.
-Under gradient accumulation, GA microbatches are fetched per optimizer step,
-so GA transfers land outside the window. Note this is NOT
-``Trainer._prepare_inputs``: on current transformers that call runs inside
-the window and is a no-op once Accelerate has already moved the batch.
+transfer is performed by Accelerate's prepared DataLoader, which places the
+batch on the device inside ``__next__``. The HF integration now arms H2D
+timing during ``Trainer.get_batch_samples`` and records a matching short
+step-time segment for each transfer before the main callback window opens.
 
 This script measures the CPU->CUDA transfer with independent CUDA events and
 compares it to what TraceML captured, plus a positive control that moves a
-tensor INSIDE ``trace_step`` to show the timer works when the transfer lands
-in the window.
+tensor inside ``trace_step``. It also verifies that gradient accumulation
+still publishes one TraceML step per optimizer-update attempt.
 
 Needs a CUDA device. On CPU it prints why it cannot run and exits 0.
 
@@ -65,16 +61,20 @@ def _positive_control_ms(num_bytes_mb: int = 64) -> float | None:
         host.to("cuda", non_blocking=False)
         torch.cuda.synchronize()
 
+    torch.cuda.synchronize()
     captured = None
     for batch in drain_step_time_batches():
         for evt in getattr(batch, "events", []):
             if evt.name == "_traceml_internal:h2d_time":
-                captured = float(getattr(evt, "gpu_ms", 0.0) or 0.0)
+                evt.try_resolve()
+                captured = float(getattr(evt, "gpu_time_ms", 0.0) or 0.0)
     return captured
 
 
-def _traceml_reported_h2d(grad_accum: int = 2) -> float | None:
-    """Run a tiny HF Trainer + Accelerate GA loop; read the reported H2D."""
+def _traceml_reported_h2d(
+    grad_accum: int = 2,
+) -> tuple[float | None, int]:
+    """Run a tiny HF Trainer loop and return H2D plus completed steps."""
     import tempfile
 
     import torch
@@ -125,18 +125,18 @@ def _traceml_reported_h2d(grad_accum: int = 2) -> float | None:
         )
         trainer.train()
 
+    torch.cuda.synchronize()
+    batches = drain_step_time_batches()
     reported = None
-    for batch in drain_step_time_batches():
+    for batch in batches:
         vals = [
-            float(getattr(evt, "gpu_ms", 0.0) or 0.0)
+            float(getattr(evt, "gpu_time_ms", 0.0) or 0.0)
             for evt in getattr(batch, "events", [])
-            if evt.name == "_traceml_internal:h2d_time"
+            if evt.name == "_traceml_internal:h2d_time" and evt.try_resolve()
         ]
         if vals:
-            reported = sum(vals)
-        elif reported is None:
-            reported = 0.0  # no h2d event captured in the bracket
-    return reported
+            reported = float(reported or 0.0) + sum(vals)
+    return reported, len(batches)
 
 
 def main() -> int:
@@ -153,20 +153,21 @@ def main() -> int:
         )
         return 0
 
-    from traceml_ai.sdk.initial import init
+    from traceml_ai.integrations.huggingface import init
 
     init()
 
     independent = _independent_h2d_ms()
     control = _positive_control_ms()
-    reported = _traceml_reported_h2d(grad_accum=2)
+    reported, completed_steps = _traceml_reported_h2d(grad_accum=2)
 
     print("=" * 60)
-    print("HF + Accelerate H2D coverage-window reproduction (#276)")
+    print("HF + Accelerate pre-step H2D validation (#276)")
     print("=" * 60)
     print(f"independent cuda-event H2D (real transfer): {independent:.3f} ms")
     print(f"positive control (transfer inside window):  {control} ms")
     print(f"TraceML reported H2D (GA=2, pre-step move):  {reported} ms")
+    print(f"TraceML completed optimizer steps:            {completed_steps}")
     print("-" * 60)
     if control is None:
         # A None control means the run could not MEASURE, not that the bug
@@ -181,22 +182,21 @@ def main() -> int:
             "script through the launcher instead:\n"
             "    traceml run src/dev/repro/hf_accelerate_h2d_window.py "
             "--mode=summary\n"
-            "and read h2d in the final summary: n/a for the GA run means "
-            "the transfer stayed outside the window."
+            "and inspect H2D in the final summary."
         )
         return 1
-    if control > 0.0 and (reported in (0.0, None)):
+    if reported is not None and reported > 0.0 and completed_steps == 3:
         print(
-            "REPRODUCED: the timer captures an in-window transfer but not "
-            "the Accelerate pre-step transfer, so H2D reads as "
-            f"{reported} despite a real {independent:.3f} ms copy."
+            "PASS: TraceML captured Accelerate's pre-step transfers and "
+            "preserved one published step per optimizer update."
         )
+        return 0
     else:
         print(
-            "Did not reproduce with these settings; the Trainer/Accelerate "
-            "version may move batches inside the step window."
+            "FAIL: expected nonzero pre-step H2D and exactly three completed "
+            "optimizer steps."
         )
-    return 0
+        return 1
 
 
 if __name__ == "__main__":

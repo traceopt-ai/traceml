@@ -146,6 +146,62 @@ def test_step_time_sampler_aggregates_repeated_event_clocks() -> None:
     assert stats["n_calls"] == 2
 
 
+def test_sampler_sums_segmented_step_time_and_h2d_once() -> None:
+    """Pre-step H2D segments combine with, but do not duplicate, step time."""
+    payload = _payload_for(
+        TimeEvent(
+            name="_traceml_internal:step_time",
+            device="cuda:0",
+            cpu_start=1.000,
+            cpu_end=1.002,
+            gpu_time_ms=2.0,
+            resolved=True,
+        ),
+        TimeEvent(
+            name="_traceml_internal:h2d_time",
+            device="cuda:0",
+            cpu_start=1.000,
+            cpu_end=1.002,
+            gpu_time_ms=2.0,
+            resolved=True,
+        ),
+        TimeEvent(
+            name="_traceml_internal:step_time",
+            device="cuda:0",
+            cpu_start=2.000,
+            cpu_end=2.003,
+            gpu_time_ms=3.0,
+            resolved=True,
+        ),
+        TimeEvent(
+            name="_traceml_internal:h2d_time",
+            device="cuda:0",
+            cpu_start=2.000,
+            cpu_end=2.003,
+            gpu_time_ms=3.0,
+            resolved=True,
+        ),
+        TimeEvent(
+            name="_traceml_internal:step_time",
+            device="cuda:0",
+            cpu_start=3.000,
+            cpu_end=3.100,
+            gpu_time_ms=90.0,
+            resolved=True,
+        ),
+    )
+
+    step = payload["_traceml_internal:step_time"]["cuda:0"]
+    h2d = payload["_traceml_internal:h2d_time"]["cuda:0"]
+
+    assert step["cpu_ms"] == pytest.approx(105.0)
+    assert step["gpu_ms"] == pytest.approx(95.0)
+    assert step["n_calls"] == 3
+    assert h2d["duration_ms"] == pytest.approx(5.0)
+    assert h2d["gpu_ms"] == pytest.approx(5.0)
+    assert h2d["n_calls"] == 2
+
+
 def test_completed_captures_wait_until_sampler_drains(
     isolated_timing_queue, monkeypatch
 ):
@@ -179,6 +235,27 @@ def test_completed_captures_wait_until_sampler_drains(
     assert step_events.drain_step_time_batches() == []
     sampler.sample()
     assert len(rows) == 2
+
+
+def test_segmented_step_events_receive_one_step_number(
+    isolated_timing_queue,
+) -> None:
+    capture = step_events.begin_step_capture()
+    events = [
+        TimeEvent("_traceml_internal:step_time", "cpu", 1.0, 1.002),
+        TimeEvent("_traceml_internal:h2d_time", "cpu", 1.0, 1.002),
+        TimeEvent("_traceml_internal:step_time", "cpu", 2.0, 2.100),
+    ]
+    for event in events:
+        timing.record_event(event)
+
+    assert step_events.complete_step_capture(capture, 42)
+    batches = step_events.drain_step_time_batches()
+
+    assert len(batches) == 1
+    assert batches[0].step == 42
+    assert batches[0].events == events
+    assert {event.step for event in events} == {42}
 
 
 def test_unresolved_cuda_batch_holds_back_later_batches(
