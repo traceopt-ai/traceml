@@ -338,7 +338,9 @@ Neither the step count nor an optimizer timing event proves parameters changed.
 
 ### Current limitations
 
-Training input timing is limited to the standard
+Automatic HF Trainer timing supports `transformers>=4.46.1`; earlier versions
+do not expose the required batch-collection seam. Training input timing is
+limited to the standard
 `Trainer.get_batch_samples` path. A custom Trainer that overrides that method
 also bypasses the collection window and produces a one-time warning; TraceML
 then omits both training Input Wait and pre-step H2D rather than publishing a

@@ -34,6 +34,7 @@ measured zero.
 
 from __future__ import annotations
 
+import inspect
 import logging
 
 import pytest
@@ -57,6 +58,7 @@ from traceml_ai.instrumentation.patches.h2d_auto_timer_patch import (  # noqa: E
 )
 from traceml_ai.instrumentation.patches.dataloader_patch import (  # noqa: E402,E501
     _timing_allowed,
+    dataloader_timing_scope,
 )
 from traceml_ai.instrumentation.step_events import (  # noqa: E402
     abort_step_capture,
@@ -278,10 +280,11 @@ def test_missing_get_batch_samples_warns_once_and_skips_installation(
     unsupported = [
         message
         for message in messages
-        if "require transformers>=4.46" in message
+        if "requires transformers>=4.46.1" in message
     ]
     assert len(unsupported) == 1
     assert "training Input Wait and pre-step H2D" in unsupported[0]
+    assert "Training will continue" in unsupported[0]
 
 
 def test_custom_batch_collection_override_warns_once(
@@ -306,6 +309,53 @@ def test_custom_batch_collection_override_warns_once(
     ]
     assert len(bypassed) == 1
     assert "CustomTrainer" in bypassed[0]
+
+
+def test_batch_collection_warning_failure_cannot_abort_training(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    """An application-owned logging handler cannot break Trainer control."""
+    monkeypatch.setattr(hf, "_WARNED_CAPABILITIES", set())
+
+    class DelegatingTrainer(Trainer):
+        def get_batch_samples(self, *args, **kwargs):
+            return super().get_batch_samples(*args, **kwargs)
+
+    class RaisingHandler(logging.Handler):
+        def emit(self, record):
+            raise RuntimeError("application logging failed")
+
+    hf.init()
+    trainer = DelegatingTrainer(
+        model=_Tiny(),
+        args=TrainingArguments(
+            output_dir=str(tmp_path),
+            per_device_train_batch_size=4,
+            max_steps=1,
+            logging_strategy="no",
+            save_strategy="no",
+            report_to=[],
+            disable_tqdm=True,
+            use_cpu=True,
+        ),
+        train_dataset=_Batches(),
+        callbacks=[hf.TraceMLTrainerCallback()],
+    )
+
+    handler = RaisingHandler()
+    previous_level = hf.logger.level
+    hf.logger.setLevel(logging.WARNING)
+    hf.logger.addHandler(handler)
+    try:
+        trainer.train()
+    finally:
+        hf.logger.removeHandler(handler)
+        hf.logger.setLevel(previous_level)
+
+    assert trainer.state.global_step == 1
+    stderr = capsys.readouterr().err
+    assert "[TraceML]" in stderr
+    assert "overrides get_batch_samples" in stderr
 
 
 def test_installed_batch_collection_hook_does_not_warn(
@@ -391,14 +441,15 @@ def test_collection_bookkeeping_runs_outside_timing_gates(tmp_path) -> None:
 
     states: list[tuple[bool, bool, bool]] = []
 
-    class BookkeepingTrainer(Trainer):
-        def _get_num_items_in_batch(self, *args, **kwargs):
-            states.append(
-                (_timing_allowed(), _enabled(), _include_step_time())
-            )
-            return super()._get_num_items_in_batch(*args, **kwargs)
+    class BookkeepingBatch(dict):
+        def __contains__(self, key):
+            if key == "labels":
+                states.append(
+                    (_timing_allowed(), _enabled(), _include_step_time())
+                )
+            return super().__contains__(key)
 
-    trainer = BookkeepingTrainer(
+    trainer = Trainer(
         model=_Tiny(),
         args=TrainingArguments(
             output_dir=str(tmp_path),
@@ -413,7 +464,18 @@ def test_collection_bookkeeping_runs_outside_timing_gates(tmp_path) -> None:
         train_dataset=_Batches(),
         callbacks=[hf.TraceMLTrainerCallback()],
     )
-    trainer.train()
+
+    batch = BookkeepingBatch(labels=torch.tensor([[1.0, -100.0]]))
+    parameters = inspect.signature(trainer.get_batch_samples).parameters
+    args = [iter([batch]), 1]
+    if "device" in parameters:
+        args.append(trainer.args.device)
+
+    # Match the lifecycle guard's disabled-by-default policy. The collection
+    # proxy enables timing only for iterator.next(); the subsequent labels
+    # check is ordinary Trainer bookkeeping and must observe the outer policy.
+    with dataloader_timing_scope(lambda: False):
+        trainer.get_batch_samples(*args)
 
     assert states
     assert all(

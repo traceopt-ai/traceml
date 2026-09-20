@@ -13,6 +13,9 @@ existing `Trainer`.
 pip install "traceml-ai[hf]"
 ```
 
+The `hf` extra installs `transformers>=4.46.1`, the minimum supported
+Transformers version for automatic Trainer timing.
+
 If you are running the full examples below, install their optional dependencies:
 
 ```bash
@@ -114,9 +117,10 @@ callback can be reused by a later Trainer run.
 
 ## Limitations
 
-- **Transformers version.** Training Input Wait and pre-step H2D timing require
-  `transformers>=4.46`, where `Trainer.get_batch_samples` is available. Older
-  versions warn once and continue training without those signals.
+- **Transformers version.** Automatic Trainer timing requires
+  `transformers>=4.46.1`, where `Trainer.get_batch_samples` is available. If an
+  older version is installed manually, TraceML warns once and lets training
+  continue, but omits training Input Wait and pre-step H2D measurements.
 - **Lifecycle guard.** Failure/retry cleanup and duplicate-callback handling
   require `traceml_hf.init()` to install the Trainer lifecycle guard. If guard
   installation fails, TraceML reports the error and training continues without

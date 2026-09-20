@@ -101,11 +101,27 @@ def _log_hf_error(message: str, exc: Exception) -> None:
 
 
 def _warn_hf_once(key: str, message: str, *args) -> None:
-    """Emit one actionable integration warning without interrupting training."""
+    """Emit one integration warning without affecting Trainer control flow.
+
+    Logging handlers are application-owned and may raise from ``emit``. Treat
+    warning delivery as best-effort: use the normal logger first, fall back to
+    stderr if it fails, and never let either output path interrupt training.
+    """
     if key in _WARNED_CAPABILITIES:
         return
     _WARNED_CAPABILITIES.add(key)
-    logger.warning("[TraceML] " + message, *args)
+    try:
+        logger.warning("[TraceML] " + message, *args)
+        return
+    except Exception:
+        pass
+
+    try:
+        rendered = message % args if args else message
+        print(f"[TraceML] {rendered}", file=sys.stderr)
+    except Exception:
+        # Instrumentation diagnostics must never change user control flow.
+        pass
 
 
 class _TraceStepAbort(RuntimeError):
@@ -302,9 +318,10 @@ def _install_training_batch_timing() -> None:
     if not callable(original):
         _warn_hf_once(
             "missing-get-batch-samples",
-            "Hugging Face training Input Wait and pre-step H2D timing require "
-            "transformers>=4.46; training will continue without those "
-            "signals.",
+            "Hugging Face Trainer timing requires transformers>=4.46.1 "
+            "and Trainer.get_batch_samples. Training will continue, but "
+            "TraceML will omit training Input Wait and pre-step H2D timing. "
+            "Upgrade Transformers to enable those measurements.",
         )
         return
     if getattr(original, "_traceml_training_batch_timing", False):
