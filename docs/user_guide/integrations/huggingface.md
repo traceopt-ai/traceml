@@ -111,6 +111,15 @@ differ from HF's `global_step` after checkpoint resume. See the
 [developer guide](../../developer_guide/step-time-pipeline-contract.md#hugging-face-steps)
 for the exact timing boundaries and optimizer behavior.
 
+When resuming an iterable dataset, Accelerate may consume checkpoint-skipped
+batches and the first real batch inside one iterator call. TraceML does not
+attribute that mixed work to the real training step: the entire first resumed
+optimizer group is omitted from step timing and memory telemetry, including
+all its accumulation microbatches. Training executes normally; recording starts
+with the next group's input collection. No partial step or zero-valued
+placeholder is published. Fresh runs, map-style sampler skipping, and
+`ignore_data_skip=True` record their first group normally.
+
 If training stops before an accumulation group completes, TraceML discards
 that group. Cleanup happens before an automatic batch-size retry, and the same
 callback can be reused by a later Trainer run.
@@ -130,6 +139,9 @@ callback can be reused by a later Trainer run.
   `get_batch_samples` bypasses the standard training-input hook. TraceML warns
   once for the affected Trainer class and continues without training Input
   Wait or pre-step H2D signals rather than reporting partial measurements.
+- **Iterable checkpoint resume.** When Accelerate lazily consumes skipped
+  batches, the entire first resumed optimizer group is omitted from step
+  telemetry. It still trains normally; subsequent groups are recorded.
 - **Memory window.** Temporary allocation peaks before the callback starts
   a step are outside its memory measurement.
 - **Callback registration.** Register the callback before `trainer.train()`

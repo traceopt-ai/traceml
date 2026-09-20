@@ -308,6 +308,21 @@ input-pipeline stall because it delays delivery to the training loop. Input
 Wait event counts therefore describe observed iterator waits, not an exact
 one-event-per-microbatch identity mapping.
 
+Checkpoint resume has one additional boundary rule. Map-style datasets skip
+completed batches in the sampler, before any fetch, so their first resumed
+group is measured normally. For iterable datasets, Accelerate lazily consumes
+the skipped batches and the first real batch within the same iterator call.
+The integration detects that existing lazy-skip path and omits the entire first
+optimizer group from step timing and memory telemetry, including all its
+accumulation microbatches. The collection hook disables input timing and the
+callback does not open `trace_step` for that group. At `on_step_end`, pending
+events are discarded and normal recording resumes with the next collection.
+No partial row is published and the omitted group does not advance TraceML's
+local counter. HF still executes every forward/backward pass and optimizer
+update. Fresh runs, sampler-level skips, and `ignore_data_skip=True` are
+unaffected. This avoids mixing checkpoint fast-forward work into a real step
+or treating deliberately missing input measurements as zero in aggregation.
+
 Other collection-side bookkeeping in `get_batch_samples`, such as token
 counting and an optional cross-rank item-count gather, is currently outside
 both Input Wait and Traced Step Time. HF Step Time is therefore the sum of the
