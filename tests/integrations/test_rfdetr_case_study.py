@@ -29,7 +29,7 @@ training = load("train")
 reporting = load("summarize")
 
 
-def telemetry(path, *, ranks=1, missing=None):
+def telemetry(path, *, ranks=1, missing=None, gpu=True):
     from traceml_ai.step_time.model import STEP_TIME_EVENT_NAMES
 
     with sqlite3.connect(path) as conn:
@@ -48,12 +48,16 @@ def telemetry(path, *, ranks=1, missing=None):
                     optimizer_step=1,
                     traced_step_time=9,
                 )
-                events = {
-                    STEP_TIME_EVENT_NAMES[key]: {
-                        "cpu": {"cpu_ms": value if step > 10 else value * 100}
-                    }
-                    for key, value in times.items()
-                }
+                events = {}
+                for key, value in times.items():
+                    duration = value if step > 10 else value * 100
+                    clocks = {"cpu": {"cpu_ms": duration}}
+                    if gpu:
+                        clocks["cuda:0"] = {
+                            "cpu_ms": duration,
+                            "gpu_ms": duration,
+                        }
+                    events[STEP_TIME_EVENT_NAMES[key]] = clocks
                 conn.execute(
                     "INSERT INTO step_time_samples (global_rank, step, events_json) VALUES (?, ?, ?)",
                     (rank, step, json.dumps(events)),
@@ -119,7 +123,9 @@ def test_summary_excludes_warmup_and_computes_paired_overhead(tmp_path):
     assert window.steps == list(range(11, 51))
     assert window.rank_facts[0].average.forward_ms == 2
     text = reporting.make_report([(base, trace)])
+    assert "| 1 | 100.000 | 40.00 |" in text
     assert "100.000 | 110.000" in text
+    assert "| 1 | 100.000 | 110.000 | +10.000 | +10.00% |" in text
     assert "Median paired overhead: +10.00%" in text
     assert "Residual ms" in text
     assert "not a measurement of criterion/matcher" in text
@@ -149,6 +155,15 @@ def test_missing_telemetry_rank_rejected(tmp_path):
     with pytest.raises(ValueError, match="missing ranks"):
         reporting.phase_window(
             path, {"steps": 50, "warmup_steps": 10, "world_size": 4}
+        )
+
+
+def test_cpu_clock_phase_window_rejected(tmp_path):
+    path = tmp_path / "telemetry"
+    telemetry(path, gpu=False)
+    with pytest.raises(ValueError, match="requires GPU events"):
+        reporting.phase_window(
+            path, {"steps": 50, "warmup_steps": 10, "world_size": 1}
         )
 
 
@@ -182,7 +197,8 @@ def test_incompatible_or_incomplete_runs_rejected(tmp_path, change):
 def test_ddp_uses_slowest_rank_wall_window(tmp_path):
     run_files(tmp_path / "base", "baseline", ranks=4)
     run, ranks = reporting.read_run(tmp_path / "base", "baseline")
-    assert reporting.window_ms(run, ranks) == 175  # 7 seconds / 40 steps
+    ranks[1]["elapsed_s"] = 9
+    assert reporting.window_ms(run, ranks) == 225  # middle rank: 9s / 40 steps
 
 
 @pytest.mark.parametrize("change", [None, "config", "rank", "window", "calls"])
@@ -229,6 +245,7 @@ def test_separate_profiler_attribution_validated(tmp_path, change):
             reporting.make_report([(base, trace)], profile)
     else:
         text = reporting.make_report([(base, trace)], profile)
+        assert "GPU span ms/active step" in text
         assert "Criterion (including matcher) | 10 | 5.000 | 3.000" in text
         assert (
             "Matcher (batched and fallback calls) | 10 | 2.000 | 1.000" in text
@@ -450,12 +467,18 @@ def test_timer_starts_after_warmup_and_includes_next_fetch(monkeypatch):
     torch = pytest.importorskip("torch")
     pytest.importorskip("pytorch_lightning")
     clock = iter([10.0, 14.0])
-    monkeypatch.setattr(training.time, "perf_counter", lambda: next(clock))
+    clock_steps = []
     barriers = []
     trainer = SimpleNamespace(
         global_step=0,
         strategy=SimpleNamespace(barrier=lambda: barriers.append(True)),
     )
+
+    def perf_counter():
+        clock_steps.append(trainer.global_step)
+        return next(clock)
+
+    monkeypatch.setattr(training.time, "perf_counter", perf_counter)
     module = SimpleNamespace(device=torch.device("cpu"))
     timer = training.make_window_callback(10, 50)
     timer.on_train_start(trainer, module)
@@ -468,6 +491,7 @@ def test_timer_starts_after_warmup_and_includes_next_fetch(monkeypatch):
             assert timer.started is None
     assert timer.elapsed_s == 4
     assert timer.completed_steps == 50
+    assert clock_steps == [10, 50]
     assert barriers == [True]
 
 

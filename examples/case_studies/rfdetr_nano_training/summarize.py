@@ -85,6 +85,8 @@ def phase_window(path, run):
         raise ValueError(
             "TraceML could not align the complete measurement window"
         )
+    if window.clock != "gpu":
+        raise ValueError("CUDA case-study phase timing requires GPU events")
     for rank in window.rank_facts:
         required = (
             "step_time_ms",
@@ -146,11 +148,11 @@ def profiler_table(directory, reference, reference_ranks):
         "## Separate PyTorch profiler attribution",
         "",
         "Steps 26–35 only (wait 20, warmup 5, active 10), without TraceML. "
-        "Inclusive CPU scope time and attributed CUDA kernel time per active step. "
+        "Inclusive CPU scope time and GPU-side scope span per active step. "
         "Criterion includes matcher; do not add rows or CPU/CUDA columns. "
         "These overlapping timings are excluded from benchmark throughput and overhead.",
         "",
-        "| Rank | Scope | Calls | CPU ms/active step | CUDA ms/active step |",
+        "| Rank | Scope | Calls | CPU ms/active step | GPU span ms/active step |",
         "|---|---|---:|---:|---:|",
     ]
     names = {
@@ -195,8 +197,9 @@ def profiler_table(directory, reference, reference_ranks):
     lines += [
         "",
         "Matcher covers _match_many/forward; other target preparation stays in criterion. "
-        "Inspect profile-rank-*.json for host syncs and kernel overlap; "
-        "this table does not count synchronizations.",
+        "The GPU span runs from the first to the last GPU activity in each scope, "
+        "so it may include idle time while host work completes. Inspect profile-rank-*.json "
+        "for host synchronizations and individual kernels.",
     ]
     return lines
 
@@ -275,7 +278,7 @@ def make_report(pairs, profile_dir=None):
         "## TraceML phase timing",
         "",
         "Per-rank event-clock means over the same steps, distinct from wall throughput. "
-        "H2D can overlap other regions; do not add it to the total.",
+        "H2D is included in the displayed phase decomposition.",
         "",
         "| Repeat | Rank | Clock | Outer step ms | Input wait ms | H2D ms | Forward ms | Backward ms | Optimizer region ms | Residual ms |",
         "|---|---|---|---:|---:|---:|---:|---:|---:|---:|",
@@ -345,12 +348,13 @@ def make_report(pairs, profile_dir=None):
         "",
         "Paired CUDA-synchronized wall windows; profiler runs are excluded.",
         "",
-        "| Repeat | Native wall ms/step | Traced wall ms/step | TraceML overhead |",
-        "|---|---:|---:|---:|",
+        "| Repeat | Native wall ms/step | Traced wall ms/step | Delta ms/step | TraceML overhead |",
+        "|---|---:|---:|---:|---:|",
     ]
     for index, (base_ms, trace_ms, delta, _) in enumerate(results, 1):
         lines.append(
-            f"| {index} | {base_ms:.3f} | {trace_ms:.3f} | {delta:+.2f}% |"
+            f"| {index} | {base_ms:.3f} | {trace_ms:.3f} | "
+            f"{trace_ms - base_ms:+.3f} | {delta:+.2f}% |"
         )
     lines += [
         "",

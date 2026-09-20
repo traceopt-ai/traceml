@@ -328,7 +328,10 @@ def main(argv=None):
         parser.error(
             "use traceml run --disable-traceml for the separate profiler run"
         )
-    if not disabled and not os.environ.get("TRACEML_SESSION_ID"):
+    if not disabled and not all(
+        os.environ.get(name)
+        for name in ("TRACEML_SESSION_ID", "TRACEML_LOGS_DIR")
+    ):
         parser.error("launch through traceml run (see README)")
     world = int(os.environ.get("WORLD_SIZE", "1"))
     local_world = int(os.environ.get("LOCAL_WORLD_SIZE", "1"))

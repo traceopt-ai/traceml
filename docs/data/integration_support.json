@@ -147,7 +147,7 @@
           "detail": "no physical multi-node validation"
         }
       },
-      "emitted_signals": "CPU tests assert training step, inner-model forward, backward, optimizer and DataLoader fetch, excluding evaluation. The T4 case study records H2D and CUDA phase timing on one and four GPUs.",
+      "emitted_signals": "CPU tests assert training step, inner-model forward, backward, optimizer and DataLoader fetch, excluding evaluation. The T4 case study records H2D and CUDA phase timing on one and four GPUs; CUDA memory remains unvalidated.",
       "example": "examples/integrations/rfdetr_minimal.py",
       "validation_level": "CI tested",
       "ci_evidence": {
