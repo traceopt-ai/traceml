@@ -63,6 +63,7 @@ from traceml_ai.instrumentation.patches.dataloader_patch import (  # noqa: E402,
 from traceml_ai.instrumentation.step_events import (  # noqa: E402
     abort_step_capture,
     begin_step_capture,
+    drain_step_memory_events,
     drain_step_time_batches,
 )
 from traceml_ai.integrations import huggingface as hf  # noqa: E402
@@ -281,6 +282,42 @@ def test_resume_skip_tracking_installation_is_idempotent() -> None:
     assert trainer_module.skip_first_batches is installed
 
 
+def test_resume_skip_tracking_distinguishes_accelerate_loader_shapes() -> None:
+    """Only Accelerate's iterable skip wrapper consumes discarded batches lazily."""
+    import transformers.trainer as trainer_module
+    from torch.utils.data import DataLoader
+
+    hf._install_resume_skip_tracking()
+    state = hf._TRAINING_ATTEMPT_STATE
+    previous = (
+        state.active,
+        state.suppress_next_input_group,
+        state.omit_current_group,
+    )
+    try:
+        state.active = True
+        state.suppress_next_input_group = False
+        state.omit_current_group = False
+
+        map_loader = trainer_module.skip_first_batches(
+            DataLoader(_Batches(), batch_size=1), 1
+        )
+        assert getattr(map_loader, "skip_batches", 0) == 0
+        assert state.suppress_next_input_group is False
+
+        iterable_loader = trainer_module.skip_first_batches(
+            DataLoader(_IterableBatches(), batch_size=1), 1
+        )
+        assert getattr(iterable_loader, "skip_batches", 0) == 1
+        assert state.suppress_next_input_group is True
+    finally:
+        (
+            state.active,
+            state.suppress_next_input_group,
+            state.omit_current_group,
+        ) = previous
+
+
 def test_non_training_input_scope_installation_is_idempotent() -> None:
     hf._install_non_training_input_scopes()
     installed = (Trainer.evaluate, Trainer.predict)
@@ -404,6 +441,7 @@ def test_training_collection_excludes_evaluation_fetches(tmp_path) -> None:
     reset_trace_session_state()
     abort_step_capture(begin_step_capture())
     drain_step_time_batches()
+    drain_step_memory_events()
     hf.init()
 
     log: list[tuple[str, bool, bool, bool]] = []
@@ -524,6 +562,7 @@ def test_iterable_resume_omits_only_ambiguous_group(
     reset_trace_session_state()
     abort_step_capture(begin_step_capture())
     drain_step_time_batches()
+    drain_step_memory_events()
     hf.init()
 
     first = Trainer(
@@ -550,6 +589,7 @@ def test_iterable_resume_omits_only_ambiguous_group(
     assert (
         len(drain_step_time_batches()) == 1
     )  # Fresh training starts immediately.
+    assert len(drain_step_memory_events()) == 1
     reset_trace_session_state()
     timing_states: list[tuple[bool, bool, bool]] = []
     resumed = Trainer(
@@ -589,6 +629,7 @@ def test_iterable_resume_omits_only_ambiguous_group(
             with pytest.raises(RuntimeError, match="resume group failed"):
                 resumed.train(resume_from_checkpoint=str(checkpoint))
         assert drain_step_time_batches() == []
+        assert drain_step_memory_events() == []
         assert hf._TRAINING_ATTEMPT_STATE.active is False
         assert hf._TRAINING_ATTEMPT_STATE.suppress_next_input_group is False
         assert hf._TRAINING_ATTEMPT_STATE.omit_current_group is False
@@ -599,9 +640,11 @@ def test_iterable_resume_omits_only_ambiguous_group(
     assert resumed.state.global_step == 3
 
     batches = drain_step_time_batches()
+    memory_events = drain_step_memory_events()
     assert [batch.step for batch in batches] == (
         [1, 2] if first_group_measured else [1]
     )
+    assert len(memory_events) == (2 if first_group_measured else 1)
     # No trace_step means no compute or memory publication for the omitted
     # group; HF nevertheless completes both optimizer updates.
     assert traced_global_steps == ([1, 2] if first_group_measured else [2])
@@ -621,7 +664,8 @@ def test_iterable_resume_omits_only_ambiguous_group(
     assert hf._TRAINING_ATTEMPT_STATE.omit_current_group is False
 
 
-def test_map_style_resume_keeps_first_groups_input_timing(tmp_path) -> None:
+@pytest.mark.parametrize("ga", [1, 2])
+def test_map_style_resume_keeps_first_groups_input_timing(tmp_path, ga) -> None:
     """Sampler-level checkpoint skipping does not fetch discarded batches."""
     reset_trace_session_state()
     abort_step_capture(begin_step_capture())
@@ -631,6 +675,7 @@ def test_map_style_resume_keeps_first_groups_input_timing(tmp_path) -> None:
     arguments = dict(
         output_dir=str(tmp_path),
         per_device_train_batch_size=1,
+        gradient_accumulation_steps=ga,
         logging_strategy="no",
         report_to=[],
         disable_tqdm=True,

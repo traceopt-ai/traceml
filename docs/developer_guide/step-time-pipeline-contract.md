@@ -354,7 +354,10 @@ Neither the step count nor an optimizer timing event proves parameters changed.
 ### Current limitations
 
 Automatic HF Trainer timing supports `transformers>=4.46.1`; earlier versions
-do not expose the required batch-collection seam. Training input timing is
+do not expose the required `get_batch_samples` collection seam. The resume
+skip itself is older upstream behavior (Transformers delegates to Accelerate's
+`skip_first_batches`); this integration does not change how checkpoints are
+restored. Training input timing is
 limited to the standard
 `Trainer.get_batch_samples` path. A custom Trainer that overrides that method
 also bypasses the collection window and produces a one-time warning; TraceML
