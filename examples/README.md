@@ -218,7 +218,8 @@ docstring carries the exact commands).
 
 Ray Data examples wrap `iter_torch_batches(...)` with
 `traceml.wrap_dataloader_fetch(...)` because Ray Data iterators are not PyTorch
-`DataLoader` objects.
+`DataLoader` objects. `TraceMLTorchTrainer` initializes each worker before the
+training function creates this wrapper.
 
 Ray + Lightning can use `--input-delay-ms` / `--input-delay-rank` for input
 stragglers, `--delay-ms` / `--delay-rank` for compute stragglers, and

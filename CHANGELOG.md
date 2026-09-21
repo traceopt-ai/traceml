@@ -7,6 +7,10 @@ which carry the full historical notes for versions predating this file.
 
 ## [Unreleased]
 
+- **Breaking:** Public manual wrappers now require `traceml.init(...)` first
+  and reject phases already owned by automatic instrumentation. Move `init()`
+  before wrapper creation; custom non-PyTorch input iterators remain wrappable
+  in auto mode because the PyTorch DataLoader patch cannot observe them.
 - Added opt-in RF-DETR instrumentation for eager detection. Unsupported
   configurations or adapter failures warn and leave native training intact.
   Skipped instrumentation no longer accumulates DataLoader timing records.

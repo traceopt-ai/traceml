@@ -139,6 +139,16 @@ def _traceml_dataloader_iter(self):
         yield batch
 
 
+def is_traceml_dataloader_iterator(obj) -> bool:
+    """Return whether ``obj`` was created by TraceML's DataLoader patch.
+
+    The patched ``DataLoader.__iter__`` is a generator function, so its return
+    value does not retain PyTorch's native DataLoader iterator type. Keep the
+    generator-specific identification beside the function that creates it.
+    """
+    return getattr(obj, "gi_code", None) is _traceml_dataloader_iter.__code__
+
+
 def patch_dataloader():
     """
     Patch torch.utils.data.DataLoader.__iter__ once.

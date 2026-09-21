@@ -107,9 +107,10 @@ def reset_optimizer_timing() -> None:
     Remove the global optimizer-step timing hooks, clear in-flight state, and
     reset the installed flag.
 
-    Inverse of ``ensure_optimizer_timing_installed()``; intended for tests and
-    re-initialization. Best-effort and never raises. After this call,
-    ``wrap_optimizer()`` is permitted again and the auto path can re-install.
+    Inverse of ``ensure_optimizer_timing_installed()``; intended for test
+    cleanup. Best-effort and never raises. The auto path can reinstall the
+    hooks, but this does not change the declared init configuration or permit
+    ``wrap_optimizer()`` when auto mode owns optimizer timing.
     """
     global _HANDLES
     if _HANDLES is not None:

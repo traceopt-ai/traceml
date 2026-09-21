@@ -37,6 +37,30 @@ def _reload_wrappers_module():
     return importlib.reload(wrappers)
 
 
+def _set_wrapper_config(
+    monkeypatch,
+    mode="manual",
+    *,
+    patch_dataloader=False,
+    patch_forward=False,
+    patch_backward=False,
+    patch_h2d=False,
+    disabled=False,
+):
+    import traceml_ai.sdk.initial as initialization
+
+    config = initialization.TraceMLInitConfig(
+        mode=mode,
+        patch_dataloader=patch_dataloader,
+        patch_forward=patch_forward,
+        patch_backward=patch_backward,
+        patch_h2d=patch_h2d,
+        disabled=disabled,
+    )
+    monkeypatch.setattr(initialization, "get_init_config", lambda: config)
+    return config
+
+
 def test_init_auto_enables_all_supported_patches(monkeypatch):
     initialization = _reload_initialization_module()
 
@@ -598,32 +622,113 @@ def test_trace_step_marks_recording_draining_after_configured_step(
     reset_trace_session_state()
 
 
-def test_wrap_dataloader_fetch_allows_custom_iterator_when_torch_patch_active(
+def test_public_wrappers_require_init(monkeypatch):
+    wrappers = _reload_wrappers_module()
+
+    import traceml_ai.sdk.initial as initialization
+
+    monkeypatch.setattr(initialization, "get_init_config", lambda: None)
+
+    calls = [
+        lambda: wrappers.wrap_dataloader_fetch(object()),
+        lambda: wrappers.wrap_forward(object()),
+        lambda: wrappers.wrap_backward(object()),
+        lambda: wrappers.wrap_optimizer(object()),
+        lambda: wrappers.wrap_h2d(object()),
+    ]
+    for call in calls:
+        with pytest.raises(RuntimeError, match=r"traceml\.init"):
+            call()
+
+
+def test_standard_wrappers_reject_auto_ownership(monkeypatch):
+    wrappers = _reload_wrappers_module()
+    _set_wrapper_config(
+        monkeypatch,
+        "auto",
+        patch_dataloader=True,
+        patch_forward=True,
+        patch_backward=True,
+        patch_h2d=True,
+    )
+
+    class Loss:
+        def backward(self):
+            raise AssertionError("ownership must be checked before execution")
+
+    class Optimizer:
+        def step(self):
+            raise AssertionError("ownership must be checked before mutation")
+
+    class Batch:
+        def to(self, _device):
+            raise AssertionError("ownership must be checked before transfer")
+
+    calls = [
+        ("wrap_forward", lambda: wrappers.wrap_forward(nn.Linear(1, 1))),
+        ("wrap_backward", lambda: wrappers.wrap_backward(Loss())),
+        ("wrap_optimizer", lambda: wrappers.wrap_optimizer(Optimizer())),
+        ("wrap_h2d", lambda: wrappers.wrap_h2d(Batch())),
+    ]
+    for wrapper_name, call in calls:
+        with pytest.raises(RuntimeError, match=wrapper_name):
+            call()
+
+
+def test_wrap_dataloader_fetch_allows_custom_iterator_in_auto_mode(
     monkeypatch,
 ):
     wrappers = _reload_wrappers_module()
+    _set_wrapper_config(
+        monkeypatch,
+        "auto",
+        patch_dataloader=True,
+        patch_forward=True,
+        patch_backward=True,
+        patch_h2d=True,
+    )
+    calls = []
 
-    from torch.utils.data import DataLoader
+    @contextmanager
+    def fake_timed_region(name, scope, record_gpu_events):
+        calls.append((name, scope, record_gpu_events))
+        yield
 
-    monkeypatch.setattr(DataLoader, "_traceml_patched", True, raising=False)
+    monkeypatch.setattr(wrappers, "timed_region", fake_timed_region)
 
     wrapped = wrappers.wrap_dataloader_fetch(iter([1, 2, 3]))
 
     assert list(wrapped) == [1, 2, 3]
+    assert calls == [
+        ("_traceml_internal:dataloader_next", "step", True),
+        ("_traceml_internal:dataloader_next", "step", True),
+        ("_traceml_internal:dataloader_next", "step", True),
+        ("_traceml_internal:dataloader_next", "step", True),
+    ]
 
 
-def test_wrap_dataloader_fetch_rejects_torch_dataloader_when_auto_patch_active(
+@pytest.mark.parametrize("use_iterator", [False, True])
+def test_wrap_dataloader_fetch_rejects_pytorch_target_in_auto_mode(
     monkeypatch,
+    use_iterator,
 ):
     wrappers = _reload_wrappers_module()
+    _set_wrapper_config(
+        monkeypatch,
+        "auto",
+        patch_dataloader=True,
+        patch_forward=True,
+        patch_backward=True,
+        patch_h2d=True,
+    )
 
     from torch.utils.data import DataLoader
 
-    monkeypatch.setattr(DataLoader, "_traceml_patched", True, raising=False)
     loader = DataLoader([1, 2, 3], batch_size=1)
+    target = iter(loader) if use_iterator else loader
 
-    with pytest.raises(RuntimeError, match="already active"):
-        wrappers.wrap_dataloader_fetch(loader)
+    with pytest.raises(RuntimeError, match="already owns"):
+        wrappers.wrap_dataloader_fetch(target)
 
 
 def test_auto_dataloader_patch_records_gpu_events(monkeypatch):
@@ -660,6 +765,19 @@ def test_auto_dataloader_patch_records_gpu_events(monkeypatch):
     ]
 
 
+def test_dataloader_patch_recognizes_only_its_own_generator():
+    import traceml_ai.instrumentation.patches.dataloader_patch as dataloader_patch
+
+    from torch.utils.data import DataLoader
+
+    loader = DataLoader([1, 2, 3], batch_size=1)
+    patched_iterator = dataloader_patch._traceml_dataloader_iter(loader)
+    custom_iterator = (item for item in [1, 2, 3])
+
+    assert dataloader_patch.is_traceml_dataloader_iterator(patched_iterator)
+    assert not dataloader_patch.is_traceml_dataloader_iterator(custom_iterator)
+
+
 def test_auto_dataloader_patch_passes_through_when_unarmed(monkeypatch):
     import traceml_ai.instrumentation.patches.dataloader_patch as dataloader_patch
 
@@ -691,6 +809,7 @@ def test_auto_dataloader_patch_passes_through_when_unarmed(monkeypatch):
 
 def test_wrap_dataloader_fetch_records_gpu_events(monkeypatch):
     wrappers = _reload_wrappers_module()
+    _set_wrapper_config(monkeypatch)
 
     calls = []
 
@@ -722,6 +841,7 @@ def test_wrap_dataloader_fetch_records_gpu_events(monkeypatch):
 
 def test_wrap_forward_times_model_instance(monkeypatch):
     wrappers = _reload_wrappers_module()
+    _set_wrapper_config(monkeypatch)
 
     calls = []
 
@@ -750,6 +870,7 @@ def test_wrap_forward_times_model_instance(monkeypatch):
 
 def test_wrap_backward_times_backward(monkeypatch):
     wrappers = _reload_wrappers_module()
+    _set_wrapper_config(monkeypatch)
 
     calls = []
 
@@ -783,6 +904,7 @@ def test_wrap_backward_times_backward(monkeypatch):
 
 def test_wrap_optimizer_preserves_identity_and_times_step(monkeypatch):
     wrappers = _reload_wrappers_module()
+    _set_wrapper_config(monkeypatch)
 
     calls = []
 

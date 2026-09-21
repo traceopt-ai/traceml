@@ -74,6 +74,12 @@ _RANK_STRAGGLER_KINDS = frozenset(
     }
 )
 
+_INCOMPLETE_DATA_ACTION = (
+    "Use the recommended automatic initialization for this training "
+    "framework, or instrument the missing phases with matching wrap_* "
+    "helpers in manual/selective mode."
+)
+
 
 @dataclass(frozen=True)
 class StepDiagnosis(BaseDiagnosis):
@@ -245,10 +251,7 @@ def diagnose_step_time_window(
                     + ", ".join(context.missing_signals)
                     + "."
                 ),
-                action=(
-                    "Instrument the missing phases (auto mode or the "
-                    "matching wrap_* helpers) to restore coverage."
-                ),
+                action=_INCOMPLETE_DATA_ACTION,
                 steps_used=int(window.coverage.steps_used),
             )
             return DiagnosticResult(
@@ -397,10 +400,7 @@ def diagnose_step_time_window(
                     + ", ".join(missing_signals)
                     + "."
                 ),
-                action=(
-                    "Instrument the missing phases (auto mode or the "
-                    "matching wrap_* helpers) to restore coverage."
-                ),
+                action=_INCOMPLETE_DATA_ACTION,
                 steps_used=context.steps_used,
                 worst_rank=(
                     None if context.single_rank else context.overall_worst_rank

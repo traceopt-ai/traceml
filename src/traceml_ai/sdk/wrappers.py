@@ -5,75 +5,61 @@ from __future__ import annotations
 import functools
 from typing import Any, Iterator
 
-import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from traceml_ai.instrumentation.h2d import should_time_h2d
+from traceml_ai.instrumentation.patches.dataloader_patch import (
+    is_traceml_dataloader_iterator,
+)
 from traceml_ai.instrumentation.step_events import TimeScope
+from traceml_ai.sdk.instrumentation_policy import (
+    require_manual_wrapper_allowed,
+)
 from traceml_ai.utils.timing import timed_region
-
-
-def _raise_duplicate_instrumentation(feature: str, reason: str) -> None:
-    raise RuntimeError(
-        f"TraceML cannot apply manual wrapper instrumentation for {feature} "
-        f"because automatic instrumentation is already active. {reason} "
-        "Disable the automatic path for this feature before using the wrapper."
-    )
 
 
 def _is_torch_dataloader_iterator(obj: Any) -> bool:
     """
-    Best-effort detection for iterators returned by torch DataLoader.
+    Detect native and TraceML-patched iterators returned by torch DataLoader.
     """
     typ = type(obj)
     module = str(getattr(typ, "__module__", "") or "")
     name = str(getattr(typ, "__name__", "") or "")
-    return module.startswith("torch.utils.data") and name.endswith(
+    if module.startswith("torch.utils.data") and name.endswith(
         "DataLoaderIter"
-    )
+    ):
+        return True
+
+    return is_traceml_dataloader_iterator(obj)
 
 
 def _ensure_dataloader_wrapper_allowed(obj: Any) -> None:
-    """
-    Reject manual wrapping only for the torch DataLoader path that is already
-    automatically patched.
-
-    Custom loaders and custom iterators remain allowed even when the global
-    torch DataLoader patch is active.
-    """
-    if not getattr(DataLoader, "_traceml_patched", False):
-        return
-
-    if isinstance(obj, DataLoader) or _is_torch_dataloader_iterator(obj):
-        _raise_duplicate_instrumentation(
-            "dataloader fetch",
-            "torch DataLoader fetch timing is already patched.",
-        )
+    """Reject overlap with automatic PyTorch DataLoader timing."""
+    is_torch_target = isinstance(obj, DataLoader) or (
+        _is_torch_dataloader_iterator(obj)
+    )
+    require_manual_wrapper_allowed(
+        "dataloader_fetch",
+        "wrap_dataloader_fetch",
+        covered_by_automatic_instrumentation=is_torch_target,
+    )
 
 
 def _ensure_forward_wrapper_allowed() -> None:
-    if getattr(nn.Module, "_traceml_forward_patched", False):
-        _raise_duplicate_instrumentation(
-            "forward",
-            "nn.Module.__call__ has already been patched.",
-        )
+    require_manual_wrapper_allowed("forward", "wrap_forward")
 
 
 def _ensure_backward_wrapper_allowed() -> None:
-    if getattr(torch, "_traceml_backward_patched", False):
-        _raise_duplicate_instrumentation(
-            "backward",
-            "torch backward entry points have already been patched.",
-        )
+    require_manual_wrapper_allowed("backward", "wrap_backward")
 
 
 def _ensure_optimizer_wrapper_allowed() -> None:
-    if getattr(torch.optim.Optimizer, "_traceml_opt_hooks_installed", False):
-        _raise_duplicate_instrumentation(
-            "optimizer step",
-            "global optimizer step hooks are already installed.",
-        )
+    require_manual_wrapper_allowed("optimizer", "wrap_optimizer")
+
+
+def _ensure_h2d_wrapper_allowed() -> None:
+    require_manual_wrapper_allowed("h2d", "wrap_h2d")
 
 
 class _WrappedDataLoaderIterator:
@@ -151,8 +137,9 @@ def wrap_dataloader_fetch(obj: Any) -> Any:
 
     Notes
     -----
-    - If you pass a torch DataLoader while automatic DataLoader patching is
-      active, this raises to prevent duplicate instrumentation.
+    - TraceML must be initialized before this wrapper is created.
+    - If automatic DataLoader patching owns a torch DataLoader, this raises to
+      prevent duplicate instrumentation.
     - Custom iterators remain allowed even when torch DataLoader auto patching
       is active.
     """
@@ -289,12 +276,6 @@ class _WrappedH2D:
         self._obj = obj
 
     def to(self, *args: Any, **kwargs: Any) -> Any:
-        # If the auto-patch was installed after this wrapper was created
-        # (wrap-then-init race), defer to avoid double-counting: the patch
-        # will time this call if it qualifies as H2D.
-        if getattr(torch.Tensor, "_traceml_h2d_patched", False):
-            return self._obj.to(*args, **kwargs)
-
         if not should_time_h2d(self._obj, args, kwargs):
             return self._obj.to(*args, **kwargs)
 
@@ -340,14 +321,15 @@ def wrap_h2d(obj: Any) -> "_WrappedH2D":
 
     Notes
     -----
+    - TraceML must be initialized before this wrapper is created.
     - The wrapper does not need the object to be a ``torch.Tensor``; any
       object with a ``.to(...)`` method is accepted (e.g. custom batch
       containers).
-    - If ``traceml.init(patch_h2d=True)`` is called *after* this wrapper was
-      created, the wrapper defers gracefully on ``.to()`` — the auto-patch
-      handles timing and the proxy becomes a pass-through, so no event is
-      double-counted.
+    - Automatic H2D instrumentation and this manual wrapper are mutually
+      exclusive.
     """
+    _ensure_h2d_wrapper_allowed()
+
     to_fn = getattr(obj, "to", None)
     if to_fn is None or not callable(to_fn):
         raise TypeError(
