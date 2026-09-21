@@ -11,7 +11,10 @@ which carry the full historical notes for versions predating this file.
   (`pip install 'traceml-ai[monai]'`). `TraceMLHandler` publishes one step
   per optimizer update with step time, Input Wait from the engine's own fetch
   events, step memory, and H2D on CUDA. Other engines warn and are not traced.
-  Phase timings, the guide, the support-matrix row and the example follow.
+  The guide, the support-matrix row and the example follow.
+- MONAI steps now carry forward, backward and optimizer time. Forward is the
+  model call MONAI makes, so `zero_grad` stays outside it, and the optimizer is
+  timed on the trainer's own optimizer, once per update group.
 - Added opt-in RF-DETR instrumentation for eager detection. Unsupported
   configurations or adapter failures warn and leave native training intact.
   Skipped instrumentation no longer accumulates DataLoader timing records.
