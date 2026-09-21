@@ -665,7 +665,9 @@ def test_iterable_resume_omits_only_ambiguous_group(
 
 
 @pytest.mark.parametrize("ga", [1, 2])
-def test_map_style_resume_keeps_first_groups_input_timing(tmp_path, ga) -> None:
+def test_map_style_resume_keeps_first_groups_input_timing(
+    tmp_path, ga
+) -> None:
     """Sampler-level checkpoint skipping does not fetch discarded batches."""
     reset_trace_session_state()
     abort_step_capture(begin_step_capture())
