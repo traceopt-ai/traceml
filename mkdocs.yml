@@ -99,6 +99,7 @@ nav:
           - Hugging Face Accelerate: user_guide/integrations/accelerate.md
           - PyTorch Lightning: user_guide/integrations/lightning.md
           - RF-DETR: user_guide/integrations/rfdetr.md
+          - MONAI: user_guide/integrations/monai.md
           - Ray Train: user_guide/integrations/ray.md
           - DeepSpeed: user_guide/integrations/deepspeed.md
           - W&B / MLflow: user_guide/integrations/wandb-mlflow.md

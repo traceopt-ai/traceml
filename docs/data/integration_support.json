@@ -166,6 +166,37 @@
       }
     },
     {
+      "id": "monai",
+      "stack": "MONAI",
+      "recommended_api": "traceml_ai.integrations.monai.init() + TraceMLHandler in train_handlers",
+      "guide": "user_guide/integrations/monai.md",
+      "tested_dependency_range": "A dedicated CPU CI job pins monai==1.6.* with pytorch-ignite==0.5.*, and reruns the same tests at the declared floor pytorch-ignite==0.4.11. This is not a broad compatibility matrix.",
+      "coverage": {
+        "cpu": { "status": "CI tested", "detail": "dedicated MONAI CPU job" },
+        "gpu": { "status": "Not claimed", "detail": "no GPU job; H2D timing is armed but never exercised" },
+        "single_process": { "status": "CI tested", "detail": "real SupervisedTrainer runs, plus the documented example end to end" },
+        "multi_process": { "status": "Not claimed", "detail": "no distributed job" },
+        "multi_node": { "status": "Not claimed", "detail": "no distributed job" }
+      },
+      "emitted_signals": "tests/integrations/test_telemetry_conformance.py asserts step time, forward, backward, optimizer and the engine's own fetch bracket on a CPU run. The same job runs examples/integrations/monai_minimal.py under traceml run, with and without gradient accumulation, and fails if the summary loses Input Wait, forward, backward or optimizer time, or if its step count disagrees with the optimizer updates the trainer made. H2D and step memory are GPU-only and not asserted in CI.",
+      "example": "examples/integrations/monai_minimal.py",
+      "validation_level": "CI tested",
+      "ci_evidence": {
+        "job": "test-monai",
+        "extras": [
+          "torch",
+          "monai"
+        ],
+        "test": "tests/integrations/test_monai.py",
+        "label": "real MONAI SupervisedTrainer tests, rerun at the Ignite floor"
+      },
+      "limitations": {
+        "guide_label": "MONAI limitations",
+        "guide": "user_guide/integrations/monai.md#limitations",
+        "issues": [141, 320, 323, 463]
+      }
+    },
+    {
       "id": "ray-train",
       "stack": "Ray Train",
       "recommended_api": "TraceMLTorchTrainer + TraceMLRayConfig",

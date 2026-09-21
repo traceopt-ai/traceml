@@ -948,6 +948,34 @@ def test_an_inferer_replaced_during_the_run_is_left_alone(capsys):
     assert "inferer was replaced" in err
 
 
+def test_the_traced_inferer_has_the_surface_the_guide_documents():
+    """The guide tells users what `engine.inferer` is during a run."""
+    from monai.inferers import Inferer
+
+    traceml_monai.init()
+    trainer = _trainer([traceml_monai.TraceMLHandler()])
+    original = trainer.inferer
+    original.marker = object()
+    seen = {}
+
+    def probe(engine):
+        inferer = engine.inferer
+        seen["proxied"] = inferer is not original
+        seen["isinstance"] = isinstance(inferer, Inferer)
+        seen["repr"] = repr(inferer)
+        seen["passthrough"] = inferer.marker is original.marker
+
+    trainer.add_event_handler(Events.ITERATION_COMPLETED(once=1), probe)
+    trainer.run()
+
+    assert seen["proxied"]
+    assert seen["passthrough"]
+    # Both are limitations the guide states, so a change here changes the doc.
+    assert not seen["isinstance"]
+    assert "_TimedInferer" in seen["repr"]
+    assert trainer.inferer is original
+
+
 def test_kill_switch_wraps_and_records_nothing(monkeypatch):
     traceml_monai.init()
     monkeypatch.setenv("TRACEML_DISABLED", "1")
