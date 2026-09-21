@@ -11,6 +11,10 @@ which carry the full historical notes for versions predating this file.
   and reject phases already owned by automatic instrumentation. Move `init()`
   before wrapper creation; custom non-PyTorch input iterators remain wrappable
   in auto mode because the PyTorch DataLoader patch cannot observe them.
+- Hugging Face checkpoint resume no longer attributes lazily skipped iterable
+  batches to the first resumed optimizer group. That entire group's step
+  timing and memory telemetry is omitted; training runs normally and recording
+  resumes with the next group. Fresh runs and sampler-level skips are unaffected.
 - Added opt-in RF-DETR instrumentation for eager detection. Unsupported
   configurations or adapter failures warn and leave native training intact.
   Skipped instrumentation no longer accumulates DataLoader timing records.
