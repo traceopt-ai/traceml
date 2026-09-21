@@ -7,6 +7,11 @@ which carry the full historical notes for versions predating this file.
 
 ## [Unreleased]
 
+- Added `traceml_ai.integrations.monai` for MONAI's `SupervisedTrainer`
+  (`pip install 'traceml-ai[monai]'`). `TraceMLHandler` publishes one step
+  per optimizer update with step time, Input Wait from the engine's own fetch
+  events, step memory, and H2D on CUDA. Other engines warn and are not traced.
+  Phase timings, the guide, the support-matrix row and the example follow.
 - Added opt-in RF-DETR instrumentation for eager detection. Unsupported
   configurations or adapter failures warn and leave native training intact.
   Skipped instrumentation no longer accumulates DataLoader timing records.
