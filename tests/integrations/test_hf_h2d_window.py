@@ -285,9 +285,13 @@ def test_resume_skip_tracking_installation_is_idempotent() -> None:
 def test_resume_skip_tracking_distinguishes_accelerate_loader_shapes() -> None:
     """Only Accelerate's iterable skip wrapper consumes discarded batches lazily."""
     import transformers.trainer as trainer_module
+    from accelerate import Accelerator
+    from accelerate.data_loader import DataLoaderDispatcher, DataLoaderShard
     from torch.utils.data import DataLoader
 
     hf._install_resume_skip_tracking()
+    # Trainer prepares its training DataLoader through this same Accelerate path.
+    accelerator = Accelerator(cpu=True)
     state = hf._TRAINING_ATTEMPT_STATE
     previous = (
         state.active,
@@ -299,15 +303,27 @@ def test_resume_skip_tracking_distinguishes_accelerate_loader_shapes() -> None:
         state.suppress_next_input_group = False
         state.omit_current_group = False
 
-        map_loader = trainer_module.skip_first_batches(
-            DataLoader(_Batches(), batch_size=1), 1
+        prepared_map_loader = accelerator.prepare(
+            DataLoader(_Batches(), batch_size=1)
         )
+        assert isinstance(prepared_map_loader, DataLoaderShard)
+        map_loader = trainer_module.skip_first_batches(
+            prepared_map_loader,
+            1,
+        )
+        assert isinstance(map_loader, DataLoaderShard)
         assert getattr(map_loader, "skip_batches", 0) == 0
         assert state.suppress_next_input_group is False
 
-        iterable_loader = trainer_module.skip_first_batches(
-            DataLoader(_IterableBatches(), batch_size=1), 1
+        prepared_iterable_loader = accelerator.prepare(
+            DataLoader(_IterableBatches(), batch_size=1)
         )
+        assert isinstance(prepared_iterable_loader, DataLoaderDispatcher)
+        iterable_loader = trainer_module.skip_first_batches(
+            prepared_iterable_loader,
+            1,
+        )
+        assert isinstance(iterable_loader, DataLoaderDispatcher)
         assert getattr(iterable_loader, "skip_batches", 0) == 1
         assert state.suppress_next_input_group is True
     finally:
@@ -431,8 +447,10 @@ def test_installed_batch_collection_hook_does_not_warn(
     with caplog.at_level(logging.WARNING, logger=hf.__name__):
         hf._warn_if_training_batch_timing_is_bypassed(trainer)
 
-    assert "cannot guarantee pre-step H2D timing" not in " ".join(
-        record.getMessage() for record in caplog.records
+    messages = " ".join(record.getMessage() for record in caplog.records)
+    assert (
+        "cannot guarantee training Input Wait or pre-step H2D timing"
+        not in messages
     )
 
 
@@ -547,7 +565,12 @@ def test_collection_bookkeeping_runs_outside_timing_gates(tmp_path) -> None:
 
 @pytest.mark.parametrize(
     ("ga", "ignore_data_skip", "first_group_measured"),
-    [(1, False, False), (2, False, False), (1, True, True)],
+    [
+        (1, False, False),
+        (2, False, False),
+        (1, True, True),
+        (2, True, True),
+    ],
 )
 @pytest.mark.parametrize("fail_before_retry", [False, True])
 def test_iterable_resume_omits_only_ambiguous_group(
@@ -651,8 +674,13 @@ def test_iterable_resume_omits_only_ambiguous_group(
 
     fetch = "_traceml_internal:dataloader_next"
     forward = "_traceml_internal:forward_time"
+    optimizer = "_traceml_internal:optimizer_step"
     names = [{event.name for event in batch.events} for batch in batches]
     assert all(fetch in group and forward in group for group in names)
+    assert all(
+        sum(event.name == optimizer for event in batch.events) == 1
+        for batch in batches
+    )
     assert timing_states
     expected_first_state = (
         (True, True, True) if first_group_measured else (False, False, False)
