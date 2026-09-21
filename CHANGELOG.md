@@ -7,6 +7,10 @@ which carry the full historical notes for versions predating this file.
 
 ## [Unreleased]
 
+- Hugging Face checkpoint resume no longer attributes lazily skipped iterable
+  batches to the first resumed optimizer group. That entire group's step
+  timing and memory telemetry is omitted; training runs normally and recording
+  resumes with the next group. Fresh runs and sampler-level skips are unaffected.
 - Added opt-in RF-DETR instrumentation for eager detection. Unsupported
   configurations or adapter failures warn and leave native training intact.
   Skipped instrumentation no longer accumulates DataLoader timing records.
