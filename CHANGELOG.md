@@ -7,6 +7,20 @@ which carry the full historical notes for versions predating this file.
 
 ## [Unreleased]
 
+- Added `traceml_ai.integrations.monai` for MONAI's `SupervisedTrainer`
+  (`pip install 'traceml-ai[monai]'`). `TraceMLHandler` publishes one step
+  per optimizer update with step time, Input Wait from the engine's own fetch
+  events, step memory, and H2D on CUDA. Other engines warn and are not traced.
+  The guide, the support-matrix row and the example follow.
+- MONAI steps now carry forward, backward and optimizer time. Forward is the
+  model call MONAI makes, so `zero_grad` stays outside it, and the optimizer is
+  timed on the trainer's own optimizer, once per update group.
+- Documented the MONAI integration: a guide, a support-matrix row, an entry in
+  the public API reference, and `examples/integrations/monai_minimal.py`, which
+  trains a small UNet on synthetic volumes and downloads nothing. CI runs that
+  example under `traceml run`, with and without gradient accumulation, and
+  fails if the summary loses Input Wait, forward, backward or optimizer time,
+  or if its step count disagrees with the optimizer updates the trainer made.
 - **Breaking:** Public manual wrappers now require `traceml.init(...)` first
   and reject phases already owned by automatic instrumentation. Move `init()`
   before wrapper creation; custom non-PyTorch input iterators remain wrappable

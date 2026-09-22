@@ -87,6 +87,13 @@ lightning = [
     "lightning>=2.6.0",
 ]
 
+monai = [
+    # The handler repeats MONAI 1.6.0's gradient-accumulation step rule.
+    "monai>=1.6.0",
+    # The Ignite release MONAI 1.6.0's own "ignite" extra pins.
+    "pytorch-ignite>=0.4.11",
+]
+
 ray = [
     "ray[train]>=2.0.0",
 ]
