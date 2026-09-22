@@ -92,6 +92,20 @@ def _fake_tensor_to(tensor, *args, **kwargs):
     return tensor
 
 
+def _set_wrapper_config(monkeypatch, mode="manual", *, patch_h2d=False):
+    import traceml_ai.sdk.initial as initialization
+
+    config = initialization.TraceMLInitConfig(
+        mode=mode,
+        patch_dataloader=mode == "auto",
+        patch_forward=mode == "auto",
+        patch_backward=mode == "auto",
+        patch_h2d=patch_h2d,
+    )
+    monkeypatch.setattr(initialization, "get_init_config", lambda: config)
+    return config
+
+
 @pytest.fixture(autouse=True)
 def _armed_tracing():
     # The patched .to() checks the process-wide flag that init() raises once
@@ -474,12 +488,14 @@ class TestWrapH2D:
         torch.Tensor.to = h2d_patch._ORIG_TENSOR_TO  # type: ignore[assignment]
         torch.Tensor._traceml_h2d_patched = False  # type: ignore[attr-defined]
 
-    def test_wrap_h2d_returns_proxy(self):
+    def test_wrap_h2d_returns_proxy(self, monkeypatch):
+        _set_wrapper_config(monkeypatch)
         tensor = torch.ones(4)
         wrapped = wrap_h2d(tensor)
         assert hasattr(wrapped, "to")
 
-    def test_wrap_h2d_to_records_event(self):
+    def test_wrap_h2d_to_records_event(self, monkeypatch):
+        _set_wrapper_config(monkeypatch)
         tensor = torch.ones(4)
         wrapped = wrap_h2d(tensor)
 
@@ -492,47 +508,28 @@ class TestWrapH2D:
         assert len(events) == 1
         assert events[0].name == "_traceml_internal:h2d_time"
 
-    def test_wrap_h2d_forwards_attributes(self):
+    def test_wrap_h2d_forwards_attributes(self, monkeypatch):
+        _set_wrapper_config(monkeypatch)
         tensor = torch.ones(4, 4)
         wrapped = wrap_h2d(tensor)
         assert wrapped.shape == tensor.shape
         assert wrapped.dtype == tensor.dtype
 
-    def test_wrap_h2d_raises_for_object_without_to(self):
+    def test_wrap_h2d_raises_for_object_without_to(self, monkeypatch):
+        _set_wrapper_config(monkeypatch)
         with pytest.raises(TypeError, match="callable .to\\(\\) method"):
             wrap_h2d(object())
 
-    def test_wrap_h2d_defers_when_auto_patch_active(self):
-        """C3: wrap-then-init race — wrapper must defer to the auto-patch,
-        not add a second timed_region, producing exactly 0 extra events."""
+    def test_wrap_h2d_rejects_automatic_ownership(self, monkeypatch):
+        _set_wrapper_config(monkeypatch, "auto", patch_h2d=True)
         tensor = torch.ones(4)
-        wrapped = wrap_h2d(tensor)  # sentinel False at construction time
 
-        recorded = []
+        with pytest.raises(RuntimeError, match="already owns"):
+            wrap_h2d(tensor)
 
-        @contextmanager
-        def fake_timed_region(name, scope, record_gpu_events):
-            recorded.append(name)
-            yield
-
-        # Simulate init(mode="auto") running after wrap_h2d().
-        torch.Tensor._traceml_h2d_patched = True  # type: ignore[attr-defined]
-        try:
-            with patch(
-                "traceml_ai.sdk.wrappers.timed_region",
-                side_effect=fake_timed_region,
-            ):
-                with patch.object(torch.Tensor, "to", return_value=tensor):
-                    wrapped.to("cuda:0")
-        finally:
-            torch.Tensor._traceml_h2d_patched = False  # type: ignore[attr-defined]
-
-        assert (
-            recorded == []
-        ), "_WrappedH2D.to() must not enter timed_region when auto-patch is active (C3)"
-
-    def test_wrap_h2d_accepts_custom_batch_object(self):
+    def test_wrap_h2d_accepts_custom_batch_object(self, monkeypatch):
         """wrap_h2d() works on any object with a .to() method, not only tensors."""
+        _set_wrapper_config(monkeypatch)
 
         class FakeBatch:
             def to(self, device):
@@ -547,10 +544,11 @@ class TestWrapH2D:
 
         assert len(events) == 1
 
-    def test_wrap_h2d_dict_batch_dunder_forwarding(self):
+    def test_wrap_h2d_dict_batch_dunder_forwarding(self, monkeypatch):
         """I1: Python bypasses __getattr__ for special methods, so _WrappedH2D
         must define __getitem__, __len__, __iter__, __contains__ explicitly.
         A dict-like batch must be fully usable through the wrapper."""
+        _set_wrapper_config(monkeypatch)
 
         class DictBatch:
             def __init__(self, data):

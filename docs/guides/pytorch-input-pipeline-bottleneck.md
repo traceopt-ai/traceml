@@ -160,11 +160,14 @@ with `traceml.init(mode="auto")`.
 If your input iterator is not a PyTorch `DataLoader`, wrap the fetch path:
 
 ```python
+traceml.init(mode="auto")
 train_loader = traceml.wrap_dataloader_fetch(train_loader)
 ```
 
 This is the pattern used for Ray Data iterators, because Ray
-`iter_torch_batches(...)` is not a PyTorch `DataLoader`.
+`iter_torch_batches(...)` is not a PyTorch `DataLoader`. Initialization must
+precede the wrapper. Passing a PyTorch `DataLoader` here in `auto` mode raises
+instead of measuring the same fetch twice.
 
 ## When to use a heavier profiler
 

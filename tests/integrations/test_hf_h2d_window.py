@@ -43,7 +43,7 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("transformers")
 pytest.importorskip("accelerate")
 
-from torch.utils.data import Dataset  # noqa: E402
+from torch.utils.data import Dataset, IterableDataset  # noqa: E402
 from transformers import Trainer, TrainingArguments  # noqa: E402
 
 from traceml_ai.diagnostics.step_time.api import (  # noqa: E402
@@ -63,6 +63,7 @@ from traceml_ai.instrumentation.patches.dataloader_patch import (  # noqa: E402,
 from traceml_ai.instrumentation.step_events import (  # noqa: E402
     abort_step_capture,
     begin_step_capture,
+    drain_step_memory_events,
     drain_step_time_batches,
 )
 from traceml_ai.integrations import huggingface as hf  # noqa: E402
@@ -84,6 +85,20 @@ class _Batches(Dataset):
 
     def __getitem__(self, index):
         return {"x": torch.randn(4), "labels": torch.randn(1)}
+
+
+class _IterableBatches(IterableDataset):
+    def __init__(self, timing_states=None) -> None:
+        self._timing_states = timing_states
+
+    def __iter__(self):
+        for index in range(64):
+            if self._timing_states is not None:
+                self._timing_states.append(
+                    (_timing_allowed(), _enabled(), _include_step_time())
+                )
+            value = torch.full((4,), float(index))
+            yield {"x": value, "labels": value[:1]}
 
 
 class _Tiny(torch.nn.Module):
@@ -258,6 +273,67 @@ def test_batch_collection_hook_installation_is_idempotent() -> None:
     assert Trainer.get_batch_samples is installed
 
 
+def test_resume_skip_tracking_installation_is_idempotent() -> None:
+    import transformers.trainer as trainer_module
+
+    hf._install_resume_skip_tracking()
+    installed = trainer_module.skip_first_batches
+    hf._install_resume_skip_tracking()
+    assert trainer_module.skip_first_batches is installed
+
+
+def test_resume_skip_tracking_distinguishes_accelerate_loader_shapes() -> None:
+    """Only Accelerate's iterable skip wrapper consumes discarded batches lazily."""
+    import transformers.trainer as trainer_module
+    from accelerate import Accelerator
+    from accelerate.data_loader import DataLoaderDispatcher, DataLoaderShard
+    from torch.utils.data import DataLoader
+
+    hf._install_resume_skip_tracking()
+    # Trainer prepares its training DataLoader through this same Accelerate path.
+    accelerator = Accelerator(cpu=True)
+    state = hf._TRAINING_ATTEMPT_STATE
+    previous = (
+        state.active,
+        state.suppress_next_input_group,
+        state.omit_current_group,
+    )
+    try:
+        state.active = True
+        state.suppress_next_input_group = False
+        state.omit_current_group = False
+
+        prepared_map_loader = accelerator.prepare(
+            DataLoader(_Batches(), batch_size=1)
+        )
+        assert isinstance(prepared_map_loader, DataLoaderShard)
+        map_loader = trainer_module.skip_first_batches(
+            prepared_map_loader,
+            1,
+        )
+        assert isinstance(map_loader, DataLoaderShard)
+        assert getattr(map_loader, "skip_batches", 0) == 0
+        assert state.suppress_next_input_group is False
+
+        prepared_iterable_loader = accelerator.prepare(
+            DataLoader(_IterableBatches(), batch_size=1)
+        )
+        assert isinstance(prepared_iterable_loader, DataLoaderDispatcher)
+        iterable_loader = trainer_module.skip_first_batches(
+            prepared_iterable_loader,
+            1,
+        )
+        assert isinstance(iterable_loader, DataLoaderDispatcher)
+        assert getattr(iterable_loader, "skip_batches", 0) == 1
+        assert state.suppress_next_input_group is True
+    finally:
+        (
+            state.active,
+            state.suppress_next_input_group,
+            state.omit_current_group,
+        ) = previous
+
+
 def test_non_training_input_scope_installation_is_idempotent() -> None:
     hf._install_non_training_input_scopes()
     installed = (Trainer.evaluate, Trainer.predict)
@@ -371,8 +447,10 @@ def test_installed_batch_collection_hook_does_not_warn(
     with caplog.at_level(logging.WARNING, logger=hf.__name__):
         hf._warn_if_training_batch_timing_is_bypassed(trainer)
 
-    assert "cannot guarantee pre-step H2D timing" not in " ".join(
-        record.getMessage() for record in caplog.records
+    messages = " ".join(record.getMessage() for record in caplog.records)
+    assert (
+        "cannot guarantee training Input Wait or pre-step H2D timing"
+        not in messages
     )
 
 
@@ -381,6 +459,7 @@ def test_training_collection_excludes_evaluation_fetches(tmp_path) -> None:
     reset_trace_session_state()
     abort_step_capture(begin_step_capture())
     drain_step_time_batches()
+    drain_step_memory_events()
     hf.init()
 
     log: list[tuple[str, bool, bool, bool]] = []
@@ -481,6 +560,189 @@ def test_collection_bookkeeping_runs_outside_timing_gates(tmp_path) -> None:
     assert all(
         not input_wait and not h2d and not step_time
         for input_wait, h2d, step_time in states
+    )
+
+
+@pytest.mark.parametrize(
+    ("ga", "ignore_data_skip", "first_group_measured"),
+    [
+        (1, False, False),
+        (2, False, False),
+        (1, True, True),
+        (2, True, True),
+    ],
+)
+@pytest.mark.parametrize("fail_before_retry", [False, True])
+def test_iterable_resume_omits_only_ambiguous_group(
+    tmp_path,
+    monkeypatch,
+    ga,
+    ignore_data_skip,
+    first_group_measured,
+    fail_before_retry,
+) -> None:
+    """Lazy checkpoint skipping must not look like first-step input work."""
+    reset_trace_session_state()
+    abort_step_capture(begin_step_capture())
+    drain_step_time_batches()
+    drain_step_memory_events()
+    hf.init()
+
+    first = Trainer(
+        model=_Tiny(),
+        args=TrainingArguments(
+            output_dir=str(tmp_path),
+            per_device_train_batch_size=1,
+            gradient_accumulation_steps=ga,
+            max_steps=1,
+            logging_strategy="no",
+            save_strategy="steps",
+            save_steps=1,
+            report_to=[],
+            disable_tqdm=True,
+            use_cpu=True,
+        ),
+        train_dataset=_IterableBatches(),
+        callbacks=[hf.TraceMLTrainerCallback()],
+    )
+    first.train()
+    checkpoint = tmp_path / "checkpoint-1"
+    assert checkpoint.is_dir()
+
+    assert (
+        len(drain_step_time_batches()) == 1
+    )  # Fresh training starts immediately.
+    assert len(drain_step_memory_events()) == 1
+    reset_trace_session_state()
+    timing_states: list[tuple[bool, bool, bool]] = []
+    resumed = Trainer(
+        model=_Tiny(),
+        args=TrainingArguments(
+            output_dir=str(tmp_path),
+            per_device_train_batch_size=1,
+            gradient_accumulation_steps=ga,
+            max_steps=3,
+            ignore_data_skip=ignore_data_skip,
+            logging_strategy="no",
+            save_strategy="no",
+            report_to=[],
+            disable_tqdm=True,
+            use_cpu=True,
+        ),
+        train_dataset=_IterableBatches(timing_states),
+        callbacks=[hf.TraceMLTrainerCallback()],
+    )
+    traced_global_steps = []
+    original_trace_step = hf.trace_step
+
+    def record_trace_step(model):
+        traced_global_steps.append(resumed.state.global_step)
+        return original_trace_step(model)
+
+    monkeypatch.setattr(hf, "trace_step", record_trace_step)
+    if fail_before_retry:
+        original_training_step = resumed.training_step
+
+        def fail_training_step(*args, **kwargs):
+            original_training_step(*args, **kwargs)
+            raise RuntimeError("resume group failed")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(resumed, "training_step", fail_training_step)
+            with pytest.raises(RuntimeError, match="resume group failed"):
+                resumed.train(resume_from_checkpoint=str(checkpoint))
+        assert drain_step_time_batches() == []
+        assert drain_step_memory_events() == []
+        assert hf._TRAINING_ATTEMPT_STATE.active is False
+        assert hf._TRAINING_ATTEMPT_STATE.suppress_next_input_group is False
+        assert hf._TRAINING_ATTEMPT_STATE.omit_current_group is False
+        traced_global_steps.clear()
+        timing_states.clear()
+
+    resumed.train(resume_from_checkpoint=str(checkpoint))
+    assert resumed.state.global_step == 3
+
+    batches = drain_step_time_batches()
+    memory_events = drain_step_memory_events()
+    assert [batch.step for batch in batches] == (
+        [1, 2] if first_group_measured else [1]
+    )
+    assert len(memory_events) == (2 if first_group_measured else 1)
+    # No trace_step means no compute or memory publication for the omitted
+    # group; HF nevertheless completes both optimizer updates.
+    assert traced_global_steps == ([1, 2] if first_group_measured else [2])
+
+    fetch = "_traceml_internal:dataloader_next"
+    forward = "_traceml_internal:forward_time"
+    optimizer = "_traceml_internal:optimizer_step"
+    names = [{event.name for event in batch.events} for batch in batches]
+    assert all(fetch in group and forward in group for group in names)
+    assert all(
+        sum(event.name == optimizer for event in batch.events) == 1
+        for batch in batches
+    )
+    assert timing_states
+    expected_first_state = (
+        (True, True, True) if first_group_measured else (False, False, False)
+    )
+    assert timing_states[0] == expected_first_state
+    assert any(state == (True, True, True) for state in timing_states)
+    assert hf._TRAINING_ATTEMPT_STATE.active is False
+    assert hf._TRAINING_ATTEMPT_STATE.suppress_next_input_group is False
+    assert hf._TRAINING_ATTEMPT_STATE.omit_current_group is False
+
+
+@pytest.mark.parametrize("ga", [1, 2])
+def test_map_style_resume_keeps_first_groups_input_timing(
+    tmp_path, ga
+) -> None:
+    """Sampler-level checkpoint skipping does not fetch discarded batches."""
+    reset_trace_session_state()
+    abort_step_capture(begin_step_capture())
+    drain_step_time_batches()
+    hf.init()
+
+    arguments = dict(
+        output_dir=str(tmp_path),
+        per_device_train_batch_size=1,
+        gradient_accumulation_steps=ga,
+        logging_strategy="no",
+        report_to=[],
+        disable_tqdm=True,
+        use_cpu=True,
+    )
+    first = Trainer(
+        model=_Tiny(),
+        args=TrainingArguments(
+            **arguments,
+            max_steps=1,
+            save_strategy="steps",
+            save_steps=1,
+        ),
+        train_dataset=_Batches(),
+        callbacks=[hf.TraceMLTrainerCallback()],
+    )
+    first.train()
+
+    drain_step_time_batches()
+    reset_trace_session_state()
+    resumed = Trainer(
+        model=_Tiny(),
+        args=TrainingArguments(
+            **arguments,
+            max_steps=2,
+            save_strategy="no",
+        ),
+        train_dataset=_Batches(),
+        callbacks=[hf.TraceMLTrainerCallback()],
+    )
+    resumed.train(resume_from_checkpoint=str(tmp_path / "checkpoint-1"))
+
+    batches = drain_step_time_batches()
+    assert len(batches) == 1
+    assert any(
+        event.name == "_traceml_internal:dataloader_next"
+        for event in batches[0].events
     )
 
 

@@ -346,7 +346,8 @@ This usually means:
 What to do next:
 
 - check the missing signal names listed in the diagnosis evidence
-- use auto mode or the matching `wrap_*` helpers to restore coverage
+- use the recommended automatic initialization for your training framework,
+  or use the matching `wrap_*` helpers in manual/selective mode
 
 ---
 

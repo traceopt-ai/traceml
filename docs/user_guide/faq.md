@@ -115,14 +115,17 @@ Use:
 - `traceml.init(mode="selective", ...)` when you want some automatic patching
   and some explicit wrapping
 
-Start with `auto` unless you already know you need more control.
+Call `init()` after imports and before creating any TraceML wrapper. Models and
+DataLoaders may be constructed first; only TraceML instrumentation order is
+restricted. Start with `auto` unless you already know you need more control.
 
 ---
 
 ## When should I use the wrapper APIs?
 
 Use wrappers when you do not want the default automatic patching path or when
-part of your training loop is custom.
+part of your training loop is outside that path. A standard phase has one
+owner: automatic instrumentation or a manual wrapper, never both.
 
 The main wrapper entrypoints are:
 
@@ -131,8 +134,11 @@ The main wrapper entrypoints are:
 - `traceml.wrap_backward(...)`
 - `traceml.wrap_optimizer(...)`
 
-This is most relevant in `manual` or `selective` mode. Most users should start
-with `mode="auto"` and only move to wrappers if they need explicit control.
+In `manual` mode all wrappers are available. In `selective` mode a wrapper is
+available only when its matching automatic patch is disabled. In `auto` mode,
+standard PyTorch phase wrappers raise a configuration error. The narrow
+exception is `wrap_dataloader_fetch(...)` for a custom iterator, such as Ray
+Data, that the PyTorch `DataLoader` patch cannot observe.
 
 ---
 

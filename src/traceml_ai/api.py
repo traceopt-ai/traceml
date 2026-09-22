@@ -136,7 +136,8 @@ def wrap_dataloader_fetch(obj: Any) -> Any:
     TypeError
         If ``obj`` is neither a loader nor an iterator.
     RuntimeError
-        If a torch ``DataLoader`` is already automatically instrumented.
+        If TraceML has not been initialized, or if automatic instrumentation
+        already owns the supplied torch ``DataLoader`` or iterator.
     """
     from traceml_ai.sdk import wrap_dataloader_fetch as _wrap_dataloader_fetch
 
@@ -162,8 +163,8 @@ def wrap_forward(model: nn.Module) -> nn.Module:
     TypeError
         If ``model`` is not a PyTorch module with a callable ``forward``.
     RuntimeError
-        If automatic forward instrumentation is active or the instance cannot
-        be wrapped safely.
+        If TraceML has not been initialized, automatic forward instrumentation
+        is active, or the instance cannot be wrapped safely.
     """
     from traceml_ai.sdk import wrap_forward as _wrap_forward
 
@@ -188,7 +189,8 @@ def wrap_backward(loss: Any) -> Any:
     TypeError
         If ``loss`` has no callable ``backward`` method.
     RuntimeError
-        If automatic backward instrumentation is active.
+        If TraceML has not been initialized or automatic backward
+        instrumentation is active.
     """
     from traceml_ai.sdk import wrap_backward as _wrap_backward
 
@@ -214,8 +216,8 @@ def wrap_optimizer(optimizer: Any) -> Any:
     TypeError
         If ``optimizer`` has no callable ``step`` method.
     RuntimeError
-        If automatic optimizer instrumentation is active or the instance
-        cannot be wrapped safely.
+        If TraceML has not been initialized, automatic optimizer
+        instrumentation is active, or the instance cannot be wrapped safely.
     """
     from traceml_ai.sdk import wrap_optimizer as _wrap_optimizer
 
@@ -240,11 +242,14 @@ def wrap_h2d(obj: Any) -> Any:
     ------
     TypeError
         If ``obj`` has no callable ``.to(...)`` method.
+    RuntimeError
+        If TraceML has not been initialized or automatic H2D instrumentation
+        is active.
 
     Notes
     -----
-    Use this in manual or selective mode. If automatic H2D timing becomes
-    active after wrapping, the proxy passes through to avoid double counting.
+    Use this after initialization in manual mode, or in selective mode with
+    automatic H2D timing disabled.
     """
     from traceml_ai.sdk import wrap_h2d as _wrap_h2d
 

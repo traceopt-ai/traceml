@@ -55,9 +55,12 @@ the environment for a run or bug report.
 
 ### Manual instrumentation helpers
 
-Use these only for manual or selective instrumentation. Automatic mode already
-times the matching PyTorch paths, and manual wrappers reject duplicate automatic
-instrumentation where double-counting would be possible.
+Use these for manual or selective instrumentation. Automatic mode already
+owns the matching PyTorch paths, so wrappers reject duplicate instrumentation.
+The exception is `wrap_dataloader_fetch(...)` for a custom non-PyTorch iterator
+that automatic DataLoader instrumentation cannot observe. When TraceML is
+disabled, each wrapper is an identity no-op. Otherwise, invalid targets raise
+their documented `TypeError` before initialization and ownership are checked.
 
 ::: traceml_ai.api.wrap_dataloader_fetch
     options:

@@ -87,7 +87,9 @@ after the loop exits.
 
 When using Ray Data, wrap the ``iter_torch_batches(...)`` iterator with
 ``traceml.wrap_dataloader_fetch(...)``. Ray Data is not a PyTorch
-``DataLoader``, so the PyTorch DataLoader patch cannot see those fetches.
+``DataLoader``, so the PyTorch DataLoader patch cannot see those fetches. The
+``TraceMLTorchTrainer`` initializes TraceML in each worker before invoking the
+training function, so the wrapper follows the required init-before-wrap order.
 
 ## Example scripts
 
@@ -243,10 +245,11 @@ from 1,000 rows.
 ``init_mode`` is passed to ``traceml.init(mode="auto")`` inside each Ray
 worker. The Ray Data ``wrap_dataloader_fetch(...)`` pattern above works with
 the default auto mode because Ray Data iterators are separate from PyTorch
-``DataLoader``. Use ``init_mode="manual"`` only if your training loop wraps
-dataloader, forward, backward, and optimizer timing explicitly. Use
-``init_mode="selective"`` with the ``patch_*`` options when you only want some
-automatic patches.
+``DataLoader``; wrapping a PyTorch ``DataLoader`` in the same mode raises to
+prevent duplicate timing. Use ``init_mode="manual"`` only if your training
+loop wraps dataloader, forward, backward, and optimizer timing explicitly.
+Use ``init_mode="selective"`` with the ``patch_*`` options when you only want
+some automatic patches.
 
 ## Lifecycle
 
