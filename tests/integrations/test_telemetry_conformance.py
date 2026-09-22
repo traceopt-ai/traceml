@@ -8,8 +8,10 @@ telemetry (a stream goes dark with no error). Diff-review and feature-scoped
 tests catch what is *present*; the costly misses are *absences*. This turns
 "the maintainer remembers HF should emit the same streams as Lightning" into a
 CI gate: each integration DECLARES the telemetry streams it owes, and this test
-runs a tiny end-to-end CPU run under the integration's documented `init()` path
-and asserts every declared stream actually emitted >= 1 row.
+runs a tiny in-process CPU integration under the documented `init()` path and
+asserts every declared stream actually emitted >= 1 row. The separate
+``test_hf_real_runtime.py`` gate carries the HF streams through the sampler,
+transport, aggregator, SQLite, and final-summary boundaries.
 
 DISCIPLINE: a new telemetry stream (e.g. all_reduce) is not "done" until it is
 added to REQUIRED_STEP_TIME below AND emitted by every integration that owes it.

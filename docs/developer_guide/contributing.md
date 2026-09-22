@@ -76,6 +76,20 @@ Step Time contributors should run the feature-local contract suite in
 [Step Time pipeline contract](step-time-pipeline-contract.md) before changing
 window, diagnosis, dashboard, or final-summary behavior.
 
+Hugging Face runtime changes should also run the real CPU product-path gate:
+
+```bash
+pytest tests/integrations/test_hf_real_runtime.py -q
+```
+
+That test covers the Trainer, sampler, TCP transport, aggregator, SQLite, and
+the public summary request/response protocol. CUDA H2D remains a manual release
+check because CI does not require a GPU:
+
+```bash
+python src/dev/repro/hf_accelerate_h2d_window.py
+```
+
 ## Docs
 
 If a code change affects user-facing behavior, update the relevant doc in the same PR.
