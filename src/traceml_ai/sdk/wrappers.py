@@ -14,6 +14,7 @@ from traceml_ai.instrumentation.patches.dataloader_patch import (
 )
 from traceml_ai.instrumentation.step_events import TimeScope
 from traceml_ai.sdk.instrumentation_policy import (
+    manual_wrapper_disabled,
     require_manual_wrapper_allowed,
 )
 from traceml_ai.utils.timing import timed_region
@@ -32,34 +33,6 @@ def _is_torch_dataloader_iterator(obj: Any) -> bool:
         return True
 
     return is_traceml_dataloader_iterator(obj)
-
-
-def _ensure_dataloader_wrapper_allowed(obj: Any) -> None:
-    """Reject overlap with automatic PyTorch DataLoader timing."""
-    is_torch_target = isinstance(obj, DataLoader) or (
-        _is_torch_dataloader_iterator(obj)
-    )
-    require_manual_wrapper_allowed(
-        "dataloader_fetch",
-        "wrap_dataloader_fetch",
-        covered_by_automatic_instrumentation=is_torch_target,
-    )
-
-
-def _ensure_forward_wrapper_allowed() -> None:
-    require_manual_wrapper_allowed("forward", "wrap_forward")
-
-
-def _ensure_backward_wrapper_allowed() -> None:
-    require_manual_wrapper_allowed("backward", "wrap_backward")
-
-
-def _ensure_optimizer_wrapper_allowed() -> None:
-    require_manual_wrapper_allowed("optimizer", "wrap_optimizer")
-
-
-def _ensure_h2d_wrapper_allowed() -> None:
-    require_manual_wrapper_allowed("h2d", "wrap_h2d")
 
 
 class _WrappedDataLoaderIterator:
@@ -143,17 +116,30 @@ def wrap_dataloader_fetch(obj: Any) -> Any:
     - Custom iterators remain allowed even when torch DataLoader auto patching
       is active.
     """
-    _ensure_dataloader_wrapper_allowed(obj)
+    if manual_wrapper_disabled():
+        return obj
 
-    if hasattr(obj, "__next__"):
+    is_iterator = callable(getattr(obj, "__next__", None))
+    is_iterable = callable(getattr(obj, "__iter__", None))
+    if not is_iterator and not is_iterable:
+        raise TypeError(
+            "wrap_dataloader_fetch() expects a loader or iterator object."
+        )
+
+    is_torch_target = isinstance(obj, DataLoader) or (
+        _is_torch_dataloader_iterator(obj)
+    )
+    if not require_manual_wrapper_allowed(
+        "dataloader_fetch",
+        "wrap_dataloader_fetch",
+        covered_by_automatic_instrumentation=is_torch_target,
+    ):
+        return obj
+
+    if is_iterator:
         return _WrappedDataLoaderIterator(obj)
 
-    if hasattr(obj, "__iter__"):
-        return _WrappedDataLoaderFetch(obj)
-
-    raise TypeError(
-        "wrap_dataloader_fetch() expects a loader or iterator object."
-    )
+    return _WrappedDataLoaderFetch(obj)
 
 
 def wrap_forward(model: nn.Module) -> nn.Module:
@@ -163,7 +149,8 @@ def wrap_forward(model: nn.Module) -> nn.Module:
     This wrapper mutates the provided model instance in place, but only for that
     instance. It does not patch `nn.Module` globally.
     """
-    _ensure_forward_wrapper_allowed()
+    if manual_wrapper_disabled():
+        return model
 
     if not isinstance(model, nn.Module):
         raise TypeError("wrap_forward() expects an nn.Module instance.")
@@ -174,6 +161,9 @@ def wrap_forward(model: nn.Module) -> nn.Module:
     original_forward = getattr(model, "forward", None)
     if original_forward is None or not callable(original_forward):
         raise TypeError("wrap_forward() requires a callable model.forward.")
+
+    if not require_manual_wrapper_allowed("forward", "wrap_forward"):
+        return model
 
     @functools.wraps(original_forward)
     def _wrapped_forward(*args: Any, **kwargs: Any) -> Any:
@@ -202,13 +192,17 @@ def wrap_backward(loss: Any) -> Any:
     """
     Wrap a loss-like object so `.backward(...)` emits TraceML backward timing.
     """
-    _ensure_backward_wrapper_allowed()
+    if manual_wrapper_disabled():
+        return loss
 
     backward = getattr(loss, "backward", None)
     if backward is None or not callable(backward):
         raise TypeError(
             "wrap_backward() expects an object with a callable backward() method."
         )
+
+    if not require_manual_wrapper_allowed("backward", "wrap_backward"):
+        return loss
 
     return _WrappedBackwardHandle(loss)
 
@@ -221,13 +215,17 @@ def wrap_optimizer(optimizer: Any) -> Any:
     `torch.cuda.amp.GradScaler.step(optimizer)` and other tooling that expects
     the real optimizer object.
     """
-    _ensure_optimizer_wrapper_allowed()
+    if manual_wrapper_disabled():
+        return optimizer
 
     step_fn = getattr(optimizer, "step", None)
     if step_fn is None or not callable(step_fn):
         raise TypeError(
             "wrap_optimizer() expects an object with a callable step() method."
         )
+
+    if not require_manual_wrapper_allowed("optimizer", "wrap_optimizer"):
+        return optimizer
 
     if getattr(optimizer, "_traceml_step_instance_wrapped", False):
         return optimizer
@@ -305,7 +303,7 @@ class _WrappedH2D:
         return f"_WrappedH2D({self._obj!r})"
 
 
-def wrap_h2d(obj: Any) -> "_WrappedH2D":
+def wrap_h2d(obj: Any) -> Any:
     """
     Wrap a tensor or batch object so qualifying CPU-to-CUDA .to(...) calls are timed.
 
@@ -328,13 +326,17 @@ def wrap_h2d(obj: Any) -> "_WrappedH2D":
     - Automatic H2D instrumentation and this manual wrapper are mutually
       exclusive.
     """
-    _ensure_h2d_wrapper_allowed()
+    if manual_wrapper_disabled():
+        return obj
 
     to_fn = getattr(obj, "to", None)
     if to_fn is None or not callable(to_fn):
         raise TypeError(
             "wrap_h2d() expects an object with a callable .to() method."
         )
+
+    if not require_manual_wrapper_allowed("h2d", "wrap_h2d"):
+        return obj
 
     return _WrappedH2D(obj)
 

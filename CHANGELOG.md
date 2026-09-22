@@ -10,7 +10,10 @@ which carry the full historical notes for versions predating this file.
 - **Breaking:** Public manual wrappers now require `traceml.init(...)` first
   and reject phases already owned by automatic instrumentation. Move `init()`
   before wrapper creation; custom non-PyTorch input iterators remain wrappable
-  in auto mode because the PyTorch DataLoader patch cannot observe them.
+  in auto mode because the PyTorch DataLoader patch cannot observe them. The
+  TraceML kill switch remains unconditional: disabled wrappers return their
+  inputs unchanged, including before initialization. When tracing is enabled,
+  invalid wrapper targets retain their documented `TypeError`.
 - Hugging Face checkpoint resume no longer attributes lazily skipped iterable
   batches to the first resumed optimizer group. That entire group's step
   timing and memory telemetry is omitted; training runs normally and recording

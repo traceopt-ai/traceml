@@ -145,6 +145,46 @@ def test_init_selective_only_installs_requested_patches(monkeypatch):
     assert calls == ["dataloader", "backward"]
 
 
+@pytest.mark.parametrize(
+    ("mode", "init_kwargs", "forward_is_manual"),
+    [
+        ("auto", {}, False),
+        ("manual", {}, True),
+        (
+            "selective",
+            {
+                "patch_dataloader": True,
+                "patch_forward": False,
+                "patch_backward": False,
+                "patch_h2d": False,
+            },
+            True,
+        ),
+    ],
+)
+def test_real_init_config_drives_wrapper_ownership(
+    monkeypatch, mode, init_kwargs, forward_is_manual
+):
+    initialization = _reload_initialization_module()
+    wrappers = _reload_wrappers_module()
+    monkeypatch.setattr(
+        initialization,
+        "_apply_requested_patches",
+        lambda _config: None,
+    )
+
+    config = initialization.init(mode=mode, **init_kwargs)
+    model = nn.Linear(1, 1)
+
+    assert config.mode == mode
+    if forward_is_manual:
+        assert wrappers.wrap_forward(model) is model
+        assert model._traceml_forward_instance_wrapped is True
+    else:
+        with pytest.raises(RuntimeError, match="already owns"):
+            wrappers.wrap_forward(model)
+
+
 def test_init_auto_and_manual_reject_patch_overrides():
     initialization = _reload_initialization_module()
 
@@ -629,16 +669,130 @@ def test_public_wrappers_require_init(monkeypatch):
 
     monkeypatch.setattr(initialization, "get_init_config", lambda: None)
 
+    class Loss:
+        def backward(self):
+            return None
+
+    class Optimizer:
+        def step(self):
+            return None
+
+    class Batch:
+        def to(self, _device):
+            return self
+
     calls = [
-        lambda: wrappers.wrap_dataloader_fetch(object()),
-        lambda: wrappers.wrap_forward(object()),
-        lambda: wrappers.wrap_backward(object()),
-        lambda: wrappers.wrap_optimizer(object()),
-        lambda: wrappers.wrap_h2d(object()),
+        lambda: wrappers.wrap_dataloader_fetch(iter([1])),
+        lambda: wrappers.wrap_forward(nn.Linear(1, 1)),
+        lambda: wrappers.wrap_backward(Loss()),
+        lambda: wrappers.wrap_optimizer(Optimizer()),
+        lambda: wrappers.wrap_h2d(Batch()),
     ]
     for call in calls:
         with pytest.raises(RuntimeError, match=r"traceml\.init"):
             call()
+
+
+@pytest.mark.parametrize(
+    ("wrapper_name", "call"),
+    [
+        (
+            "wrap_dataloader_fetch",
+            lambda wrappers: wrappers.wrap_dataloader_fetch(123),
+        ),
+        ("wrap_forward", lambda wrappers: wrappers.wrap_forward(object())),
+        ("wrap_backward", lambda wrappers: wrappers.wrap_backward(object())),
+        ("wrap_optimizer", lambda wrappers: wrappers.wrap_optimizer(object())),
+        ("wrap_h2d", lambda wrappers: wrappers.wrap_h2d(object())),
+    ],
+)
+def test_invalid_wrapper_target_precedes_missing_init(
+    monkeypatch, wrapper_name, call
+):
+    wrappers = _reload_wrappers_module()
+
+    import traceml_ai.sdk.initial as initialization
+
+    monkeypatch.setattr(initialization, "get_init_config", lambda: None)
+
+    with pytest.raises(TypeError, match=wrapper_name):
+        call(wrappers)
+
+
+def _assert_public_wrappers_are_identity_noops(wrappers):
+    class Loss:
+        def backward(self):
+            return None
+
+    class Optimizer:
+        def step(self):
+            return None
+
+    class Batch:
+        def to(self, _device):
+            return self
+
+    loader = [1, 2, 3]
+    model = nn.Linear(1, 1)
+    loss = Loss()
+    optimizer = Optimizer()
+    batch = Batch()
+
+    assert wrappers.wrap_dataloader_fetch(loader) is loader
+    assert wrappers.wrap_forward(model) is model
+    assert wrappers.wrap_backward(loss) is loss
+    assert wrappers.wrap_optimizer(optimizer) is optimizer
+    assert wrappers.wrap_h2d(batch) is batch
+    assert not hasattr(model, "_traceml_forward_instance_wrapped")
+    assert not hasattr(optimizer, "_traceml_step_instance_wrapped")
+
+
+@pytest.mark.parametrize("disabled_via", ["environment", "config"])
+def test_disabled_public_wrappers_are_identity_noops(
+    monkeypatch, disabled_via
+):
+    wrappers = _reload_wrappers_module()
+
+    import traceml_ai.sdk.initial as initialization
+
+    if disabled_via == "environment":
+        monkeypatch.setenv("TRACEML_DISABLED", "1")
+        monkeypatch.setattr(initialization, "get_init_config", lambda: None)
+    else:
+        monkeypatch.delenv("TRACEML_DISABLED", raising=False)
+        _set_wrapper_config(
+            monkeypatch,
+            "auto",
+            patch_dataloader=True,
+            patch_forward=True,
+            patch_backward=True,
+            patch_h2d=True,
+            disabled=True,
+        )
+
+    _assert_public_wrappers_are_identity_noops(wrappers)
+
+
+def test_disabled_public_wrappers_skip_target_validation(monkeypatch):
+    wrappers = _reload_wrappers_module()
+    monkeypatch.setenv("TRACEML_DISABLED", "1")
+
+    invalid = object()
+    assert wrappers.wrap_dataloader_fetch(invalid) is invalid
+    assert wrappers.wrap_forward(invalid) is invalid
+    assert wrappers.wrap_backward(invalid) is invalid
+    assert wrappers.wrap_optimizer(invalid) is invalid
+    assert wrappers.wrap_h2d(invalid) is invalid
+
+
+def test_init_disabled_makes_public_wrappers_identity_noops(monkeypatch):
+    initialization = _reload_initialization_module()
+    wrappers = _reload_wrappers_module()
+
+    config = initialization.init(disabled=True)
+
+    assert config.disabled is True
+    _assert_public_wrappers_are_identity_noops(wrappers)
 
 
 def test_standard_wrappers_reject_auto_ownership(monkeypatch):

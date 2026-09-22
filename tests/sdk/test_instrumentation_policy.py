@@ -66,13 +66,13 @@ def test_auto_allows_source_outside_automatic_coverage(monkeypatch):
     config = _config("auto", patch_dataloader=True)
     monkeypatch.setattr(policy.initial, "get_init_config", lambda: config)
 
-    result = policy.require_manual_wrapper_allowed(
+    allowed = policy.require_manual_wrapper_allowed(
         "dataloader_fetch",
         "wrap_dataloader_fetch",
         covered_by_automatic_instrumentation=False,
     )
 
-    assert result is config
+    assert allowed is True
 
 
 @pytest.mark.parametrize(
@@ -83,10 +83,7 @@ def test_manual_mode_allows_every_wrapper(monkeypatch, feature):
     config = _config("manual")
     monkeypatch.setattr(policy.initial, "get_init_config", lambda: config)
 
-    assert (
-        policy.require_manual_wrapper_allowed(feature, f"wrap_{feature}")
-        is config
-    )
+    assert policy.require_manual_wrapper_allowed(feature, f"wrap_{feature}")
 
 
 @pytest.mark.parametrize(
@@ -111,9 +108,8 @@ def test_selective_mode_follows_patch_ownership(monkeypatch, feature, owned):
         with pytest.raises(RuntimeError, match="already owns"):
             policy.require_manual_wrapper_allowed(feature, f"wrap_{feature}")
     else:
-        assert (
-            policy.require_manual_wrapper_allowed(feature, f"wrap_{feature}")
-            is config
+        assert policy.require_manual_wrapper_allowed(
+            feature, f"wrap_{feature}"
         )
 
 
@@ -128,7 +124,11 @@ def test_disabled_config_never_blocks_training(monkeypatch):
     )
     monkeypatch.setattr(policy.initial, "get_init_config", lambda: config)
 
-    assert (
-        policy.require_manual_wrapper_allowed("forward", "wrap_forward")
-        is config
-    )
+    assert not policy.require_manual_wrapper_allowed("forward", "wrap_forward")
+
+
+def test_environment_kill_switch_precedes_missing_init(monkeypatch):
+    monkeypatch.setenv("TRACEML_DISABLED", "1")
+    monkeypatch.setattr(policy.initial, "get_init_config", lambda: None)
+
+    assert not policy.require_manual_wrapper_allowed("forward", "wrap_forward")
