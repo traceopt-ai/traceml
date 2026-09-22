@@ -48,6 +48,9 @@ __all__ = ["TraceMLHandler", "init"]
 
 _STEP = STEP_TIME_EVENT_NAMES["traced_step_time"]
 _FETCH = STEP_TIME_EVENT_NAMES["input_wait"]
+_FORWARD = STEP_TIME_EVENT_NAMES["forward"]
+_BACKWARD = STEP_TIME_EVENT_NAMES["backward"]
+_OPTIMIZER = STEP_TIME_EVENT_NAMES["optimizer_step"]
 _RUN_SCOPED_REPORTS = frozenset(
     {
         "run start",
@@ -60,6 +63,16 @@ _RUN_SCOPED_REPORTS = frozenset(
         "prepare_batch",
         "detached capture",
         "unfinished group",
+        "inferer wrap",
+        "inferer",
+        "restore",
+        "forward open",
+        "forward close",
+        "backward open",
+        "backward close",
+        "optimizer open",
+        "optimizer close",
+        "optimizer hooks",
     }
 )
 
@@ -236,6 +249,47 @@ def _record_fetch(clock) -> None:
     )
 
 
+class _TimedInferer:
+    """Time the model call MONAI makes, and pass everything else through."""
+
+    def __init__(self, handler, inferer):
+        self._handler, self._inferer = handler, inferer
+
+    def __call__(self, *args, **kwargs):
+        handler = self._handler
+        if not handler._inside_iteration():
+            # A call outside prepare_batch..MODEL_COMPLETED belongs to no
+            # step. Timing it would attribute its forward time to whatever
+            # step opens next, the same class of bug the optimizer hooks
+            # guard against with this same check.
+            return self._inferer(*args, **kwargs)
+        handler._saw_forward = True
+        handler._best_effort("forward open", handler._open, _FORWARD)
+        try:
+            return self._inferer(*args, **kwargs)
+        finally:
+            handler._best_effort("forward close", handler._close, _FORWARD)
+
+    def __getattr__(self, name):
+        # __dict__ directly: a copied or unpickled proxy has no _inferer yet,
+        # and self._inferer would recurse through this method forever.
+        inferer = self.__dict__.get("_inferer")
+        if inferer is None:
+            raise AttributeError(name)
+        return getattr(inferer, name)
+
+    def __setattr__(self, name, value):
+        # Writes go to the real inferer, not to this wrapper. Otherwise a
+        # handler that stores state on engine.inferer during a run would
+        # lose it when the original is restored, which is tracing changing
+        # what training leaves behind.
+        inferer = self.__dict__.get("_inferer")
+        if inferer is None or name in ("_handler", "_inferer"):
+            object.__setattr__(self, name, value)
+        else:
+            setattr(inferer, name, value)
+
+
 class TraceMLHandler:
     """
     MONAI handler that times ``SupervisedTrainer`` steps for TraceML.
@@ -261,7 +315,11 @@ class TraceMLHandler:
         self._capture = None
         self._mem_tracker = None
         self._fetch_clock = None
-        self._prepare = None  # (original, wrapper) while a run is traced
+        # attribute name -> (original, ours) while a run is traced
+        self._wrapped = {}
+        self._opt_handles = []
+        self._opt_depth = 0
+        self._saw_forward = False
         self._reported = set()
 
     def attach(self, engine) -> None:
@@ -299,6 +357,12 @@ class TraceMLHandler:
         engine.run = run
         engine.add_event_handler(Events.GET_BATCH_STARTED, self._fetch_start)
         engine.add_event_handler(Events.GET_BATCH_COMPLETED, self._fetch_end)
+        engine.add_event_handler(
+            IterationEvents.LOSS_COMPLETED, self._loss_completed
+        )
+        engine.add_event_handler(
+            IterationEvents.BACKWARD_COMPLETED, self._backward_completed
+        )
         engine.add_event_handler(
             IterationEvents.MODEL_COMPLETED, self._model_completed
         )
@@ -354,25 +418,45 @@ class TraceMLHandler:
         abort_step_capture(begin_step_capture())
         self._regions, self._capture = {}, None
         self._mem_tracker, self._fetch_clock = None, None
+        self._opt_depth = 0
         # Run-scoped failures report again next run; the config warnings
         # above stay once per handler.
         self._reported -= _RUN_SCOPED_REPORTS
         self._wrap_prepare_batch(engine)
+        # Each phase installs behind its own boundary: one that cannot be
+        # installed costs its own stream, never the whole run.
+        self._best_effort("inferer wrap", self._wrap_inferer, engine)
+        self._best_effort("optimizer hooks", self._hook_optimizer, engine)
         self._active = True
 
     def _end_run(self, engine) -> None:
         was_active, self._active = self._active, False
         self._fetch_clock = None
+        # If optimizer.step() raised between the pre- and post-hook, torch
+        # skips the post-hook and depth would stick above 0. Nothing today
+        # depends on that (the run is already ending), but "depth is 0
+        # outside a run" should not depend on _start_run always following.
+        self._opt_depth = 0
         try:
             if was_active:
                 # A group the run did not finish is dropped, never published.
                 self._abandon()
         finally:
             # The wrappers come off even when dropping the group failed.
-            original, wrapper = self._prepare or (None, None)
-            self._prepare = None
-            if wrapper is not None and engine.prepare_batch is wrapper:
-                engine.prepare_batch = original
+            for handle in self._opt_handles:
+                self._best_effort("optimizer hooks", handle.remove)
+            self._opt_handles = []
+            wrapped, self._wrapped = self._wrapped, {}
+            for name, (original, ours) in wrapped.items():
+                self._best_effort(
+                    "restore", self._restore, engine, name, original, ours
+                )
+
+    @staticmethod
+    def _restore(engine, name, original, ours) -> None:
+        # A replacement made during the run is left alone.
+        if getattr(engine, name, None) is ours:
+            setattr(engine, name, original)
 
     def _wrap_prepare_batch(self, engine) -> None:
         original = engine.prepare_batch
@@ -396,9 +480,72 @@ class TraceMLHandler:
                     )
 
         engine.prepare_batch = prepare_batch
-        self._prepare = (original, prepare_batch)
+        self._wrapped["prepare_batch"] = (original, prepare_batch)
+
+    def _wrap_inferer(self, engine) -> None:
+        """MONAI calls the inferer to run the model (``trainer.py:253``)."""
+        original = engine.inferer
+        timed = _TimedInferer(self, original)
+        engine.inferer = timed
+        self._wrapped["inferer"] = (original, timed)
+
+    def _hook_optimizer(self, engine) -> None:
+        """Time the real ``step()``, including the one AMP's scaler makes."""
+        optimizer = engine.optimizer
+        if getattr(optimizer, "_traceml_step_instance_wrapped", False):
+            # traceml.wrap_optimizer() already times this one.
+            return
+        if not hasattr(optimizer, "register_step_pre_hook"):
+            # MONAI accepts any object with step() and zero_grad().
+            self._warn_once(
+                "optimizer hooks",
+                "this optimizer does not support torch step hooks, so "
+                "optimizer time is not measured. Every other phase is.",
+            )
+            return
+        # Appended one at a time: a handle that is registered but lost
+        # cannot be removed at the end of the run.
+        handles = []
+        self._opt_handles = handles
+        handles.append(
+            optimizer.register_step_pre_hook(self._optimizer_started)
+        )
+        handles.append(
+            optimizer.register_step_post_hook(self._optimizer_finished)
+        )
+
+    def _optimizer_started(self, optimizer, args, kwargs) -> None:
+        # torch patches step() per class, so a subclass that calls
+        # super().step() fires this pair twice. Only the outer one counts.
+        if not self._inside_iteration():
+            return
+        self._opt_depth += 1
+        if self._opt_depth == 1:
+            self._best_effort("optimizer open", self._open, _OPTIMIZER)
+
+    def _optimizer_finished(self, optimizer, args, kwargs) -> None:
+        if self._opt_depth == 0:
+            return
+        self._opt_depth -= 1
+        if self._opt_depth == 0 and self._inside_iteration():
+            self._best_effort("optimizer close", self._close, _OPTIMIZER)
+
+    def _inside_iteration(self) -> bool:
+        """True while MONAI is between prepare_batch and MODEL_COMPLETED."""
+        return (
+            self._active and _STEP in self._regions and not _traceml_disabled()
+        )
+
+    def _loss_completed(self, engine) -> None:
+        if self._active and not _traceml_disabled():
+            self._best_effort("backward open", self._open, _BACKWARD)
+
+    def _backward_completed(self, engine) -> None:
+        if self._active and not _traceml_disabled():
+            self._best_effort("backward close", self._close, _BACKWARD)
 
     def _open_step(self, engine) -> None:
+        self._saw_forward = False
         if self._capture is not None and self._capture is not (
             begin_step_capture()
         ):
@@ -468,12 +615,20 @@ class TraceMLHandler:
     def _close_step(self, engine) -> None:
         opened = _STEP in self._regions
         if not opened and not _traceml_disabled():
-            wrapper = (self._prepare or (None, None))[1]
+            wrapper = self._wrapped.get("prepare_batch", (None, None))[1]
             if wrapper is not None and engine.prepare_batch is not wrapper:
                 self._warn_once(
                     "prepare_batch",
                     "prepare_batch was replaced after the run started, so "
                     "this trainer is no longer traced.",
+                )
+        if opened and not self._saw_forward:
+            proxy = self._wrapped.get("inferer", (None, None))[1]
+            if proxy is not None and engine.inferer is not proxy:
+                self._warn_once(
+                    "inferer",
+                    "the inferer was replaced after the run started, so "
+                    "forward time is no longer measured.",
                 )
         if _traceml_disabled() or not opened:
             # The kill switch flipped mid-run, or no step opened in this

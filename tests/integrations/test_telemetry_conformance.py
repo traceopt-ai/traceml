@@ -62,6 +62,14 @@ REQUIRED_STEP_TIME = {
         "optimizer",
         "dataloader_fetch",
     },
+    "monai": {
+        "step_time",
+        "forward",
+        "backward",
+        "optimizer",
+        # Timed from the engine's own fetch events, not the torch patch.
+        "dataloader_fetch",
+    },
 }
 
 
@@ -201,10 +209,73 @@ def _run_lightning(init: bool = True) -> set[str]:
     return _drain_step_time_names()
 
 
+def _run_monai() -> set[str]:
+    import torch
+    from monai.data import DataLoader
+    from monai.engines import SupervisedTrainer
+
+    from traceml_ai.instrumentation.hooks.optimizer_hooks import (
+        reset_optimizer_timing,
+    )
+    from traceml_ai.instrumentation.patches import dataloader_patch
+    from traceml_ai.integrations.monai import TraceMLHandler
+    from traceml_ai.integrations.monai import init as monai_init
+
+    class _TinyDS(torch.utils.data.Dataset):
+        def __len__(self):
+            return 8
+
+        def __getitem__(self, i):
+            return {
+                "image": torch.zeros(1, 8, 8),
+                "label": torch.zeros(1, 8, 8),
+            }
+
+    # The torch fetch patch and the global optimizer hooks are process-wide,
+    # and an integration that ran earlier installs both. Left in place they
+    # would satisfy the fetch and optimizer rows without the handler emitting
+    # anything, so this harness runs without them and puts the patch back for
+    # whatever runs next. The hooks come back on the next auto-mode init.
+    loader_class = torch.utils.data.DataLoader
+    saved_iter = loader_class.__iter__
+    saved_patched = getattr(loader_class, "_traceml_patched", False)
+    loader_class.__iter__ = dataloader_patch._ORIG_DATALOADER_ITER
+    loader_class._traceml_patched = False
+    reset_optimizer_timing()
+
+    try:
+        # Documented path: traceml.init(mode="selective", patch_h2d=True),
+        # which leaves the DataLoader patch off. Input Wait comes from the
+        # engine.
+        config = monai_init()
+        # The one thing this init arms; h2d itself is GPU-only, so the row
+        # below cannot see it going dark.
+        assert config.patch_h2d, "monai.init() must arm H2D timing"
+        drain_step_time_batches()
+        abort_step_capture(begin_step_capture())
+
+        network = torch.nn.Conv2d(1, 1, 3, padding=1)
+        SupervisedTrainer(
+            device=torch.device("cpu"),
+            max_epochs=1,
+            train_data_loader=DataLoader(_TinyDS(), batch_size=2),
+            network=network,
+            optimizer=torch.optim.SGD(network.parameters(), lr=0.1),
+            loss_function=torch.nn.MSELoss(),
+            train_handlers=[TraceMLHandler()],
+        ).run()
+
+        return _drain_step_time_names()
+    finally:
+        loader_class.__iter__ = saved_iter
+        loader_class._traceml_patched = saved_patched
+
+
 # integration -> (runner, required deps). No entry => no runnable harness yet.
 _HARNESSES = {
     "huggingface": (_run_huggingface, ("torch", "transformers")),
     "lightning": (_run_lightning, ("torch", "lightning")),
+    "monai": (_run_monai, ("torch", "monai", "ignite")),
 }
 
 

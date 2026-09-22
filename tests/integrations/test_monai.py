@@ -52,6 +52,9 @@ from traceml_ai.utils.timing import timed_region  # noqa: E402
 
 STEP = "_traceml_internal:step_time"
 FETCH = "_traceml_internal:dataloader_next"
+FORWARD = "_traceml_internal:forward_time"
+BACKWARD = "_traceml_internal:backward_time"
+OPTIMIZER = "_traceml_internal:optimizer_step"
 WARNING = "[TraceML] MONAI:"
 ITEMS = 8  # four batches of two
 
@@ -260,6 +263,13 @@ def test_one_step_per_optimizer_update(
     assert sorted(steps) == list(range(1, len(updates) + 1))
     assert [_count(steps[s], STEP) for s in sorted(steps)] == sizes
     assert [_count(steps[s], FETCH) for s in sorted(steps)] == sizes
+    # One forward and one backward per iteration of the group, and exactly
+    # one optimizer step for the group itself.
+    assert [_count(steps[s], FORWARD) for s in sorted(steps)] == sizes
+    assert [_count(steps[s], BACKWARD) for s in sorted(steps)] == sizes
+    assert [_count(steps[s], OPTIMIZER) for s in sorted(steps)] == [1] * len(
+        sizes
+    )
     assert len(drain_step_memory_events()) == len(updates)
     assert _pending() == 0
 
@@ -342,6 +352,85 @@ def test_published_durations_are_real_measurements():
     # for far less. This is the whole reason Input Wait comes from the
     # engine bracket rather than the torch patch.
     assert waits["threaded"] < waits["plain"] / 2
+
+
+def _slow_loss(seconds):
+    mse = torch.nn.MSELoss()
+
+    def loss(prediction, target):
+        time.sleep(seconds)
+        return mse(prediction, target)
+
+    return loss
+
+
+def test_forward_excludes_zero_grad():
+    """The forward window is the inferer call, not the whole iteration."""
+    traceml_monai.init()
+
+    class SlowZeroGrad(torch.optim.SGD):
+        def zero_grad(self, *args, **kwargs):
+            time.sleep(0.02)
+            return super().zero_grad(*args, **kwargs)
+
+    network = torch.nn.Conv2d(1, 1, 3, padding=1)
+    trainer = SupervisedTrainer(
+        device=torch.device("cpu"),
+        max_epochs=1,
+        train_data_loader=DataLoader(Volumes(), batch_size=2),
+        network=network,
+        optimizer=SlowZeroGrad(network.parameters(), lr=0.01),
+        loss_function=_slow_loss(0.02),
+        train_handlers=[traceml_monai.TraceMLHandler()],
+    )
+    trainer.run()
+
+    steps = _published()
+    assert len(steps) == ITEMS // 2
+    for events in steps.values():
+        # zero_grad runs before the inferer call and the loss after it.
+        # Both are inside the step and outside forward.
+        assert _count(events, FORWARD) == 1
+        assert _phase_ms(events, FORWARD) > 0
+        # 20 ms in zero_grad and 20 ms in the loss are inside the step and
+        # outside forward, so forward is a small share of the step.
+        assert _phase_ms(events, STEP) > 40
+        assert _phase_ms(events, FORWARD) < _phase_ms(events, STEP) / 4
+
+
+def test_nothing_stays_hooked_or_wrapped_after_a_run():
+    traceml_monai.init()
+    trainer = _trainer([traceml_monai.TraceMLHandler()])
+    original_inferer = trainer.inferer
+    trainer.run()
+
+    assert trainer.inferer is original_inferer
+    assert len(trainer.optimizer._optimizer_step_pre_hooks) == 0
+    assert len(trainer.optimizer._optimizer_step_post_hooks) == 0
+
+
+def test_nothing_stays_hooked_or_wrapped_after_a_crash():
+    traceml_monai.init()
+    trainer = _trainer([traceml_monai.TraceMLHandler()], network=FailsAt(3))
+    original_inferer = trainer.inferer
+
+    with pytest.raises(RuntimeError, match="boom"):
+        trainer.run()
+
+    assert trainer.inferer is original_inferer
+    assert len(trainer.optimizer._optimizer_step_pre_hooks) == 0
+    assert len(trainer.optimizer._optimizer_step_post_hooks) == 0
+
+
+def test_an_optimizer_wrapped_by_the_sdk_is_not_timed_twice():
+    traceml_monai.init()
+    trainer = _trainer([traceml_monai.TraceMLHandler()])
+    traceml.wrap_optimizer(trainer.optimizer)
+    trainer.run()
+
+    steps = _published()
+    assert sorted(steps) == [1, 2, 3, 4]
+    assert all(_count(ev, OPTIMIZER) == 1 for ev in steps.values())
 
 
 def test_step_time_covers_the_work_of_the_iteration():
@@ -534,8 +623,9 @@ def test_a_failing_h2d_timer_never_reaches_training(monkeypatch, capsys):
     assert capsys.readouterr().err.count(WARNING) == 1
 
 
+@pytest.mark.parametrize("phase", ["_open_step", "_hook_optimizer"])
 def test_a_run_scoped_failure_reports_again_on_the_next_run(
-    monkeypatch, capsys
+    phase, monkeypatch, capsys
 ):
     traceml_monai.init()
     handler = traceml_monai.TraceMLHandler()
@@ -543,7 +633,7 @@ def test_a_run_scoped_failure_reports_again_on_the_next_run(
     def fail(*args, **kwargs):
         raise RuntimeError("internal")
 
-    monkeypatch.setattr(handler, "_open_step", fail)
+    monkeypatch.setattr(handler, phase, fail)
     trainer = _trainer([handler])
     trainer.run()
     trainer.run()
@@ -620,15 +710,270 @@ def test_the_kill_switch_flipped_during_a_run_stops_publishing(monkeypatch):
     handler = traceml_monai.TraceMLHandler()
     trainer = _trainer([handler])
     original_prepare = trainer.prepare_batch
+    pending_per_iteration = []
     trainer.add_event_handler(
         Events.ITERATION_COMPLETED(once=2),
         lambda e: monkeypatch.setenv("TRACEML_DISABLED", "1"),
+    )
+    trainer.add_event_handler(
+        Events.ITERATION_COMPLETED,
+        lambda e: pending_per_iteration.append(_pending()),
     )
     trainer.run()
 
     assert sorted(_published()) == [1, 2]
     assert _pending() == 0
     assert trainer.prepare_batch is original_prepare
+    # Every phase reads the switch, so the disabled iterations record
+    # nothing at all rather than filling a capture nobody publishes.
+    assert pending_per_iteration == [0, 0, 0, 0]
+
+
+@pytest.mark.parametrize("phase", ["_wrap_inferer", "_hook_optimizer"])
+def test_a_phase_that_cannot_be_installed_degrades_alone(
+    phase, monkeypatch, capsys
+):
+    """One optional phase failing must not take the whole run dark."""
+    traceml_monai.init()
+    handler = traceml_monai.TraceMLHandler()
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("internal")
+
+    monkeypatch.setattr(handler, phase, fail)
+    trainer = _trainer([handler])
+    trainer.run()
+
+    steps = _published()
+    assert sorted(steps) == [1, 2, 3, 4]
+    assert all(
+        _count(ev, STEP) == _count(ev, FETCH) == 1 for ev in steps.values()
+    )
+    assert all(_count(ev, BACKWARD) == 1 for ev in steps.values())
+    missing = FORWARD if phase == "_wrap_inferer" else OPTIMIZER
+    assert all(_count(ev, missing) == 0 for ev in steps.values())
+    assert _pending() == 0
+    assert capsys.readouterr().err.count(WARNING) == 1
+
+
+def test_an_optimizer_without_torch_step_hooks_loses_only_that_phase(capsys):
+    """MONAI accepts any object with step() and zero_grad()."""
+    traceml_monai.init()
+    network = torch.nn.Conv2d(1, 1, 3, padding=1)
+    inner = torch.optim.SGD(network.parameters(), lr=0.01)
+
+    class DuckOptimizer:
+        param_groups = inner.param_groups
+
+        def step(self, *args, **kwargs):
+            return inner.step(*args, **kwargs)
+
+        def zero_grad(self, *args, **kwargs):
+            return inner.zero_grad(*args, **kwargs)
+
+    trainer = SupervisedTrainer(
+        device=torch.device("cpu"),
+        max_epochs=1,
+        train_data_loader=DataLoader(Volumes(), batch_size=2),
+        network=network,
+        optimizer=DuckOptimizer(),
+        loss_function=torch.nn.MSELoss(),
+        train_handlers=[traceml_monai.TraceMLHandler()],
+    )
+    trainer.run()
+
+    steps = _published()
+    assert sorted(steps) == [1, 2, 3, 4]
+    assert all(
+        _count(ev, FORWARD) == _count(ev, BACKWARD) == 1
+        for ev in steps.values()
+    )
+    assert all(_count(ev, OPTIMIZER) == 0 for ev in steps.values())
+    err = capsys.readouterr().err
+    assert err.count(WARNING) == 1
+    assert "optimizer time is not measured" in err
+
+
+def test_the_optimizer_window_is_the_step_call():
+    """The window must be optimizer.step(), not the events around it."""
+    traceml_monai.init()
+
+    class SlowStep(torch.optim.SGD):
+        def step(self, *args, **kwargs):
+            time.sleep(0.02)
+            return super().step(*args, **kwargs)
+
+    network = torch.nn.Conv2d(1, 1, 3, padding=1)
+    trainer = SupervisedTrainer(
+        device=torch.device("cpu"),
+        max_epochs=1,
+        train_data_loader=DataLoader(Volumes(), batch_size=2),
+        network=network,
+        optimizer=SlowStep(network.parameters(), lr=0.01),
+        # Five times the optimizer's own sleep, so a window that swallowed the
+        # loss lands past 100 ms and the ceiling below still leaves room for a
+        # busy machine to overshoot a 20 ms sleep.
+        loss_function=_slow_loss(0.10),
+        train_handlers=[traceml_monai.TraceMLHandler()],
+    )
+    trainer.run()
+
+    for events in _published().values():
+        # torch wraps step() per class, so a subclass calling super().step()
+        # fires the hook pair twice; only one event may be recorded.
+        assert _count(events, OPTIMIZER) == 1
+        assert _phase_ms(events, OPTIMIZER) > 15
+        # The loss sleeps too, and it is not the optimizer's time.
+        assert _phase_ms(events, OPTIMIZER) < 60
+
+
+def test_an_optimizer_step_between_iterations_is_not_timed():
+    """The hooks stay registered for the run, so they must be gated."""
+    traceml_monai.init()
+    trainer = _trainer([traceml_monai.TraceMLHandler()])
+    trainer.add_event_handler(
+        Events.ITERATION_COMPLETED(once=1),
+        lambda e: e.optimizer.step(),
+    )
+    trainer.run()
+
+    steps = _published()
+    assert sorted(steps) == [1, 2, 3, 4]
+    # The extra step belongs to no iteration, so it is charged to none.
+    assert all(_count(ev, OPTIMIZER) == 1 for ev in steps.values())
+
+
+def test_an_inferer_call_between_iterations_is_not_timed():
+    """The proxy is installed for the whole run, so it must be gated too."""
+    traceml_monai.init()
+    trainer = _trainer([traceml_monai.TraceMLHandler()])
+    trainer.add_event_handler(
+        Events.ITERATION_COMPLETED(once=1),
+        lambda e: e.inferer(torch.zeros(1, 1, 8, 8), e.network),
+    )
+    trainer.run()
+
+    steps = _published()
+    assert sorted(steps) == [1, 2, 3, 4]
+    # The extra call belongs to no iteration, so it is charged to none.
+    assert all(_count(ev, FORWARD) == 1 for ev in steps.values())
+
+
+def test_the_amp_branch_still_records_one_optimizer_event_per_group():
+    """MONAI takes a different code path when amp=True.
+
+    torch disables a CPU GradScaler, so the scaler's skip-on-inf path is
+    not reachable here; this pins the branch, not the skip.
+    """
+    traceml_monai.init()
+    trainer = _trainer([traceml_monai.TraceMLHandler()], amp=True)
+    trainer.run()
+
+    steps = _published()
+    assert sorted(steps) == [1, 2, 3, 4]
+    assert all(_count(ev, OPTIMIZER) == 1 for ev in steps.values())
+    # MONAI fires BACKWARD_COMPLETED from a different line on this branch,
+    # so the backward window has to be asserted here too.
+    assert all(_count(ev, BACKWARD) == 1 for ev in steps.values())
+
+
+def test_the_backward_window_is_the_backward_pass():
+    traceml_monai.init()
+
+    class SlowBackward(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx, value):
+            return value.clone()
+
+        @staticmethod
+        def backward(ctx, grad):
+            time.sleep(0.02)
+            return grad
+
+    class Network(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv = torch.nn.Conv2d(1, 1, 3, padding=1)
+
+        def forward(self, x):
+            return SlowBackward.apply(self.conv(x))
+
+    trainer = _trainer([traceml_monai.TraceMLHandler()], network=Network())
+    trainer.run()
+
+    for events in _published().values():
+        assert _count(events, BACKWARD) == 1
+        assert _phase_ms(events, BACKWARD) > 15
+        # The backward pass is not the forward pass.
+        assert _phase_ms(events, FORWARD) < _phase_ms(events, BACKWARD)
+
+
+def test_state_written_to_the_traced_inferer_survives_the_run():
+    """Tracing must not swallow what a handler stores on the inferer.
+
+    The proxy is swapped out at run end, so a write that landed on the
+    proxy instead of the real inferer would disappear with it.
+    """
+    traceml_monai.init()
+    trainer = _trainer([traceml_monai.TraceMLHandler()])
+    original = trainer.inferer
+    trainer.add_event_handler(
+        Events.ITERATION_COMPLETED(once=1),
+        lambda e: setattr(e.inferer, "roi_state", "written mid-run"),
+    )
+    trainer.run()
+
+    assert trainer.inferer is original
+    assert original.roi_state == "written mid-run"
+
+
+def test_an_inferer_replaced_during_the_run_is_left_alone(capsys):
+    traceml_monai.init()
+    trainer = _trainer([traceml_monai.TraceMLHandler()])
+    from monai.inferers import SimpleInferer
+
+    later = SimpleInferer()
+    trainer.add_event_handler(
+        Events.ITERATION_COMPLETED(once=1),
+        lambda e: setattr(e, "inferer", later),
+    )
+    trainer.run()
+
+    steps = _published()
+    assert trainer.inferer is later
+    assert _count(steps[1], FORWARD) == 1
+    assert _count(steps[4], FORWARD) == 0
+    err = capsys.readouterr().err
+    assert err.count(WARNING) == 1
+    assert "inferer was replaced" in err
+
+
+def test_the_traced_inferer_has_the_surface_the_guide_documents():
+    """The guide tells users what `engine.inferer` is during a run."""
+    from monai.inferers import Inferer
+
+    traceml_monai.init()
+    trainer = _trainer([traceml_monai.TraceMLHandler()])
+    original = trainer.inferer
+    original.marker = object()
+    seen = {}
+
+    def probe(engine):
+        inferer = engine.inferer
+        seen["proxied"] = inferer is not original
+        seen["isinstance"] = isinstance(inferer, Inferer)
+        seen["repr"] = repr(inferer)
+        seen["passthrough"] = inferer.marker is original.marker
+
+    trainer.add_event_handler(Events.ITERATION_COMPLETED(once=1), probe)
+    trainer.run()
+
+    assert seen["proxied"]
+    assert seen["passthrough"]
+    # Both are limitations the guide states, so a change here changes the doc.
+    assert not seen["isinstance"]
+    assert "_TimedInferer" in seen["repr"]
+    assert trainer.inferer is original
 
 
 def test_kill_switch_wraps_and_records_nothing(monkeypatch):
