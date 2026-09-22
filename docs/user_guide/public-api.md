@@ -288,6 +288,22 @@ Call `init()` before the existing `model.train()` call. See the
       show_root_heading: true
       show_source: false
 
+### MONAI
+
+Call `init()` before building the trainer, then pass `TraceMLHandler()` in
+`train_handlers`. See the [MONAI guide](integrations/monai.md) for the seam
+each phase is measured from.
+
+::: traceml_ai.integrations.monai.init
+    options:
+      show_root_heading: true
+      show_source: false
+
+::: traceml_ai.integrations.monai.TraceMLHandler
+    options:
+      show_root_heading: true
+      show_source: false
+
 ### Ray Train
 
 ::: traceml_ai.integrations.ray.TraceMLTorchTrainer

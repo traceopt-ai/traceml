@@ -33,6 +33,7 @@ These are the main user-facing examples.
 | `integrations/lightning_minimal.py` | Minimal Lightning integration init + `TraceMLCallback` example | CPU / CUDA | No dataset download required |
 | `integrations/rfdetr_minimal.py` | RF-DETR Nano with automatic tracing; compare two DataLoader worker counts | CPU / CUDA recipe | Requires `rfdetr[train]==1.10.1` and a local COCO export; downloads pretrained weights on first use; see the [guide](../docs/user_guide/integrations/rfdetr.md) |
 | `integrations/lightning_dataloading_bottleneck.py` | ResNet-18 on 320px Imagenette under Lightning; `--profile` flips the DataLoader settings and nothing else, so two runs plus `traceml compare` isolate the loader change | CPU (`--smoke`) / CUDA | Downloads 326 MB on first use; `--smoke` runs a synthetic CPU check; companion Colab notebook in `notebooks/` |
+| `integrations/monai_minimal.py` | Minimal MONAI `SupervisedTrainer` with `TraceMLHandler` in `train_handlers` | CPU / CUDA | Synthetic volumes and a small UNet, so nothing is downloaded; see the [guide](../docs/user_guide/integrations/monai.md) |
 | `integrations/deepspeed_minimal.py` | Minimal DeepSpeed loop wrapped with `traceml.trace_step(...)` | CUDA | Requires `deepspeed`; exits cleanly without it |
 
 If you only try one example first, use:
@@ -252,6 +253,7 @@ Use:
 - `integrations/lightning_minimal.py` if you use PyTorch Lightning
 - `ray/torchtrainer_minimal.py` if you use Ray Train
 - `integrations/deepspeed_minimal.py` if you use DeepSpeed
+- `integrations/monai_minimal.py` if you use MONAI `SupervisedTrainer`
 
 Use the diagnosis demos when you want to see:
 

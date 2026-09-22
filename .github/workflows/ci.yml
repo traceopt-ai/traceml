@@ -205,6 +205,54 @@ jobs:
         run: |
           pytest tests/integrations/test_monai.py \
             tests/integrations/test_telemetry_conformance.py -q
+      - name: Run the documented example end to end
+        # The guide promises this script reports all four phases, and that one
+        # TraceML step is one optimizer update. The tests above cannot see
+        # either: they stop at the rank side. The second run takes the
+        # accumulation path, where a step spans several iterations and the
+        # short last group of an epoch still publishes.
+        env:
+          OMP_NUM_THREADS: "1"
+        run: |
+          traceml run --run-name monai_plain \
+            examples/integrations/monai_minimal.py --args --epochs 1
+          traceml run --run-name monai_accumulated \
+            examples/integrations/monai_minimal.py \
+            --args --epochs 1 --accumulation-steps 3
+          python -c '
+          import json
+          import pathlib
+          import re
+          import sys
+
+          required = [
+              "input_wait_ms", "forward_ms", "backward_ms", "optimizer_ms"
+          ]
+          for name in sys.argv[1:]:
+              run = pathlib.Path("logs") / name
+              summary = json.loads((run / "final_summary.json").read_text())
+              average = summary["step_time"]["global"]["average"]
+              dark = [k for k in required if average.get(k) is None]
+              if dark:
+                  sys.exit(f"{name}: summary reports no {dark}; got {average}")
+              # A measured region cannot take exactly zero, so a zero here is
+              # a broken clock rather than a fast machine.
+              flat = [k for k in required if average[k] <= 0]
+              if flat:
+                  sys.exit(f"{name}: summary reports a zero {flat}; got {average}")
+              log = (run / "nodes/node_0/training.stdout.log").read_text()
+              printed = re.search(r"optimizer updates: ([0-9]+)", log)
+              if printed is None:
+                  sys.exit(f"{name}: the example printed no update count: {log}")
+              updates = int(printed.group(1))
+              steps = summary["step_time"]["metadata"]["training_total_steps"]
+              if steps != updates:
+                  sys.exit(
+                      f"{name}: {steps} published steps for {updates} "
+                      "optimizer updates"
+                  )
+              print(name, {k: round(average[k], 3) for k in required}, steps)
+          ' monai_plain monai_accumulated
       - name: Rerun at the declared Ignite floor
         # The floor in pyproject's monai extra, which is what MONAI's own
         # "ignite" extra pins. Untested floors drift.

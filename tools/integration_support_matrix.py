@@ -22,6 +22,7 @@ REQUIRED_IDS = {
     "accelerate",
     "lightning",
     "rfdetr",
+    "monai",
     "ray-train",
     "deepspeed",
     "wandb-mlflow",

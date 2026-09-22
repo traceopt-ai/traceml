@@ -352,7 +352,8 @@ For remote browser access and SSH tunneling, see the
   [PyTorch Lightning](https://traceopt-ai.github.io/traceml/user_guide/integrations/lightning/),
   [RF-DETR](https://traceopt-ai.github.io/traceml/user_guide/integrations/rfdetr/),
   [Ray Train](https://traceopt-ai.github.io/traceml/user_guide/integrations/ray/),
-  and [DeepSpeed](https://traceopt-ai.github.io/traceml/user_guide/integrations/deepspeed/)
+  [DeepSpeed](https://traceopt-ai.github.io/traceml/user_guide/integrations/deepspeed/),
+  and [MONAI](https://traceopt-ai.github.io/traceml/user_guide/integrations/monai/)
 - **Trackers:** [W&B and MLflow](https://traceopt-ai.github.io/traceml/user_guide/integrations/wandb-mlflow/)
 
 Summary mode is the documented path for single-node and multi-node runs. Live
