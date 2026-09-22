@@ -138,8 +138,9 @@ without a profiler.
 - Optimizer time is `optimizer.step()` only. A step-interval scheduler, such as
   `LrScheduleHandler(epoch_level=False)`, runs on `ITERATION_COMPLETED`, so it
   is in neither the optimizer phase nor the step.
-- `gpu`, `multi_process` and `multi_node` are not claimed. The handler has no
-  per-rank branch, and CI covers CPU single-process runs only.
+- CUDA is a documented recipe, not CI tested: the spleen notebook below ran on
+  one T4, and CI covers CPU single-process runs only. `multi_process` and
+  `multi_node` are not claimed, because the handler has no per-rank branch.
 
 ## Full example
 
@@ -152,3 +153,25 @@ traceml run examples/integrations/monai_minimal.py
 
 The end-of-run summary reports Input Wait, forward, backward and optimizer time
 for each published step.
+
+## Try it on a real workload
+
+[`examples/integrations/monai_dataloading_bottleneck.py`](https://github.com/traceopt-ai/traceml/blob/main/examples/integrations/monai_dataloading_bottleneck.py)
+trains a 3D UNet on patches from the Medical Segmentation Decathlon spleen task.
+Each flag changes one setting: the dataset class, the worker count, the loader
+class, or mixed precision. Two runs that differ in one flag measure that setting
+alone:
+
+```bash
+traceml run --mode summary --logs-dir logs --run-name spleen_1_baseline \
+    examples/integrations/monai_dataloading_bottleneck.py --args --data-dir data
+traceml run --mode summary --logs-dir logs --run-name spleen_2_workers \
+    examples/integrations/monai_dataloading_bottleneck.py \
+    --args --data-dir data --num-workers 4
+traceml compare logs/spleen_1_baseline/final_summary.json \
+    logs/spleen_2_workers/final_summary.json
+```
+
+The notebook runs six settings on one GPU, compares each adjacent pair, and
+shows where the bottleneck moves as each one changes:
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/notebooks/monai_dataloading_bottleneck.ipynb)

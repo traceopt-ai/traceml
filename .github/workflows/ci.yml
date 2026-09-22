@@ -195,7 +195,8 @@ jobs:
         # until it does.
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[torch,monai]" "monai==1.6.*" "pytorch-ignite==0.5.*" pytest
+          pip install -e ".[torch,monai]" "monai==1.6.*" "pytorch-ignite==0.5.*" \
+            nibabel pytest
       - name: Report the resolved MONAI and Ignite versions
         run: |
           python -c 'import ignite, monai, torch; print("monai", monai.__version__, "ignite", ignite.__version__, "torch", torch.__version__)'
@@ -204,6 +205,7 @@ jobs:
           OMP_NUM_THREADS: "1"
         run: |
           pytest tests/integrations/test_monai.py \
+            tests/integrations/test_monai_dataloading_example.py \
             tests/integrations/test_telemetry_conformance.py -q
       - name: Run the documented example end to end
         # The guide promises this script reports all four phases, and that one
@@ -262,6 +264,7 @@ jobs:
           pip install "pytorch-ignite==0.4.11"
           python -c 'import ignite; print("ignite", ignite.__version__)'
           pytest tests/integrations/test_monai.py \
+            tests/integrations/test_monai_dataloading_example.py \
             tests/integrations/test_telemetry_conformance.py -q
 
   test-latest-deps:
