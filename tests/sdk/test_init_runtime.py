@@ -305,6 +305,12 @@ def test_init_warns_and_noops_when_aggregator_unreachable(
     assert "[TraceML]" in capsys.readouterr().err  # detached loudly
     assert initialization.get_init_config() is cfg  # no-op config stored
 
+    from traceml_ai.sdk.wrappers import wrap_h2d
+
+    invalid_target = object()
+    assert wrap_h2d(invalid_target) is invalid_target
+    assert capsys.readouterr().err == ""  # wrapper remains a silent no-op
+
 
 def test_init_raises_when_aggregator_unreachable_and_strict(
     initialization, monkeypatch

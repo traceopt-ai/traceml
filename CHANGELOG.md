@@ -12,6 +12,17 @@ which carry the full historical notes for versions predating this file.
   per optimizer update with step time, Input Wait from the engine's own fetch
   events, step memory, and H2D on CUDA. Other engines warn and are not traced.
   Phase timings, the guide, the support-matrix row and the example follow.
+- **Breaking:** Public manual wrappers now require `traceml.init(...)` first
+  and reject phases already owned by automatic instrumentation. Move `init()`
+  before wrapper creation; custom non-PyTorch input iterators remain wrappable
+  in auto mode because the PyTorch DataLoader patch cannot observe them. The
+  TraceML kill switch remains unconditional: disabled wrappers return their
+  inputs unchanged, including before initialization. When tracing is enabled,
+  invalid wrapper targets retain their documented `TypeError`.
+- Hugging Face checkpoint resume no longer attributes lazily skipped iterable
+  batches to the first resumed optimizer group. That entire group's step
+  timing and memory telemetry is omitted; training runs normally and recording
+  resumes with the next group. Fresh runs and sampler-level skips are unaffected.
 - Added opt-in RF-DETR instrumentation for eager detection. Unsupported
   configurations or adapter failures warn and leave native training intact.
   Skipped instrumentation no longer accumulates DataLoader timing records.

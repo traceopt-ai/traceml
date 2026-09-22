@@ -137,9 +137,11 @@ toward Input Wait or H2D, and no step is published for them.
 
 Normal PyTorch `DataLoader` input timing is automatic after
 `traceml_lightning.init()`. If you pass Lightning a custom iterator or
-non-PyTorch loader, wrap it with `traceml.wrap_dataloader_fetch(...)` before
-passing it to `trainer.fit(...)`. For Ray Data with Lightning, see
-[Ray Train](ray.md).
+non-PyTorch loader, call `traceml_lightning.init()` first, then wrap the custom
+source with `traceml.wrap_dataloader_fetch(...)` before passing it to
+`trainer.fit(...)`. Wrapping a normal PyTorch `DataLoader` raises because the
+integration already owns that timing. For Ray Data with Lightning, see [Ray
+Train](ray.md).
 
 For a DataLoader whose length is unknown, Lightning performs a one-batch
 look-ahead and probes the iterator for exhaustion. Input Wait reports those

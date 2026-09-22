@@ -7,6 +7,7 @@ TraceMLTrainerCallback with transformers.Trainer.
 import logging
 import os
 import sys
+import threading
 from functools import wraps
 
 from traceml_ai.instrumentation.patches.dataloader_patch import (
@@ -19,6 +20,18 @@ from traceml_ai.sdk.instrumentation import trace_step
 
 logger = logging.getLogger(__name__)
 _WARNED_CAPABILITIES: set[str] = set()
+
+
+class _TrainingAttemptState(threading.local):
+    """Per-thread state shared by the narrow Trainer integration hooks."""
+
+    def __init__(self) -> None:
+        self.active = False
+        self.suppress_next_input_group = False
+        self.omit_current_group = False
+
+
+_TRAINING_ATTEMPT_STATE = _TrainingAttemptState()
 
 
 def _traceml_disabled() -> bool:
@@ -73,6 +86,10 @@ def init():
         _install_training_batch_timing()
     except Exception as exc:
         _log_hf_error("Training batch timing installation failed", exc)
+    try:
+        _install_resume_skip_tracking()
+    except Exception as exc:
+        _log_hf_error("Resume input attribution installation failed", exc)
     try:
         _install_non_training_input_scopes()
     except Exception as exc:
@@ -219,6 +236,8 @@ class TraceMLTrainerCallback(TrainerCallback if HAS_TRANSFORMERS else object):
         self._abort_step_cm_safely()
         if _traceml_disabled() or not self._owns_run:
             return
+        if _TRAINING_ATTEMPT_STATE.omit_current_group:
+            return
 
         model = kwargs.get("model")
         if model is None:
@@ -235,6 +254,12 @@ class TraceMLTrainerCallback(TrainerCallback if HAS_TRANSFORMERS else object):
             _log_hf_error("trace_step enter failed", exc)
 
     def on_step_end(self, args, state, control, **kwargs):
+        if self._owns_run and _TRAINING_ATTEMPT_STATE.omit_current_group:
+            # The lazy resume group has no trace_step or memory capture.
+            # Discard any pending events before enabling the next collection.
+            _abort_pending_capture_safely()
+            _TRAINING_ATTEMPT_STATE.omit_current_group = False
+            return
         if _traceml_disabled() or not self._owns_run:
             self._abort_step_cm_safely()
             return
@@ -280,19 +305,32 @@ class _TrainingBatchIterator:
     The surrounding Trainer lifecycle keeps DataLoader timing disabled by
     default. The nested scope restores that policy after every fetch, including
     when fetching raises, and leaves collection-side bookkeeping outside both
-    the input-wait and H2D regions.
+    the input-wait and H2D regions. ``measure_input=False`` preserves that
+    disabled policy for a complete optimizer group whose resume-skip work
+    cannot be separated from its first real batch.
     """
 
-    def __init__(self, iterator):
+    def __init__(self, iterator, *, measure_input: bool = True):
         self._iterator = iterator
+        self._measure_input = measure_input
 
     def __iter__(self):
         return self
 
     def __next__(self):
+        if not self._measure_input:
+            return next(self._iterator)
         with dataloader_timing_scope(lambda: True):
             with h2d_auto_timer(include_step_time=True):
                 return next(self._iterator)
+
+
+def _consume_resume_input_suppression() -> bool:
+    """Consume the one-shot marker for a lazily skipped resume group."""
+    if not _TRAINING_ATTEMPT_STATE.suppress_next_input_group:
+        return False
+    _TRAINING_ATTEMPT_STATE.suppress_next_input_group = False
+    return True
 
 
 def _install_training_batch_timing() -> None:
@@ -332,15 +370,81 @@ def _install_training_batch_timing() -> None:
         if _traceml_disabled() or not _traceml_callbacks(trainer):
             return original(trainer, epoch_iterator, *args, **kwargs)
 
+        measure_input = not _consume_resume_input_suppression()
+        # Standard Trainer collects one accumulation group before its step
+        # callbacks. Keep this decision through on_step_end, not just next().
+        _TRAINING_ATTEMPT_STATE.omit_current_group = not measure_input
         return original(
             trainer,
-            _TrainingBatchIterator(epoch_iterator),
+            _TrainingBatchIterator(
+                epoch_iterator,
+                measure_input=measure_input,
+            ),
             *args,
             **kwargs,
         )
 
     timed_get_batch_samples._traceml_training_batch_timing = True
     Trainer.get_batch_samples = timed_get_batch_samples
+
+
+def _loader_skips_lazily(loader, num_batches: int) -> bool:
+    """Return whether Accelerate will consume skipped batches at iteration."""
+    if num_batches <= 0:
+        return False
+
+    try:
+        candidate = loader
+        # XLA's MpDeviceLoaderWrapper exposes the underlying loader as .dataloader.
+        for _ in range(2):
+            if getattr(candidate, "skip_batches", 0) > 0:
+                return True
+            candidate = getattr(candidate, "dataloader", None)
+            if candidate is None:
+                break
+    except Exception:
+        # Compatibility inspection must never interfere with checkpoint
+        # restoration. An unknown loader retains the existing measurement.
+        return False
+    return False
+
+
+def _install_resume_skip_tracking() -> None:
+    """Detect HF resume paths that lazily consume skipped input batches.
+
+    Accelerate uses sampler-level skipping for map-style datasets, so no
+    discarded batch is fetched. Iterable datasets instead discard batches
+    inside the first iterator call, where their input and H2D work cannot be
+    separated from the first real batch. Mark that one optimizer group so the
+    collection hook and callback omit the complete group from step telemetry.
+    Training still executes every microbatch and the optimizer update.
+    """
+    if not HAS_TRANSFORMERS:
+        return
+
+    import transformers.trainer as trainer_module
+
+    original = getattr(trainer_module, "skip_first_batches", None)
+    if not callable(original) or getattr(
+        original,
+        "_traceml_resume_skip_tracking",
+        False,
+    ):
+        return
+
+    @wraps(original)
+    def tracked_skip_first_batches(dataloader, num_batches=0):
+        skipped_loader = original(dataloader, num_batches)
+        if (
+            _TRAINING_ATTEMPT_STATE.active
+            and not _traceml_disabled()
+            and _loader_skips_lazily(skipped_loader, num_batches)
+        ):
+            _TRAINING_ATTEMPT_STATE.suppress_next_input_group = True
+        return skipped_loader
+
+    tracked_skip_first_batches._traceml_resume_skip_tracking = True
+    trainer_module.skip_first_batches = tracked_skip_first_batches
 
 
 def _scoped_non_training_input(original):
@@ -428,6 +532,14 @@ def _install_trainer_lifecycle_guard() -> None:
         # Start every Trainer attempt with a clean capture. This also handles
         # failures that happen while fetching inputs, before on_step_begin.
         _abort_pending_capture_safely()
+        previous_attempt_state = (
+            _TRAINING_ATTEMPT_STATE.active,
+            _TRAINING_ATTEMPT_STATE.suppress_next_input_group,
+            _TRAINING_ATTEMPT_STATE.omit_current_group,
+        )
+        _TRAINING_ATTEMPT_STATE.active = True
+        _TRAINING_ATTEMPT_STATE.suppress_next_input_group = False
+        _TRAINING_ATTEMPT_STATE.omit_current_group = False
         try:
             # HF has no reliable public training-loader flag at fetch time:
             # get_batch_samples runs before training_step calls model.train().
@@ -443,6 +555,11 @@ def _install_trainer_lifecycle_guard() -> None:
                 # Ownership applies only to this attempt, not later reuse.
                 callback._set_run_owner(True)
             _abort_pending_capture_safely()
+            (
+                _TRAINING_ATTEMPT_STATE.active,
+                _TRAINING_ATTEMPT_STATE.suppress_next_input_group,
+                _TRAINING_ATTEMPT_STATE.omit_current_group,
+            ) = previous_attempt_state
 
     guarded_inner_training_loop._traceml_lifecycle_guard = True
     Trainer._inner_training_loop = guarded_inner_training_loop

@@ -43,7 +43,7 @@ htmlcov/
 
 logs/
 compare/
-
+remote_logs/
 
 # Local ML datasets, checkpoints, model weights, and export archives
 
