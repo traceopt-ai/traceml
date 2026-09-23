@@ -21,6 +21,14 @@ which carry the full historical notes for versions predating this file.
   example under `traceml run`, with and without gradient accumulation, and
   fails if the summary loses Input Wait, forward, backward or optimizer time,
   or if its step count disagrees with the optimizer updates the trainer made.
+- Added a MONAI case study: `notebooks/monai_dataloading_bottleneck.ipynb` and
+  its script, `examples/integrations/monai_dataloading_bottleneck.py`. It
+  trains a 3D UNet on the Medical Segmentation Decathlon spleen task six times,
+  changing one data-loading or compute setting per run, and compares each
+  adjacent pair with `traceml compare`. A `--smoke` mode sends synthetic
+  volumes through the same transforms and patch sampler, and the notebook smoke
+  job runs it on CPU. The support matrix now lists MONAI on CUDA as a
+  documented recipe, citing the notebook's T4 results.
 - **Breaking:** Public manual wrappers now require `traceml.init(...)` first
   and reject phases already owned by automatic instrumentation. Move `init()`
   before wrapper creation; custom non-PyTorch input iterators remain wrappable
