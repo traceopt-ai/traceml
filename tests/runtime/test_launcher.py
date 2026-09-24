@@ -1398,6 +1398,13 @@ def test_launcher_scopes_telemetry_health_to_aggregator_owner(
             ("unavailable", "aggregator_not_ready", None),
         ),
         (
+            {
+                "telemetry_available": False,
+                "startup_reason": "aggregator_port_in_use",
+            },
+            ("unavailable", "aggregator_port_in_use", None),
+        ),
+        (
             {"finalization_reason": "finalization_failed"},
             ("failed", "finalization_failed", None),
         ),
