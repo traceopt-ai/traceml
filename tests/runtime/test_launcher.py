@@ -1182,6 +1182,38 @@ def test_wildcard_port_probe_rejects_a_loopback_listener() -> None:
         stale.close()
 
 
+@pytest.mark.parametrize(
+    ("host", "expected_hosts"),
+    [
+        ("0.0.0.0", ["0.0.0.0", "127.0.0.1"]),
+        ("", ["", "127.0.0.1"]),
+        ("127.0.0.1", ["127.0.0.1"]),
+    ],
+)
+def test_port_probe_adds_loopback_for_wildcard_hosts(
+    monkeypatch, host, expected_hosts
+) -> None:
+    # Linux already refuses the wildcard bind, so only recording the probes
+    # proves the loopback probe runs on every platform.
+    calls = []
+    probes = []
+
+    def _record(probe_host, port, backlog):
+        calls.append((probe_host, port))
+        probes.append(Mock())
+        return probes[-1]
+
+    monkeypatch.setattr(
+        "traceml_ai.launcher.process.bind_exclusive_listener", _record
+    )
+
+    ensure_aggregator_port_free(host, 43170)
+
+    assert calls == [(probe_host, 43170) for probe_host in expected_hosts]
+    for probe in probes:
+        probe.close.assert_called_once_with()
+
+
 def test_aggregator_port_probe_releases_a_free_port() -> None:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
