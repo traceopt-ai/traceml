@@ -145,9 +145,21 @@ def test_final_summary_json_smoke(tmp_path):
     for key in required:
         assert key in payload, f"final_summary.json missing key: {key!r}"
 
+    average = payload["step_time"]["global"]["average"]
+    for metric in (
+        "traced_step_time_ms",
+        "compute_ms",
+        "forward_ms",
+        "backward_ms",
+        "optimizer_ms",
+    ):
+        assert average[metric] is not None, f"missing CPU metric: {metric}"
+        assert average[metric] > 0.0, f"non-positive CPU metric: {metric}"
+
     manifest = json.loads(
         (session_root / "manifest.json").read_text(encoding="utf-8")
     )
+    assert manifest["telemetry_status"] == "complete"
     training_ended_at = manifest["lifecycle"]["training_ended_at"]
     assert payload["duration_s"] > 0.0
     assert datetime.fromisoformat(payload["generated_at"]) >= (

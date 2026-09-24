@@ -41,6 +41,16 @@ from pathlib import Path
 from typing import Any
 
 _EXPECTED_STEPS = 3
+_REQUIRED_LIVE_SUMMARY_METRICS = (
+    "input_wait_ms",
+    "step_time_ms",
+    "traced_step_time_ms",
+    "dataloader_fetch_cpu_ms",
+    "compute_ms",
+    "forward_ms",
+    "backward_ms",
+    "optimizer_ms",
+)
 
 
 @dataclass(frozen=True)
@@ -68,7 +78,7 @@ def _independent_h2d_ms(num_bytes_mb: int = 64) -> float:
 
 
 def _run_hf_workload(grad_accum: int = 2) -> int:
-    """Run the launcher-owned workload without consuming telemetry."""
+    """Run the launcher-owned workload without consuming internal queues."""
     import tempfile
 
     import torch
@@ -83,6 +93,7 @@ def _run_hf_workload(grad_accum: int = 2) -> int:
         TraceMLTrainerCallback,
         init,
     )
+    from traceml_ai.sdk.summary_client import final_summary
 
     class _Dataset(torch.utils.data.Dataset):
         def __len__(self) -> int:
@@ -126,13 +137,48 @@ def _run_hf_workload(grad_accum: int = 2) -> int:
 
     completed_steps = int(trainer.state.global_step)
     print(
-        "HF workload completed optimizer steps: " f"{completed_steps}",
+        f"HF workload completed optimizer steps: {completed_steps}",
         flush=True,
     )
     if completed_steps != _EXPECTED_STEPS:
         print(
             f"Expected {_EXPECTED_STEPS} optimizer steps, got "
             f"{completed_steps}.",
+            flush=True,
+        )
+        return 1
+
+    # Exercise the public worker-to-aggregator request/response protocol while
+    # the real runtime is still alive. The aggregator settles the sampler and
+    # SQLite writer before it returns this payload. Validate that response
+    # here, before shutdown regenerates the summary artifact.
+    summary = final_summary(timeout_sec=60.0, print_text=False)
+    step_time = (summary or {}).get("step_time") or {}
+    summary_steps = int(
+        (step_time.get("metadata") or {}).get("training_total_steps", -1)
+    )
+    print(
+        f"HF runtime summary round-trip optimizer steps: {summary_steps}",
+        flush=True,
+    )
+    if summary_steps != _EXPECTED_STEPS:
+        print(
+            "Expected the live TraceML summary to contain "
+            f"{_EXPECTED_STEPS} optimizer steps, got {summary_steps}.",
+            flush=True,
+        )
+        return 1
+
+    average = (step_time.get("global") or {}).get("average") or {}
+    invalid_metrics = {
+        metric: average.get(metric)
+        for metric in _REQUIRED_LIVE_SUMMARY_METRICS
+        if average.get(metric) is None or not average[metric] > 0.0
+    }
+    if invalid_metrics:
+        print(
+            "Expected the live TraceML summary to contain positive timing "
+            f"metrics, got {invalid_metrics}.",
             flush=True,
         )
         return 1
