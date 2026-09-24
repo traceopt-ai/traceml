@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import signal
 import socket
@@ -20,8 +21,12 @@ from pathlib import Path
 from typing import Any, BinaryIO, Callable, Iterable, Optional
 
 from traceml_ai.launcher.manifest import update_run_manifest
+from traceml_ai.transport.tcp_transport import bind_exclusive_listener
 
 _IS_WINDOWS = sys.platform == "win32"
+_ADDR_IN_USE_ERRNOS = frozenset(
+    (errno.EADDRINUSE, getattr(errno, "WSAEADDRINUSE", errno.EADDRINUSE))
+)
 # Absent on POSIX, where start_new_session is used instead.
 _CREATE_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
 
@@ -374,6 +379,36 @@ def terminate_process_group(
         proc.wait(timeout=min(timeout_sec, DEFAULT_SHUTDOWN_TIMEOUT_SEC))
     except Exception:
         pass
+
+
+class AggregatorPortInUseError(RuntimeError):
+    """Another process already listens on the aggregator port."""
+
+
+def ensure_aggregator_port_free(host: str, port: int) -> None:
+    """Raise ``AggregatorPortInUseError`` if ``(host, port)`` is taken.
+
+    ``wait_for_tcp_listen`` only proves that *something* accepts on the
+    port. An aggregator left behind by a killed run would pass it while the
+    new aggregator fails to bind, and ranks would stream into the stale
+    session. Probing with the aggregator's own bind before spawning it makes
+    that case fail loudly instead.
+    """
+    if int(port) == 0:
+        return
+    try:
+        probe = bind_exclusive_listener(host, port, backlog=1)
+    except OSError as exc:
+        if exc.errno not in _ADDR_IN_USE_ERRNOS:
+            # Other bind errors surface from the aggregator itself.
+            return
+        raise AggregatorPortInUseError(
+            f"aggregator port {host}:{port} is already in use, most likely "
+            "by an aggregator left behind by an earlier `traceml run` that "
+            f"was killed. Stop that process (`lsof -i :{port}` finds it) or "
+            "pass --aggregator-port with a free port."
+        ) from exc
+    probe.close()
 
 
 def wait_for_tcp_listen(

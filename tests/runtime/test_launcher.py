@@ -9,6 +9,7 @@ import io
 import json
 import os
 import signal
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -42,12 +43,18 @@ from traceml_ai.launcher.manifest import (
     update_run_manifest,
     write_run_manifest,
 )
-from traceml_ai.launcher.process import ProcessOutputResult, TrainingOutcome
+from traceml_ai.launcher.process import (
+    AggregatorPortInUseError,
+    ProcessOutputResult,
+    TrainingOutcome,
+    ensure_aggregator_port_free,
+)
 from traceml_ai.runtime.settings import (
     DEFAULT_FINALIZE_TIMEOUT_SEC,
     resolve_on_missing_aggregator,
 )
 from traceml_ai.telemetry.retention import DEFAULT_HISTORY_RETENTION_S
+from traceml_ai.transport.tcp_transport import TCPConfig, TCPServer
 
 
 def test_serve_is_a_public_command() -> None:
@@ -991,6 +998,7 @@ def test_started_training_result_is_authoritative(
     ("failure", "reason", "owner"),
     [
         ("spawn", "aggregator_spawn_failed", True),
+        ("port_in_use", "aggregator_port_in_use", True),
         ("readiness", "aggregator_not_ready", True),
         ("readiness", "aggregator_not_ready", False),
     ],
@@ -1034,6 +1042,14 @@ def test_strict_aggregator_failure_does_not_start_training(
     start_aggregator = Mock(return_value=aggregator)
     if failure == "spawn":
         start_aggregator.side_effect = FileNotFoundError("aggregator missing")
+    port_check = Mock()
+    if failure == "port_in_use":
+        port_check.side_effect = AggregatorPortInUseError(
+            "aggregator port 127.0.0.1:43170 is already in use"
+        )
+    monkeypatch.setattr(
+        launcher_commands, "ensure_aggregator_port_free", port_check
+    )
     monkeypatch.setattr(
         launcher_commands, "start_aggregator_process", start_aggregator
     )
@@ -1080,6 +1096,9 @@ def test_strict_aggregator_failure_does_not_start_training(
         assert "(exit=" not in stderr
         start_aggregator_output.assert_not_called()
     start_training.assert_not_called()
+    if failure == "port_in_use":
+        assert "127.0.0.1:43170 is already in use" in stderr
+        start_aggregator.assert_not_called()
     if owner:
         assert update_manifest.call_args.kwargs["status"] == "failed"
         assert (
@@ -1118,6 +1137,35 @@ def test_stderr_from_process_exiting_before_readiness_is_exact(
 
     assert stderr_path.read_bytes() == expected
     assert result.stderr_path == stderr_path.resolve()
+
+
+def test_aggregator_port_probe_rejects_a_live_listener() -> None:
+    # A stale aggregator from a killed run still accepts connections, so the
+    # readiness probe alone would mistake it for the new one.
+    stale = TCPServer(TCPConfig(host="127.0.0.1", port=0))
+    stale.start()
+    try:
+        with pytest.raises(AggregatorPortInUseError) as excinfo:
+            ensure_aggregator_port_free("127.0.0.1", stale.port)
+        message = str(excinfo.value)
+        assert f"127.0.0.1:{stale.port} is already in use" in message
+        assert "--aggregator-port" in message
+    finally:
+        stale.stop()
+
+
+def test_aggregator_port_probe_releases_a_free_port() -> None:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+
+    ensure_aggregator_port_free("127.0.0.1", port)
+    ensure_aggregator_port_free("127.0.0.1", 0)
+
+    # The probe must not keep the port it checked.
+    server = TCPServer(TCPConfig(host="127.0.0.1", port=port))
+    server.start()
+    server.stop()
 
 
 @pytest.mark.parametrize(

@@ -1,4 +1,7 @@
+import errno
 import socket
+
+import pytest
 
 from traceml_ai.transport.tcp_transport import TCPClient, TCPConfig, TCPServer
 
@@ -64,50 +67,63 @@ def test_tcp_server_exposes_actual_port_for_dynamic_bind(monkeypatch) -> None:
     assert fake.closed
 
 
-def test_tcp_server_starts_without_so_reuseport(monkeypatch) -> None:
-    # Uses a real socket: _FakeSocket swallows setsockopt, so only a
-    # genuine bind proves the Windows path (no SO_REUSEPORT) works.
-    monkeypatch.delattr(
-        "traceml_ai.transport.tcp_transport.socket.SO_REUSEPORT",
-        raising=False,
+def _addr_in_use(exc: OSError) -> bool:
+    return exc.errno in (
+        errno.EADDRINUSE,
+        getattr(errno, "WSAEADDRINUSE", errno.EADDRINUSE),
     )
 
-    server = TCPServer(TCPConfig(host="127.0.0.1", port=0))
-    server.start()
+
+def test_second_tcp_server_cannot_share_a_live_port() -> None:
+    # An aggregator orphaned by a killed `traceml run` keeps listening on
+    # the default port. If the next run's aggregator could bind beside it,
+    # the kernel would hand some rank connections to the orphan and the new
+    # session would silently record nothing.
+    first = TCPServer(TCPConfig(host="127.0.0.1", port=0))
+    first.start()
     try:
-        assert server.port > 0
+        second = TCPServer(TCPConfig(host="127.0.0.1", port=first.port))
+        with pytest.raises(OSError) as excinfo:
+            second.start()
+        assert _addr_in_use(excinfo.value)
+        assert second._sock is None
     finally:
-        server.stop()
+        first.stop()
 
 
-def test_tcp_server_starts_when_so_reuseport_is_rejected(
-    monkeypatch,
-) -> None:
-    # A kernel older than the headers Python was built against exposes the
-    # constant but rejects the option, so presence alone is not enough.
-    monkeypatch.setattr(
-        "traceml_ai.transport.tcp_transport.socket.SO_REUSEPORT",
-        15,
-        raising=False,
-    )
+def test_tcp_server_stop_releases_its_port() -> None:
+    first = TCPServer(TCPConfig(host="127.0.0.1", port=0))
+    first.start()
+    port = first.port
+    first.stop()
+    first._thread.join(timeout=2.0)
+    assert not first._thread.is_alive()
 
-    class _RejectingSocket(_FakeSocket):
-        def setsockopt(self, _level, option, _value):
-            if option == socket.SO_REUSEPORT:
-                raise OSError(92, "Protocol not available")
-            return None
+    second = TCPServer(TCPConfig(host="127.0.0.1", port=port))
+    second.start()
+    second.stop()
 
-    fake = _RejectingSocket()
-    monkeypatch.setattr(
-        "traceml_ai.transport.tcp_transport.socket.socket",
-        lambda *_args, **_kwargs: fake,
-    )
 
-    server = TCPServer(TCPConfig(host="127.0.0.1", port=0))
+def test_tcp_server_rebinds_port_left_in_time_wait() -> None:
+    # A restart must still bind at once while the previous session's
+    # server-side connections sit in TIME_WAIT. Linux skips a TIME_WAIT
+    # conflict only when both the old and new sockets set SO_REUSEADDR, so
+    # this listener stands in for the previous aggregator.
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+    client = socket.create_connection(("127.0.0.1", port))
+    conn, _ = listener.accept()
+    conn.close()  # server closes first, so its side enters TIME_WAIT
+    client.close()
+    listener.close()
+
+    server = TCPServer(TCPConfig(host="127.0.0.1", port=port))
     server.start()
     try:
-        assert fake.bound_to == ("127.0.0.1", 0)
-        assert server.port == 54321
+        assert server.port == port
     finally:
         server.stop()
 

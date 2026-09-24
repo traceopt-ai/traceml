@@ -38,9 +38,11 @@ from traceml_ai.launcher.manifest import (
 from traceml_ai.launcher.process import (
     DEFAULT_SHUTDOWN_TIMEOUT_SEC,
     DEFAULT_TCP_READY_TIMEOUT_SEC,
+    AggregatorPortInUseError,
     ProcessOutputDrainer,
     ProcessOutputResult,
     TrainingOutcome,
+    ensure_aggregator_port_free,
     install_shutdown_handlers,
     start_aggregator_process,
     start_training_process,
@@ -300,6 +302,8 @@ def _print_telemetry_footer(
         message = "Telemetry complete."
     elif reason == "aggregator_spawn_failed":
         message = "Telemetry unavailable: aggregator could not start."
+    elif reason == "aggregator_port_in_use":
+        message = "Telemetry unavailable: aggregator port was already in use."
     elif reason == "aggregator_not_ready":
         message = "Telemetry unavailable: aggregator was not reachable."
     elif reason == "aggregator_exited_early":
@@ -818,7 +822,14 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         )
         aggregator_started_at = utc_now_iso()
         try:
+            ensure_aggregator_port_free(
+                aggregator_cfg.bind_host, aggregator_cfg.port
+            )
             agg_proc = start_aggregator_process(env=env, cwd=execution_cwd)
+        except AggregatorPortInUseError as exc:
+            print(f"[TraceML] ERROR: {exc}", file=sys.stderr)
+            ready = False
+            telemetry_startup_reason = "aggregator_port_in_use"
         except OSError as exc:
             _log_launcher_exception("aggregator process could not start", exc)
             ready = False
