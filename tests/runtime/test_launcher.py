@@ -54,7 +54,11 @@ from traceml_ai.runtime.settings import (
     resolve_on_missing_aggregator,
 )
 from traceml_ai.telemetry.retention import DEFAULT_HISTORY_RETENTION_S
-from traceml_ai.transport.tcp_transport import TCPConfig, TCPServer
+from traceml_ai.transport.tcp_transport import (
+    TCPConfig,
+    TCPServer,
+    bind_exclusive_listener,
+)
 
 
 def test_serve_is_a_public_command() -> None:
@@ -1163,6 +1167,18 @@ def test_aggregator_port_probe_rejects_a_live_listener() -> None:
         assert "--aggregator-port" in message
     finally:
         stale.stop()
+
+
+def test_wildcard_port_probe_rejects_a_loopback_listener() -> None:
+    # BSD SO_REUSEADDR lets 0.0.0.0 bind beside a 127.0.0.1 listener, and
+    # ranks connecting to 127.0.0.1 would then reach the stale listener.
+    stale = bind_exclusive_listener("127.0.0.1", 0, backlog=1)
+    try:
+        port = stale.getsockname()[1]
+        with pytest.raises(AggregatorPortInUseError):
+            ensure_aggregator_port_free("0.0.0.0", port)
+    finally:
+        stale.close()
 
 
 def test_aggregator_port_probe_releases_a_free_port() -> None:

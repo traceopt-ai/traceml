@@ -393,22 +393,32 @@ def ensure_aggregator_port_free(host: str, port: int) -> None:
     new aggregator fails to bind, and ranks would stream into the stale
     session. Probing with the aggregator's own bind before spawning it makes
     that case fail loudly instead.
+
+    On macOS, SO_REUSEADDR lets a wildcard bind succeed beside a listener on
+    127.0.0.1, and local ranks connecting to 127.0.0.1 would still reach
+    that listener, so a wildcard host also probes loopback. Each probe is
+    closed before the next, so they never conflict with each other.
     """
     if int(port) == 0:
         return
-    try:
-        probe = bind_exclusive_listener(host, port, backlog=1)
-    except OSError as exc:
-        if exc.errno not in _ADDR_IN_USE_ERRNOS:
-            # Other bind errors surface from the aggregator itself.
-            return
-        raise AggregatorPortInUseError(
-            f"aggregator port {host}:{port} is already in use, most likely "
-            "by an aggregator left behind by an earlier `traceml run` that "
-            f"was killed. Stop that process (`lsof -i :{port}` finds it) or "
-            "pass --aggregator-port with a free port."
-        ) from exc
-    probe.close()
+    probe_hosts = [host]
+    if host in ("0.0.0.0", ""):
+        probe_hosts.append("127.0.0.1")
+    for probe_host in probe_hosts:
+        try:
+            probe = bind_exclusive_listener(probe_host, port, backlog=1)
+        except OSError as exc:
+            if exc.errno not in _ADDR_IN_USE_ERRNOS:
+                # Other bind errors surface from the aggregator itself.
+                return
+            raise AggregatorPortInUseError(
+                f"aggregator port {probe_host}:{port} is already in use, "
+                "most likely by an aggregator left behind by an earlier "
+                "`traceml run` that was killed. Stop that process "
+                f"(`lsof -i :{port}` finds it) or pass --aggregator-port "
+                "with a free port."
+            ) from exc
+        probe.close()
 
 
 def wait_for_tcp_listen(
