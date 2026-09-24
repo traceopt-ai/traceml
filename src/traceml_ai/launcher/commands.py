@@ -894,9 +894,21 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                 if aggregator_exit_code is not None
                 else ""
             )
+            if telemetry_startup_reason == "aggregator_port_in_use":
+                # Something answered on the port, so "not reachable" is
+                # false; the error above says how to find the process.
+                failure = (
+                    f"aggregator port {aggregator_cfg.bind_host}:"
+                    f"{aggregator_cfg.port} was already in use by another "
+                    "process"
+                )
+            else:
+                failure = (
+                    "aggregator was not reachable at "
+                    f"{aggregator_cfg.connect_host}:{aggregator_cfg.port}"
+                )
             print(
-                "[TraceML] ERROR: aggregator was not reachable at "
-                f"{aggregator_cfg.connect_host}:{aggregator_cfg.port}"
+                f"[TraceML] ERROR: {failure}"
                 f"{exit_detail}; training was not started. Use "
                 "--on-missing-aggregator=warn or "
                 "TRACEML_ON_MISSING_AGGREGATOR=warn to continue without "

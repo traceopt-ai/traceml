@@ -1081,7 +1081,18 @@ def test_strict_aggregator_failure_does_not_start_training(
 
     assert exc.value.code == 1
     stderr = capsys.readouterr().err
-    assert "aggregator was not reachable at telemetry.internal:43170" in stderr
+    if failure == "port_in_use":
+        # The stale listener answered, so "not reachable" would be false.
+        assert "not reachable" not in stderr
+        assert (
+            "aggregator port 127.0.0.1:43170 was already in use by another "
+            "process; training was not started" in stderr
+        )
+    else:
+        assert (
+            "aggregator was not reachable at telemetry.internal:43170"
+            in stderr
+        )
     assert "--on-missing-aggregator=warn" in stderr
     assert "TRACEML_ON_MISSING_AGGREGATOR=warn" in stderr
     if failure == "readiness" and owner:
