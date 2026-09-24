@@ -893,6 +893,7 @@ def test_started_training_result_is_authoritative(
     monkeypatch.setenv("PYTHONUNBUFFERED", "user-choice")
     replacements = {
         "install_shutdown_handlers": Mock(),
+        "ensure_aggregator_port_free": Mock(),
         "start_aggregator_process": Mock(return_value=aggregator),
         "wait_for_tcp_listen": Mock(return_value=True),
         "start_training_process": Mock(return_value=training),
@@ -1273,6 +1274,9 @@ def test_launcher_scopes_telemetry_health_to_aggregator_owner(
         install_shutdown_handlers,
     )
     start_aggregator = Mock(return_value=aggregator)
+    monkeypatch.setattr(
+        launcher_commands, "ensure_aggregator_port_free", Mock()
+    )
     monkeypatch.setattr(
         launcher_commands, "start_aggregator_process", start_aggregator
     )
