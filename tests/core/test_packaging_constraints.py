@@ -74,6 +74,32 @@ def _runtime_dependencies() -> list[str]:
     return _parse_dependencies(PYPROJECT.read_text(encoding="utf-8"))
 
 
+def _optional_dependencies(extra: str) -> list[str]:
+    """Return one optional-dependency group from pyproject.toml."""
+    if _toml is None:
+        raise AssertionError(
+            "no TOML parser available. Install tomli on Python 3.10 "
+            "(pip install \"tomli; python_version < '3.11'\") so this "
+            "guard can read pyproject.toml."
+        )
+
+    data = _toml.loads(PYPROJECT.read_text(encoding="utf-8"))
+    try:
+        dependencies = data["project"]["optional-dependencies"][extra]
+    except KeyError as exc:
+        raise AssertionError(
+            f"could not locate optional dependency group {extra!r}: "
+            f"missing {exc}"
+        ) from None
+
+    if not isinstance(dependencies, list):
+        raise AssertionError(
+            f"[project.optional-dependencies].{extra} is not an array"
+        )
+
+    return [str(item) for item in dependencies]
+
+
 def _requirement_name(requirement: str) -> str:
     """Return the bare distribution name from a requirement string."""
     name = re.split(r"[\[(;<>=!~ @]", requirement.strip(), maxsplit=1)[0]
@@ -198,3 +224,19 @@ def test_nicegui_floor_covers_ui_context() -> None:
         return
 
     pytest.fail("nicegui not found among runtime dependencies")
+
+
+def test_hf_extra_requires_supported_transformers() -> None:
+    """The HF extra must install the batch-collection timing seam."""
+    for requirement in _optional_dependencies("hf"):
+        if _requirement_name(requirement) != "transformers":
+            continue
+
+        specifier = _version_specifier(requirement).replace(" ", "")
+        assert ">=4.46.1" in specifier, (
+            f"the hf extra declares {requirement!r} without the minimum "
+            "Transformers version supported by automatic Trainer timing"
+        )
+        return
+
+    pytest.fail("transformers not found in the hf optional dependency group")

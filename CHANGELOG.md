@@ -5,8 +5,47 @@ All notable changes to TraceML are documented here. This file follows
 should match the tags on [GitHub Releases](https://github.com/traceopt-ai/traceml/releases),
 which carry the full historical notes for versions predating this file.
 
-## [Unreleased]
+## [0.4.1] - 2026-09-24
 
+- Added `traceml_ai.integrations.monai` for MONAI's `SupervisedTrainer`
+  (`pip install 'traceml-ai[monai]'`). `TraceMLHandler` publishes one step
+  per optimizer update with step time, Input Wait from the engine's own fetch
+  events, step memory, and H2D on CUDA. Other engines warn and are not traced.
+  The guide, the support-matrix row and the example follow.
+- MONAI steps now carry forward, backward and optimizer time. Forward is the
+  model call MONAI makes, so `zero_grad` stays outside it, and the optimizer is
+  timed on the trainer's own optimizer, once per update group.
+- Documented the MONAI integration: a guide, a support-matrix row, an entry in
+  the public API reference, and `examples/integrations/monai_minimal.py`, which
+  trains a small UNet on synthetic volumes and downloads nothing. CI runs that
+  example under `traceml run`, with and without gradient accumulation, and
+  fails if the summary loses Input Wait, forward, backward or optimizer time,
+  or if its step count disagrees with the optimizer updates the trainer made.
+- Added a MONAI case study: `notebooks/monai_dataloading_bottleneck.ipynb` and
+  its script, `examples/integrations/monai_dataloading_bottleneck.py`. It
+  trains a 3D UNet on the Medical Segmentation Decathlon spleen task six times,
+  changing one data-loading or compute setting per run, and compares each
+  adjacent pair with `traceml compare`. A `--smoke` mode sends synthetic
+  volumes through the same transforms and patch sampler, and the notebook smoke
+  job runs it on CPU. The support matrix now lists MONAI on CUDA as a
+  documented recipe, citing the notebook's T4 results.
+- **Breaking:** Public manual wrappers now require `traceml.init(...)` first
+  and reject phases already owned by automatic instrumentation. Move `init()`
+  before wrapper creation; custom non-PyTorch input iterators remain wrappable
+  in auto mode because the PyTorch DataLoader patch cannot observe them. The
+  TraceML kill switch remains unconditional: disabled wrappers return their
+  inputs unchanged, including before initialization. When tracing is enabled,
+  invalid wrapper targets retain their documented `TypeError`.
+- Hugging Face checkpoint resume no longer attributes lazily skipped iterable
+  batches to the first resumed optimizer group. That entire group's step
+  timing and memory telemetry is omitted; training runs normally and recording
+  resumes with the next group. Fresh runs and sampler-level skips are unaffected.
+- Hugging Face Trainer now captures the host-to-device transfers performed
+  while collecting an optimizer group's training microbatches. The transfers
+  contribute to Traced Step Time alongside forward, backward and optimizer
+  work, while DataLoader waiting remains separate Input Wait. Evaluation and
+  prediction input work stays excluded, and one TraceML step still represents
+  one optimizer-update group.
 - Added opt-in RF-DETR instrumentation for eager detection. Unsupported
   configurations or adapter failures warn and leave native training intact.
   Skipped instrumentation no longer accumulates DataLoader timing records.

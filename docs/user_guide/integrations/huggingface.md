@@ -13,6 +13,9 @@ existing `Trainer`.
 pip install "traceml-ai[hf]"
 ```
 
+The `hf` extra installs `transformers>=4.46.1`, the minimum supported
+Transformers version for automatic Trainer timing.
+
 If you are running the full examples below, install their optional dependencies:
 
 ```bash
@@ -93,11 +96,29 @@ the peak PyTorch allocated/reserved memory on the tracked device during that
 group, rather than adding memory values. CPU runs report this memory metric
 as unavailable.
 
+Accelerate prepares each training batch before the Trainer's step callback.
+TraceML measures those host-to-device transfers as short parts of Traced Step
+Time and combines them with the later forward, backward, and optimizer work.
+DataLoader waiting remains separate Input Wait, including blocking look-ahead
+fetches, and is not included in the transfer regions. The timing scope opens
+only while the standard Trainer requests training batches; evaluation and
+prediction input work is excluded, including direct `trainer.evaluate()` and
+`trainer.predict(...)` calls made outside training.
+
 TraceML follows HF's completed-step count even when mixed-precision overflow
 skips a parameter update. Step numbers are local to the process, so they may
 differ from HF's `global_step` after checkpoint resume. See the
 [developer guide](../../developer_guide/step-time-pipeline-contract.md#hugging-face-steps)
 for the exact timing boundaries and optimizer behavior.
+
+When resuming an iterable dataset, Accelerate may consume checkpoint-skipped
+batches and the first real batch inside one iterator call. TraceML does not
+attribute that mixed work to the real training step: the entire first resumed
+optimizer group is omitted from step timing and memory telemetry, including
+all its accumulation microbatches. Training executes normally; recording starts
+with the next group's input collection. No partial step or zero-valued
+placeholder is published. Fresh runs, map-style sampler skipping, and
+`ignore_data_skip=True` record their first group normally.
 
 If training stops before an accumulation group completes, TraceML discards
 that group. Cleanup happens before an automatic batch-size retry, and the same
@@ -105,15 +126,22 @@ callback can be reused by a later Trainer run.
 
 ## Limitations
 
+- **Transformers version.** Automatic Trainer timing requires
+  `transformers>=4.46.1`, where `Trainer.get_batch_samples` is available. If an
+  older version is installed manually, TraceML warns once and lets training
+  continue, but omits training Input Wait and pre-step H2D measurements.
 - **Lifecycle guard.** Failure/retry cleanup and duplicate-callback handling
   require `traceml_hf.init()` to install the Trainer lifecycle guard. If guard
   installation fails, TraceML reports the error and training continues without
   those guarantees. Custom `_inner_training_loop` overrides must call the
   guarded parent implementation to receive this handling.
-- **Input timing.** Accelerate can transfer batches to the GPU before the
-  callback starts a step. Those H2D copies are currently missed, so Step Time
-  can omit pre-step transfers. Evaluation loader fetches can also be attributed
-  to the next training step.
+- **Custom batch collection.** A Trainer subclass that overrides
+  `get_batch_samples` bypasses the standard training-input hook. TraceML warns
+  once for the affected Trainer class and continues without training Input
+  Wait or pre-step H2D signals rather than reporting partial measurements.
+- **Iterable checkpoint resume.** When Accelerate lazily consumes skipped
+  batches, the entire first resumed optimizer group is omitted from step
+  telemetry. It still trains normally; subsequent groups are recorded.
 - **Memory window.** Temporary allocation peaks before the callback starts
   a step are outside its memory measurement.
 - **Callback registration.** Register the callback before `trainer.train()`

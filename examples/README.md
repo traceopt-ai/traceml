@@ -33,6 +33,8 @@ These are the main user-facing examples.
 | `integrations/lightning_minimal.py` | Minimal Lightning integration init + `TraceMLCallback` example | CPU / CUDA | No dataset download required |
 | `integrations/rfdetr_minimal.py` | RF-DETR Nano with automatic tracing; compare two DataLoader worker counts | CPU / CUDA recipe | Requires `rfdetr[train]==1.10.1` and a local COCO export; downloads pretrained weights on first use; see the [guide](../docs/user_guide/integrations/rfdetr.md) |
 | `integrations/lightning_dataloading_bottleneck.py` | ResNet-18 on 320px Imagenette under Lightning; `--profile` flips the DataLoader settings and nothing else, so two runs plus `traceml compare` isolate the loader change | CPU (`--smoke`) / CUDA | Downloads 326 MB on first use; `--smoke` runs a synthetic CPU check; companion Colab notebook in `notebooks/` |
+| `integrations/monai_minimal.py` | Minimal MONAI `SupervisedTrainer` with `TraceMLHandler` in `train_handlers` | CPU / CUDA | Synthetic volumes and a small UNet, so nothing is downloaded; see the [guide](../docs/user_guide/integrations/monai.md) |
+| `integrations/monai_dataloading_bottleneck.py` | 3D UNet on MONAI's spleen segmentation task under `SupervisedTrainer`; each flag changes one data-loading or compute setting, so consecutive runs plus `traceml compare` isolate that setting | CPU (`--smoke`) / CUDA | Downloads the 1.6 GB Medical Segmentation Decathlon spleen archive (CC BY-SA 4.0) on first use and reads it with `nibabel`; `--smoke` runs a synthetic CPU check; companion Colab notebook in `notebooks/` |
 | `integrations/deepspeed_minimal.py` | Minimal DeepSpeed loop wrapped with `traceml.trace_step(...)` | CUDA | Requires `deepspeed`; exits cleanly without it |
 
 If you only try one example first, use:
@@ -218,7 +220,8 @@ docstring carries the exact commands).
 
 Ray Data examples wrap `iter_torch_batches(...)` with
 `traceml.wrap_dataloader_fetch(...)` because Ray Data iterators are not PyTorch
-`DataLoader` objects.
+`DataLoader` objects. `TraceMLTorchTrainer` initializes each worker before the
+training function creates this wrapper.
 
 Ray + Lightning can use `--input-delay-ms` / `--input-delay-rank` for input
 stragglers, `--delay-ms` / `--delay-rank` for compute stragglers, and
@@ -251,6 +254,7 @@ Use:
 - `integrations/lightning_minimal.py` if you use PyTorch Lightning
 - `ray/torchtrainer_minimal.py` if you use Ray Train
 - `integrations/deepspeed_minimal.py` if you use DeepSpeed
+- `integrations/monai_minimal.py` if you use MONAI `SupervisedTrainer`
 
 Use the diagnosis demos when you want to see:
 

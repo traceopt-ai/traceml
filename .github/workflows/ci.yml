@@ -174,6 +174,99 @@ jobs:
             tests/integrations/test_rfdetr_trainer.py \
             tests/integrations/test_rfdetr_nano.py -q
 
+  test-monai:
+    name: MONAI Integration (CPU)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+      - name: Install TraceML with the MONAI extra
+        # Pinned like test-rfdetr: a new MONAI or Ignite release must not
+        # turn every contributor's PR red. Unlike test-rfdetr, test-latest-deps
+        # does not install monai, so a new release gets no early warning here
+        # until it does.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[torch,monai]" "monai==1.6.*" "pytorch-ignite==0.5.*" \
+            nibabel pytest
+      - name: Report the resolved MONAI and Ignite versions
+        run: |
+          python -c 'import ignite, monai, torch; print("monai", monai.__version__, "ignite", ignite.__version__, "torch", torch.__version__)'
+      - name: Run MONAI integration tests
+        env:
+          OMP_NUM_THREADS: "1"
+        run: |
+          pytest tests/integrations/test_monai.py \
+            tests/integrations/test_monai_dataloading_example.py \
+            tests/integrations/test_telemetry_conformance.py -q
+      - name: Run the documented example end to end
+        # The guide promises this script reports all four phases, and that one
+        # TraceML step is one optimizer update. The tests above cannot see
+        # either: they stop at the rank side. The second run takes the
+        # accumulation path, where a step spans several iterations and the
+        # short last group of an epoch still publishes.
+        env:
+          OMP_NUM_THREADS: "1"
+        run: |
+          traceml run --run-name monai_plain \
+            examples/integrations/monai_minimal.py --args --epochs 1
+          traceml run --run-name monai_accumulated \
+            examples/integrations/monai_minimal.py \
+            --args --epochs 1 --accumulation-steps 3
+          python -c '
+          import json
+          import pathlib
+          import re
+          import sys
+
+          required = [
+              "input_wait_ms", "forward_ms", "backward_ms", "optimizer_ms"
+          ]
+          for name in sys.argv[1:]:
+              run = pathlib.Path("logs") / name
+              summary = json.loads((run / "final_summary.json").read_text())
+              average = summary["step_time"]["global"]["average"]
+              dark = [k for k in required if average.get(k) is None]
+              if dark:
+                  sys.exit(f"{name}: summary reports no {dark}; got {average}")
+              # A measured region cannot take exactly zero, so a zero here is
+              # a broken clock rather than a fast machine.
+              flat = [k for k in required if average[k] <= 0]
+              if flat:
+                  sys.exit(f"{name}: summary reports a zero {flat}; got {average}")
+              log = (run / "nodes/node_0/training.stdout.log").read_text()
+              printed = re.search(r"optimizer updates: ([0-9]+)", log)
+              if printed is None:
+                  sys.exit(f"{name}: the example printed no update count: {log}")
+              updates = int(printed.group(1))
+              steps = summary["step_time"]["metadata"]["training_total_steps"]
+              if steps != updates:
+                  sys.exit(
+                      f"{name}: {steps} published steps for {updates} "
+                      "optimizer updates"
+                  )
+              print(name, {k: round(average[k], 3) for k in required}, steps)
+          ' monai_plain monai_accumulated
+      - name: Rerun at the declared Ignite floor
+        # The floor in pyproject's monai extra, which is what MONAI's own
+        # "ignite" extra pins. Untested floors drift.
+        env:
+          OMP_NUM_THREADS: "1"
+        run: |
+          pip install "pytorch-ignite==0.4.11"
+          python -c 'import ignite; print("ignite", ignite.__version__)'
+          pytest tests/integrations/test_monai.py \
+            tests/integrations/test_monai_dataloading_example.py \
+            tests/integrations/test_telemetry_conformance.py -q
+
   test-latest-deps:
     name: Latest Dependencies (early warning)
     # Not a pull-request gate. A brand new release of a dependency must not

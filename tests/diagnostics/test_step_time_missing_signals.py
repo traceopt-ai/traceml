@@ -158,6 +158,8 @@ def test_missing_forward_blocks_compute_bound_and_reports_incomplete() -> None:
     assert result.primary.kind == "INCOMPLETE_DATA"
     assert result.primary.status == "INCOMPLETE DATA"
     assert result.primary.severity == "info"
+    assert "automatic initialization" in result.primary.action
+    assert "manual/selective mode" in result.primary.action
     assert result.issues[0].evidence["missing_signals"] == ["forward"]
     assert result.issues[0].evidence["signal_coverage"] == {"forward": "0/1"}
 

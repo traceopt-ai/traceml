@@ -90,6 +90,30 @@ see Limitations.
   window to be one step, and place `trace_step` accordingly — this guide
   does not prescribe one, since the right choice depends on what you're
   trying to measure.
+- **Prepared-loader H2D happens before `trace_step`.** By default, an
+  Accelerate-prepared DataLoader moves each batch to the device while the
+  `for` loop requests it, before the documented `trace_step` block opens.
+  Standalone Accelerate therefore does not report that transfer as H2D. To
+  include it, disable device placement for the DataLoader and move the batch
+  inside `trace_step`:
+
+  ```python
+  model, optimizer, dataloader = accelerator.prepare(
+      model,
+      optimizer,
+      dataloader,
+      device_placement=[True, True, False],
+  )
+
+  for batch_x, batch_y in dataloader:
+      with traceml.trace_step(accelerator.unwrap_model(model)):
+          batch_x = batch_x.to(accelerator.device)
+          batch_y = batch_y.to(accelerator.device)
+          # forward, backward, and optimizer step
+  ```
+
+  `device_placement` must contain one value for each object passed to
+  `prepare`; a single `False` value is not accepted by that method.
 - **DeepSpeed and FSDP configurations routed through Accelerate are out of
   scope for this first version.** This guide covers the plain `Accelerator()`
   path only. Tune DeepSpeed/FSDP independently of TraceML for now.

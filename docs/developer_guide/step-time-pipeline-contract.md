@@ -279,9 +279,55 @@ but their absolute values can differ after checkpoint resume.
 ### Timing and memory
 
 All timing events for a group are flushed together as one `StepTimeBatch`.
-`StepTimeSampler` sums repeated forward and backward events within that batch,
-keeping CPU and GPU durations separate. It does not merge separate batches
-that happen to have the same step number.
+Before the callback opens the main `trace_step`, Accelerate moves the batches
+returned by `Trainer.get_batch_samples` to the device. The HF integration arms
+DataLoader and H2D timing only around each training iterator `next()` made by
+that method. Each observed transfer records its H2D phase plus a matching short
+traced-step segment; DataLoader fetch work is outside those transfer segments
+and remains Input Wait. The later callback region still covers forward,
+backward, collective, and optimizer work.
+
+The Trainer lifecycle holds the existing DataLoader timing scope disabled by
+default. A small iterator proxy temporarily enables it for those training
+`next()` calls and restores the outer policy afterward. Evaluation and
+prediction consume their dataloaders directly, so their fetches and transfers
+remain outside the training capture without requiring sampler or diagnosis
+special cases. The public `evaluate` and `predict` entry points apply the same
+disabled scope when invoked outside `train`, preventing non-training fetches
+from remaining in the process-wide pending capture.
+
+`StepTimeSampler` sums the repeated transfer segments with the callback region,
+and sums repeated H2D, forward, and backward events while keeping CPU and GPU
+durations separate. All events receive the optimizer-group step number only
+when `on_step_end` publishes the capture. The sampler does not merge separate
+batches that happen to have the same step number.
+
+Accelerate may fetch one CPU batch ahead while yielding the current prepared
+batch. Any blocking wait observed there is attributed to the current step's
+input-pipeline stall because it delays delivery to the training loop. Input
+Wait event counts therefore describe observed iterator waits, not an exact
+one-event-per-microbatch identity mapping.
+
+Checkpoint resume has one additional boundary rule. Map-style datasets skip
+completed batches in the sampler, before any fetch, so their first resumed
+group is measured normally. For iterable datasets, Accelerate lazily consumes
+the skipped batches and the first real batch within the same iterator call.
+The integration detects that existing lazy-skip path and omits the entire first
+optimizer group from step timing and memory telemetry, including all its
+accumulation microbatches. The collection hook disables input timing and the
+callback does not open `trace_step` for that group. At `on_step_end`, pending
+events are discarded and normal recording resumes with the next collection.
+No partial row is published and the omitted group does not advance TraceML's
+local counter. HF still executes every forward/backward pass and optimizer
+update. Fresh runs, sampler-level skips, and `ignore_data_skip=True` are
+unaffected. This avoids mixing checkpoint fast-forward work into a real step
+or treating deliberately missing input measurements as zero in aggregation.
+
+Other collection-side bookkeeping in `get_batch_samples`, such as token
+counting and an optional cross-rank item-count gather, is currently outside
+both Input Wait and Traced Step Time. HF Step Time is therefore the sum of the
+instrumented input-wait and traced regions, not a full training-loop wall-clock
+measurement.
 
 `StepMemoryTracker` resets the tracked CUDA device's PyTorch peak counters
 once at the start of the group and reads peak allocated/reserved memory once
@@ -307,12 +353,17 @@ Neither the step count nor an optimizer timing event proves parameters changed.
 
 ### Current limitations
 
-HF requests prepared inputs before `on_step_begin`, so the current callback
-can miss input H2D transfers. Evaluation loader events can also reach the next
-training step. The existing raw input event names are
+Automatic HF Trainer timing supports `transformers>=4.46.1`; earlier versions
+do not expose the required `get_batch_samples` collection seam. The resume
+skip itself is older upstream behavior (Transformers delegates to Accelerate's
+`skip_first_batches`); this integration does not change how checkpoints are
+restored. Training input timing is
+limited to the standard
+`Trainer.get_batch_samples` path. A custom Trainer that overrides that method
+also bypasses the collection window and produces a one-time warning; TraceML
+then omits both training Input Wait and pre-step H2D rather than publishing a
+partial input measurement. The existing raw input event names are
 `_traceml_internal:dataloader_next` and `_traceml_internal:h2d_time`.
-These gaps can omit transfers from Step Time or assign loader work to the
-wrong training step.
 
 If training is interrupted, the Trainer lifecycle guard aborts the open
 capture before the exception reaches Accelerate's automatic batch-size retry.

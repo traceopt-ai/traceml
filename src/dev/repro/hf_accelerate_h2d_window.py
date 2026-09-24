@@ -4,41 +4,63 @@
 # you may not use this file except in compliance with the License.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Reproduce the Hugging Face + Accelerate H2D coverage-window gap (#276).
+"""Validate Hugging Face + Accelerate pre-step H2D coverage (#276).
 
 Reported on the HF forum: with the Trainer + Accelerate path and gradient
-accumulation, a real CPU->CUDA transfer happens while TraceML reports
-``H2D: 0.0 ms`` (pre-#274) or ``H2D: n/a`` (with #274).
+accumulation, a real CPU-to-CUDA transfer previously happened while TraceML
+reported ``H2D: 0.0 ms`` or ``H2D: n/a``.
 
-Mechanism, measured rather than assumed (see
-``tests/integrations/test_hf_h2d_window.py``, which pins it on CPU): the
-transfer is performed by Accelerate's PREPARED DATALOADER, which places the
-batch on the device inside ``__next__``. The fetch happens between steps,
-after the previous ``on_step_end`` and before the next ``on_step_begin``,
-so it falls outside the ``trace_step`` bracket that arms the H2D timer.
-Under gradient accumulation, GA microbatches are fetched per optimizer step,
-so GA transfers land outside the window. Note this is NOT
-``Trainer._prepare_inputs``: on current transformers that call runs inside
-the window and is a no-op once Accelerate has already moved the batch.
+The validation has two process roles:
 
-This script measures the CPU->CUDA transfer with independent CUDA events and
-compares it to what TraceML captured, plus a positive control that moves a
-tensor INSIDE ``trace_step`` to show the timer works when the transfer lands
-in the window.
+* the parent measures an independent CUDA copy and launches TraceML;
+* the launcher child runs a three-step Hugging Face workload.
+
+The parent validates ``final_summary.json`` only after the runtime sampler has
+exported the child's events. It intentionally does not drain TraceML's internal
+event queue: that queue has a single consumer while the runtime is active.
 
 Needs a CUDA device. On CPU it prints why it cannot run and exits 0.
 
-Run:
-    python -m dev.repro.hf_accelerate_h2d_window
+Run from the repository root::
+
+    python src/dev/repro/hf_accelerate_h2d_window.py \
+        --logs-dir traceml-validation \
+        --run-name hf-h2d-validation
 """
 
 from __future__ import annotations
 
+import argparse
+import json
+import subprocess
 import sys
+import time
+from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+_EXPECTED_STEPS = 3
+_REQUIRED_LIVE_SUMMARY_METRICS = (
+    "input_wait_ms",
+    "step_time_ms",
+    "traced_step_time_ms",
+    "dataloader_fetch_cpu_ms",
+    "compute_ms",
+    "forward_ms",
+    "backward_ms",
+    "optimizer_ms",
+)
+
+
+@dataclass(frozen=True)
+class _SummaryMeasurement:
+    h2d_ms: float | None
+    completed_steps: int | None
 
 
 def _independent_h2d_ms(num_bytes_mb: int = 64) -> float:
-    """Time one CPU->CUDA copy with CUDA events, independent of TraceML."""
+    """Time one CPU-to-CUDA copy with events independent of TraceML."""
     import torch
 
     host = torch.empty(num_bytes_mb * 1024 * 1024 // 4, dtype=torch.float32)
@@ -46,35 +68,17 @@ def _independent_h2d_ms(num_bytes_mb: int = 64) -> float:
     end = torch.cuda.Event(enable_timing=True)
     torch.cuda.synchronize()
     start.record()
-    host.to("cuda", non_blocking=False)
+    device = host.to("cuda", non_blocking=False)
     end.record()
     torch.cuda.synchronize()
-    return float(start.elapsed_time(end))
+    elapsed_ms = float(start.elapsed_time(end))
+    del device, host
+    torch.cuda.empty_cache()
+    return elapsed_ms
 
 
-def _positive_control_ms(num_bytes_mb: int = 64) -> float | None:
-    """Move a tensor INSIDE trace_step; TraceML should capture this one."""
-    import torch
-
-    from traceml_ai.instrumentation.step_events import drain_step_time_batches
-    from traceml_ai.sdk.instrumentation import trace_step
-
-    model = torch.nn.Linear(4, 4).cuda()
-    host = torch.empty(num_bytes_mb * 1024 * 1024 // 4, dtype=torch.float32)
-    with trace_step(model):
-        host.to("cuda", non_blocking=False)
-        torch.cuda.synchronize()
-
-    captured = None
-    for batch in drain_step_time_batches():
-        for evt in getattr(batch, "events", []):
-            if evt.name == "_traceml_internal:h2d_time":
-                captured = float(getattr(evt, "gpu_ms", 0.0) or 0.0)
-    return captured
-
-
-def _traceml_reported_h2d(grad_accum: int = 2) -> float | None:
-    """Run a tiny HF Trainer + Accelerate GA loop; read the reported H2D."""
+def _run_hf_workload(grad_accum: int = 2) -> int:
+    """Run the launcher-owned workload without consuming internal queues."""
     import tempfile
 
     import torch
@@ -85,20 +89,24 @@ def _traceml_reported_h2d(grad_accum: int = 2) -> float | None:
         TrainingArguments,
     )
 
-    from traceml_ai.instrumentation.step_events import drain_step_time_batches
-    from traceml_ai.integrations.huggingface import TraceMLTrainerCallback
+    from traceml_ai.integrations.huggingface import (
+        TraceMLTrainerCallback,
+        init,
+    )
+    from traceml_ai.sdk.summary_client import final_summary
 
-    class _DS(torch.utils.data.Dataset):
-        def __len__(self):
+    class _Dataset(torch.utils.data.Dataset):
+        def __len__(self) -> int:
             return 40
 
-        def __getitem__(self, i):
+        def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
             return {
                 "input_ids": torch.arange(16) % 128,
                 "attention_mask": torch.ones(16, dtype=torch.long),
-                "labels": torch.tensor(i % 4),
+                "labels": torch.tensor(index % 4),
             }
 
+    init()
     model = BertForSequenceClassification(
         BertConfig(
             vocab_size=128,
@@ -108,38 +116,112 @@ def _traceml_reported_h2d(grad_accum: int = 2) -> float | None:
             num_labels=4,
         )
     )
-    with tempfile.TemporaryDirectory() as tmp:
-        args = TrainingArguments(
-            output_dir=tmp,
-            max_steps=3,
+    with tempfile.TemporaryDirectory() as output_dir:
+        training_args = TrainingArguments(
+            output_dir=output_dir,
+            max_steps=_EXPECTED_STEPS,
             per_device_train_batch_size=4,
             gradient_accumulation_steps=grad_accum,
             report_to=[],
             logging_strategy="no",
+            save_strategy="no",
+            disable_tqdm=True,
         )
         trainer = Trainer(
             model=model,
-            args=args,
-            train_dataset=_DS(),
+            args=training_args,
+            train_dataset=_Dataset(),
             callbacks=[TraceMLTrainerCallback()],
         )
         trainer.train()
 
-    reported = None
-    for batch in drain_step_time_batches():
-        vals = [
-            float(getattr(evt, "gpu_ms", 0.0) or 0.0)
-            for evt in getattr(batch, "events", [])
-            if evt.name == "_traceml_internal:h2d_time"
-        ]
-        if vals:
-            reported = sum(vals)
-        elif reported is None:
-            reported = 0.0  # no h2d event captured in the bracket
-    return reported
+    completed_steps = int(trainer.state.global_step)
+    print(
+        f"HF workload completed optimizer steps: {completed_steps}",
+        flush=True,
+    )
+    if completed_steps != _EXPECTED_STEPS:
+        print(
+            f"Expected {_EXPECTED_STEPS} optimizer steps, got "
+            f"{completed_steps}.",
+            flush=True,
+        )
+        return 1
+
+    # Exercise the public worker-to-aggregator request/response protocol while
+    # the real runtime is still alive. The aggregator settles the sampler and
+    # SQLite writer before it returns this payload. Validate that response
+    # here, before shutdown regenerates the summary artifact.
+    summary = final_summary(timeout_sec=60.0, print_text=False)
+    step_time = (summary or {}).get("step_time") or {}
+    summary_steps = int(
+        (step_time.get("metadata") or {}).get("training_total_steps", -1)
+    )
+    print(
+        f"HF runtime summary round-trip optimizer steps: {summary_steps}",
+        flush=True,
+    )
+    if summary_steps != _EXPECTED_STEPS:
+        print(
+            "Expected the live TraceML summary to contain "
+            f"{_EXPECTED_STEPS} optimizer steps, got {summary_steps}.",
+            flush=True,
+        )
+        return 1
+
+    average = (step_time.get("global") or {}).get("average") or {}
+    invalid_metrics = {
+        metric: average.get(metric)
+        for metric in _REQUIRED_LIVE_SUMMARY_METRICS
+        if average.get(metric) is None or not average[metric] > 0.0
+    }
+    if invalid_metrics:
+        print(
+            "Expected the live TraceML summary to contain positive timing "
+            f"metrics, got {invalid_metrics}.",
+            flush=True,
+        )
+        return 1
+    return 0
 
 
-def main() -> int:
+def _read_summary(path: Path) -> _SummaryMeasurement:
+    """Read the two public summary values that establish this regression."""
+    payload: Any = json.loads(path.read_text(encoding="utf-8"))
+    step_time = payload.get("step_time") or {}
+    metadata = step_time.get("metadata") or {}
+    global_values = step_time.get("global") or {}
+    average = global_values.get("average") or {}
+
+    raw_h2d = average.get("h2d_ms")
+    raw_steps = metadata.get("training_total_steps")
+    return _SummaryMeasurement(
+        h2d_ms=None if raw_h2d is None else float(raw_h2d),
+        completed_steps=None if raw_steps is None else int(raw_steps),
+    )
+
+
+def _build_launch_command(*, logs_dir: Path, run_name: str) -> list[str]:
+    """Build the product path used by the GPU validation."""
+    return [
+        sys.executable,
+        "-m",
+        "traceml_ai.launcher.cli",
+        "run",
+        "--mode",
+        "summary",
+        "--logs-dir",
+        str(logs_dir),
+        "--run-name",
+        run_name,
+        str(Path(__file__).resolve()),
+        "--args",
+        "--workload",
+    ]
+
+
+def _run_validation(*, logs_dir: Path, run_name: str) -> int:
+    """Run the workload through TraceML, then validate its final summary."""
     try:
         import torch
     except ImportError:
@@ -149,54 +231,89 @@ def main() -> int:
     if not torch.cuda.is_available():
         print(
             "No CUDA device. This reproduction needs a GPU to move tensors "
-            "host->device. Run it on Colab or an AWS GPU box."
+            "host-to-device. Run it on Colab or a GPU machine."
         )
         return 0
 
-    from traceml_ai.sdk.initial import init
-
-    init()
-
-    independent = _independent_h2d_ms()
-    control = _positive_control_ms()
-    reported = _traceml_reported_h2d(grad_accum=2)
-
-    print("=" * 60)
-    print("HF + Accelerate H2D coverage-window reproduction (#276)")
-    print("=" * 60)
-    print(f"independent cuda-event H2D (real transfer): {independent:.3f} ms")
-    print(f"positive control (transfer inside window):  {control} ms")
-    print(f"TraceML reported H2D (GA=2, pre-step move):  {reported} ms")
-    print("-" * 60)
-    if control is None:
-        # A None control means the run could not MEASURE, not that the bug
-        # is absent: init() degrades to a disabled no-op when no aggregator
-        # is reachable, so neither the control nor the trainer run recorded
-        # anything. Saying "did not reproduce" here would be a false
-        # all-clear from a rig that never armed.
+    independent_ms = _independent_h2d_ms()
+    command = _build_launch_command(logs_dir=logs_dir, run_name=run_name)
+    launched = subprocess.run(command, check=False)
+    if launched.returncode != 0:
         print(
-            "INCONCLUSIVE: the in-window positive control captured nothing, "
-            "which means TraceML tracing never armed in this process "
-            "(init() is a no-op without a reachable aggregator). Run this "
-            "script through the launcher instead:\n"
-            "    traceml run src/dev/repro/hf_accelerate_h2d_window.py "
-            "--mode=summary\n"
-            "and read h2d in the final summary: n/a for the GA run means "
-            "the transfer stayed outside the window."
+            "FAIL: the TraceML workload exited with code "
+            f"{launched.returncode}."
         )
         return 1
-    if control > 0.0 and (reported in (0.0, None)):
+
+    summary_path = logs_dir / run_name / "final_summary.json"
+    if not summary_path.is_file():
+        print(f"FAIL: expected final summary at {summary_path}.")
+        return 1
+
+    try:
+        measurement = _read_summary(summary_path)
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        print(f"FAIL: could not read {summary_path}: {exc}")
+        return 1
+
+    print("=" * 60)
+    print("HF + Accelerate pre-step H2D validation (#276)")
+    print("=" * 60)
+    print(
+        "independent cuda-event H2D (real transfer): "
+        f"{independent_ms:.3f} ms"
+    )
+    print(
+        "TraceML final-summary H2D:                   "
+        f"{measurement.h2d_ms} ms"
+    )
+    print(
+        "TraceML completed optimizer steps:            "
+        f"{measurement.completed_steps}"
+    )
+    print(f"TraceML summary: {summary_path}")
+    print("-" * 60)
+
+    if (
+        measurement.h2d_ms is not None
+        and measurement.h2d_ms > 0.0
+        and measurement.completed_steps == _EXPECTED_STEPS
+    ):
         print(
-            "REPRODUCED: the timer captures an in-window transfer but not "
-            "the Accelerate pre-step transfer, so H2D reads as "
-            f"{reported} despite a real {independent:.3f} ms copy."
+            "PASS: TraceML captured Accelerate's pre-step transfers and "
+            "preserved one published step per optimizer update."
         )
-    else:
-        print(
-            "Did not reproduce with these settings; the Trainer/Accelerate "
-            "version may move batches inside the step window."
-        )
-    return 0
+        return 0
+
+    print(
+        "FAIL: expected nonzero final-summary H2D and exactly "
+        f"{_EXPECTED_STEPS} completed optimizer steps."
+    )
+    return 1
+
+
+def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--logs-dir",
+        type=Path,
+        default=Path("traceml-validation"),
+    )
+    parser.add_argument(
+        "--run-name",
+        default=f"hf-h2d-validation-{time.strftime('%Y%m%d-%H%M%S')}",
+    )
+    parser.add_argument(
+        "--workload", action="store_true", help=argparse.SUPPRESS
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = _parse_args(argv)
+    if args.workload:
+        return _run_hf_workload()
+    return _run_validation(logs_dir=args.logs_dir, run_name=args.run_name)
 
 
 if __name__ == "__main__":
