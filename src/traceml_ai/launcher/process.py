@@ -382,7 +382,15 @@ def terminate_process_group(
 
 
 class AggregatorPortInUseError(RuntimeError):
-    """Another process already listens on the aggregator port."""
+    """Another process already listens on the aggregator port.
+
+    ``host`` is the address whose probe conflicted, which can differ from
+    the aggregator's bind host when a wildcard bind also probes loopback.
+    """
+
+    def __init__(self, message: str, *, host: str) -> None:
+        super().__init__(message)
+        self.host = host
 
 
 def ensure_aggregator_port_free(host: str, port: int) -> None:
@@ -416,7 +424,8 @@ def ensure_aggregator_port_free(host: str, port: int) -> None:
                 "most likely by an aggregator left behind by an earlier "
                 "`traceml run` that was killed. Stop that process "
                 f"(`lsof -i :{port}` finds it) or pass --aggregator-port "
-                "with a free port."
+                "with a free port.",
+                host=probe_host,
             ) from exc
         probe.close()
 

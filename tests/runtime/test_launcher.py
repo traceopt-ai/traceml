@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import argparse
+import errno
 import io
 import json
 import os
@@ -1050,7 +1051,8 @@ def test_strict_aggregator_failure_does_not_start_training(
     port_check = Mock()
     if failure == "port_in_use":
         port_check.side_effect = AggregatorPortInUseError(
-            "aggregator port 127.0.0.1:43170 is already in use"
+            "aggregator port 127.0.0.1:43170 is already in use",
+            host="127.0.0.1",
         )
     monkeypatch.setattr(
         launcher_commands, "ensure_aggregator_port_free", port_check
@@ -1153,6 +1155,62 @@ def test_stderr_from_process_exiting_before_readiness_is_exact(
 
     assert stderr_path.read_bytes() == expected
     assert result.stderr_path == stderr_path.resolve()
+
+
+def test_wildcard_port_conflict_names_the_conflicting_address(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    # The aggregator binds 0.0.0.0 but the stale listener sits on loopback;
+    # both ERROR lines must name the address that actually conflicted.
+    script = tmp_path / "train.py"
+    script.write_text("print('train')\n", encoding="utf-8")
+    args = build_parser().parse_args(
+        [
+            "run",
+            str(script),
+            "--logs-dir",
+            str(tmp_path / "logs"),
+            "--aggregator-bind-host",
+            "0.0.0.0",
+            "--aggregator-port",
+            "43170",
+        ]
+    )
+
+    def _bind(host, port, backlog):
+        if host == "127.0.0.1":
+            raise OSError(errno.EADDRINUSE, "Address already in use")
+        return Mock()
+
+    monkeypatch.setattr(
+        "traceml_ai.launcher.process.bind_exclusive_listener", _bind
+    )
+    start_aggregator = Mock()
+    start_training = Mock()
+    monkeypatch.chdir(tmp_path)
+    for name, replacement in {
+        "install_shutdown_handlers": Mock(),
+        "start_aggregator_process": start_aggregator,
+        "start_training_process": start_training,
+        "write_code_manifest": Mock(return_value=None),
+        "write_run_manifest": Mock(return_value=tmp_path / "manifest.json"),
+        "update_run_manifest": Mock(),
+    }.items():
+        monkeypatch.setattr(launcher_commands, name, replacement)
+
+    with pytest.raises(SystemExit) as exc:
+        launch_process(str(script), args)
+
+    assert exc.value.code == 1
+    stderr = capsys.readouterr().err
+    assert "aggregator port 127.0.0.1:43170 is already in use" in stderr
+    assert (
+        "aggregator port 127.0.0.1:43170 was already in use by another "
+        "process; training was not started" in stderr
+    )
+    assert "0.0.0.0:43170" not in stderr
+    start_aggregator.assert_not_called()
+    start_training.assert_not_called()
 
 
 def test_aggregator_port_probe_rejects_a_live_listener() -> None:

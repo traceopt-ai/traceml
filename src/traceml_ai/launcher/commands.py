@@ -759,6 +759,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     aggregator_exited_early = False
     telemetry_available = False
     telemetry_startup_reason: Optional[str] = None
+    port_conflict_host: Optional[str] = None
 
     def finish_aggregator_output() -> Optional[ProcessOutputResult]:
         nonlocal aggregator_output_result
@@ -830,6 +831,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
             print(f"[TraceML] ERROR: {exc}", file=sys.stderr)
             ready = False
             telemetry_startup_reason = "aggregator_port_in_use"
+            port_conflict_host = exc.host
         except OSError as exc:
             _log_launcher_exception("aggregator process could not start", exc)
             ready = False
@@ -898,7 +900,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                 # Something answered on the port, so "not reachable" is
                 # false; the error above says how to find the process.
                 failure = (
-                    f"aggregator port {aggregator_cfg.bind_host}:"
+                    f"aggregator port {port_conflict_host}:"
                     f"{aggregator_cfg.port} was already in use by another "
                     "process"
                 )
