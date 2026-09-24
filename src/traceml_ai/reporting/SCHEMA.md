@@ -297,7 +297,8 @@ Fallback evidence types are:
       "steps_analyzed": null,
       "start_step": null,
       "end_step": null,
-      "completed_step": null
+      "completed_step": null,
+      "diagnosis_clock": "cpu | gpu"
     },
     "average": {"<metric_name>": null},
     "median": {"<metric_name>": {"value": null, "idx": null}},

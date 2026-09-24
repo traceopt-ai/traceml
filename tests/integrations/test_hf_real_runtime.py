@@ -185,4 +185,5 @@ def test_hf_cpu_reaches_real_runtime_sqlite_and_summary(
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["status"] == "completed"
+    # Covers degraded telemetry outside the step-time streams checked above.
     assert manifest["telemetry_status"] == "complete"
