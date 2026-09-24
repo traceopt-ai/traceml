@@ -40,7 +40,7 @@
       "stack": "Hugging Face Trainer",
       "recommended_api": "traceml_ai.integrations.huggingface.init() + TraceMLTrainerCallback",
       "guide": "user_guide/integrations/huggingface.md",
-      "tested_dependency_range": "CI resolves torch>=2.5.0, transformers (unbounded), and accelerate>=0.26.0; not a pinned compatibility matrix.",
+      "tested_dependency_range": "CI resolves torch>=2.5.0, transformers>=4.46.1, and accelerate>=0.26.0; not a pinned compatibility matrix.",
       "coverage": {
         "cpu": { "status": "CI tested", "detail": "real Trainer run" },
         "gpu": { "status": "Not claimed", "detail": "no GPU job" },

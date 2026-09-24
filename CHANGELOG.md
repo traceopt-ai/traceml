@@ -5,7 +5,7 @@ All notable changes to TraceML are documented here. This file follows
 should match the tags on [GitHub Releases](https://github.com/traceopt-ai/traceml/releases),
 which carry the full historical notes for versions predating this file.
 
-## [Unreleased]
+## [0.4.1] - 2026-09-24
 
 - Added `traceml_ai.integrations.monai` for MONAI's `SupervisedTrainer`
   (`pip install 'traceml-ai[monai]'`). `TraceMLHandler` publishes one step
@@ -40,6 +40,12 @@ which carry the full historical notes for versions predating this file.
   batches to the first resumed optimizer group. That entire group's step
   timing and memory telemetry is omitted; training runs normally and recording
   resumes with the next group. Fresh runs and sampler-level skips are unaffected.
+- Hugging Face Trainer now captures the host-to-device transfers performed
+  while collecting an optimizer group's training microbatches. The transfers
+  contribute to Traced Step Time alongside forward, backward and optimizer
+  work, while DataLoader waiting remains separate Input Wait. Evaluation and
+  prediction input work stays excluded, and one TraceML step still represents
+  one optimizer-update group.
 - Added opt-in RF-DETR instrumentation for eager detection. Unsupported
   configurations or adapter failures warn and leave native training intact.
   Skipped instrumentation no longer accumulates DataLoader timing records.
