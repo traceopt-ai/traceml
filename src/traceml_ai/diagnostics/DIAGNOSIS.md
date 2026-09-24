@@ -19,7 +19,8 @@ Three `primary_diagnosis` kinds are top-level only. No section emits them:
 - `LOW_GPU_UTILIZATION_UNEXPLAINED`: Step Time is `BALANCED` and System
   reports `LOW_GPU_UTILIZATION` or `MODERATE_GPU_UTILIZATION`.
 - `NO_CLEAR_PERFORMANCE_BOTTLENECK`: Step Time is `BALANCED` and GPU
-  utilization is not low or moderate.
+  utilization is not low or moderate. It is also the fallback for a Step
+  Time kind the policy does not recognize.
 
 For the full field shape and the selection policy, see
 [Primary Diagnosis Shape](../reporting/SCHEMA.md#primary-diagnosis-shape).
