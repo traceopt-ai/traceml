@@ -371,6 +371,9 @@ display and shows a bounded stderr excerpt after a failure. Use
 `--no-save-training-output` when another system already captures the streams
 or when the workload requires a real terminal.
 
+See [What Happens When My Training Crashes](training-crashes.md) for what
+these files contain after a Python exception or a native crash.
+
 ---
 
 ## What does `MEMORY CREEP` usually mean?
