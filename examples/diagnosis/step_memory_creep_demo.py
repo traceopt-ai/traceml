@@ -9,20 +9,17 @@ Requires a CUDA GPU for the verdict. Step memory is read from torch's CUDA
 memory statistics, so on CPU the script still runs but leaks nothing, and
 the STEP MEMORY section reports NO GPU.
 
-Run with:
-
-    traceml run examples/diagnosis/step_memory_creep_demo.py
-    traceml run examples/diagnosis/step_memory_creep_demo.py \
-        --nproc-per-node=2
-
-Use ``--epochs`` or ``--steps`` to change the run length::
+Run with::
 
     traceml run examples/diagnosis/step_memory_creep_demo.py \
         --args --steps 300
+    traceml run examples/diagnosis/step_memory_creep_demo.py \
+        --nproc-per-node=2 --args --steps 300
 
-Keep short runs to a few hundred steps: confirmed creep needs at least 50
-steps and a rise of about 1 GiB per rank across the analyzed window, and
-the leak adds 8 MiB per step.
+A few hundred steps is enough: confirmed creep needs at least 50 steps and
+a rise of about 1 GiB per rank across the analyzed window, and the leak
+adds 8 MiB per step. Without ``--steps`` or ``--epochs`` the demo runs two
+epochs (1024 steps on one rank), which retains about 8 GiB per rank.
 """
 
 from __future__ import annotations

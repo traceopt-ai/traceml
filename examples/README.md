@@ -57,7 +57,7 @@ These examples are still user-facing, but they are more about showing specific T
 |---|---|---|---|
 | `diagnosis/dataloader_bottleneck_demo.py` | Slow input pipeline or input-bound training | CPU / CUDA | Simulates dataloader delay |
 | `distributed/ddp_rank_straggler_demo.py` | Rank stragglers in DDP | CPU / CUDA | Simulates balanced, input-straggler, and compute-straggler runs |
-| `diagnosis/step_memory_creep_demo.py` | Step memory creep (`MEMORY CREEP`) | CUDA | Retains 8 MiB of CUDA memory per step on every rank; on CPU it runs without leaking and Step Memory reports `NO GPU` |
+| `diagnosis/step_memory_creep_demo.py` | Step memory creep (`MEMORY CREEP`) | CUDA for the verdict; runs on CPU | Retains 8 MiB of CUDA memory per step on every rank; on CPU it runs without leaking and Step Memory reports `NO GPU` |
 | `diagnosis/incomplete_signals_demo.py` | Missing signals reported as absent, not zero (`INCOMPLETE DATA`) | CPU / CUDA | Calls `model.forward(...)` directly, so forward timing is never recorded |
 
 These are useful when you want to see how TraceML behaves on a known bottleneck.
@@ -202,8 +202,10 @@ The same `--steps` option sets the run length of `quickstart.py`,
 `integrations/accelerate_minimal.py`, `integrations/deepspeed_minimal.py`,
 `advanced/fsdp_minimal_cuda.py`, `diagnosis/h2d_timing_demo.py`,
 `diagnosis/step_memory_creep_demo.py`, and
-`diagnosis/incomplete_signals_demo.py`. Scripts that loop over epochs also
-accept `--epochs`. Pass `--args --help` to see each default.
+`diagnosis/incomplete_signals_demo.py`. `accelerate_minimal.py`,
+`deepspeed_minimal.py`, `fsdp_minimal_cuda.py`, `step_memory_creep_demo.py`
+and `incomplete_signals_demo.py` also accept `--epochs`. Pass `--args --help`
+to see each default.
 
 DeepSpeed (single or multi-GPU; requires `deepspeed` + a CUDA GPU):
 
