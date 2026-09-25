@@ -50,8 +50,8 @@ def test_phase_bar_null_input_wait_is_not_borrowed_from_dataloader(
 ) -> None:
     # Schema >= 1.6 always carries the input_wait_ms key; a present-but-
     # null value means genuinely unmeasured, not "old payload without
-    # the key" -- the chart must drop the phase, not borrow
-    # dataloader_ms's number under the "input wait" label.
+    # the key" -- the chart must mark the phase as not measured, not
+    # borrow dataloader_ms's number under the "input wait" label.
     section = make_section(
         metric_names=["total_step_ms", "input_wait_ms", "forward_ms"],
         average={
@@ -62,9 +62,58 @@ def test_phase_bar_null_input_wait_is_not_borrowed_from_dataloader(
         },
     )
     out = phase_bar(section)
-    assert "input wait" not in out
+    assert "input wait not measured" in out
+    assert "60.0" not in out
     assert out.count("<rect") == 1  # forward only
     assert 'width="40.00%"' in out
+
+
+def test_phase_bar_distinguishes_measured_zero_from_never_measured(
+    make_section,
+) -> None:
+    # Tables print a measured 0.0 as "0.0 ms" and a null as a placeholder;
+    # the bar must not collapse both into the same silent omission.
+    section = make_section(
+        metric_names=[
+            "input_wait_ms",
+            "step_time_ms",
+            "forward_ms",
+            "backward_ms",
+            "optimizer_ms",
+        ],
+        average={
+            "input_wait_ms": 40.0,
+            "step_time_ms": 100.0,
+            "forward_ms": 0.0,
+            "backward_ms": 60.0,
+            "optimizer_ms": None,
+        },
+    )
+    out = phase_bar(section)
+    assert out.count("<rect") == 2  # input wait + backward carry width
+    assert "forward 0.0&thinsp;ms" in out
+    assert (
+        '<span class="na"><i class="sw na"></i>optimizer not measured</span>'
+    ) in out
+    assert "optimizer 0.0" not in out
+    assert "forward not measured" not in out
+    # h2d/residual are absent from this payload altogether, as in the table.
+    assert "h2d" not in out
+    assert "residual" not in out
+
+
+def test_phase_bar_is_deterministic_with_unmeasured_phases(
+    make_section,
+) -> None:
+    section = make_section(
+        metric_names=["step_time_ms", "forward_ms", "optimizer_ms"],
+        average={
+            "step_time_ms": 100.0,
+            "forward_ms": 0.0,
+            "optimizer_ms": None,
+        },
+    )
+    assert phase_bar(section) == phase_bar(section)
 
 
 def test_phase_bar_empty_when_no_timing(make_section) -> None:

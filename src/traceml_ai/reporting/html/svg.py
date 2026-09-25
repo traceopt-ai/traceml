@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, List, Optional, Tuple
 
 from .sections_helpers import sorted_rows
@@ -69,7 +70,11 @@ def phase_bar(
     if step_time is None or step_time <= 0.0:
         return ""
 
-    present: List[Tuple[str, str, float]] = []
+    metric_names = (step_time_section.get("metadata") or {}).get(
+        "section_metric_names"
+    ) or []
+    # (label, color, value); value None = reported but never measured.
+    phases: List[Tuple[str, str, Optional[float]]] = []
     for metric, label, color in _PHASES:
         value = avg.get(metric)
         if (
@@ -81,27 +86,39 @@ def phase_bar(
             # always carries the key, so a
             # present-but-null value here means genuinely unmeasured,
             # not "borrow dataloader_ms" -- fall through to the isinstance
-            # check below and drop this phase from the chart.
+            # check below and mark this phase as not measured.
             value = avg.get("dataloader_ms")
-        if isinstance(value, (int, float)) and value > 0:
-            present.append((label, color, float(value)))
-    if not present:
+        if isinstance(value, (int, float)) and math.isfinite(value):
+            phases.append((label, color, float(value)))
+        elif metric in avg or metric in metric_names:
+            # Same rule as the metric tables: a phase the payload reports
+            # without a number is shown as unmeasured, never as 0.0.
+            phases.append((label, color, None))
+    if not any(value is not None for _, _, value in phases):
         return ""
 
     rects: List[str] = []
     legend: List[str] = []
     x = 0.0
-    for label, color, value in present:
-        width = 100.0 * value / step_time
-        rects.append(
-            f'<rect x="{x:.2f}%" y="4" width="{width:.2f}%" height="18" '
-            f'fill="{color}"/>'
-        )
+    for label, color, value in phases:
+        if value is None:
+            legend.append(
+                '<span class="na"><i class="sw na"></i>'
+                f"{esc(label)} not measured</span>"
+            )
+            continue
+        # A measured zero keeps zero width but stays in the legend.
+        if value > 0:
+            width = 100.0 * value / step_time
+            rects.append(
+                f'<rect x="{x:.2f}%" y="4" width="{width:.2f}%" height="18" '
+                f'fill="{color}"/>'
+            )
+            x += width
         legend.append(
             f'<span><i class="sw" style="background:{color}"></i>'
             f"{esc(label)} {value:,.1f}&thinsp;ms</span>"
         )
-        x += width
     return (
         '<svg width="100%" height="26" role="img" '
         'aria-label="average step phase breakdown">'
