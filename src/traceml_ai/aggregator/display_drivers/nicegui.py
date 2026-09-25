@@ -37,6 +37,9 @@ Important reliability notes
   healthy in stdout. start() probes the socket, and if the bind is not
   confirmed in time a watchdog keeps probing and logs an ERROR with the
   server thread's stack, so the failure reaches the error log.
+- The error log is file-only, so each startup outcome is also printed to
+  stderr as one [TraceML] line; the launcher mirrors aggregator stderr to
+  the terminal in dashboard mode (#488).
 
 Aggregator contract (required by trace_aggregator)
 --------------------------------------------------
@@ -104,6 +107,45 @@ def _stack_versions() -> str:
         except Exception:
             parts.append(f"{name} ?")
     return ", ".join(parts)
+
+
+def _print_startup_notice(
+    outcome: ServerReadiness | ServerWatchOutcome,
+    port: int,
+    *,
+    timeout_sec: float,
+    port_in_use: bool = False,
+) -> None:
+    """Print one startup outcome to stderr as a [TraceML] line, best effort.
+
+    The error logger writes to a file only, so without this line a dashboard
+    that never came up is invisible on the console. The stack and
+    diagnostics stay in the log file. A failed print never raises.
+    """
+    try:
+        url = f"http://localhost:{port}"
+        if outcome in (ServerReadiness.READY, ServerWatchOutcome.READY_LATE):
+            message = f"Dashboard ready at {url}"
+        elif outcome is ServerReadiness.TIMEOUT:
+            message = (
+                f"Dashboard not confirmed within {timeout_sec:.0f}s; "
+                f"continuing. It may still come up at {url}."
+            )
+        elif port_in_use:
+            message = (
+                f"Dashboard could not start: port {port} is already in use. "
+                f"Training continues without the dashboard. Pass "
+                f"--dashboard-port <free port> to use another port."
+            )
+        else:
+            message = (
+                f"Dashboard did not start on port {port}; training continues "
+                f"without it. Details: see traceml_errors.log in the "
+                f"session's aggregator directory."
+            )
+        print(f"[TraceML] {message}", file=sys.stderr, flush=True)
+    except Exception:
+        pass
 
 
 @dataclass
@@ -231,7 +273,7 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
         # doomed -- report it clearly instead of starting a server that will
         # die, and avoid mistaking the foreign listener for our own.
         if socket_is_listening("127.0.0.1", self._port):
-            self._log_startup_result(ServerReadiness.FAILED)
+            self._log_startup_result(ServerReadiness.FAILED, port_in_use=True)
             return
 
         self._lifespan_started.clear()
@@ -256,7 +298,9 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
             )
             self._startup_watchdog.start()
 
-    def _log_startup_result(self, result: ServerReadiness) -> None:
+    def _log_startup_result(
+        self, result: ServerReadiness, *, port_in_use: bool = False
+    ) -> None:
         url = f"http://localhost:{self._port}"
         if result is ServerReadiness.READY:
             self._logger.info(
@@ -274,6 +318,12 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
                 f"{self._startup_timeout_sec:.0f}s; continuing. It may still "
                 f"come up at {url}."
             )
+        _print_startup_notice(
+            result,
+            self._port,
+            timeout_sec=self._startup_timeout_sec,
+            port_in_use=port_in_use,
+        )
 
     def _watch_startup(self) -> None:
         """Daemon watchdog: settle a timed-out startup within the grace."""
@@ -309,6 +359,9 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
                     f"without the dashboard. Diagnostics:\n"
                     + self._startup_diagnostics()
                 )
+            _print_startup_notice(
+                outcome, self._port, timeout_sec=self._startup_timeout_sec
+            )
         except Exception as e:  # the watchdog itself must never raise
             self._logger.error(f"[TraceML] Dashboard startup watchdog: {e}")
 
@@ -378,6 +431,8 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
         except BaseException as e:  # uvicorn calls sys.exit() on bind failure
             # SystemExit is not an Exception; catching it here turns a port
             # conflict into a logged failure instead of a wedged daemon thread.
+            # No console line here: start() or the watchdog sees the thread
+            # exit and prints the one startup notice.
             self._logger.error(f"[TraceML] NiceGUI server failed: {e}")
             self._logger.error(traceback.format_exc())
             self._ui_ready = False
