@@ -113,6 +113,7 @@ jobs:
   test-integration:
     name: Integration Smoke Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -130,6 +131,8 @@ jobs:
           pip install -e ".[torch,dashboard,hf,lightning]"
           pip install pytest
       - name: Run integration tests
+        env:
+          OMP_NUM_THREADS: "1"
         run: |
           # Aggregator, runtime, SDK, and root timing tests import torch.
           pytest \
@@ -143,7 +146,23 @@ jobs:
             tests/renderers \
             tests/display \
             tests/test_h2d_timing.py \
+            --basetemp="$RUNNER_TEMP/traceml-pytest" \
             -q
+      - name: Check for orphaned DDP workers
+        if: always()
+        run: |
+          if pgrep -af '[e]xamples/distributed/ddp_minimal.py'; then
+            echo "A ddp_minimal.py worker remained after the DDP smoke run." >&2
+            exit 1
+          fi
+      - name: Upload integration failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-artifacts
+          path: ${{ runner.temp }}/traceml-pytest/**/logs/**
+          if-no-files-found: ignore
+          retention-days: 7
 
   test-rfdetr:
     name: RF-DETR Integration (CPU and Gloo)

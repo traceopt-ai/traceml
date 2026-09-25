@@ -18,8 +18,11 @@ import pytest
 
 pytest.importorskip("torch")
 
-SRC_DIR = Path(__file__).resolve().parents[2] / "src"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SRC_DIR = REPO_ROOT / "src"
+DDP_SCRIPT = REPO_ROOT / "examples" / "distributed" / "ddp_minimal.py"
 RUN_NAME = "smoke-test"
+DDP_RUN_NAME = "ddp-smoke-test"
 FINALIZE_TIMEOUT_SEC = 60.0
 SUBPROCESS_TIMEOUT_SEC = 240
 
@@ -165,3 +168,85 @@ def test_final_summary_json_smoke(tmp_path):
     assert datetime.fromisoformat(payload["generated_at"]) >= (
         datetime.fromisoformat(training_ended_at)
     )
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="End-to-end torchrun smoke run not yet verified on Windows.",
+)
+def test_two_rank_ddp_final_summary_smoke(tmp_path):
+    from traceml_ai.reporting.final import SCHEMA_VERSION
+
+    logs_dir = tmp_path / "logs"
+    env = os.environ.copy()
+    env["OMP_NUM_THREADS"] = "1"
+    env["PYTHONPATH"] = os.pathsep.join(
+        part for part in (str(SRC_DIR), env.get("PYTHONPATH", "")) if part
+    )
+
+    aggregator_port = _free_tcp_port()
+    master_port = _free_tcp_port()
+    while master_port == aggregator_port:
+        master_port = _free_tcp_port()
+
+    cmd = [
+        sys.executable,
+        "-c",
+        "from traceml_ai.launcher.cli import main; main()",
+        "run",
+        str(DDP_SCRIPT),
+        "--mode",
+        "summary",
+        "--run-name",
+        DDP_RUN_NAME,
+        "--logs-dir",
+        str(logs_dir),
+        "--nproc-per-node",
+        "2",
+        "--master-port",
+        str(master_port),
+        "--aggregator-port",
+        str(aggregator_port),
+        "--finalize-timeout-sec",
+        str(FINALIZE_TIMEOUT_SEC),
+        "--args",
+        "--steps",
+        "20",
+    ]
+
+    result = subprocess.run(
+        cmd,
+        cwd=str(REPO_ROOT),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=SUBPROCESS_TIMEOUT_SEC,
+    )
+
+    session_root = logs_dir / DDP_RUN_NAME
+    assert result.returncode == 0, (
+        f"two-rank traceml run exited with {result.returncode}\n"
+        f"Artifacts: {session_root}\n"
+        f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+    )
+
+    summary_path = session_root / "final_summary.json"
+    manifest_path = session_root / "manifest.json"
+    assert summary_path.is_file()
+    assert manifest_path.is_file()
+
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == SCHEMA_VERSION
+
+    # Shared CPU runners are timing-variable. Pin the all-rank artifact
+    # contract here; diagnosis and performance thresholds have separate tests.
+    step_time = payload["step_time"]
+    assert step_time["metadata"]["global_ranks_seen"] == 2
+    assert step_time["metadata"]["global_ranks_used"] == 2
+    assert set(step_time["groups"]["rows"]) == {"0", "1"}
+    assert step_time["global"]["window"]["steps_analyzed"] == 20
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["status"] == "completed"
+    assert manifest["telemetry_status"] == "complete"
+    assert manifest["launch"]["nproc_per_node"] == 2

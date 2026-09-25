@@ -174,6 +174,14 @@ Single-node DDP:
 traceml run examples/distributed/ddp_minimal.py --nproc-per-node=4
 ```
 
+For a short smoke run, cap the number of optimizer steps completed by each
+rank:
+
+```bash
+traceml run examples/distributed/ddp_minimal.py \
+  --nproc-per-node=2 --args --steps 20
+```
+
 DeepSpeed (single or multi-GPU; requires `deepspeed` + a CUDA GPU):
 
 ```bash
