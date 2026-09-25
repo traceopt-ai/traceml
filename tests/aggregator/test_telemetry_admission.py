@@ -135,3 +135,239 @@ def test_foreign_stamp_is_forwarded_when_nothing_is_enforced(tmp_path):
 
     assert agg._split_telemetry_payloads([envelope, control]) == [[envelope]]
     assert sorted(agg._finished_ranks) == [0]
+
+
+# Admission: drop payloads stamped for another run before SQLite.
+
+
+def _enforcing(tmp_path: Path, **overrides) -> TraceMLSettings:
+    return _settings(tmp_path, enforce_session_id=True, **overrides)
+
+
+def test_foreign_session_is_dropped_and_own_session_kept(tmp_path):
+    agg = _make_aggregator(tmp_path, _enforcing(tmp_path))
+    own = _envelope(session_id="run-b")
+    foreign = _envelope(session_id="run-a")
+    unstamped = _envelope()
+
+    assert agg._split_telemetry_payloads([foreign, own, unstamped]) == [
+        [own, unstamped]
+    ]
+    assert agg._split_telemetry_payloads(foreign) == []
+    assert agg._split_telemetry_payloads([foreign]) == []
+    assert agg._foreign_senders == {("host-a", 4242, "run-a"): 3}
+
+
+def test_foreign_nonce_is_dropped_for_a_reused_run_name(tmp_path):
+    agg = _make_aggregator(tmp_path, _enforcing(tmp_path, run_nonce="nb"))
+    own = _envelope(session_id="run-b", run_nonce="nb")
+    rerun = _envelope(session_id="run-b", run_nonce="na")
+    no_nonce = _envelope(session_id="run-b")
+
+    assert agg._split_telemetry_payloads([rerun, own, no_nonce]) == [
+        [own, no_nonce]
+    ]
+    assert agg._foreign_senders == {("host-a", 4242, "run-b"): 1}
+
+
+def test_foreign_rank_finished_does_not_finish_a_rank(tmp_path):
+    agg = _make_aggregator(tmp_path, _enforcing(tmp_path, run_nonce="nb"))
+
+    agg._split_telemetry_payloads(_rank_finished(session_id="run-a"))
+    agg._split_telemetry_payloads(
+        [_rank_finished(session_id="run-b", run_nonce="na")]
+    )
+    assert agg._finished_ranks == {}
+
+    agg._split_telemetry_payloads(
+        [_rank_finished(session_id="run-b", run_nonce="nb")]
+    )
+    assert sorted(agg._finished_ranks) == [0]
+    # Control payloads carry no pid.
+    assert agg._foreign_senders == {
+        ("host-a", None, "run-a"): 1,
+        ("host-a", None, "run-b"): 1,
+    }
+
+
+def test_session_is_not_enforced_without_the_flag(tmp_path):
+    agg = _make_aggregator(tmp_path, _settings(tmp_path, run_nonce="nb"))
+    other_session = _envelope(session_id="run-a", run_nonce="nb")
+    other_nonce = _envelope(session_id="run-b", run_nonce="na")
+
+    assert agg._split_telemetry_payloads([other_session, other_nonce]) == [
+        [other_session]
+    ]
+
+
+class _TCP:
+    def __init__(self, messages):
+        self._messages = list(messages)
+
+    def poll(self):
+        while self._messages:
+            yield self._messages.pop(0)
+
+    def wait_for_data(self, timeout):
+        return False
+
+    def stop(self):
+        return None
+
+
+class _Writer:
+    def __init__(self):
+        self.ingested = []
+
+    def ingest(self, payload):
+        self.ingested.append(payload)
+
+    def finalize(self, timeout_sec):
+        from traceml_ai.aggregator.sqlite_writer import SQLiteFinalizeResult
+
+        return SQLiteFinalizeResult(
+            ok=True,
+            elapsed_sec=0.0,
+            enqueued=0,
+            written=0,
+            dropped=0,
+            queue_size=0,
+            checkpoint_ok=True,
+            error=None,
+        )
+
+    def stats(self):
+        return {}
+
+
+class _Stopped:
+    def is_alive(self):
+        return False
+
+    def join(self, timeout=None):
+        return None
+
+    def stop(self):
+        return None
+
+
+def test_stop_prints_one_warning_naming_foreign_senders(tmp_path, capsys):
+    settings = _enforcing(tmp_path, history_enabled=False)
+    agg = _make_aggregator(tmp_path, settings)
+    agg._thread = _Stopped()
+    agg._display_driver = _Stopped()
+    agg._sqlite_writer = _Writer()
+    other = dict(_envelope(session_id="run-c"))
+    other["meta"] = dict(other["meta"], hostname="host-c", pid=7)
+    agg._tcp_server = _TCP(
+        [
+            [_envelope(session_id="run-a"), _envelope(session_id="run-b")],
+            [_envelope(session_id="run-a"), other],
+            _rank_finished(session_id="run-a"),
+        ]
+    )
+
+    agg._drain_tcp()
+    agg.stop(timeout_sec=1.0)
+
+    assert len(agg._sqlite_writer.ingested) == 1
+    warnings = [
+        line
+        for line in capsys.readouterr().err.splitlines()
+        if line.startswith("[TraceML]")
+    ]
+    assert len(warnings) == 1
+    assert "ignored 4 payload(s) from another TraceML run" in warnings[0]
+    assert "host=host-a pid=4242 session=run-a (2)" in warnings[0]
+    assert "host=host-a pid=? session=run-a (1)" in warnings[0]
+    assert "host=host-c pid=7 session=run-c (1)" in warnings[0]
+
+
+def test_stop_prints_nothing_without_foreign_payloads(tmp_path, capsys):
+    agg = _make_aggregator(
+        tmp_path, _enforcing(tmp_path, history_enabled=False)
+    )
+    agg._thread = _Stopped()
+    agg._display_driver = _Stopped()
+    agg._sqlite_writer = _Writer()
+    agg._tcp_server = _TCP([[_envelope(session_id="run-b")]])
+
+    agg._drain_tcp()
+    agg.stop(timeout_sec=1.0)
+
+    assert "[TraceML]" not in capsys.readouterr().err
+
+
+def test_foreign_rows_never_reach_sqlite_over_the_real_wire(tmp_path):
+    """Own rows land intact; foreign rows are absent, not zeroed."""
+    import sqlite3
+    import time
+
+    from traceml_ai.aggregator.sqlite_writer import (
+        SQLiteWriterConfig,
+        SQLiteWriterSimple,
+    )
+    from traceml_ai.samplers.schema.system import SystemSample
+    from traceml_ai.transport.tcp_transport import (
+        TCPClient,
+        TCPConfig,
+        TCPServer,
+    )
+
+    def system_envelope(rank: int, cpu: float, session: str) -> dict:
+        sample = SystemSample(
+            sample_idx=1,
+            timestamp=time.time(),
+            cpu_percent=cpu,
+            ram_used=1.0,
+            ram_total=8.0,
+            gpu_available=False,
+            gpu_count=0,
+            gpus=[],
+        )
+        return build_telemetry_envelope(
+            identity=SenderIdentity(
+                global_rank=rank,
+                local_rank=rank,
+                hostname="test-host",
+                pid=100 + rank,
+                session_id=session,
+                run_nonce="nb",
+            ),
+            sampler_name="SystemSampler",
+            tables={"SystemTable": [sample.to_wire()]},
+        )
+
+    server = TCPServer(TCPConfig(host="127.0.0.1", port=0))
+    server.start()
+    writer = SQLiteWriterSimple(
+        SQLiteWriterConfig(
+            path=str(tmp_path / "telemetry"), flush_interval_sec=0.05
+        )
+    )
+    writer.start()
+    client = TCPClient(TCPConfig(host="127.0.0.1", port=server.port))
+    try:
+        agg = _make_aggregator(tmp_path, _enforcing(tmp_path, run_nonce="nb"))
+        agg._tcp_server = server
+        agg._sqlite_writer = writer
+
+        client.send_batch(
+            [
+                system_envelope(0, 11.0, "run-b"),
+                system_envelope(1, 99.0, "run-a"),
+            ]
+        )
+        assert server.wait_for_data(timeout=2.0)
+        agg._drain_tcp()
+        assert writer.force_flush(timeout_sec=2.0)
+
+        with sqlite3.connect(str(tmp_path / "telemetry")) as conn:
+            rows = conn.execute(
+                "SELECT global_rank, cpu_percent FROM system_samples"
+            ).fetchall()
+        assert rows == [(0, 11.0)]
+    finally:
+        client.close()
+        server.stop()
+        writer.finalize(timeout_sec=5.0)
