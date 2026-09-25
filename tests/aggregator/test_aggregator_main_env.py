@@ -52,6 +52,7 @@ def test_launcher_aggregator_enforces_session_and_run_nonce(
     settings = captured["settings"]
     assert settings.session_id == "run-b"
     assert settings.enforce_session_id is True
+    assert settings.admit_generated_session_id is True
     assert settings.run_nonce == "abc123"
 
 

@@ -449,9 +449,93 @@ def test_serve_admits_its_own_explicit_session(tmp_path, monkeypatch):
     assert agg._foreign_senders == {}
 
 
-def test_run_aggregator_still_drops_a_generated_foreign_session(tmp_path):
-    """`traceml run` keeps strict session enforcement."""
+def test_strict_enforcement_drops_a_generated_foreign_session(tmp_path):
+    """Without admit_generated_session_id every stamped id is enforced."""
     agg = _make_aggregator(tmp_path, _enforcing(tmp_path))
     generated = _envelope(session_id="session_1", session_source="generated")
 
     assert agg._split_telemetry_payloads([generated]) == []
+
+
+# The standalone aggregator entrypoint, as `traceml run` or a manual start
+# with only TRACEML_SESSION_ID exported builds it.
+
+
+def _aggregator_main_settings(monkeypatch, **env) -> TraceMLSettings:
+    from traceml_ai.aggregator import aggregator_main
+
+    for var in ("TRACEML_SESSION_ID", "TRACEML_RUN_NONCE"):
+        monkeypatch.delenv(var, raising=False)
+    for var, value in env.items():
+        monkeypatch.setenv(var, value)
+    captured = {}
+
+    def _run(settings, *, logger=None):
+        captured["settings"] = settings
+        return 0
+
+    monkeypatch.setattr(
+        aggregator_main, "setup_error_logger", lambda **_: None
+    )
+    monkeypatch.setattr(aggregator_main, "run_aggregator", _run)
+    try:
+        aggregator_main.main()
+    except SystemExit:
+        pass
+    return captured["settings"]
+
+
+def test_manual_aggregator_admits_a_rank_with_a_generated_id(
+    tmp_path, monkeypatch
+):
+    """A plain `python train.py` beside a hand-started aggregator."""
+    settings = _aggregator_main_settings(
+        monkeypatch, TRACEML_SESSION_ID="manual"
+    )
+    agg = _make_aggregator(tmp_path, settings)
+    worker = _envelope(session_id="session_1", session_source="generated")
+    done = _rank_finished(session_id="session_1", session_source="generated")
+
+    assert agg._split_telemetry_payloads([worker, done]) == [[worker]]
+    assert sorted(agg._finished_ranks) == [0]
+    assert agg._foreign_senders == {}
+
+
+def test_aggregator_main_still_drops_an_explicit_foreign_session(
+    tmp_path, monkeypatch
+):
+    """Launcher ranks stamp their id as explicit, so an orphan of an
+    earlier `traceml run` is still dropped."""
+    settings = _aggregator_main_settings(
+        monkeypatch, TRACEML_SESSION_ID="run-b"
+    )
+    agg = _make_aggregator(tmp_path, settings)
+    orphan = _envelope(session_id="run-a", session_source="explicit")
+    no_source = _envelope(session_id="run-a")
+
+    assert agg._split_telemetry_payloads([orphan, no_source]) == []
+    assert agg._foreign_senders == {("host-a", "4242", "run-a"): 2}
+
+
+def test_aggregator_main_still_drops_a_foreign_run_nonce(
+    tmp_path, monkeypatch
+):
+    settings = _aggregator_main_settings(
+        monkeypatch, TRACEML_SESSION_ID="run-b", TRACEML_RUN_NONCE="nb"
+    )
+    agg = _make_aggregator(tmp_path, settings)
+    rerun = _envelope(
+        session_id="run-b", run_nonce="na", session_source="explicit"
+    )
+    generated = _envelope(
+        session_id="session_1", run_nonce="na", session_source="generated"
+    )
+    own = _envelope(
+        session_id="run-b", run_nonce="nb", session_source="explicit"
+    )
+
+    assert agg._split_telemetry_payloads([rerun, generated, own]) == [[own]]
+    assert agg._foreign_senders == {
+        ("host-a", "4242", "run-b"): 1,
+        ("host-a", "4242", "session_1"): 1,
+    }

@@ -278,11 +278,15 @@ def main() -> None:
         html_report=bool(cfg["html_report"]),
         finalize_timeout_sec=float(cfg["finalize_timeout_sec"]),
         expected_world_size=int(cfg["expected_world_size"]),
-        # Only the `traceml run` launcher starts this entrypoint, and it
-        # hands the same session id (and, single-node, run nonce) to its
-        # ranks, so a payload stamped otherwise came from another run.
+        # The `traceml run` launcher hands its ranks the same session id,
+        # stamped explicit, and (single-node) the same run nonce, so a
+        # payload stamped otherwise came from another run. This entrypoint
+        # can also be started by hand, with at most TRACEML_SESSION_ID set,
+        # beside a plain `python train.py` that makes up its own id. Such a
+        # generated id is admitted, as `traceml serve --run-name` does.
         run_nonce=str(cfg["run_nonce"]),
         enforce_session_id=True,
+        admit_generated_session_id=True,
         aggregator=AggregatorTransportSettings(
             connect_host=str(cfg["aggregator_host"]),
             bind_host=str(cfg["aggregator_bind_host"]),
