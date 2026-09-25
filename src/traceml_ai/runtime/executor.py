@@ -119,6 +119,7 @@ def read_traceml_env() -> Dict[str, Any]:
             )
         ),
         "session_id": os.environ.get("TRACEML_SESSION_ID", ""),
+        "run_nonce": os.environ.get("TRACEML_RUN_NONCE", ""),
         "finalize_timeout_sec": float(
             os.environ.get(
                 "TRACEML_FINALIZE_TIMEOUT_SEC",
@@ -173,6 +174,7 @@ def build_runtime_settings(cfg: Dict[str, Any]) -> TraceMLSettings:
         enable_logging=bool(cfg["enable_logging"]),
         logs_dir=str(cfg["logs_dir"]),
         session_id=str(cfg["session_id"]),
+        run_nonce=str(cfg.get("run_nonce", "") or ""),
         finalize_timeout_sec=float(
             cfg.get("finalize_timeout_sec", DEFAULT_FINALIZE_TIMEOUT_SEC)
         ),

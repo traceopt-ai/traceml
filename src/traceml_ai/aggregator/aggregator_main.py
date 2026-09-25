@@ -98,6 +98,7 @@ def read_traceml_env() -> dict[str, Any]:
         )
         == "1",
         "session_id": os.environ.get("TRACEML_SESSION_ID", ""),
+        "run_nonce": os.environ.get("TRACEML_RUN_NONCE", ""),
         "history_enabled": os.environ.get("TRACEML_HISTORY_ENABLED", "1")
         == "1",
         "history_retention_s": parse_history_retention(
@@ -277,6 +278,11 @@ def main() -> None:
         html_report=bool(cfg["html_report"]),
         finalize_timeout_sec=float(cfg["finalize_timeout_sec"]),
         expected_world_size=int(cfg["expected_world_size"]),
+        # Only the `traceml run` launcher starts this entrypoint, and it
+        # hands the same session id (and, single-node, run nonce) to its
+        # ranks, so a payload stamped otherwise came from another run.
+        run_nonce=str(cfg["run_nonce"]),
+        enforce_session_id=True,
         aggregator=AggregatorTransportSettings(
             connect_host=str(cfg["aggregator_host"]),
             bind_host=str(cfg["aggregator_bind_host"]),

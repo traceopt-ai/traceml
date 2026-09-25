@@ -373,3 +373,16 @@ def test_executor_user_failure_stays_native_and_out_of_internal_logs(
         assert "subprocess boom" not in internal_logs[0].read_text(
             encoding="utf-8"
         )
+
+
+def test_executor_threads_run_nonce_into_runtime_settings(monkeypatch):
+    monkeypatch.setenv("TRACEML_SCRIPT_PATH", "train.py")
+    monkeypatch.setenv("TRACEML_RUN_NONCE", "abc123")
+
+    cfg = read_traceml_env()
+
+    assert cfg["run_nonce"] == "abc123"
+    assert build_runtime_settings(cfg).run_nonce == "abc123"
+
+    monkeypatch.delenv("TRACEML_RUN_NONCE")
+    assert build_runtime_settings(read_traceml_env()).run_nonce == ""

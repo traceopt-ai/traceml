@@ -12,6 +12,7 @@ import argparse
 import importlib.util
 import json
 import os
+import secrets
 import struct
 import subprocess
 import sys
@@ -625,6 +626,13 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         require_explicit=torchrun_cfg.nnodes > 1,
     )
     env["TRACEML_SESSION_ID"] = run_identity.session_id
+    # A rerun with the same run name reuses the session id, so a surviving
+    # rank from the earlier launch would still match it. A fresh nonce per
+    # launch tells them apart. Only a single-node launcher starts every rank,
+    # so multi-node runs send no nonce and rely on the session id alone.
+    env["TRACEML_RUN_NONCE"] = (
+        secrets.token_hex(16) if torchrun_cfg.nnodes == 1 else ""
+    )
     env["TRACEML_AGGREGATOR_HOST"] = aggregator_cfg.connect_host
     env["TRACEML_AGGREGATOR_BIND_HOST"] = aggregator_cfg.bind_host
     env["TRACEML_AGGREGATOR_PORT"] = str(aggregator_cfg.port)
@@ -1174,6 +1182,9 @@ def _resolve_serve_settings(args: argparse.Namespace):
         dashboard_auto_open=bool(cfg["dashboard_auto_open"]),
         finalize_timeout_sec=float(cfg["finalize_timeout_sec"]),
         session_id=run_identity.session_id,
+        # A plain `python train.py` generates its own session id, so only an
+        # explicit --run-name/--session-id is a promise the workers share.
+        enforce_session_id=run_identity.source != "generated",
         aggregator=AggregatorTransportSettings(
             connect_host=connect_host,
             bind_host=bind_host,

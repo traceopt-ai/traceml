@@ -1903,3 +1903,88 @@ def test_run_identity_rejects_path_segments() -> None:
 
     with pytest.raises(ValueError, match="single path segment"):
         RunIdentity.from_args(args)
+
+
+@pytest.mark.parametrize(
+    ("extra", "enforced"),
+    [
+        ([], False),
+        (["--run-name", "demo"], True),
+        (["--session-id", "x"], True),
+    ],
+)
+def test_serve_enforces_session_id_only_when_explicit(
+    monkeypatch, tmp_path, extra, enforced
+) -> None:
+    """A plain `python train.py` generates its own id and must be admitted."""
+    monkeypatch.chdir(tmp_path)
+    args = build_parser().parse_args(["serve", *extra])
+
+    settings = _resolve_serve_settings(args)
+
+    assert settings.enforce_session_id is enforced
+    assert settings.run_nonce == ""
+
+
+@pytest.mark.parametrize("nnodes", [1, 2])
+def test_launcher_shares_run_nonce_only_on_single_node(
+    monkeypatch, tmp_path, nnodes
+) -> None:
+    """Other nodes' launchers cannot know the owner node's nonce."""
+    script = tmp_path / "train.py"
+    script.write_text("print('train')\n", encoding="utf-8")
+    args = build_parser().parse_args(
+        [
+            "run",
+            str(script),
+            "--logs-dir",
+            str(tmp_path / "logs"),
+            "--run-name",
+            "nonce-run",
+            "--on-missing-aggregator",
+            "warn",
+            "--nnodes",
+            str(nnodes),
+        ]
+    )
+    monkeypatch.chdir(tmp_path)
+    # A stale value inherited from the parent shell must not leak through.
+    monkeypatch.setenv("TRACEML_RUN_NONCE", "inherited")
+    envs = {}
+
+    def _start_aggregator(*, env, cwd):
+        envs["aggregator"] = dict(env)
+        return Mock(pid=10, returncode=7, **{"poll.return_value": 7})
+
+    def _start_training(*, train_cmd, env, cwd, capture_output):
+        envs["training"] = dict(env)
+        return Mock(**{"poll.return_value": 0})
+
+    output = ProcessOutputResult(
+        stdout_path=None, stderr_path=None, stderr_tail=b"", warning=None
+    )
+    drainer = Mock(**{"finish.return_value": output})
+    for name, value in {
+        "setup_error_logger": Mock(),
+        "install_shutdown_handlers": Mock(),
+        "start_aggregator_process": _start_aggregator,
+        "_start_aggregator_output": Mock(return_value=drainer),
+        "wait_for_tcp_listen": Mock(return_value=False),
+        "start_training_process": _start_training,
+        "_start_training_output": Mock(return_value=drainer),
+        "terminate_process_group": Mock(),
+        "write_code_manifest": Mock(return_value=None),
+        "write_run_manifest": Mock(return_value=tmp_path / "manifest.json"),
+        "update_run_manifest": Mock(),
+    }.items():
+        monkeypatch.setattr(launcher_commands, name, value)
+
+    with pytest.raises(SystemExit):
+        launch_process(str(script), args)
+
+    nonce = envs["aggregator"]["TRACEML_RUN_NONCE"]
+    assert envs["training"]["TRACEML_RUN_NONCE"] == nonce
+    if nnodes == 1:
+        assert len(nonce) >= 16 and nonce != "inherited"
+    else:
+        assert nonce == ""
