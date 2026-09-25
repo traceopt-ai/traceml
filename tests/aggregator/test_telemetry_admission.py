@@ -155,7 +155,7 @@ def test_foreign_session_is_dropped_and_own_session_kept(tmp_path):
     ]
     assert agg._split_telemetry_payloads(foreign) == []
     assert agg._split_telemetry_payloads([foreign]) == []
-    assert agg._foreign_senders == {("host-a", 4242, "run-a"): 3}
+    assert agg._foreign_senders == {("host-a", "4242", "run-a"): 3}
 
 
 def test_foreign_nonce_is_dropped_for_a_reused_run_name(tmp_path):
@@ -167,7 +167,7 @@ def test_foreign_nonce_is_dropped_for_a_reused_run_name(tmp_path):
     assert agg._split_telemetry_payloads([rerun, own, no_nonce]) == [
         [own, no_nonce]
     ]
-    assert agg._foreign_senders == {("host-a", 4242, "run-b"): 1}
+    assert agg._foreign_senders == {("host-a", "4242", "run-b"): 1}
 
 
 def test_foreign_rank_finished_does_not_finish_a_rank(tmp_path):
@@ -188,6 +188,15 @@ def test_foreign_rank_finished_does_not_finish_a_rank(tmp_path):
         ("host-a", None, "run-a"): 1,
         ("host-a", None, "run-b"): 1,
     }
+
+
+def test_malformed_foreign_stamp_is_dropped_without_raising(tmp_path):
+    agg = _make_aggregator(tmp_path, _enforcing(tmp_path))
+    foreign = _envelope(session_id="run-a")
+    foreign["meta"]["pid"] = [1, 2]
+
+    assert agg._split_telemetry_payloads([foreign]) == []
+    assert agg._foreign_senders == {("host-a", "[1, 2]", "run-a"): 1}
 
 
 def test_session_is_not_enforced_without_the_flag(tmp_path):

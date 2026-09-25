@@ -48,8 +48,9 @@ _SQLITE_FINALIZE_TINY_FLOOR_SEC = 0.001
 
 _LOGGER = logging.getLogger(__name__)
 
-# (hostname, pid, session_id) of a sender whose payloads were not admitted.
-_ForeignSender = Tuple[Optional[str], Optional[int], Optional[str]]
+# (hostname, pid, session_id) of a sender whose payloads were not admitted,
+# as strings so a malformed stamp cannot make the key unhashable.
+_ForeignSender = Tuple[Optional[str], Optional[str], Optional[str]]
 
 
 def _safe(logger: Any, label: str, fn: Callable[[], Any]) -> Any:
@@ -512,10 +513,9 @@ class TraceMLAggregator:
         for key, want in expected:
             got = stamp.get(key)
             if want and got not in (None, "") and str(got) != want:
-                sender = (
-                    stamp.get("hostname"),
-                    stamp.get("pid"),
-                    stamp.get("session_id"),
+                sender: _ForeignSender = tuple(  # type: ignore[assignment]
+                    None if stamp.get(field) is None else str(stamp[field])
+                    for field in ("hostname", "pid", "session_id")
                 )
                 self._foreign_senders[sender] = (
                     self._foreign_senders.get(sender, 0) + 1
