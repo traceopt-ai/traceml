@@ -10,6 +10,7 @@ from typing import Any, Callable, Iterator, Mapping, Sequence
 
 from traceml_ai.aggregator.sqlite_writers import (
     process as process_projection,
+    runtime_environment as runtime_environment_projection,
     step_memory as step_memory_projection,
     step_time as step_time_projection,
     system as system_projection,
@@ -25,14 +26,15 @@ def init_summary_schema(conn: sqlite3.Connection) -> None:
         process_projection.init_schema,
         step_time_projection.init_schema,
         step_memory_projection.init_schema,
+        runtime_environment_projection.init_schema,
     ):
         initialize(conn)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS runtime_environment (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            training_strategy TEXT
-        )
-        """)
+
+
+def init_step_time_schema(conn: sqlite3.Connection) -> None:
+    """Create only the projection tables read by the Step Time repository."""
+    step_time_projection.init_schema(conn)
+    runtime_environment_projection.init_schema(conn)
 
 
 @contextmanager
@@ -276,15 +278,23 @@ def insert_step_time_sample(
     ts: float | None = None,
     seq: int | None | object = _UNSET,
 ) -> None:
-    """Insert one canonical Step Time projection row."""
-    payload = events or step_time_events(
-        dataloader=dataloader,
-        h2d=h2d,
-        forward=2.0 + rank if forward is None else forward,
-        backward=3.0 + rank if backward is None else backward,
-        optimizer=optimizer,
-        traced_step_time=traced_step_time,
-        clock=clock,
+    """Insert one canonical Step Time projection row.
+
+    ``events`` replaces the generated payload verbatim, so an empty mapping
+    persists no phases instead of falling back to default timings.
+    """
+    payload = (
+        events
+        if events is not None
+        else step_time_events(
+            dataloader=dataloader,
+            h2d=h2d,
+            forward=2.0 + rank if forward is None else forward,
+            backward=3.0 + rank if backward is None else backward,
+            optimizer=optimizer,
+            traced_step_time=traced_step_time,
+            clock=clock,
+        )
     )
     _insert_row(
         conn,
@@ -348,12 +358,17 @@ def insert_training_strategy(
 ) -> None:
     """Append runtime strategy rows in observation order."""
     conn.executemany(
-        "INSERT INTO runtime_environment(training_strategy) VALUES (?)",
-        [(strategy,) for strategy in strategies],
+        "INSERT INTO runtime_environment(recv_ts_ns, training_strategy) "
+        "VALUES (?, ?)",
+        [
+            (recv_ts_ns, strategy)
+            for recv_ts_ns, strategy in enumerate(strategies, start=1)
+        ],
     )
 
 
 __all__ = [
+    "init_step_time_schema",
     "init_summary_schema",
     "insert_process_sample",
     "insert_step_memory_sample",

@@ -14,11 +14,17 @@ across the CLI, dashboard, and final-summary test suites.
 
 from __future__ import annotations
 
-import json
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
+
+from tests.sqlite_fixtures import (
+    init_step_time_schema,
+    insert_step_time_sample,
+    insert_training_strategy,
+    sqlite_database,
+)
 
 MetricProfile = Mapping[str, float]
 RankProfiles = Mapping[int, MetricProfile]
@@ -211,7 +217,7 @@ def create_step_time_database(
     path: str | Path,
     scenario: StepTimeScenario,
 ) -> None:
-    """Persist a scenario using the columns read by all Step Time surfaces.
+    """Persist a scenario through the production projection schema.
 
     Parameters
     ----------
@@ -220,85 +226,29 @@ def create_step_time_database(
     scenario:
         Canonical scenario whose rows and runtime strategy are persisted.
     """
-    db_path = str(path)
     world_size = len(scenario.profiles)
-    conn = sqlite3.connect(db_path)
-    try:
-        conn.executescript("""
-            CREATE TABLE step_time_samples (
-                id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-                recv_ts_ns         INTEGER NOT NULL,
-                rank               INTEGER,
-                global_rank        INTEGER,
-                local_rank         INTEGER,
-                world_size         INTEGER,
-                local_world_size   INTEGER,
-                node_rank          INTEGER,
-                hostname           TEXT,
-                sample_ts_s        REAL,
-                seq                INTEGER,
-                step               INTEGER,
-                events_json        TEXT NOT NULL
-            );
-
-            CREATE TABLE runtime_environment (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                training_strategy TEXT
-            );
-            """)
-        conn.execute(
-            "INSERT INTO runtime_environment(training_strategy) VALUES (?);",
-            (scenario.training_strategy,),
-        )
-
-        rows = []
+    with sqlite_database(path, init_step_time_schema) as conn:
+        insert_training_strategy(conn, scenario.training_strategy)
         sequence = 0
         for global_rank, profile in sorted(scenario.profiles.items()):
-            payload = json.dumps(
-                _event_payload(profile, scenario.clock),
-                sort_keys=True,
-            )
+            events = _event_payload(profile, scenario.clock)
             for step in scenario.steps:
                 sequence += 1
-                rows.append(
-                    (
-                        sequence,
-                        global_rank,
-                        global_rank,
-                        global_rank,
-                        world_size,
-                        world_size,
-                        0,
-                        "worker-0",
-                        float(step),
-                        sequence,
-                        step,
-                        payload,
-                    )
+                insert_step_time_sample(
+                    conn,
+                    row_id=sequence,
+                    rank=global_rank,
+                    step=step,
+                    traced_step_time=profile.get("traced_step_time"),
+                    events=events,
+                    local_rank=global_rank,
+                    world_size=world_size,
+                    local_world_size=world_size,
+                    node_rank=0,
+                    hostname="worker-0",
+                    ts=float(step),
+                    seq=sequence,
                 )
-
-        conn.executemany(
-            """
-            INSERT INTO step_time_samples(
-                recv_ts_ns,
-                rank,
-                global_rank,
-                local_rank,
-                world_size,
-                local_world_size,
-                node_rank,
-                hostname,
-                sample_ts_s,
-                seq,
-                step,
-                events_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-            """,
-            rows,
-        )
-        conn.commit()
-    finally:
-        conn.close()
 
 
 __all__ = [

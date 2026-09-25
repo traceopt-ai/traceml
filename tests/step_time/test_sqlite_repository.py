@@ -11,23 +11,62 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
+from typing import Any, Sequence
 from unittest.mock import patch
 
 import pytest
 
+from tests.sqlite_fixtures import (
+    init_step_time_schema,
+    insert_training_strategy,
+)
 from tests.step_time.scenarios import (
     BALANCED_PROFILE,
     StepTimeScenario,
     create_step_time_database,
 )
 from tests.step_time.factories import rank_average
+from traceml_ai.aggregator.sqlite_writers import (
+    step_time as step_time_projection,
+)
+from traceml_ai.samplers.schema.step_time_schema import StepTimeEventSample
 from traceml_ai.step_time.analysis import StepTimeAnalyzer
-from traceml_ai.step_time.model import StepTimeLoadRequest
+from traceml_ai.step_time.model import (
+    STEP_TIME_EVENT_NAMES,
+    StepTimeClockValues,
+    StepTimeLoadRequest,
+)
 from traceml_ai.step_time.sqlite import SQLiteStepTimeRepository
+from traceml_ai.telemetry.envelope import TelemetryEnvelope, TelemetryMeta
+
+_LIVE_TAIL_INDEX = "idx_step_time_samples_global_rank_step_id"
+
+
+class _RecordingConnection:
+    """Forward to one connection while recording each executed statement."""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self._conn = conn
+        self.statements: list[tuple[str, tuple[Any, ...]]] = []
+
+    def execute(
+        self,
+        sql: str,
+        parameters: Sequence[Any] = (),
+    ) -> sqlite3.Cursor:
+        self.statements.append((sql, tuple(parameters)))
+        return self._conn.execute(sql, parameters)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._conn, name)
 
 
 def _create_minimal_table(conn: sqlite3.Connection) -> None:
-    """Create the smallest schema accepted by the repository."""
+    """Create the smallest legacy schema accepted by the repository.
+
+    Only the fail-open legacy-schema test uses this. Every other test reads
+    the production projection schema from ``tests.sqlite_fixtures``.
+    """
     conn.execute("""
         CREATE TABLE step_time_samples (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -159,10 +198,7 @@ def test_live_strategy_change_reuses_rows_but_invalidates_analysis(
     with sqlite3.connect(db_path) as conn:
         repository = SQLiteStepTimeRepository(conn)
         first = repository.load_live(request)
-        conn.execute(
-            "INSERT INTO runtime_environment(training_strategy) "
-            "VALUES ('fsdp');"
-        )
+        insert_training_strategy(conn, "fsdp")
         conn.commit()
         with patch(
             "traceml_ai.step_time.sqlite.json.loads",
@@ -253,16 +289,12 @@ def test_live_selection_cost_is_independent_of_total_run_length(
     def measured_batches(stored_steps: int) -> int:
         db_path = tmp_path / f"live-cost-{stored_steps}.db"
         with sqlite3.connect(db_path) as conn:
-            _create_minimal_table(conn)
-            conn.execute("""
-                CREATE INDEX step_time_rank_step_id
-                ON step_time_samples(global_rank, step DESC, id DESC);
-                """)
+            init_step_time_schema(conn)
             conn.executemany(
                 """
                 INSERT INTO step_time_samples(
-                    global_rank, step, events_json
-                ) VALUES (?, ?, '{}');
+                    recv_ts_ns, global_rank, step, events_json
+                ) VALUES (0, ?, ?, '{}');
                 """,
                 (
                     (rank, step)
@@ -292,6 +324,140 @@ def test_live_selection_cost_is_independent_of_total_run_length(
     assert long_run <= short_run + 10
 
 
+def test_live_tail_query_uses_the_production_index(tmp_path: Path) -> None:
+    """The writer's index must exist and serve the repository tail scan."""
+    db_path = tmp_path / "live-index.db"
+    create_step_time_database(
+        db_path,
+        StepTimeScenario(
+            name="live_index",
+            profiles={0: BALANCED_PROFILE, 1: BALANCED_PROFILE},
+            steps=(1, 2, 3, 4),
+        ),
+    )
+
+    with sqlite3.connect(db_path) as conn:
+        indexes = {
+            str(row[1])
+            for row in conn.execute(
+                "PRAGMA index_list(step_time_samples);"
+            ).fetchall()
+        }
+        recorder = _RecordingConnection(conn)
+        SQLiteStepTimeRepository(recorder).load_live(
+            StepTimeLoadRequest(window_size=2)
+        )
+        tail_queries = [
+            (sql, parameters)
+            for sql, parameters in recorder.statements
+            if sql.lstrip().startswith("WITH RECURSIVE")
+        ]
+        assert len(tail_queries) == 1
+        sql, parameters = tail_queries[0]
+        plan = [
+            str(row[3])
+            for row in conn.execute(
+                f"EXPLAIN QUERY PLAN {sql}", parameters
+            ).fetchall()
+        ]
+
+    assert _LIVE_TAIL_INDEX in indexes
+    candidate_scans = [
+        detail for detail in plan if detail.startswith("SEARCH candidate ")
+    ]
+    assert candidate_scans, plan
+    assert all(_LIVE_TAIL_INDEX in detail for detail in candidate_scans), plan
+
+
+def test_writer_events_json_round_trips_through_repository_decoder(
+    tmp_path: Path,
+) -> None:
+    """Pin the writer's persisted event shape to the decoder's contract."""
+    events = {
+        event_name: {
+            "cuda:0": {
+                "is_gpu": True,
+                "duration_ms": float(index),
+                "cpu_ms": float(index) + 0.5,
+                "gpu_ms": float(index),
+                "n_calls": 2,
+                "dropped_by_writer": "extra",
+            },
+            "cpu": {
+                "is_gpu": False,
+                "duration_ms": 1,
+                "cpu_ms": 1,
+                "gpu_ms": None,
+                "n_calls": 1,
+            },
+        }
+        for index, event_name in enumerate(
+            STEP_TIME_EVENT_NAMES.values(), start=1
+        )
+    }
+    envelope = TelemetryEnvelope(
+        meta=TelemetryMeta.from_mapping(
+            {
+                "sampler": step_time_projection.SAMPLER_NAME,
+                "global_rank": 0,
+                "rank": 0,
+            }
+        ),
+        body={
+            "tables": {
+                "step_time": [
+                    StepTimeEventSample(
+                        seq=1,
+                        timestamp=1.0,
+                        step=7,
+                        events=events,
+                    ).to_wire()
+                ]
+            }
+        },
+    )
+    rows = step_time_projection.build_rows(envelope, recv_ts_ns=1)
+
+    events_json = rows["step_time_samples"][0][-1]
+    assert json.loads(events_json) == {
+        event_name: {
+            "cuda:0": {
+                "is_gpu": True,
+                "duration_ms": float(index),
+                "cpu_ms": float(index) + 0.5,
+                "gpu_ms": float(index),
+                "n_calls": 2,
+            },
+            "cpu": {
+                "is_gpu": False,
+                "duration_ms": 1.0,
+                "cpu_ms": 1.0,
+                "gpu_ms": None,
+                "n_calls": 1,
+            },
+        }
+        for index, event_name in enumerate(
+            STEP_TIME_EVENT_NAMES.values(), start=1
+        )
+    }
+
+    with sqlite3.connect(tmp_path / "writer-contract.db") as conn:
+        init_step_time_schema(conn)
+        step_time_projection.insert_rows(conn, rows)
+        snapshot = SQLiteStepTimeRepository(conn).load_summary(
+            StepTimeLoadRequest()
+        )
+
+    assert [(row.global_rank, row.step) for row in snapshot.rows] == [(0, 7)]
+    assert snapshot.rows[0].metrics == {
+        metric: StepTimeClockValues(
+            cpu_ms=float(index) + 1.5,
+            gpu_ms=float(index),
+        )
+        for index, metric in enumerate(STEP_TIME_EVENT_NAMES, start=1)
+    }
+
+
 def test_repository_flattens_multi_device_dual_clock_values(
     tmp_path: Path,
 ) -> None:
@@ -306,11 +472,12 @@ def test_repository_flattens_multi_device_dual_clock_values(
         },
     }
     with sqlite3.connect(db_path) as conn:
-        _create_minimal_table(conn)
+        init_step_time_schema(conn)
         conn.execute(
             """
-            INSERT INTO step_time_samples(global_rank, step, events_json)
-            VALUES (0, 1, ?);
+            INSERT INTO step_time_samples(
+                recv_ts_ns, global_rank, step, events_json
+            ) VALUES (0, 0, 1, ?);
             """,
             (json.dumps(events),),
         )
@@ -483,10 +650,7 @@ def test_related_reads_share_one_sqlite_snapshot(tmp_path: Path) -> None:
             nonlocal inserted
             if inserted or "FROM runtime_environment" not in statement:
                 return
-            writer.execute("""
-                INSERT INTO runtime_environment(training_strategy)
-                VALUES ('fsdp');
-                """)
+            insert_training_strategy(writer, "fsdp")
             writer.commit()
             inserted = True
 
