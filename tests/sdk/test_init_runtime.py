@@ -482,3 +482,18 @@ def test_generated_session_id_stays_generated_in_a_child_process(
     assert child.session_id == parent.session_id
     assert child.session_source == "generated"
 
+
+@pytest.mark.parametrize(("env", "nonce"), [(None, ""), ("n1", "n1")])
+def test_direct_runtime_settings_read_the_run_nonce(
+    initialization, monkeypatch, tmp_path, env, nonce
+):
+    """A rank started under `traceml run` stamps the launcher's nonce."""
+    monkeypatch.chdir(tmp_path)
+    if env is None:
+        monkeypatch.delenv("TRACEML_RUN_NONCE", raising=False)
+    else:
+        monkeypatch.setenv("TRACEML_RUN_NONCE", env)
+
+    settings = _resolve_direct_settings(initialization)
+
+    assert settings.run_nonce == nonce

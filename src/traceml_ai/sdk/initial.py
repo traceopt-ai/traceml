@@ -351,6 +351,8 @@ def _resolve_runtime_settings(
         # Lets an aggregator started with an explicit id still admit a rank
         # that had to make up its own (plain `python train.py` under serve).
         session_source=session_source,
+        # Set by a single-node `traceml run`, as executor.py reads it.
+        run_nonce=_env_str("TRACEML_RUN_NONCE", ""),
         trace_max_steps=trace_max_steps,
         aggregator=AggregatorTransportSettings(
             connect_host=host, bind_host=host, port=port
