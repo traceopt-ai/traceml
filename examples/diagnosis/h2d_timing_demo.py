@@ -19,8 +19,10 @@ Usage
 -----
     traceml run examples/diagnosis/h2d_timing_demo.py
 
-Requires a CUDA GPU for meaningful H2D timings (works on CPU too, timings
-will just be near-zero).
+Requires a CUDA GPU for H2D timings. The script still runs on CPU, but
+TraceML does not time CPU-only moves, so the H2D signal is absent rather
+than zero: no `_traceml_internal:h2d_time` event is recorded, `h2d_ms`
+stays null, and the H2D column below prints a dash for every step.
 """
 
 import glob

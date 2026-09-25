@@ -7,10 +7,23 @@ also copies that same item to `diagnosis`.
 The final summary also includes a top-level `primary_diagnosis`. That field is
 a run-level performance finding promoted from existing section diagnoses. It is
 not a replacement for section diagnoses and it is not a health-warning rollup.
-In schema `1.6`, Step Time drives the top-level primary diagnosis; System GPU
+In schema `1.8`, Step Time drives the top-level primary diagnosis; System GPU
 utilization can appear as supporting evidence or as an unexplained-utilization
 fallback. System, Process, and Step Memory resource findings remain canonical
 inside their sections.
+
+Three `primary_diagnosis` kinds are top-level only. No section emits them:
+
+- `INSUFFICIENT_STEP_TIME_DATA`: the Step Time diagnosis is `NO_DATA`,
+  `WARMUP`, or `INCOMPLETE_DATA`, so no performance cause is available.
+- `LOW_GPU_UTILIZATION_UNEXPLAINED`: Step Time is `BALANCED` and System
+  reports `LOW_GPU_UTILIZATION` or `MODERATE_GPU_UTILIZATION`.
+- `NO_CLEAR_PERFORMANCE_BOTTLENECK`: Step Time is `BALANCED` and GPU
+  utilization is not low or moderate. It is also the fallback for a Step
+  Time kind the policy does not recognize.
+
+For the full field shape and the selection policy, see
+[Primary Diagnosis Shape](../reporting/SCHEMA.md#primary-diagnosis-shape).
 
 Use `kind` as the stable internal key for logic and comparisons. Use `status`
 as the user-facing display label. In many cases they are similar, but they are

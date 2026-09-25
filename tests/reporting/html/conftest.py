@@ -72,10 +72,11 @@ def _make_payload(
             "nodes_observed": 1,
             "gpus_observed": 2,
         }
-    # Use the current production schema-1.7 metric set. Only Step Time,
-    # input wait, and compute are measured in this default fixture; every
-    # other field stays None (never a fabricated 0.0) so bare payload tests
-    # exercise the nullable shape emitted by real runs.
+    # Use the production Step Time metric set, whose canonical vocabulary
+    # was introduced in schema 1.7. Only Step Time, input wait, and compute
+    # are measured in this default fixture; every other field stays None
+    # (never a fabricated 0.0) so bare payload tests exercise the nullable
+    # shape emitted by real runs.
     st_metrics = list(STEP_TIME_METRIC_NAMES)
     _st_unmeasured = {
         name: None
