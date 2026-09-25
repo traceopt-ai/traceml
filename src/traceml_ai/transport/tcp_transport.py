@@ -90,17 +90,25 @@ class TCPServer:
 
     def stop(self) -> None:
         self._stop_event.set()
-        if self._sock:
+        sock = self._sock
+        self._sock = None
+        if sock:
             try:
                 # On Linux close() alone does not wake the accept thread, and
                 # its blocked accept() keeps the port listening after stop.
-                self._sock.shutdown(socket.SHUT_RDWR)
+                sock.shutdown(socket.SHUT_RDWR)
             except Exception:
+                # Listening sockets commonly report ENOTCONN. shutdown() is
+                # only a best-effort wakeup before the required close().
                 pass
             try:
-                self._sock.close()
-            except Exception:
-                pass
+                sock.close()
+            except Exception as exc:
+                self.logger.error(
+                    "[TraceML] TCP listener close failed: %s: %s",
+                    type(exc).__name__,
+                    exc,
+                )
 
     def poll(self) -> Iterator[Dict]:
         """

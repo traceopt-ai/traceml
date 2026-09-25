@@ -759,7 +759,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     aggregator_exited_early = False
     telemetry_available = False
     telemetry_startup_reason: Optional[str] = None
-    port_conflict_host: Optional[str] = None
+    port_conflict_detail: Optional[str] = None
 
     def finish_aggregator_output() -> Optional[ProcessOutputResult]:
         nonlocal aggregator_output_result
@@ -824,14 +824,15 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         aggregator_started_at = utc_now_iso()
         try:
             ensure_aggregator_port_free(
-                aggregator_cfg.bind_host, aggregator_cfg.port
+                aggregator_cfg.bind_host,
+                aggregator_cfg.port,
+                connect_host=aggregator_cfg.connect_host,
             )
             agg_proc = start_aggregator_process(env=env, cwd=execution_cwd)
         except AggregatorPortInUseError as exc:
-            print(f"[TraceML] ERROR: {exc}", file=sys.stderr)
             ready = False
             telemetry_startup_reason = "aggregator_port_in_use"
-            port_conflict_host = exc.host
+            port_conflict_detail = str(exc).rstrip(".")
         except OSError as exc:
             _log_launcher_exception("aggregator process could not start", exc)
             ready = False
@@ -897,12 +898,8 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                 else ""
             )
             if telemetry_startup_reason == "aggregator_port_in_use":
-                # Something answered on the port, so "not reachable" is
-                # false; the error above says how to find the process.
-                failure = (
-                    f"aggregator port {port_conflict_host}:"
-                    f"{aggregator_cfg.port} was already in use by another "
-                    "process"
+                failure = port_conflict_detail or (
+                    "aggregator port was already in use by another process"
                 )
             else:
                 failure = (
@@ -913,15 +910,22 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                 f"[TraceML] ERROR: {failure}"
                 f"{exit_detail}; training was not started. Use "
                 "--on-missing-aggregator=warn or "
-                "TRACEML_ON_MISSING_AGGREGATOR=warn to continue without "
-                "telemetry.",
+                "TRACEML_ON_MISSING_AGGREGATOR=warn only when the script "
+                "can run without TraceML telemetry or traceml.summary().",
                 file=sys.stderr,
             )
             raise SystemExit(1)
 
+        if telemetry_startup_reason == "aggregator_port_in_use":
+            unavailable_detail = port_conflict_detail or (
+                "aggregator port was already in use by another process"
+            )
+        else:
+            unavailable_detail = "aggregator was not available"
         print(
-            "[TraceML] WARNING: aggregator was not available; training will "
-            "continue without TraceML telemetry.",
+            f"[TraceML] WARNING: {unavailable_detail}; training will continue "
+            "with TraceML disabled. Calls that require the aggregator, "
+            "including traceml.summary(), will fail.",
             file=sys.stderr,
         )
         env["TRACEML_DISABLED"] = "1"

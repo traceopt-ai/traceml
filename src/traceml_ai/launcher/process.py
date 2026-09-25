@@ -27,6 +27,9 @@ _IS_WINDOWS = sys.platform == "win32"
 _ADDR_IN_USE_ERRNOS = frozenset(
     (errno.EADDRINUSE, getattr(errno, "WSAEADDRINUSE", errno.EADDRINUSE))
 )
+_WINDOWS_ADDR_IN_USE_ERRNOS = frozenset(
+    (errno.EACCES, getattr(errno, "WSAEACCES", 10013), 10013)
+)
 # Absent on POSIX, where start_new_session is used instead.
 _CREATE_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
 
@@ -393,7 +396,12 @@ class AggregatorPortInUseError(RuntimeError):
         self.host = host
 
 
-def ensure_aggregator_port_free(host: str, port: int) -> None:
+def ensure_aggregator_port_free(
+    host: str,
+    port: int,
+    *,
+    connect_host: Optional[str] = None,
+) -> None:
     """Raise ``AggregatorPortInUseError`` if ``(host, port)`` is taken.
 
     ``wait_for_tcp_listen`` only proves that *something* accepts on the
@@ -404,27 +412,46 @@ def ensure_aggregator_port_free(host: str, port: int) -> None:
 
     On macOS, SO_REUSEADDR lets a wildcard bind succeed beside a listener on
     127.0.0.1, and local ranks connecting to 127.0.0.1 would still reach
-    that listener, so a wildcard host also probes loopback. Each probe is
-    closed before the next, so they never conflict with each other.
+    that listener. A wildcard bind therefore also probes loopback and the
+    concrete address workers use. Each probe is closed before the next, so
+    they never conflict with each other. A worker address that cannot be bound
+    for another reason is ignored because the aggregator's bind address is the
+    authoritative startup check.
     """
     if int(port) == 0:
         return
     probe_hosts = [host]
     if host in ("0.0.0.0", ""):
-        probe_hosts.append("127.0.0.1")
+        for candidate in ("127.0.0.1", connect_host):
+            if candidate and candidate not in ("0.0.0.0", ""):
+                if candidate not in probe_hosts:
+                    probe_hosts.append(candidate)
     for probe_host in probe_hosts:
         try:
             probe = bind_exclusive_listener(probe_host, port, backlog=1)
         except OSError as exc:
-            if exc.errno not in _ADDR_IN_USE_ERRNOS:
-                # Other bind errors surface from the aggregator itself.
-                return
+            address_in_use = exc.errno in _ADDR_IN_USE_ERRNOS or (
+                _IS_WINDOWS and exc.errno in _WINDOWS_ADDR_IN_USE_ERRNOS
+            )
+            if not address_in_use:
+                # An unresolvable or non-local worker address is not evidence
+                # that another aggregator owns the endpoint.
+                continue
+            if _IS_WINDOWS:
+                detail = (
+                    "is already in use or reserved by Windows. Stop the "
+                    "process using that endpoint or pass --aggregator-port "
+                    "with a free, unreserved port."
+                )
+            else:
+                detail = (
+                    "is already in use, most likely by an aggregator left "
+                    "behind by an earlier `traceml run` that was killed. "
+                    f"Stop that process (`lsof -i :{port}` finds it) or pass "
+                    "--aggregator-port with a free port."
+                )
             raise AggregatorPortInUseError(
-                f"aggregator port {probe_host}:{port} is already in use, "
-                "most likely by an aggregator left behind by an earlier "
-                "`traceml run` that was killed. Stop that process "
-                f"(`lsof -i :{port}` finds it) or pass --aggregator-port "
-                "with a free port.",
+                f"aggregator port {probe_host}:{port} {detail}",
                 host=probe_host,
             ) from exc
         probe.close()

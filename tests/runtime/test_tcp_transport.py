@@ -3,16 +3,22 @@ import socket
 
 import pytest
 
-from traceml_ai.transport.tcp_transport import TCPClient, TCPConfig, TCPServer
+from traceml_ai.transport.tcp_transport import (
+    TCPClient,
+    TCPConfig,
+    TCPServer,
+    bind_exclusive_listener,
+)
 
 
 class _FakeSocket:
     def __init__(self):
         self.bound_to = None
         self.closed = False
+        self.options = []
 
-    def setsockopt(self, *_args):
-        return None
+    def setsockopt(self, *args):
+        self.options.append(args)
 
     def bind(self, address):
         self.bound_to = address
@@ -48,6 +54,30 @@ class _FailingSendSocket:
 
     def close(self):
         self.closed = True
+
+
+@pytest.mark.parametrize("exclusive", [None, 42])
+def test_listener_uses_platform_appropriate_socket_option(
+    monkeypatch, exclusive
+) -> None:
+    fake = _FakeSocket()
+    monkeypatch.setattr(
+        "traceml_ai.transport.tcp_transport.socket.socket",
+        lambda *_args, **_kwargs: fake,
+    )
+    if exclusive is None:
+        monkeypatch.delattr(socket, "SO_EXCLUSIVEADDRUSE", raising=False)
+        expected_option = socket.SO_REUSEADDR
+    else:
+        monkeypatch.setattr(
+            socket, "SO_EXCLUSIVEADDRUSE", exclusive, raising=False
+        )
+        expected_option = exclusive
+
+    result = bind_exclusive_listener("127.0.0.1", 43170, backlog=1)
+
+    assert result is fake
+    assert fake.options == [(socket.SOL_SOCKET, expected_option, 1)]
 
 
 def test_tcp_server_exposes_actual_port_for_dynamic_bind(monkeypatch) -> None:
@@ -95,13 +125,37 @@ def test_tcp_server_stop_releases_its_port() -> None:
     first = TCPServer(TCPConfig(host="127.0.0.1", port=0))
     first.start()
     port = first.port
+    thread = first._thread
     first.stop()
-    first._thread.join(timeout=2.0)
-    assert not first._thread.is_alive()
+    assert thread is not None
+    thread.join(timeout=2.0)
+    assert not thread.is_alive()
+    assert first._sock is None
 
     second = TCPServer(TCPConfig(host="127.0.0.1", port=port))
     second.start()
     second.stop()
+
+
+def test_tcp_server_logs_listener_close_failure() -> None:
+    class _FailingCloseSocket(_FakeSocket):
+        def shutdown(self, _how):
+            return None
+
+        def close(self):
+            raise OSError("close failed")
+
+    server = TCPServer(TCPConfig())
+    server._sock = _FailingCloseSocket()
+    logger = _RecordingLogger()
+    server.logger = logger
+
+    server.stop()
+
+    assert server._sock is None
+    assert logger.errors == [
+        "[TraceML] TCP listener close failed: OSError: close failed"
+    ]
 
 
 def test_tcp_server_rebinds_port_left_in_time_wait() -> None:
