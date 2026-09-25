@@ -16,8 +16,6 @@ from pathlib import Path
 
 import pytest
 
-from traceml_ai.reporting.final import SCHEMA_VERSION
-
 pytest.importorskip("torch")
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -174,9 +172,11 @@ def test_final_summary_json_smoke(tmp_path):
 
 @pytest.mark.skipif(
     sys.platform == "win32",
-    reason="Aggregator uses socket.SO_REUSEPORT, unavailable on Windows.",
+    reason="End-to-end torchrun smoke run not yet verified on Windows.",
 )
 def test_two_rank_ddp_final_summary_smoke(tmp_path):
+    from traceml_ai.reporting.final import SCHEMA_VERSION
+
     logs_dir = tmp_path / "logs"
     env = os.environ.copy()
     env["OMP_NUM_THREADS"] = "1"
