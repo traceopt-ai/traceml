@@ -2192,6 +2192,7 @@ def test_launcher_shares_run_nonce_only_on_single_node(
     for name, value in {
         "setup_error_logger": Mock(),
         "install_shutdown_handlers": Mock(),
+        "ensure_aggregator_port_free": Mock(),
         "start_aggregator_process": _start_aggregator,
         "_start_aggregator_output": Mock(return_value=drainer),
         "wait_for_tcp_listen": Mock(return_value=False),
@@ -2290,6 +2291,7 @@ def test_launcher_prints_the_foreign_run_warning_in_cli_mode(
     for name, value in {
         "setup_error_logger": Mock(),
         "install_shutdown_handlers": Mock(),
+        "ensure_aggregator_port_free": Mock(),
         "start_aggregator_process": Mock(
             return_value=Mock(pid=10, returncode=7, **{"poll.return_value": 7})
         ),

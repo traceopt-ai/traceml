@@ -17,6 +17,7 @@ subprocess with torch blocked (``sys.modules["torch"] = None`` makes any
 
 import builtins
 import os
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -42,6 +43,12 @@ _PUBLIC_INSTRUMENTATION_API = (
     "wrap_optimizer",
     "wrap_h2d",
 )
+
+
+def _free_tcp_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
 
 
 def _run_torch_free(code: str) -> subprocess.CompletedProcess:
@@ -276,6 +283,7 @@ def test_watch_runs_end_to_end_without_torch(tmp_path):
             "import sys; sys.argv = ['traceml', 'watch', "
             f"{str(script)!r}, '--mode=summary', "
             f"'--logs-dir', {str(logs_dir)!r}, "
+            f"'--aggregator-port', '{_free_tcp_port()}', "
             "'--run-name', 'torch_free_e2e']; "
             "from traceml_ai.launcher.cli import main; main()",
         ],
