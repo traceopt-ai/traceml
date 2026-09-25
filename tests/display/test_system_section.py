@@ -980,3 +980,142 @@ def test_a_live_machine_gets_no_liveness_note() -> None:
     update_system_section(panel, as_payload(_liveness_payload("fresh", 1.0)))
 
     assert "not reporting" not in panel["note"].text
+
+
+def _display(element) -> str:
+    """The CSS display an element was last given, '' if never set."""
+    return element._style.get("display", "")
+
+
+def test_the_first_tick_waits_and_the_gpu_slots_come_back() -> None:
+    """Before any sample the card waits; it does not claim a CPU-only box.
+
+    The compute layer's empty payload says ``gpu_available=False`` because
+    nothing has been read yet, so the GPU slots fold into their one-line
+    state. When the first GPU payload lands they must come back: a slot
+    that stayed folded would read "no GPU" on a GPU host for the rest of
+    the run.
+    """
+    from nicegui import ui
+
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section import (  # noqa: E501
+        build_system_section,
+        update_system_section,
+    )
+
+    with ui.element("div"):
+        panel = build_system_section()
+    empty = {"window_len": 0, "gpu_available": False, "rollups": {}}
+    update_system_section(panel, as_payload(empty))
+
+    assert panel["note"].text == "waiting for data"
+    for key in ("util", "mem", "temp"):
+        assert panel["tiles"][key].content == "n/a"
+        # Nothing was read, so nothing is known about the GPUs yet.
+        assert panel["subs"][key].text == ""
+    assert panel["power_placeholder"].text == "waiting for data"
+    assert panel["rows_placeholder"].text == "per-GPU rows"
+    assert _display(panel["power_placeholder"]) == "flex"
+    assert _display(panel["rows"]) == "none"
+
+    update_system_section(
+        panel,
+        as_payload(
+            {
+                "window_len": 2,
+                "gpu_available": True,
+                "rollups": {
+                    "cpu": {"now": 9.0, "p50": 8.0},
+                    "ram": {"now": 9.0 * GB, "total": 200.0 * GB},
+                    "gpu_util": {"now": 99.0, "p50": 99.0},
+                    "gpu_mem": {"now": 6.3 * GB, "total": 16.1 * GB},
+                    "temp": {"now": 48.0},
+                    "gpu_power": {"now": 66.0, "p50": 66.0, "limit": 70.0},
+                    "gpus": _gpus(),
+                },
+                "series": {
+                    "x_time": [
+                        "2026-08-21T10:00:00+00:00",
+                        "2026-08-21T10:03:20+00:00",
+                    ],
+                    "cpu": [8.0, 9.0],
+                    "gpu_power": [{"gpu_idx": 0, "values": [66.0, 68.0]}],
+                },
+            }
+        ),
+    )
+
+    assert panel["gpu_visible"] is True
+    assert "waiting for data" not in panel["note"].text
+    assert _display(panel["power_placeholder"]) == "none"
+    assert _display(panel["rows"]) == "block"
+    assert _display(panel["rows_placeholder"]) == "none"
+
+
+def test_a_gpu_that_reports_no_power_says_so() -> None:
+    """A board with no power reading gets words, not an empty plot.
+
+    Some boards expose utilisation and memory but no power draw. Drawing
+    the chart anyway would give an empty frame under a label promising
+    per-GPU power, which reads as a broken card rather than a missing
+    reading.
+    """
+    from nicegui import ui
+
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section import (  # noqa: E501
+        build_system_section,
+        update_system_section,
+    )
+
+    with ui.element("div"):
+        panel = build_system_section()
+    gpus = [dict(g, power=None, power_limit=None) for g in _gpus()]
+    update_system_section(
+        panel,
+        as_payload(
+            {
+                "window_len": 2,
+                "gpu_available": True,
+                "rollups": {
+                    "cpu": {"now": 9.0, "p50": 8.0},
+                    "ram": {"now": 9.0 * GB, "total": 200.0 * GB},
+                    "gpu_util": {"now": 99.0, "p50": 99.0},
+                    "gpu_power": {"now": None, "p50": None, "limit": None},
+                    "gpus": gpus,
+                },
+                "series": {
+                    "x_time": [
+                        "2026-08-21T10:00:00+00:00",
+                        "2026-08-21T10:03:20+00:00",
+                    ],
+                    "cpu": [8.0, 9.0],
+                    "gpu_power": [
+                        {"gpu_idx": 0, "values": [None, None]},
+                        {"gpu_idx": 1, "values": [None, None]},
+                    ],
+                },
+            }
+        ),
+    )
+
+    assert panel["power_label"].text == "gpu power · not reported"
+    assert _display(panel["power_chart"]) == "none"
+
+
+def test_a_payload_of_the_wrong_type_is_ignored() -> None:
+    """Anything but a System payload leaves the card as it was."""
+    from nicegui import ui
+
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section import (  # noqa: E501
+        build_system_section,
+        update_system_section,
+    )
+
+    with ui.element("div"):
+        panel = build_system_section()
+    update_system_section(panel, None)
+    update_system_section(panel, {"window_len": 2, "rollups": {}})
+
+    assert panel["note"].text == "waiting for data"
+    assert panel["tiles"]["ram"].content == "n/a"
+    assert panel["_sig"] is None
