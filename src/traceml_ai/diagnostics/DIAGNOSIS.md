@@ -161,7 +161,10 @@ typical_component_share = median(component_share_r across ranks)
 
 `INPUT_BOUND` uses `input_wait`, `H2D_BOUND` uses H2D transfer, and
 `RESIDUAL_HEAVY` uses residual as the component. They warn at 10% and are
-critical at 20%. `H2D_BOUND` requires GPU-selected timing, so asynchronous CPU
+critical at 20%. Each also requires the component's own per-step average to
+reach 2.0 ms (median across ranks, worst rank when single-rank), so a large
+share of a tiny step is not reported and does not suppress `COMPUTE_BOUND`.
+`H2D_BOUND` requires GPU-selected timing, so asynchronous CPU
 host-call duration is not reported as transfer cost. Cross-rank skew remains
 evidence in a typical-bottleneck finding, but does not suppress one. In
 contrast, `H2D_STRAGGLER` identifies one rank's excess H2D time.
