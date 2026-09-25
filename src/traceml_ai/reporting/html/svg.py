@@ -67,7 +67,7 @@ def phase_bar(
     if not isinstance(avg, dict):
         return ""
     step_time = _phase_bar_denominator(avg, schema_version=schema_version)
-    if step_time is None or step_time <= 0.0:
+    if step_time is None or not math.isfinite(step_time) or step_time <= 0.0:
         return ""
 
     metric_names = (step_time_section.get("metadata") or {}).get(

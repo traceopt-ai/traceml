@@ -168,3 +168,26 @@ def test_watch_payload_header_uses_watch_card_routing(make_payload) -> None:
     assert "<b>4/4 ranks</b>" in chips
     assert "<b>2/4 nodes</b>" in chips
     assert "steps" not in chips
+
+
+def test_watch_artifact_stored_under_card_uses_watch_routing(
+    make_payload,
+) -> None:
+    payload = _coverage_payload(
+        make_payload,
+        world_size=4,
+        ranks_seen=4,
+        ranks_used=3,
+        nodes_expected=4,
+        nodes_observed=2,
+        nodes_partial=True,
+        steps=40,
+        alignment="common_steps",
+    )
+    # Older/simple artifacts carry the card under `card`, not `text`.
+    payload.pop("text", None)
+    payload["card"] = "TraceML Watch Summary\n"
+    payload["process"]["metadata"]["global_ranks_used"] = 4
+    chips = _chips(render_html_report(payload))
+    assert "<b>4/4 ranks</b>" in chips
+    assert "steps" not in chips

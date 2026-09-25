@@ -102,18 +102,14 @@ def test_phase_bar_distinguishes_measured_zero_from_never_measured(
     assert "residual" not in out
 
 
-def test_phase_bar_is_deterministic_with_unmeasured_phases(
-    make_section,
-) -> None:
+def test_phase_bar_empty_when_step_time_is_not_finite(make_section) -> None:
     section = make_section(
-        metric_names=["step_time_ms", "forward_ms", "optimizer_ms"],
-        average={
-            "step_time_ms": 100.0,
-            "forward_ms": 0.0,
-            "optimizer_ms": None,
-        },
+        metric_names=["step_time_ms", "forward_ms"],
+        average={"step_time_ms": float("nan"), "forward_ms": 50.0},
     )
-    assert phase_bar(section) == phase_bar(section)
+    out = phase_bar(section)
+    assert out == ""
+    assert "nan%" not in out
 
 
 def test_phase_bar_empty_when_no_timing(make_section) -> None:

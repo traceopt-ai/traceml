@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from traceml_ai.reporting.summary_artifact import extract_summary_text
 from traceml_ai.reporting.terminal_card.common import (
     DOT,
     SEVERITY_RANK,
@@ -204,7 +205,12 @@ def summary_header_coverage(
     other renderers state exactly the coverage the terminal card states.
     """
     if profile is None:
-        profile = card_profile_from_text(str(payload.get("text") or ""))
+        # Same fallback order as the artifact reader (`text`, then `card`).
+        try:
+            stored_text = extract_summary_text(dict(payload))
+        except RuntimeError:
+            stored_text = ""
+        profile = card_profile_from_text(stored_text)
     return _header_coverage(
         watch=str(profile).strip().lower() == WATCH_PROFILE,
         meta=as_mapping(payload.get("meta")),
