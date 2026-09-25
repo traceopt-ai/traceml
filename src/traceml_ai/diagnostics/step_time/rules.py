@@ -9,7 +9,7 @@ primary diagnosis and building richer result payloads.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Optional, Sequence, Tuple
 
 from ..common import DiagnosticIssue, DiagnosticRule
 from .context import (
@@ -19,7 +19,9 @@ from .context import (
     metric_worst_rank,
     non_negative_finite,
 )
-from .policy import DiagnosisThresholds
+
+if TYPE_CHECKING:
+    from .policy import DiagnosisThresholds
 
 
 def _phase_fires(

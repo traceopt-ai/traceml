@@ -40,12 +40,14 @@ class DiagnosisThresholds:
 
     overhead_share_warn: float = 0.10
     overhead_share_crit: float = 0.20
-    min_phase_ms_for_diag: float = 2.0
 
     compute_bound_share_warn: float = 0.90
 
     min_steps_for_warning_diag: int = 2
     min_steps_for_confident_diag: int = 20
+
+    # Last, so positional construction of the existing fields is unchanged.
+    min_phase_ms_for_diag: float = 2.0
 
 
 @dataclass(frozen=True)

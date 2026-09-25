@@ -403,6 +403,35 @@ def test_sub_floor_phase_does_not_suppress_compute_bound(
     assert issue.kind == "COMPUTE_BOUND"
 
 
+@pytest.mark.parametrize(("rule_cls", "field", "clock"), _PHASE_RULES)
+@pytest.mark.parametrize(
+    ("phase_ms_by_rank", "fires"),
+    [
+        # The worst rank clears the floor but the median does not.
+        pytest.param((1.0, 1.5, 3.0), False, id="median-below-worst-above"),
+        # The median clears the floor even though one rank does not.
+        pytest.param((2.5, 2.5, 1.0), True, id="median-above-one-below"),
+    ],
+)
+def test_multi_rank_phase_floor_uses_the_median_rank(
+    rule_cls: type,
+    field: str,
+    clock: str,
+    phase_ms_by_rank: tuple[float, float, float],
+    fires: bool,
+) -> None:
+    per_rank = {
+        rank: _phase_rank_map(field, phase_ms, 5.0)[0]
+        for rank, phase_ms in enumerate(phase_ms_by_rank)
+    }
+    context = _rank_context(per_rank, diagnosis_clock=clock)
+
+    assert not context.single_rank
+    issue = rule_cls().evaluate(context)
+
+    assert (issue is not None) is fires
+
+
 def test_compute_bound_is_informational_despite_compute_skew() -> None:
     per_rank = {
         0: _timing_row(
