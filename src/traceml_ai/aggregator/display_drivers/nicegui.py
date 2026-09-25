@@ -115,6 +115,7 @@ def _print_startup_notice(
     *,
     timeout_sec: float,
     port_in_use: bool = False,
+    elapsed_sec: Optional[float] = None,
 ) -> None:
     """Print one startup outcome to stderr as a [TraceML] line, best effort.
 
@@ -123,19 +124,30 @@ def _print_startup_notice(
     diagnostics stay in the log file. A failed print never raises.
     """
     try:
-        url = f"http://localhost:{port}"
-        if outcome in (ServerReadiness.READY, ServerWatchOutcome.READY_LATE):
+        stream = sys.stderr
+        if stream is None:
+            # print(file=None) would fall back to stdout.
+            return
+        # Same spelling as the launcher's "Open locally" line.
+        url = f"http://127.0.0.1:{port}"
+        if outcome is ServerReadiness.READY:
             message = f"Dashboard ready at {url}"
+        elif outcome is ServerWatchOutcome.READY_LATE:
+            late = f" after {elapsed_sec:.0f}s" if elapsed_sec else ""
+            message = f"Dashboard ready at {url}{late}"
         elif outcome is ServerReadiness.TIMEOUT:
             message = (
                 f"Dashboard not confirmed within {timeout_sec:.0f}s; "
                 f"continuing. It may still come up at {url}."
             )
         elif port_in_use:
+            # `traceml serve` has no --dashboard-port; the env var works on
+            # every entry point.
             message = (
                 f"Dashboard could not start: port {port} is already in use. "
-                f"Training continues without the dashboard. Pass "
-                f"--dashboard-port <free port> to use another port."
+                f"Training continues without the dashboard. Set "
+                f"TRACEML_DASHBOARD_PORT to a free port, or pass "
+                f"--dashboard-port with traceml run or watch."
             )
         else:
             message = (
@@ -143,7 +155,7 @@ def _print_startup_notice(
                 f"without it. Details: see traceml_errors.log in the "
                 f"session's aggregator directory."
             )
-        print(f"[TraceML] {message}", file=sys.stderr, flush=True)
+        print(f"[TraceML] {message}", file=stream, flush=True)
     except Exception:
         pass
 
@@ -360,7 +372,10 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
                     + self._startup_diagnostics()
                 )
             _print_startup_notice(
-                outcome, self._port, timeout_sec=self._startup_timeout_sec
+                outcome,
+                self._port,
+                timeout_sec=self._startup_timeout_sec,
+                elapsed_sec=elapsed,
             )
         except Exception as e:  # the watchdog itself must never raise
             self._logger.error(f"[TraceML] Dashboard startup watchdog: {e}")

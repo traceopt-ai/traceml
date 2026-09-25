@@ -186,7 +186,7 @@ def test_ready_prints_url_and_keeps_info_log(
         driver._log_startup_result(ServerReadiness.READY)
 
     assert _dashboard_lines(capsys.readouterr().err) == [
-        f"[TraceML] Dashboard ready at http://localhost:{driver._port}"
+        f"[TraceML] Dashboard ready at http://127.0.0.1:{driver._port}"
     ]
     assert "Dashboard ready at" in _messages(caplog, logging.INFO)
 
@@ -208,8 +208,9 @@ def test_taken_port_prints_port_and_flag_and_keeps_error_log(
     assert driver._server_thread is None  # the pre-check short-circuited
     assert _dashboard_lines(capsys.readouterr().err) == [
         f"[TraceML] Dashboard could not start: port {port} is already in "
-        f"use. Training continues without the dashboard. Pass "
-        f"--dashboard-port <free port> to use another port."
+        f"use. Training continues without the dashboard. Set "
+        f"TRACEML_DASHBOARD_PORT to a free port, or pass --dashboard-port "
+        f"with traceml run or watch."
     ]
     assert f"failed to start on port {port}" in _messages(
         caplog, logging.ERROR
@@ -253,7 +254,7 @@ def test_timeout_prints_notice_and_keeps_warning_log(
 
     assert _dashboard_lines(capsys.readouterr().err) == [
         f"[TraceML] Dashboard not confirmed within 10s; continuing. It may "
-        f"still come up at http://localhost:{driver._port}."
+        f"still come up at http://127.0.0.1:{driver._port}."
     ]
     assert "not confirmed within" in _messages(caplog, logging.WARNING)
 
@@ -276,9 +277,13 @@ def test_watchdog_ready_late_prints_url_and_keeps_info_log(
     with caplog.at_level(logging.INFO, logger=_LOGGER):
         driver._watch_startup()
 
-    assert _dashboard_lines(capsys.readouterr().err) == [
-        f"[TraceML] Dashboard ready at http://localhost:{driver._port}"
-    ]
+    lines = _dashboard_lines(capsys.readouterr().err)
+    assert len(lines) == 1
+    # A late start says how late, like the log line does.
+    assert lines[0].startswith(
+        f"[TraceML] Dashboard ready at http://127.0.0.1:{driver._port} after "
+    )
+    assert lines[0].endswith("s")
     assert "Dashboard ready at" in _messages(caplog, logging.INFO)
 
 
@@ -316,7 +321,10 @@ def test_console_print_failure_never_raises(
     caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     class _BrokenStream:
+        writes = 0
+
         def write(self, _text: str) -> int:
+            _BrokenStream.writes += 1
             raise OSError("stderr is gone")
 
         def flush(self) -> None:
@@ -327,4 +335,16 @@ def test_console_print_failure_never_raises(
     with caplog.at_level(logging.INFO, logger=_LOGGER):
         driver._log_startup_result(ServerReadiness.READY)
 
+    # The notice was attempted, failed, and did not escape.
+    assert _BrokenStream.writes >= 1
     assert "Dashboard ready at" in _messages(caplog, logging.INFO)
+
+
+def test_missing_stderr_does_not_fall_back_to_stdout(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sys, "stderr", None)
+    driver = _driver(_free_port())
+    driver._log_startup_result(ServerReadiness.READY)
+
+    assert "Dashboard" not in capsys.readouterr().out
