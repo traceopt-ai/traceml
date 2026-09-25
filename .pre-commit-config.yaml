@@ -22,20 +22,20 @@ repos:
         args: [--branch, main]
 
   - repo: https://github.com/PyCQA/isort
-    rev: 5.13.2
+    rev: 9.0.1
     hooks:
       - id: isort
         files: ^(src/|dev/|docs/)
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.9.4
+    rev: v0.15.22
     hooks:
       - id: ruff
         args: [--fix, --exit-non-zero-on-fix]
         files: ^(src/|dev/|docs/)
 
   - repo: https://github.com/psf/black
-    rev: 24.10.0
+    rev: 26.5.1
     hooks:
       - id: black-jupyter
 
