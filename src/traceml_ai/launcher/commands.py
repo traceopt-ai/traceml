@@ -18,7 +18,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, BinaryIO, Callable, Mapping, Optional
+from typing import Any, BinaryIO, Callable, Iterable, Mapping, Optional
 
 from traceml_ai.launcher.launch_config import (
     TORCH_LAUNCHER_REQUIRED,
@@ -69,6 +69,9 @@ SINGLE_NODE_DEFAULT_MODE = DEFAULT_UI_MODE
 MULTI_NODE_DEFAULT_MODE = DEFAULT_UI_MODE
 _FAILURE_EXCERPT_BYTES = 8 * 1024
 _FAILURE_EXCERPT_LINES = 40
+# Start of the line TraceMLAggregator prints at stop when it dropped payloads
+# stamped for another run.
+_FOREIGN_RUN_WARNING = "[TraceML] WARNING: ignored "
 
 
 def _launch_defaults_for_topology(
@@ -210,6 +213,43 @@ def _print_aggregator_stderr_path(path: Optional[Path]) -> None:
     """Report confirmed raw aggregator diagnostics after a failure."""
     if path is not None:
         print(f"[TraceML] Aggregator stderr: {path}", file=sys.stderr)
+
+
+def _print_foreign_run_warnings(
+    result: Optional[ProcessOutputResult], *, mode: str
+) -> None:
+    """
+    Repeat the aggregator's foreign-run warning once cli rendering stopped.
+
+    Other modes mirror aggregator stderr live, so they already showed it. The
+    persisted stderr file is read first because the bounded tail can lose
+    the line on a chatty run.
+    """
+    if result is None or mode != "cli":
+        return
+
+    def matching(lines: Iterable[str]) -> list[str]:
+        found = []
+        for line in lines:
+            start = line.find(_FOREIGN_RUN_WARNING)
+            if start >= 0:
+                found.append(line[start:].rstrip("\r\n"))
+        return found
+
+    found: Optional[list[str]] = None
+    if result.stderr_path is not None:
+        try:
+            with open(
+                result.stderr_path, encoding="utf-8", errors="replace"
+            ) as stream:
+                found = matching(stream)
+        except OSError:
+            found = None
+    if found is None:
+        tail = result.stderr_tail.decode("utf-8", errors="replace")
+        found = matching(tail.splitlines())
+    for line in found:
+        print(line, file=sys.stderr)
 
 
 def _print_training_output(
@@ -779,6 +819,9 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                     f"[TraceML] WARNING: {aggregator_output_result.warning}",
                     file=sys.stderr,
                 )
+            _print_foreign_run_warnings(
+                aggregator_output_result, mode=str(cfg["mode"])
+            )
         return aggregator_output_result
 
     def finish_process_output() -> None:
