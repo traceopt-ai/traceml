@@ -182,6 +182,15 @@ traceml run examples/distributed/ddp_minimal.py \
   --nproc-per-node=2 --args --steps 20
 ```
 
+The same `--steps` option sets the run length of `quickstart.py`,
+`summary_logging_minimal.py`, `manual_custom_minimal.py`,
+`integrations/huggingface_trainer_minimal.py`,
+`integrations/accelerate_minimal.py`, `integrations/deepspeed_minimal.py`,
+`advanced/fsdp_minimal_cuda.py`, `diagnosis/h2d_timing_demo.py`,
+`diagnosis/step_memory_creep_demo.py`, and
+`diagnosis/incomplete_signals_demo.py`. Scripts that loop over epochs also
+accept `--epochs`. Pass `--args --help` to see each default.
+
 DeepSpeed (single or multi-GPU; requires `deepspeed` + a CUDA GPU):
 
 ```bash

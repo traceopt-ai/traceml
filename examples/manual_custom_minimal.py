@@ -1,3 +1,15 @@
+"""Manual TraceML instrumentation with a custom batch source.
+
+Run with:
+
+    traceml run examples/manual_custom_minimal.py
+
+Use ``--steps`` to change the number of optimizer steps::
+
+    traceml run examples/manual_custom_minimal.py --args --steps 20
+"""
+
+import argparse
 import random
 import time
 from typing import Iterator, Tuple
@@ -15,6 +27,27 @@ NUM_CLASSES = 10
 BATCH_SIZE = 64
 STEPS = 250
 PAUSE_BETWEEN_STEPS = 0.03
+
+
+def positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--steps",
+        type=positive_int,
+        default=STEPS,
+        help="Number of optimizer steps to run.",
+    )
+    return parser.parse_args()
 
 
 class TinyMLP(nn.Module):
@@ -64,6 +97,7 @@ class CustomBatchSource:
 
 
 def main() -> None:
+    args = parse_args()
     random.seed(SEED)
     torch.manual_seed(SEED)
 
@@ -74,7 +108,7 @@ def main() -> None:
     traceml.init(mode="manual")
 
     batch_source = CustomBatchSource(
-        steps=STEPS,
+        steps=args.steps,
         batch_size=BATCH_SIZE,
         input_dim=INPUT_DIM,
         num_classes=NUM_CLASSES,

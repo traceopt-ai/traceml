@@ -19,12 +19,17 @@ Usage
 -----
     traceml run examples/diagnosis/h2d_timing_demo.py
 
+Use ``--steps`` to change the number of optimizer steps::
+
+    traceml run examples/diagnosis/h2d_timing_demo.py --args --steps 50
+
 Requires a CUDA GPU for H2D timings. The script still runs on CPU, but
 TraceML does not time CPU-only moves, so the H2D signal is absent rather
 than zero: no `_traceml_internal:h2d_time` event is recorded, `h2d_ms`
 stays null, and the H2D column below prints a dash for every step.
 """
 
+import argparse
 import glob
 import json
 import os
@@ -43,7 +48,28 @@ HIDDEN_DIM = 1024
 NUM_CLASSES = 10
 BATCH_SIZE = 512
 NUM_SAMPLES = 8192
-NUM_STEPS = 30
+NUM_STEPS = 16
+
+
+def positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--steps",
+        type=positive_int,
+        default=NUM_STEPS,
+        help="Number of optimizer steps to run.",
+    )
+    return parser.parse_args()
 
 
 class TinyMLP(nn.Module):
@@ -146,6 +172,7 @@ def print_h2d_results(db_path: str) -> None:
 
 
 def main():
+    args = parse_args()
     torch.manual_seed(SEED)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -173,25 +200,27 @@ def main():
 
     model.train()
     step = 0
+    epochs = (args.steps + len(loader) - 1) // len(loader)
 
-    for batch_x, batch_y in loader:
-        if step >= NUM_STEPS:
-            break
+    for _ in range(epochs):
+        for batch_x, batch_y in loader:
+            if step >= args.steps:
+                break
 
-        with traceml.trace_step(model):
-            # These .to() calls happen inside trace_step so they are timed
-            batch_x = batch_x.to(device, non_blocking=True)
-            batch_y = batch_y.to(device, non_blocking=True)
+            with traceml.trace_step(model):
+                # These .to() calls happen inside trace_step so they are timed
+                batch_x = batch_x.to(device, non_blocking=True)
+                batch_y = batch_y.to(device, non_blocking=True)
 
-            optimizer.zero_grad(set_to_none=True)
-            logits = model(batch_x)
-            loss = criterion(logits, batch_y)
-            loss.backward()
-            optimizer.step()
+                optimizer.zero_grad(set_to_none=True)
+                logits = model(batch_x)
+                loss = criterion(logits, batch_y)
+                loss.backward()
+                optimizer.step()
 
-        step += 1
-        if step % 10 == 0:
-            print(f"Step {step}/{NUM_STEPS} | loss: {loss.item():.4f}")
+            step += 1
+            if step % 10 == 0:
+                print(f"Step {step}/{args.steps} | loss: {loss.item():.4f}")
 
     print("\nTraining done. Waiting for final summary...")
     traceml.final_summary()
