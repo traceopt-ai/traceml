@@ -73,7 +73,7 @@ def _free_tcp_port():
 
 @pytest.mark.skipif(
     sys.platform == "win32",
-    reason="Aggregator uses socket.SO_REUSEPORT, unavailable on Windows.",
+    reason="End-to-end torchrun smoke run not yet verified on Windows.",
 )
 def test_final_summary_json_smoke(tmp_path):
     script_path = tmp_path / "smoke_train.py"

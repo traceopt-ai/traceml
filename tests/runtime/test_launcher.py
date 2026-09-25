@@ -5,10 +5,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import argparse
+import errno
 import io
 import json
 import os
 import signal
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -42,12 +44,22 @@ from traceml_ai.launcher.manifest import (
     update_run_manifest,
     write_run_manifest,
 )
-from traceml_ai.launcher.process import ProcessOutputResult, TrainingOutcome
+from traceml_ai.launcher.process import (
+    AggregatorPortInUseError,
+    ProcessOutputResult,
+    TrainingOutcome,
+    ensure_aggregator_port_free,
+)
 from traceml_ai.runtime.settings import (
     DEFAULT_FINALIZE_TIMEOUT_SEC,
     resolve_on_missing_aggregator,
 )
 from traceml_ai.telemetry.retention import DEFAULT_HISTORY_RETENTION_S
+from traceml_ai.transport.tcp_transport import (
+    TCPConfig,
+    TCPServer,
+    bind_exclusive_listener,
+)
 
 
 def test_serve_is_a_public_command() -> None:
@@ -882,6 +894,7 @@ def test_started_training_result_is_authoritative(
     monkeypatch.setenv("PYTHONUNBUFFERED", "user-choice")
     replacements = {
         "install_shutdown_handlers": Mock(),
+        "ensure_aggregator_port_free": Mock(),
         "start_aggregator_process": Mock(return_value=aggregator),
         "wait_for_tcp_listen": Mock(return_value=True),
         "start_training_process": Mock(return_value=training),
@@ -991,6 +1004,7 @@ def test_started_training_result_is_authoritative(
     ("failure", "reason", "owner"),
     [
         ("spawn", "aggregator_spawn_failed", True),
+        ("port_in_use", "aggregator_port_in_use", True),
         ("readiness", "aggregator_not_ready", True),
         ("readiness", "aggregator_not_ready", False),
     ],
@@ -1034,6 +1048,15 @@ def test_strict_aggregator_failure_does_not_start_training(
     start_aggregator = Mock(return_value=aggregator)
     if failure == "spawn":
         start_aggregator.side_effect = FileNotFoundError("aggregator missing")
+    port_check = Mock()
+    if failure == "port_in_use":
+        port_check.side_effect = AggregatorPortInUseError(
+            "aggregator port 127.0.0.1:43170 is already in use.",
+            host="127.0.0.1",
+        )
+    monkeypatch.setattr(
+        launcher_commands, "ensure_aggregator_port_free", port_check
+    )
     monkeypatch.setattr(
         launcher_commands, "start_aggregator_process", start_aggregator
     )
@@ -1065,7 +1088,19 @@ def test_strict_aggregator_failure_does_not_start_training(
 
     assert exc.value.code == 1
     stderr = capsys.readouterr().err
-    assert "aggregator was not reachable at telemetry.internal:43170" in stderr
+    if failure == "port_in_use":
+        # The stale listener answered, so "not reachable" would be false.
+        assert "not reachable" not in stderr
+        assert (
+            "aggregator port 127.0.0.1:43170 is already in use; training "
+            "was not started" in stderr
+        )
+        assert stderr.count("aggregator port 127.0.0.1:43170") == 1
+    else:
+        assert (
+            "aggregator was not reachable at telemetry.internal:43170"
+            in stderr
+        )
     assert "--on-missing-aggregator=warn" in stderr
     assert "TRACEML_ON_MISSING_AGGREGATOR=warn" in stderr
     if failure == "readiness" and owner:
@@ -1080,6 +1115,9 @@ def test_strict_aggregator_failure_does_not_start_training(
         assert "(exit=" not in stderr
         start_aggregator_output.assert_not_called()
     start_training.assert_not_called()
+    if failure == "port_in_use":
+        assert "127.0.0.1:43170 is already in use" in stderr
+        start_aggregator.assert_not_called()
     if owner:
         assert update_manifest.call_args.kwargs["status"] == "failed"
         assert (
@@ -1120,12 +1158,183 @@ def test_stderr_from_process_exiting_before_readiness_is_exact(
     assert result.stderr_path == stderr_path.resolve()
 
 
+def test_wildcard_port_conflict_names_the_conflicting_address(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    # The aggregator binds 0.0.0.0 but the stale listener sits on loopback;
+    # the error must name the address that actually conflicted.
+    script = tmp_path / "train.py"
+    script.write_text("print('train')\n", encoding="utf-8")
+    args = build_parser().parse_args(
+        [
+            "run",
+            str(script),
+            "--logs-dir",
+            str(tmp_path / "logs"),
+            "--aggregator-bind-host",
+            "0.0.0.0",
+            "--aggregator-port",
+            "43170",
+        ]
+    )
+
+    def _bind(host, port, backlog):
+        if host == "127.0.0.1":
+            raise OSError(errno.EADDRINUSE, "Address already in use")
+        return Mock()
+
+    monkeypatch.setattr(
+        "traceml_ai.launcher.process.bind_exclusive_listener", _bind
+    )
+    start_aggregator = Mock()
+    start_training = Mock()
+    monkeypatch.chdir(tmp_path)
+    for name, replacement in {
+        "install_shutdown_handlers": Mock(),
+        "start_aggregator_process": start_aggregator,
+        "start_training_process": start_training,
+        "write_code_manifest": Mock(return_value=None),
+        "write_run_manifest": Mock(return_value=tmp_path / "manifest.json"),
+        "update_run_manifest": Mock(),
+    }.items():
+        monkeypatch.setattr(launcher_commands, name, replacement)
+
+    with pytest.raises(SystemExit) as exc:
+        launch_process(str(script), args)
+
+    assert exc.value.code == 1
+    stderr = capsys.readouterr().err
+    assert "aggregator port 127.0.0.1:43170 is already in use" in stderr
+    assert "training was not started" in stderr
+    assert stderr.count("aggregator port 127.0.0.1:43170") == 1
+    assert "0.0.0.0:43170" not in stderr
+    start_aggregator.assert_not_called()
+    start_training.assert_not_called()
+
+
+def test_aggregator_port_probe_rejects_a_live_listener() -> None:
+    # A stale aggregator from a killed run still accepts connections, so the
+    # readiness probe alone would mistake it for the new one.
+    stale = TCPServer(TCPConfig(host="127.0.0.1", port=0))
+    stale.start()
+    try:
+        with pytest.raises(AggregatorPortInUseError) as excinfo:
+            ensure_aggregator_port_free("127.0.0.1", stale.port)
+        message = str(excinfo.value)
+        assert f"127.0.0.1:{stale.port} is already in use" in message
+        assert f"lsof -i :{stale.port}" in message
+        assert "--aggregator-port" in message
+    finally:
+        stale.stop()
+
+
+def test_wildcard_port_probe_rejects_a_loopback_listener() -> None:
+    # BSD SO_REUSEADDR lets 0.0.0.0 bind beside a 127.0.0.1 listener, and
+    # ranks connecting to 127.0.0.1 would then reach the stale listener.
+    stale = bind_exclusive_listener("127.0.0.1", 0, backlog=1)
+    try:
+        port = stale.getsockname()[1]
+        with pytest.raises(AggregatorPortInUseError):
+            ensure_aggregator_port_free("0.0.0.0", port)
+    finally:
+        stale.close()
+
+
+@pytest.mark.parametrize(
+    ("host", "connect_host", "expected_hosts"),
+    [
+        ("0.0.0.0", "10.0.0.8", ["0.0.0.0", "127.0.0.1", "10.0.0.8"]),
+        ("", "127.0.0.1", ["", "127.0.0.1"]),
+        ("127.0.0.1", "10.0.0.8", ["127.0.0.1"]),
+    ],
+)
+def test_port_probe_adds_worker_addresses_for_wildcard_hosts(
+    monkeypatch, host, connect_host, expected_hosts
+) -> None:
+    # Linux already refuses the wildcard bind, so recording the probes proves
+    # the worker-facing addresses are checked on every platform.
+    calls = []
+    probes = []
+
+    def _record(probe_host, port, backlog):
+        calls.append((probe_host, port))
+        probes.append(Mock())
+        return probes[-1]
+
+    monkeypatch.setattr(
+        "traceml_ai.launcher.process.bind_exclusive_listener", _record
+    )
+
+    ensure_aggregator_port_free(host, 43170, connect_host=connect_host)
+
+    assert calls == [(probe_host, 43170) for probe_host in expected_hosts]
+    for probe in probes:
+        probe.close.assert_called_once_with()
+
+
+def test_windows_access_denied_is_reported_as_port_in_use(monkeypatch) -> None:
+    def _deny(_host, _port, backlog):
+        del backlog
+        raise OSError(10013, "Permission denied")
+
+    monkeypatch.setattr("traceml_ai.launcher.process._IS_WINDOWS", True)
+    monkeypatch.setattr(
+        "traceml_ai.launcher.process.bind_exclusive_listener", _deny
+    )
+
+    with pytest.raises(AggregatorPortInUseError) as excinfo:
+        ensure_aggregator_port_free("127.0.0.1", 43170)
+
+    message = str(excinfo.value)
+    assert "in use or reserved by Windows" in message
+    assert "unreserved port" in message
+
+
+def test_unusable_worker_probe_does_not_skip_later_addresses(
+    monkeypatch,
+) -> None:
+    calls = []
+
+    def _bind(host, _port, backlog):
+        del backlog
+        calls.append(host)
+        if host == "127.0.0.1":
+            raise OSError(errno.EADDRNOTAVAIL, "Address not available")
+        if host == "10.0.0.8":
+            raise OSError(errno.EADDRINUSE, "Address already in use")
+        return Mock()
+
+    monkeypatch.setattr(
+        "traceml_ai.launcher.process.bind_exclusive_listener", _bind
+    )
+
+    with pytest.raises(AggregatorPortInUseError) as excinfo:
+        ensure_aggregator_port_free("0.0.0.0", 43170, connect_host="10.0.0.8")
+
+    assert excinfo.value.host == "10.0.0.8"
+    assert calls == ["0.0.0.0", "127.0.0.1", "10.0.0.8"]
+
+
+def test_aggregator_port_probe_releases_a_free_port() -> None:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+
+    ensure_aggregator_port_free("127.0.0.1", port)
+    ensure_aggregator_port_free("127.0.0.1", 0)
+
+    # The probe must not keep the port it checked.
+    server = TCPServer(TCPConfig(host="127.0.0.1", port=port))
+    server.start()
+    server.stop()
+
+
 @pytest.mark.parametrize(
     ("owner", "ready"),
     [(True, False), (False, False), (False, True)],
 )
 def test_launcher_scopes_telemetry_health_to_aggregator_owner(
-    monkeypatch, tmp_path, owner, ready
+    monkeypatch, tmp_path, capsys, owner, ready
 ) -> None:
     script = tmp_path / "train.py"
     script.write_text("print('train')\n", encoding="utf-8")
@@ -1199,6 +1408,9 @@ def test_launcher_scopes_telemetry_health_to_aggregator_owner(
     )
     start_aggregator = Mock(return_value=aggregator)
     monkeypatch.setattr(
+        launcher_commands, "ensure_aggregator_port_free", Mock()
+    )
+    monkeypatch.setattr(
         launcher_commands, "start_aggregator_process", start_aggregator
     )
     monkeypatch.setattr(
@@ -1237,6 +1449,11 @@ def test_launcher_scopes_telemetry_health_to_aggregator_owner(
         launch_process(str(script), args)
 
     assert exc.value.code == 0
+    stderr = capsys.readouterr().err
+    if owner and not ready:
+        assert "[TraceML] ERROR:" not in stderr
+        assert "training will continue with TraceML disabled" in stderr
+        assert "traceml.summary()" in stderr
     setup_error_logger.assert_called_once_with(
         role="launcher",
         session_root=(tmp_path / "logs" / "warn-run").resolve(),
@@ -1321,6 +1538,13 @@ def test_launcher_scopes_telemetry_health_to_aggregator_owner(
                 "startup_reason": "aggregator_not_ready",
             },
             ("unavailable", "aggregator_not_ready", None),
+        ),
+        (
+            {
+                "telemetry_available": False,
+                "startup_reason": "aggregator_port_in_use",
+            },
+            ("unavailable", "aggregator_port_in_use", None),
         ),
         (
             {"finalization_reason": "finalization_failed"},

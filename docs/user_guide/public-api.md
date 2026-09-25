@@ -212,6 +212,12 @@ training starts, a later telemetry or finalization failure is reported
 separately and does not replace the training exit code. In multi-node runs,
 only the node 0 launcher reports final aggregator health.
 
+The aggregator-owning launcher also refuses to start beside an earlier process
+that still owns the configured endpoint. Stop that process or choose another
+`--aggregator-port`. With `--on-missing-aggregator=warn`, TraceML is disabled
+and training starts, but aggregator-dependent calls, including
+`traceml.summary()`, still fail.
+
 After training starts, the aggregator-owning launcher prints one telemetry
 health line to stderr immediately before the final training result, including
 `[TraceML] Telemetry complete.` on a healthy run. This footer reports telemetry

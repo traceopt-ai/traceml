@@ -18,6 +18,36 @@ class TCPConfig:
     recv_buf: int = 65536
 
 
+def bind_exclusive_listener(
+    host: str, port: int, backlog: int
+) -> socket.socket:
+    """
+    Return a TCP socket listening on ``(host, port)`` that owns the port.
+
+    Raises ``OSError`` (``EADDRINUSE``) while another socket listens there.
+    The socket is closed before any error propagates.
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        # Never SO_REUSEPORT: it would let a second aggregator (e.g. one
+        # orphaned by a killed run) bind the same port, and the kernel would
+        # then split rank connections between the two. POSIX SO_REUSEADDR
+        # only permits rebinding over TIME_WAIT, which fast restarts need.
+        # Windows SO_REUSEADDR also allows taking over a live port, so there
+        # the socket asks for exclusive use instead.
+        exclusive = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)
+        if exclusive is not None:
+            sock.setsockopt(socket.SOL_SOCKET, exclusive, 1)
+        else:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((host, int(port)))
+        sock.listen(backlog)
+    except BaseException:
+        sock.close()
+        raise
+    return sock
+
+
 class TCPServer:
     """
     Non-blocking TCP server for TraceML DDP telemetry.
@@ -46,25 +76,10 @@ class TCPServer:
         return int(self._port)
 
     def start(self) -> None:
-        self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        # SO_REUSEPORT is best-effort: it is absent on Windows, and even
-        # where the constant exists the kernel can still reject it (Python
-        # picks it up from build-time headers). Only SO_REUSEADDR above is
-        # required, so never fail startup over it.
-        reuseport = getattr(socket, "SO_REUSEPORT", None)
-        if reuseport is not None:
-            try:
-                self._sock.setsockopt(socket.SOL_SOCKET, reuseport, 1)
-            except OSError as exc:
-                self.logger.warning(
-                    "[TraceML] SO_REUSEPORT unavailable (%s); "
-                    "continuing without it.",
-                    exc,
-                )
-        self._sock.bind((self.cfg.host, self.cfg.port))
+        self._sock = bind_exclusive_listener(
+            self.cfg.host, self.cfg.port, self.cfg.backlog
+        )
         self._port = int(self._sock.getsockname()[1])
-        self._sock.listen(self.cfg.backlog)
 
         self._thread = threading.Thread(
             target=self._run,
@@ -75,11 +90,25 @@ class TCPServer:
 
     def stop(self) -> None:
         self._stop_event.set()
-        if self._sock:
+        sock = self._sock
+        self._sock = None
+        if sock:
             try:
-                self._sock.close()
+                # On Linux close() alone does not wake the accept thread, and
+                # its blocked accept() keeps the port listening after stop.
+                sock.shutdown(socket.SHUT_RDWR)
             except Exception:
+                # Listening sockets commonly report ENOTCONN. shutdown() is
+                # only a best-effort wakeup before the required close().
                 pass
+            try:
+                sock.close()
+            except Exception as exc:
+                self.logger.error(
+                    "[TraceML] TCP listener close failed: %s: %s",
+                    type(exc).__name__,
+                    exc,
+                )
 
     def poll(self) -> Iterator[Dict]:
         """
