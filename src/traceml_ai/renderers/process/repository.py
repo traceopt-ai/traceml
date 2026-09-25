@@ -92,15 +92,13 @@ class ProcessRepository:
         Optional[int]
             Latest seq, or None if the table has no seq-bearing rows.
         """
-        row = conn.execute(
-            """
+        row = conn.execute("""
             SELECT seq
             FROM process_samples
             WHERE seq IS NOT NULL
             ORDER BY id DESC
             LIMIT 1;
-            """
-        ).fetchone()
+            """).fetchone()
         if row is None or row["seq"] is None:
             return None
         return int(row["seq"])
@@ -116,16 +114,14 @@ class ProcessRepository:
         dict[int, int]
             Mapping rank -> latest seq for that rank.
         """
-        rows = conn.execute(
-            """
+        rows = conn.execute("""
             SELECT rank, MAX(seq) AS max_seq
             FROM process_samples
             WHERE rank IS NOT NULL
               AND seq IS NOT NULL
             GROUP BY rank
             ORDER BY rank ASC;
-            """
-        ).fetchall()
+            """).fetchall()
 
         out: Dict[int, int] = {}
         for row in rows:
@@ -365,8 +361,7 @@ class ProcessRepository:
         This read answers "who has ever reported, and when did each last
         speak".
         """
-        return conn.execute(
-            """
+        return conn.execute("""
             SELECT * FROM process_samples
             WHERE id IN (
                 SELECT MAX(id) FROM process_samples
@@ -374,8 +369,7 @@ class ProcessRepository:
                 GROUP BY COALESCE(global_rank, rank)
             )
             ORDER BY COALESCE(global_rank, rank) ASC;
-            """
-        ).fetchall()
+            """).fetchall()
 
     # --- whole-run reads, one explicit method per metric -----------------
     def cpu_capacity_run_stats(
@@ -404,8 +398,7 @@ class ProcessRepository:
     def _run_stats(
         self, conn: sqlite3.Connection, value_sql: str
     ) -> Optional[RunStats]:
-        row = conn.execute(
-            f"""
+        row = conn.execute(f"""
             WITH per_rank AS (
                 SELECT
                     COUNT(*) AS n,
@@ -419,8 +412,7 @@ class ProcessRepository:
             )
             SELECT MIN(lo), MAX(hi), SUM(n), COUNT(*), MAX(n)
             FROM per_rank;
-            """
-        ).fetchone()
+            """).fetchone()
         if row is None or row[0] is None or row[1] is None:
             return None
         return RunStats(

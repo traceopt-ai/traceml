@@ -114,8 +114,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
     """
     Create query-friendly projection table for StepMemorySampler.
     """
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS step_memory_samples (
             id                   INTEGER PRIMARY KEY AUTOINCREMENT,
             recv_ts_ns           INTEGER NOT NULL,
@@ -133,8 +132,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
             peak_alloc_bytes     REAL,
             peak_reserved_bytes  REAL
         );
-        """
-    )
+        """)
     _ensure_column(
         conn,
         table="step_memory_samples",
@@ -171,30 +169,22 @@ def init_schema(conn: sqlite3.Connection) -> None:
         column="hostname",
         definition="TEXT",
     )
-    conn.execute(
-        """
+    conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_step_memory_samples_rank_step_ts
         ON step_memory_samples(rank, step, sample_ts_s, id);
-        """
-    )
-    conn.execute(
-        """
+        """)
+    conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_step_memory_samples_step_rank
         ON step_memory_samples(step, rank, id);
-        """
-    )
-    conn.execute(
-        """
+        """)
+    conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_step_memory_samples_global_rank_step_ts
         ON step_memory_samples(global_rank, step, sample_ts_s, id);
-        """
-    )
-    conn.execute(
-        """
+        """)
+    conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_step_memory_samples_step_global_rank
         ON step_memory_samples(step, global_rank, id);
-        """
-    )
+        """)
 
 
 def build_rows(

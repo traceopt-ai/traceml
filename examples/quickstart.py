@@ -18,7 +18,6 @@ from torch.utils.data import DataLoader, TensorDataset
 
 import traceml_ai as traceml
 
-
 SEED = 42
 NUM_STEPS = 128
 BATCH_SIZE = 64

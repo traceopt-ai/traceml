@@ -659,8 +659,7 @@ def test_sqlite_window_has_one_share_across_live_and_summary_consumers(
     db_path = tmp_path / "step-time-pipeline.db"
     conn = sqlite3.connect(db_path)
     try:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE step_time_samples (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 recv_ts_ns INTEGER NOT NULL,
@@ -676,16 +675,13 @@ def test_sqlite_window_has_one_share_across_live_and_summary_consumers(
                 step INTEGER,
                 events_json TEXT NOT NULL
             );
-            """
-        )
-        conn.execute(
-            """
+            """)
+        conn.execute("""
             CREATE TABLE runtime_environment (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 training_strategy TEXT
             );
-            """
-        )
+            """)
         conn.execute(
             "INSERT INTO runtime_environment(training_strategy) "
             "VALUES ('ddp');"

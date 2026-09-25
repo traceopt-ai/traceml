@@ -278,20 +278,16 @@ def test_system_projection_stores_global_and_local_rank_identity() -> None:
     rows = system_projection.build_rows(envelope, recv_ts_ns=999)
     system_projection.insert_rows(conn, rows)
 
-    sample = conn.execute(
-        """
+    sample = conn.execute("""
         SELECT global_rank, local_rank, world_size, local_world_size,
                node_rank, hostname, seq
         FROM system_samples;
-        """
-    ).fetchone()
-    gpu_sample = conn.execute(
-        """
+        """).fetchone()
+    gpu_sample = conn.execute("""
         SELECT global_rank, local_rank, world_size, local_world_size,
                node_rank, hostname, gpu_idx
         FROM system_gpu_samples;
-        """
-    ).fetchone()
+        """).fetchone()
 
     assert sample == (5, 1, 8, 4, 1, "worker-1", 7)
     assert gpu_sample == (5, 1, 8, 4, 1, "worker-1", 0)
@@ -325,20 +321,16 @@ def test_sqlite_writer_persists_projection_without_raw_table(tmp_path) -> None:
     conn = sqlite3.connect(db_path)
     try:
         assert "raw_messages" not in _sqlite_table_names(conn)
-        sample = conn.execute(
-            """
+        sample = conn.execute("""
             SELECT global_rank, local_rank, world_size, local_world_size,
                    node_rank, hostname, seq
             FROM system_samples;
-            """
-        ).fetchone()
-        gpu_sample = conn.execute(
-            """
+            """).fetchone()
+        gpu_sample = conn.execute("""
             SELECT global_rank, local_rank, world_size, local_world_size,
                    node_rank, hostname, gpu_idx
             FROM system_gpu_samples;
-            """
-        ).fetchone()
+            """).fetchone()
     finally:
         conn.close()
 
@@ -350,14 +342,12 @@ def test_sqlite_writer_leaves_existing_raw_table_untouched(tmp_path) -> None:
     db_path = tmp_path / "telemetry.db"
     conn = sqlite3.connect(db_path)
     try:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE raw_messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 payload_mp BLOB NOT NULL
             );
-            """
-        )
+            """)
         conn.execute(
             "INSERT INTO raw_messages(payload_mp) VALUES (?);",
             (b"old-raw-payload",),

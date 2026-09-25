@@ -43,7 +43,6 @@ from torch.utils.data import DataLoader
 
 import traceml_ai as traceml
 
-
 SEED = 42
 NUM_LABELS = 4
 DEFAULT_DATASET_NAME = "fancyzhx/ag_news"

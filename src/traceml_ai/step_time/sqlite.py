@@ -127,16 +127,14 @@ def _optional_str(value: Any) -> Optional[str]:
 def load_training_strategy_from_sqlite(conn: sqlite3.Connection) -> str:
     """Load the latest recognized strategy, defaulting safely to ``ddp``."""
     try:
-        row = conn.execute(
-            """
+        row = conn.execute("""
             SELECT training_strategy
             FROM runtime_environment
             WHERE training_strategy IS NOT NULL
               AND TRIM(training_strategy) != ''
             ORDER BY id DESC
             LIMIT 1;
-            """
-        ).fetchone()
+            """).fetchone()
     except Exception:
         return DEFAULT_TRAINING_STRATEGY
 

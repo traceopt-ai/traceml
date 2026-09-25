@@ -95,8 +95,7 @@ def accepts_sampler(sampler: Optional[str]) -> bool:
 
 def init_schema(conn: sqlite3.Connection) -> None:
     """Create the query-friendly runtime environment table."""
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS runtime_environment (
             id                         INTEGER PRIMARY KEY AUTOINCREMENT,
             recv_ts_ns                 INTEGER NOT NULL,
@@ -117,14 +116,11 @@ def init_schema(conn: sqlite3.Connection) -> None:
             strategy_source            TEXT,
             strategy_confidence        TEXT
         );
-        """
-    )
-    conn.execute(
-        """
+        """)
+    conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_runtime_environment_global_rank
         ON runtime_environment(global_rank, id);
-        """
-    )
+        """)
 
 
 def build_rows(

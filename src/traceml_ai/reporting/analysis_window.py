@@ -93,8 +93,7 @@ def _common_completed_steps(
 ) -> list[tuple[int, float]]:
     """Return step completion timestamps present on every observed rank."""
     try:
-        rows = conn.execute(
-            """
+        rows = conn.execute("""
             WITH deduplicated AS (
                 SELECT
                     COALESCE(global_rank, rank) AS rank_id,
@@ -126,8 +125,7 @@ def _common_completed_steps(
             GROUP BY step
             HAVING COUNT(DISTINCT rank_id) = rank_count.value
             ORDER BY step ASC;
-            """
-        ).fetchall()
+            """).fetchall()
     except sqlite3.Error:
         return []
     return [(int(row[0]), float(row[1])) for row in rows]
