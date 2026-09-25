@@ -226,6 +226,10 @@ class _TCP:
     def wait_for_data(self, timeout):
         return False
 
+    def open_connections(self):
+        # One live rank connection, as a real server would report mid-run.
+        return 1
+
     def stop(self):
         return None
 
