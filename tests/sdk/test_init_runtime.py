@@ -4,6 +4,7 @@ import importlib
 import os
 import sys
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -399,3 +400,100 @@ def test_stop_runtime_for_init_is_idempotent(initialization):
 
     assert handle.stops == 1
     assert initialization._RUNTIME_HANDLE is None
+
+
+def _resolve_direct_settings(initialization, session_id=None):
+    return initialization._resolve_runtime_settings(
+        ui_mode=None,
+        interval=None,
+        logs_dir=None,
+        enable_logging=None,
+        session_id=session_id,
+        aggregator_host=None,
+        aggregator_port=None,
+    )
+
+
+_RUN_STAMP_ENV = (
+    "TRACEML_SESSION_ID",
+    "TRACEML_SESSION_SOURCE",
+    "TRACEML_RUN_NONCE",
+)
+
+
+@pytest.mark.parametrize(
+    ("arg", "env", "env_source", "source"),
+    [
+        (None, None, None, "generated"),
+        ("mine", None, None, "explicit"),
+        # A launcher or a user export sets the id without a source.
+        (None, "e", None, "explicit"),
+        (None, "e", "explicit", "explicit"),
+        (None, "e", "generated", "generated"),
+        ("mine", "e", "generated", "explicit"),
+    ],
+)
+def test_direct_runtime_settings_record_session_source(
+    initialization, monkeypatch, tmp_path, arg, env, env_source, source
+):
+    monkeypatch.chdir(tmp_path)
+    for var, value in (
+        ("TRACEML_SESSION_ID", env),
+        ("TRACEML_SESSION_SOURCE", env_source),
+    ):
+        if value is None:
+            monkeypatch.delenv(var, raising=False)
+        else:
+            monkeypatch.setenv(var, value)
+
+    settings = _resolve_direct_settings(initialization, session_id=arg)
+
+    assert settings.session_source == source
+    assert settings.session_id
+
+
+def test_generated_session_id_stays_generated_in_a_child_process(
+    initialization, monkeypatch, tmp_path
+):
+    """start_runtime mirrors the id into env; a child must not call it
+    explicit, or `traceml serve --run-name X` would drop the child."""
+    import traceml_ai.runtime.lifecycle as lifecycle
+
+    class _Runtime:
+        def __init__(self, settings=None):
+            pass
+
+        def start(self):
+            return None
+
+        def stop(self):
+            return None
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(lifecycle, "TraceMLRuntime", _Runtime)
+    with mock.patch.dict(os.environ):
+        for var in _RUN_STAMP_ENV:
+            os.environ.pop(var, None)
+        parent = _resolve_direct_settings(initialization)
+        lifecycle.start_runtime(parent, fail_open=False)
+        child = _resolve_direct_settings(initialization)
+
+    assert parent.session_source == "generated"
+    assert child.session_id == parent.session_id
+    assert child.session_source == "generated"
+
+
+@pytest.mark.parametrize(("env", "nonce"), [(None, ""), ("n1", "n1")])
+def test_direct_runtime_settings_read_the_run_nonce(
+    initialization, monkeypatch, tmp_path, env, nonce
+):
+    """A rank started under `traceml run` stamps the launcher's nonce."""
+    monkeypatch.chdir(tmp_path)
+    if env is None:
+        monkeypatch.delenv("TRACEML_RUN_NONCE", raising=False)
+    else:
+        monkeypatch.setenv("TRACEML_RUN_NONCE", env)
+
+    settings = _resolve_direct_settings(initialization)
+
+    assert settings.run_nonce == nonce

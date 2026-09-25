@@ -192,7 +192,7 @@ non-aggregator node needs the reachable node-0 address above.
 | `--nnodes` / `--nproc-per-node` | Expected world size; the aggregator waits for all ranks before finalizing. |
 | `--mode` | `summary` (default), `cli`, or `dashboard`. |
 | `--logs-dir` | Directory for session logs. |
-| `--run-name` / `--session-id` | Shared run identity for worker artifacts. |
+| `--run-name` / `--session-id` | Shared run identity for worker artifacts. Telemetry from a worker explicitly given a different id is ignored. A worker that generates its own id, such as a plain `python train.py`, is still traced. |
 | `--history-retention` | Aligned raw-history duration; default `30m`. |
 
 ### Missing-aggregator behavior

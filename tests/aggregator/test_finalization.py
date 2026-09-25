@@ -102,6 +102,7 @@ def _make_aggregator(tmp_path: Path, *, writer: _Writer, tcp: _TCP):
     agg._started = True
     agg._expected_world_size = 2
     agg._finished_ranks = {}
+    agg._foreign_senders = {}
     agg._drain_lock = threading.Lock()
     agg._thread = _StoppedThread()
     agg._display_driver = _Display()

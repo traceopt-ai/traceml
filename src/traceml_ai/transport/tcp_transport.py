@@ -226,7 +226,7 @@ class TCPClient:
     Best-effort TCP client for TraceML telemetry.
 
     Notes:
-      - No reconnect logic (intentional for MVP)
+      - The next send after a failure reconnects (no background loop)
       - send() never raises
       - If rank 0 dies, training continues unaffected
     """

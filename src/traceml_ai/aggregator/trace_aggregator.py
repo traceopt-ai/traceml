@@ -7,10 +7,12 @@
 """Out-of-process telemetry server and display driver host."""
 
 import logging
+import sys
 import threading
 import time
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
 from traceml_ai.aggregator.display_drivers.base import BaseDisplayDriver
 from traceml_ai.aggregator.display_drivers.cli import CLIDisplayDriver
@@ -45,6 +47,10 @@ _SQLITE_FINALIZE_BUDGET_MAX_SEC = 60.0
 _SQLITE_FINALIZE_TINY_FLOOR_SEC = 0.001
 
 _LOGGER = logging.getLogger(__name__)
+
+# (hostname, pid, session_id) of a sender whose payloads were not admitted,
+# as strings so a malformed stamp cannot make the key unhashable.
+_ForeignSender = Tuple[Optional[str], Optional[str], Optional[str]]
 
 
 def _safe(logger: Any, label: str, fn: Callable[[], Any]) -> Any:
@@ -106,6 +112,7 @@ class TraceMLAggregator:
             1, int(getattr(settings, "expected_world_size", 1) or 1)
         )
         self._finished_ranks: dict[int, RankFinishedControl] = {}
+        self._foreign_senders: dict[_ForeignSender, int] = {}
         self._started = False
         self._drain_lock = threading.Lock()
 
@@ -230,15 +237,19 @@ class TraceMLAggregator:
         try:
             sqlite_finalize_budget = self._sqlite_finalize_budget(remaining())
             settle_budget = max(0.0, remaining() - sqlite_finalize_budget)
-            if self._settings.history_enabled:
-                warning_payload = self._settle_end_of_run_telemetry(
-                    settle_budget
+            try:
+                if self._settings.history_enabled:
+                    warning_payload = self._settle_end_of_run_telemetry(
+                        settle_budget
+                    )
+                _safe(
+                    self._logger,
+                    "TCPServer.stop failed",
+                    self._tcp_server.stop,
                 )
-            _safe(
-                self._logger,
-                "TCPServer.stop failed",
-                self._tcp_server.stop,
-            )
+            finally:
+                # Report dropped senders even when the final drain raised.
+                self._warn_foreign_senders()
             finalize_result = self._sqlite_writer.finalize(
                 max(sqlite_finalize_budget, remaining())
             )
@@ -448,27 +459,104 @@ class TraceMLAggregator:
 
     def _split_telemetry_payloads(self, msg: Any) -> List[Any]:
         """
-        Consume control messages and return sampler telemetry payloads.
+        Admit payloads, consume control messages, return sampler telemetry.
 
         Rank-finished markers share the TCP transport with telemetry so workers
         do not need a second control channel. They are consumed here and never
         enter SQLite projection storage.
-        """
-        if isinstance(msg, list):
-            telemetry: List[Any] = []
-            for item in msg:
-                control = parse_rank_finished(item)
-                if control is not None:
-                    self._finished_ranks[control.global_rank] = control
-                else:
-                    telemetry.append(item)
-            return [telemetry] if telemetry else []
 
-        control = parse_rank_finished(msg)
-        if control is not None:
-            self._finished_ranks[control.global_rank] = control
-            return []
-        return [msg]
+        This is the single admission point between the socket and SQLite:
+        every payload, telemetry or control, passes ``_admit`` first, so a
+        rank left over from another run can neither add rows nor mark one of
+        this run's ranks finished.
+        """
+        items = msg if isinstance(msg, list) else [msg]
+        telemetry: List[Any] = []
+        for item in items:
+            if not self._admit(item):
+                continue
+            control = parse_rank_finished(item)
+            if control is not None:
+                self._finished_ranks[control.global_rank] = control
+            else:
+                telemetry.append(item)
+
+        if isinstance(msg, list):
+            return [telemetry] if telemetry else []
+        return telemetry
+
+    def _admit(self, payload: Any) -> bool:
+        """
+        Return False for a payload stamped for a different run.
+
+        The stamp is read from envelope ``meta`` or, for control and legacy
+        flat payloads, from the top level. Each key is checked only when this
+        aggregator enforces it and the payload carries it: ranks that predate
+        the stamp send neither key and are always admitted. ``session_id`` is
+        enforced when the launch path shares one run id with its ranks, and
+        ``run_nonce`` when a single launcher started both sides. With
+        ``admit_generated_session_id`` only explicit ids are enforced: a
+        stamped id without a ``session_source`` counts as explicit.
+        """
+        if not isinstance(payload, Mapping):
+            return True
+        meta = payload.get("meta")
+        stamp = meta if isinstance(meta, Mapping) else payload
+
+        settings = self._settings
+        enforce_session = settings.enforce_session_id and not (
+            settings.admit_generated_session_id
+            and stamp.get("session_source") == "generated"
+        )
+        expected = (
+            (
+                "session_id",
+                str(settings.session_id or "") if enforce_session else "",
+            ),
+            ("run_nonce", str(settings.run_nonce or "")),
+        )
+        for key, want in expected:
+            got = stamp.get(key)
+            if want and got not in (None, "") and str(got) != want:
+                sender: _ForeignSender = tuple(  # type: ignore[assignment]
+                    None if stamp.get(field) is None else str(stamp[field])
+                    for field in ("hostname", "pid", "session_id")
+                )
+                self._foreign_senders[sender] = (
+                    self._foreign_senders.get(sender, 0) + 1
+                )
+                return False
+        return True
+
+    def _warn_foreign_senders(self) -> None:
+        """Print one stderr warning naming every sender that was dropped."""
+        with self._drain_lock:
+            senders = dict(self._foreign_senders)
+        if not senders:
+            return
+
+        def fmt(value: Any) -> str:
+            return "?" if value in (None, "") else str(value)
+
+        named = "; ".join(
+            f"host={fmt(host)} pid={fmt(pid)} session={fmt(session)} "
+            f"({count})"
+            for (host, pid, session), count in sorted(
+                senders.items(), key=lambda item: str(item[0])
+            )
+        )
+        try:
+            print(
+                f"[TraceML] WARNING: ignored {sum(senders.values())} "
+                f"payload(s) from another TraceML run: {named}. A training "
+                "process from an earlier run may still be running; stop it "
+                "so it no longer sends telemetry to this run.",
+                file=sys.stderr,
+                flush=True,
+            )
+        except Exception:
+            # Best-effort diagnostics must not interrupt finalization.
+            pass
 
     def _settle_end_of_run_telemetry(
         self, timeout_sec: float
