@@ -42,11 +42,12 @@ def build_rank_finished_payload(
     timestamp: Optional[float] = None,
     session_id: Optional[str] = None,
     run_nonce: Optional[str] = None,
+    session_source: Optional[str] = None,
 ) -> dict[str, Any]:
     """Return the wire payload for one rank-finished control message.
 
-    ``session_id`` and ``run_nonce`` stamp the sender's run, the same optional
-    keys telemetry envelopes carry.
+    ``session_id``, ``run_nonce`` and ``session_source`` stamp the sender's
+    run, the same optional keys telemetry envelopes carry.
     """
     return {
         CONTROL_KIND_FIELD: RANK_FINISHED,
@@ -57,6 +58,7 @@ def build_rank_finished_payload(
         "timestamp": float(time.time() if timestamp is None else timestamp),
         "session_id": session_id or None,
         "run_nonce": run_nonce or None,
+        "session_source": session_source or None,
     }
 
 

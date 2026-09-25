@@ -1182,9 +1182,11 @@ def _resolve_serve_settings(args: argparse.Namespace):
         dashboard_auto_open=bool(cfg["dashboard_auto_open"]),
         finalize_timeout_sec=float(cfg["finalize_timeout_sec"]),
         session_id=run_identity.session_id,
-        # A plain `python train.py` generates its own session id, so only an
-        # explicit --run-name/--session-id is a promise the workers share.
+        # With --run-name/--session-id, drop ranks that name a different run
+        # explicitly. A plain `python train.py` makes up its own id and is
+        # still admitted, as it is when serve has no explicit id at all.
         enforce_session_id=run_identity.source != "generated",
+        admit_generated_session_id=True,
         aggregator=AggregatorTransportSettings(
             connect_host=connect_host,
             bind_host=bind_host,

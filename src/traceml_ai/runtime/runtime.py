@@ -98,6 +98,7 @@ class TraceMLRuntime:
                 pid=self.identity.pid,
                 session_id=str(self._settings.session_id or ""),
                 run_nonce=str(self._settings.run_nonce or ""),
+                session_source=str(self._settings.session_source or ""),
             ),
             logger=self._logger,
         )
@@ -232,6 +233,7 @@ class TraceMLRuntime:
                 hostname=self.identity.hostname,
                 session_id=str(self._settings.session_id or ""),
                 run_nonce=str(self._settings.run_nonce or ""),
+                session_source=str(self._settings.session_source or ""),
             )
         )
 

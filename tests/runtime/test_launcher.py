@@ -1924,6 +1924,7 @@ def test_serve_enforces_session_id_only_when_explicit(
 
     assert settings.enforce_session_id is enforced
     assert settings.run_nonce == ""
+    assert settings.admit_generated_session_id is True
 
 
 @pytest.mark.parametrize("nnodes", [1, 2])

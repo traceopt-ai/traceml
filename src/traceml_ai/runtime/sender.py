@@ -28,7 +28,9 @@ class SenderIdentity:
 
     ``session_id`` and ``run_nonce`` stamp the run and the launch that own
     this sender, so an aggregator can drop telemetry from a rank that
-    outlived another run. Empty values are sent as unstamped (``None``).
+    outlived another run. ``session_source`` is ``"generated"`` when the
+    rank made up its own session id and ``"explicit"`` when it was given one.
+    Empty values are sent as unstamped (``None``).
     """
 
     global_rank: int
@@ -40,6 +42,7 @@ class SenderIdentity:
     pid: int = 0
     session_id: str = ""
     run_nonce: str = ""
+    session_source: str = ""
 
     @property
     def rank(self) -> int:
@@ -59,6 +62,7 @@ class SenderIdentity:
             "pid": self.pid,
             "session_id": self.session_id or None,
             "run_nonce": self.run_nonce or None,
+            "session_source": self.session_source or None,
         }
 
 

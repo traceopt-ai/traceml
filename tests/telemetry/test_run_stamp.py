@@ -139,3 +139,66 @@ def test_runtime_stamps_telemetry_and_rank_finished(monkeypatch):
 
     assert controls[0]["session_id"] == "run-a"
     assert controls[0]["run_nonce"] == "n1"
+
+
+def test_session_source_rides_with_the_stamp():
+    identity = SenderIdentity(
+        global_rank=0,
+        local_rank=0,
+        session_id="s",
+        session_source="generated",
+    )
+    payload = build_telemetry_envelope(
+        identity=identity,
+        sampler_name="SystemSampler",
+        tables={"SystemTable": [{"seq": 1}]},
+        timestamp=1.0,
+    )
+    control = build_rank_finished_payload(
+        global_rank=0,
+        world_size=1,
+        node_rank=0,
+        hostname="h",
+        session_id="s",
+        session_source="generated",
+    )
+
+    assert payload["meta"]["session_source"] == "generated"
+    assert TelemetryMeta.from_mapping(payload["meta"]).session_source == (
+        "generated"
+    )
+    assert control["session_source"] == "generated"
+    assert (
+        SenderIdentity(global_rank=0, local_rank=0).to_payload_fields()[
+            "session_source"
+        ]
+        is None
+    )
+
+
+def test_runtime_stamps_session_source(monkeypatch):
+    monkeypatch.setattr(
+        "traceml_ai.runtime.runtime.setup_error_logger", Mock()
+    )
+    monkeypatch.setattr(
+        "traceml_ai.runtime.runtime.get_error_logger",
+        lambda _name: _Logger(),
+    )
+    monkeypatch.setattr(
+        "traceml_ai.runtime.runtime.build_samplers", lambda **_kw: []
+    )
+    monkeypatch.setattr("traceml_ai.runtime.runtime.TCPClient", _TCPClient)
+
+    runtime = TraceMLRuntime(
+        settings=TraceMLSettings(
+            mode="summary", session_id="s", session_source="generated"
+        )
+    )
+    assert runtime._publisher._identity.session_source == "generated"
+
+    controls = []
+    runtime._sampler_thread = _StoppedThread()
+    runtime._publisher = Mock(send_control=controls.append)
+    runtime._exporter = Mock()
+    runtime.stop()
+    assert controls[0]["session_source"] == "generated"

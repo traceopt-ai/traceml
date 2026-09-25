@@ -311,9 +311,8 @@ def _resolve_runtime_settings(
         defaults=BUILT_IN_DEFAULTS,
     )
 
-    resolved_session = str(
-        session_id or _env_str("TRACEML_SESSION_ID", "") or get_session_id()
-    )
+    given_session = session_id or _env_str("TRACEML_SESSION_ID", "")
+    resolved_session = str(given_session or get_session_id())
     host = str(
         aggregator_host
         if aggregator_host is not None
@@ -336,6 +335,9 @@ def _resolve_runtime_settings(
         history_enabled=bool(cfg["history_enabled"]),
         history_retention_s=float(cfg["history_retention"]),
         session_id=resolved_session,
+        # Lets an aggregator started with an explicit id still admit a rank
+        # that had to make up its own (plain `python train.py` under serve).
+        session_source="explicit" if given_session else "generated",
         trace_max_steps=trace_max_steps,
         aggregator=AggregatorTransportSettings(
             connect_host=host, bind_host=host, port=port

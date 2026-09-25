@@ -175,6 +175,8 @@ def build_runtime_settings(cfg: Dict[str, Any]) -> TraceMLSettings:
         logs_dir=str(cfg["logs_dir"]),
         session_id=str(cfg["session_id"]),
         run_nonce=str(cfg.get("run_nonce", "") or ""),
+        # The launcher hands every rank the run's session id.
+        session_source="explicit" if cfg["session_id"] else "",
         finalize_timeout_sec=float(
             cfg.get("finalize_timeout_sec", DEFAULT_FINALIZE_TIMEOUT_SEC)
         ),

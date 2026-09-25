@@ -399,3 +399,34 @@ def test_stop_runtime_for_init_is_idempotent(initialization):
 
     assert handle.stops == 1
     assert initialization._RUNTIME_HANDLE is None
+
+
+@pytest.mark.parametrize(
+    ("arg", "env", "source"),
+    [
+        (None, None, "generated"),
+        ("mine", None, "explicit"),
+        (None, "e", "explicit"),
+    ],
+)
+def test_direct_runtime_settings_record_session_source(
+    initialization, monkeypatch, tmp_path, arg, env, source
+):
+    monkeypatch.chdir(tmp_path)
+    if env is None:
+        monkeypatch.delenv("TRACEML_SESSION_ID", raising=False)
+    else:
+        monkeypatch.setenv("TRACEML_SESSION_ID", env)
+
+    settings = initialization._resolve_runtime_settings(
+        ui_mode=None,
+        interval=None,
+        logs_dir=None,
+        enable_logging=None,
+        session_id=arg,
+        aggregator_host=None,
+        aggregator_port=None,
+    )
+
+    assert settings.session_source == source
+    assert settings.session_id

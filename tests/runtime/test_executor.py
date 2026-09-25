@@ -386,3 +386,12 @@ def test_executor_threads_run_nonce_into_runtime_settings(monkeypatch):
 
     monkeypatch.delenv("TRACEML_RUN_NONCE")
     assert build_runtime_settings(read_traceml_env()).run_nonce == ""
+
+
+def test_executor_marks_launcher_session_as_explicit(monkeypatch):
+    monkeypatch.setenv("TRACEML_SCRIPT_PATH", "train.py")
+    monkeypatch.setenv("TRACEML_SESSION_ID", "run-a")
+
+    assert build_runtime_settings(read_traceml_env()).session_source == (
+        "explicit"
+    )

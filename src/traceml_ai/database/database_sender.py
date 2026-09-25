@@ -65,7 +65,8 @@ class DBIncrementalSender:
             "sampler": <str>,
             "timestamp": <float>,
             "session_id": <str | None>,
-            "run_nonce": <str | None>
+            "run_nonce": <str | None>,
+            "session_source": <"explicit" | "generated" | None>
         },
         "body": {
             "tables": {table_name: [row, row, ...]}

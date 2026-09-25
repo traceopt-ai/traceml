@@ -114,7 +114,11 @@ def test_unstamped_rank_finished_counts_as_finished(tmp_path):
 
 def test_parsers_ignore_stamp_keys(tmp_path):
     """An aggregator that predates the stamp must still parse stamped data."""
-    stamp = {"session_id": "run-a", "run_nonce": "abc"}
+    stamp = {
+        "session_id": "run-a",
+        "run_nonce": "abc",
+        "session_source": "explicit",
+    }
 
     envelope = normalize_telemetry_envelope(_envelope(**stamp))
     control = parse_rank_finished(_rank_finished(**stamp))
@@ -380,3 +384,74 @@ def test_foreign_rows_never_reach_sqlite_over_the_real_wire(tmp_path):
         client.close()
         server.stop()
         writer.finalize(timeout_sec=5.0)
+
+
+# `traceml serve --run-name X` enforces explicit session ids only.
+
+
+def _serve_settings(tmp_path: Path, monkeypatch, *extra: str):
+    from traceml_ai.launcher.cli import build_parser
+    from traceml_ai.launcher.commands import _resolve_serve_settings
+
+    monkeypatch.chdir(tmp_path)
+    for var in ("TRACEML_EXPECTED_WORLD_SIZE", "TRACEML_UI_MODE"):
+        monkeypatch.delenv(var, raising=False)
+    return _resolve_serve_settings(
+        build_parser().parse_args(["serve", *extra])
+    )
+
+
+def test_serve_admits_generated_worker_and_does_not_wait_on_it(
+    tmp_path, monkeypatch
+):
+    """A plain `python train.py` creates its own id and must be traced."""
+    import time
+
+    settings = _serve_settings(tmp_path, monkeypatch, "--run-name", "X")
+    agg = _make_aggregator(tmp_path, settings)
+    worker = _envelope(session_id="session_1", session_source="generated")
+    done = _rank_finished(session_id="session_1", session_source="generated")
+    agg._tcp_server = _TCP([[worker, done]])
+    agg._sqlite_writer = _Writer()
+
+    started = time.monotonic()
+    warning = agg._settle_end_of_run_telemetry(timeout_sec=30.0)
+
+    assert warning is None
+    assert time.monotonic() - started < 5.0
+    assert agg._sqlite_writer.ingested == [[worker]]
+    assert sorted(agg._finished_ranks) == [0]
+    assert agg._foreign_senders == {}
+
+
+def test_serve_drops_a_different_explicit_session(tmp_path, monkeypatch):
+    settings = _serve_settings(tmp_path, monkeypatch, "--run-name", "X")
+    agg = _make_aggregator(tmp_path, settings)
+    other = _envelope(session_id="Y", session_source="explicit")
+    other_done = _rank_finished(session_id="Y", session_source="explicit")
+    # A stamped session without a source is treated as explicit.
+    no_source = _envelope(session_id="Y")
+
+    assert agg._split_telemetry_payloads([other, other_done, no_source]) == []
+    assert agg._finished_ranks == {}
+    assert agg._foreign_senders == {
+        ("host-a", "4242", "Y"): 2,
+        ("host-a", None, "Y"): 1,
+    }
+
+
+def test_serve_admits_its_own_explicit_session(tmp_path, monkeypatch):
+    settings = _serve_settings(tmp_path, monkeypatch, "--run-name", "X")
+    agg = _make_aggregator(tmp_path, settings)
+    own = _envelope(session_id="X", session_source="explicit")
+
+    assert agg._split_telemetry_payloads([own]) == [[own]]
+    assert agg._foreign_senders == {}
+
+
+def test_run_aggregator_still_drops_a_generated_foreign_session(tmp_path):
+    """`traceml run` keeps strict session enforcement."""
+    agg = _make_aggregator(tmp_path, _enforcing(tmp_path))
+    generated = _envelope(session_id="session_1", session_source="generated")
+
+    assert agg._split_telemetry_payloads([generated]) == []

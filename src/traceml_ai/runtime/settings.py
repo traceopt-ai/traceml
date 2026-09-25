@@ -99,6 +99,10 @@ class TraceMLSettings:
       with a different one. Empty means no nonce for this launch path.
     - `enforce_session_id` makes the aggregator drop payloads stamped with a
       `session_id` other than its own. Payloads without a stamp are admitted.
+    - `admit_generated_session_id` narrows that check to explicit ids: a
+      payload whose `session_source` is "generated" is admitted.
+    - `session_source` is what a rank stamps: "explicit" when its session id
+      was given to it, "generated" when it made one up.
     """
 
     profile: str = "run"
@@ -120,3 +124,5 @@ class TraceMLSettings:
     expected_world_size: int = 1
     run_nonce: str = ""
     enforce_session_id: bool = False
+    admit_generated_session_id: bool = False
+    session_source: str = ""

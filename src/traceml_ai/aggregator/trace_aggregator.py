@@ -490,8 +490,10 @@ class TraceMLAggregator:
         flat payloads, from the top level. Each key is checked only when this
         aggregator enforces it and the payload carries it: ranks that predate
         the stamp send neither key and are always admitted. ``session_id`` is
-        enforced when the launch path shares one run id with its ranks;
-        ``run_nonce`` when a single launcher started both sides.
+        enforced when the launch path shares one run id with its ranks, and
+        ``run_nonce`` when a single launcher started both sides. With
+        ``admit_generated_session_id`` only explicit ids are enforced: a
+        stamped id without a ``session_source`` counts as explicit.
         """
         if not isinstance(payload, Mapping):
             return True
@@ -499,14 +501,14 @@ class TraceMLAggregator:
         stamp = meta if isinstance(meta, Mapping) else payload
 
         settings = self._settings
+        enforce_session = settings.enforce_session_id and not (
+            settings.admit_generated_session_id
+            and stamp.get("session_source") == "generated"
+        )
         expected = (
             (
                 "session_id",
-                (
-                    str(settings.session_id or "")
-                    if settings.enforce_session_id
-                    else ""
-                ),
+                str(settings.session_id or "") if enforce_session else "",
             ),
             ("run_nonce", str(settings.run_nonce or "")),
         )
