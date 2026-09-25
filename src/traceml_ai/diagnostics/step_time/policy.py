@@ -21,6 +21,13 @@ class DiagnosisThresholds:
     H2D policies. Compute-bound uses the same denominator and a separate
     informational dominance threshold.
 
+    ``min_phase_ms_for_diag`` is an absolute floor on top of the overhead
+    share: input, H2D, and residual diagnoses fire, and suppress
+    compute-bound, only when the phase's own per-step average cost reaches
+    it. That cost is the median across ranks, or the worst rank when a
+    single rank is present, so a large share of a sub-millisecond toy step
+    is not reported as a bottleneck.
+
     ``min_steps_for_warning_diag`` is the minimum window size for warning-only
     bottleneck diagnoses. ``min_steps_for_confident_diag`` is the minimum window
     size for critical diagnoses. ``straggler_cause_coverage_min`` is the future
@@ -33,6 +40,7 @@ class DiagnosisThresholds:
 
     overhead_share_warn: float = 0.10
     overhead_share_crit: float = 0.20
+    min_phase_ms_for_diag: float = 2.0
 
     compute_bound_share_warn: float = 0.90
 

@@ -19,6 +19,26 @@ from .context import (
     metric_worst_rank,
     non_negative_finite,
 )
+from .policy import DiagnosisThresholds
+
+
+def _phase_fires(
+    share: Optional[float],
+    component_ms: float,
+    thresholds: DiagnosisThresholds,
+) -> bool:
+    """
+    Return whether an overhead phase is material by share and by cost.
+
+    The share must reach the overhead warning threshold and the phase's own
+    per-step average cost must reach the absolute floor, so a large share of
+    a tiny step does not count. An unmeasured share never fires.
+    """
+    return (
+        share is not None
+        and share >= thresholds.overhead_share_warn
+        and component_ms >= thresholds.min_phase_ms_for_diag
+    )
 
 
 def _severity(value: float, crit_threshold: float) -> str:
@@ -226,7 +246,11 @@ class InputBoundRule(_BaseStepTimeRule):
             # Input wait or outer Step Time was never measured: abstain
             # rather than diagnose from a fake zero.
             return None
-        if context.input_bound_share < context.thresholds.overhead_share_warn:
+        if not _phase_fires(
+            context.input_bound_share,
+            context.input_wait_total,
+            context.thresholds,
+        ):
             return None
 
         return self._issue(
@@ -272,7 +296,11 @@ class H2DBoundRule(_BaseStepTimeRule):
         if context.h2d_share is None:
             # H2D or outer Step Time was never measured.
             return None
-        if context.h2d_share < context.thresholds.overhead_share_warn:
+        h2d_ms = metric_total(
+            context.h2d_metric,
+            single_rank=context.single_rank,
+        )
+        if not _phase_fires(context.h2d_share, h2d_ms, context.thresholds):
             return None
         worst_rank = metric_worst_rank(context.h2d_metric)
 
@@ -301,10 +329,7 @@ class H2DBoundRule(_BaseStepTimeRule):
             ),
             ranks=(worst_rank,) if worst_rank is not None else (),
             evidence={
-                "h2d_ms": metric_total(
-                    context.h2d_metric,
-                    single_rank=context.single_rank,
-                ),
+                "h2d_ms": h2d_ms,
                 "h2d_share": context.h2d_share,
                 "diagnosis_clock": context.diagnosis_clock,
             },
@@ -327,7 +352,14 @@ class ResidualHeavyRule(_BaseStepTimeRule):
             # The residual is underivable because a component phase was
             # never measured: abstain instead of absorbing missing work.
             return None
-        if context.residual_share < context.thresholds.overhead_share_warn:
+        if not _phase_fires(
+            context.residual_share,
+            metric_total(
+                context.residual_metric,
+                single_rank=context.single_rank,
+            ),
+            context.thresholds,
+        ):
             return None
 
         return self._issue(
@@ -371,22 +403,26 @@ class ComputeBoundRule(_BaseStepTimeRule):
             return None
         if context.compute_share < context.thresholds.compute_bound_share_warn:
             return None
-        if (
-            context.input_bound_share is not None
-            and context.input_bound_share
-            >= context.thresholds.overhead_share_warn
+        thresholds = context.thresholds
+        if _phase_fires(
+            context.input_bound_share,
+            context.input_wait_total,
+            thresholds,
         ):
             return None
-        if (
-            context.diagnosis_clock == "gpu"
-            and context.h2d_share is not None
-            and context.h2d_share >= context.thresholds.overhead_share_warn
+        if context.diagnosis_clock == "gpu" and _phase_fires(
+            context.h2d_share,
+            metric_total(context.h2d_metric, single_rank=context.single_rank),
+            thresholds,
         ):
             return None
-        if (
-            context.residual_share is not None
-            and context.residual_share
-            >= context.thresholds.overhead_share_warn
+        if _phase_fires(
+            context.residual_share,
+            metric_total(
+                context.residual_metric,
+                single_rank=context.single_rank,
+            ),
+            thresholds,
         ):
             return None
 

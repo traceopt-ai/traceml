@@ -302,6 +302,107 @@ def test_residual_heavy_uses_step_time_share_thresholds(
     assert issue.severity == expected_severity
 
 
+_PHASE_RULES = [
+    pytest.param(InputBoundRule, "dataloader", "cpu", id="input"),
+    pytest.param(H2DBoundRule, "h2d", "gpu", id="h2d"),
+    pytest.param(ResidualHeavyRule, "residual", "cpu", id="residual"),
+]
+
+
+def _phase_rank_map(
+    field: str,
+    phase_ms: float,
+    step_ms: float,
+    *,
+    forward: float = 0.0,
+) -> dict[int, dict[str, float]]:
+    """One rank whose phase costs ``phase_ms`` of a ``step_ms`` step."""
+    row = {
+        "dataloader": 0.0,
+        "h2d": 0.0,
+        "forward": forward,
+        "backward": 0.0,
+        "optimizer": 0.0,
+        "residual": 0.0,
+        field: phase_ms,
+    }
+    traced = step_ms - phase_ms if field == "dataloader" else step_ms
+    return {0: _timing_row(**row, traced_step_time=traced)}
+
+
+@pytest.mark.parametrize(("rule_cls", "field", "clock"), _PHASE_RULES)
+@pytest.mark.parametrize(
+    ("phase_ms", "step_ms", "expected_severity"),
+    [
+        pytest.param(0.1, 0.5, None, id="toy-share-crit"),
+        pytest.param(1.99, 13.0, None, id="below-floor-share-warn"),
+        pytest.param(2.0, 8.0, "crit", id="at-floor-crit"),
+        pytest.param(2.0, 16.0, "warn", id="at-floor-warn"),
+        pytest.param(25.0, 100.0, "crit", id="real-crit"),
+        pytest.param(15.0, 100.0, "warn", id="real-warn"),
+    ],
+)
+def test_phase_rules_require_absolute_phase_cost(
+    rule_cls: type,
+    field: str,
+    clock: str,
+    phase_ms: float,
+    step_ms: float,
+    expected_severity: str | None,
+) -> None:
+    context = _rank_context(
+        _phase_rank_map(field, phase_ms, step_ms),
+        diagnosis_clock=clock,
+    )
+
+    issue = rule_cls().evaluate(context)
+
+    if expected_severity is None:
+        assert issue is None
+        return
+    assert issue is not None
+    assert issue.share_pct == pytest.approx(phase_ms / step_ms)
+    assert issue.severity == expected_severity
+
+
+@pytest.mark.parametrize(("rule_cls", "field", "clock"), _PHASE_RULES)
+def test_phase_rules_abstain_when_share_is_unmeasured(
+    rule_cls: type,
+    field: str,
+    clock: str,
+) -> None:
+    share_field = {
+        "dataloader": "input_bound_share",
+        "h2d": "h2d_share",
+        "residual": "residual_share",
+    }[field]
+    context = _rank_context(
+        _phase_rank_map(field, 50.0, 100.0),
+        diagnosis_clock=clock,
+    )
+
+    assert rule_cls().evaluate(context) is not None
+    assert rule_cls().evaluate(replace(context, **{share_field: None})) is None
+
+
+@pytest.mark.parametrize(("_rule_cls", "field", "clock"), _PHASE_RULES)
+def test_sub_floor_phase_does_not_suppress_compute_bound(
+    _rule_cls: type,
+    field: str,
+    clock: str,
+) -> None:
+    context = _rank_context(
+        _phase_rank_map(field, 1.0, 10.0, forward=9.0),
+        diagnosis_clock=clock,
+    )
+
+    assert context.compute_share == pytest.approx(0.90)
+    issue = ComputeBoundRule().evaluate(context)
+
+    assert issue is not None
+    assert issue.kind == "COMPUTE_BOUND"
+
+
 def test_compute_bound_is_informational_despite_compute_skew() -> None:
     per_rank = {
         0: _timing_row(
@@ -1168,6 +1269,7 @@ def test_builtin_live_and_summary_policies_use_identical_thresholds() -> None:
 
     assert live_thresholds is summary_thresholds
     assert live_thresholds.compute_bound_share_warn == pytest.approx(0.90)
+    assert live_thresholds.min_phase_ms_for_diag == pytest.approx(2.0)
 
     window = window_from_events(
         {0: _summary_step_events(input_wait_gpu=None, steps=40)},
