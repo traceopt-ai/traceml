@@ -237,16 +237,19 @@ class TraceMLAggregator:
         try:
             sqlite_finalize_budget = self._sqlite_finalize_budget(remaining())
             settle_budget = max(0.0, remaining() - sqlite_finalize_budget)
-            if self._settings.history_enabled:
-                warning_payload = self._settle_end_of_run_telemetry(
-                    settle_budget
+            try:
+                if self._settings.history_enabled:
+                    warning_payload = self._settle_end_of_run_telemetry(
+                        settle_budget
+                    )
+                _safe(
+                    self._logger,
+                    "TCPServer.stop failed",
+                    self._tcp_server.stop,
                 )
-            _safe(
-                self._logger,
-                "TCPServer.stop failed",
-                self._tcp_server.stop,
-            )
-            self._warn_foreign_senders()
+            finally:
+                # Report dropped senders even when the final drain raised.
+                self._warn_foreign_senders()
             finalize_result = self._sqlite_writer.finalize(
                 max(sqlite_finalize_budget, remaining())
             )

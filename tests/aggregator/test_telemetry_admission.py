@@ -18,6 +18,8 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 
+import pytest
+
 from traceml_ai.aggregator.trace_aggregator import TraceMLAggregator
 from traceml_ai.runtime.sender import SenderIdentity
 from traceml_ai.runtime.settings import TraceMLSettings
@@ -539,3 +541,37 @@ def test_aggregator_main_still_drops_a_foreign_run_nonce(
         ("host-a", "4242", "run-b"): 1,
         ("host-a", "4242", "session_1"): 1,
     }
+
+
+def test_stop_warns_about_foreign_senders_when_settle_raises(tmp_path, capsys):
+    """A failed end-of-run drain must not hide the foreign-run warning."""
+    settings = _enforcing(tmp_path, history_enabled=True, mode="summary")
+    agg = _make_aggregator(tmp_path, settings)
+    agg._thread = _Stopped()
+    agg._display_driver = _Stopped()
+    agg._sqlite_writer = _Writer()
+    agg._tcp_server = _TCP([[_envelope(session_id="run-a")]])
+    agg._drain_tcp()
+
+    def _settle(timeout_sec):
+        raise RuntimeError("settle failed")
+
+    agg._settle_end_of_run_telemetry = _settle
+
+    # Summary mode re-raises finalization errors, as before.
+    with pytest.raises(RuntimeError, match="settle failed"):
+        agg.stop(timeout_sec=1.0)
+
+    warnings = [
+        line
+        for line in capsys.readouterr().err.splitlines()
+        if line.startswith("[TraceML] WARNING: ignored")
+    ]
+    assert warnings == [
+        "[TraceML] WARNING: ignored 1 payload(s) from another TraceML run: "
+        "host=host-a pid=4242 session=run-a (1). A training process from "
+        "an earlier run may still be running; stop it to free the "
+        "aggregator port."
+    ]
+    error = tmp_path / "run-b" / "aggregator" / "finalization_error.json"
+    assert "settle failed" in error.read_text(encoding="utf-8")
