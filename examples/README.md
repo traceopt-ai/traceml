@@ -57,6 +57,8 @@ These examples are still user-facing, but they are more about showing specific T
 |---|---|---|---|
 | `diagnosis/dataloader_bottleneck_demo.py` | Slow input pipeline or input-bound training | CPU / CUDA | Simulates dataloader delay |
 | `distributed/ddp_rank_straggler_demo.py` | Rank stragglers in DDP | CPU / CUDA | Simulates balanced, input-straggler, and compute-straggler runs |
+| `diagnosis/step_memory_creep_demo.py` | Step memory creep (`MEMORY CREEP`) | CUDA | Retains 8 MiB of CUDA memory per step on every rank; on CPU it runs without leaking and Step Memory reports `NO GPU` |
+| `diagnosis/incomplete_signals_demo.py` | Missing signals reported as absent, not zero (`INCOMPLETE DATA`) | CPU / CUDA | Calls `model.forward(...)` directly, so forward timing is never recorded |
 
 These are useful when you want to see how TraceML behaves on a known bottleneck.
 
@@ -87,6 +89,18 @@ traceml run examples/distributed/ddp_rank_straggler_demo.py --mode=summary --npr
 The default DDP demo uses precomputed tensors plus a compute-heavy MLP so the
 balanced run is not dominated by tiny batches or synthetic input overhead on
 GPUs such as T4 or L4.
+
+To see a uniform step-memory leak reported as creep (requires CUDA):
+
+```bash
+traceml run examples/diagnosis/step_memory_creep_demo.py --args --steps 300
+```
+
+To see Step Time refuse a verdict when the forward signal is missing:
+
+```bash
+traceml run examples/diagnosis/incomplete_signals_demo.py
+```
 
 ---
 
@@ -277,6 +291,8 @@ Use the diagnosis demos when you want to see:
 
 - an input bottleneck
 - an input straggler in DDP
+- step memory creep
+- a missing signal reported as incomplete data
 
 ---
 
@@ -287,7 +303,7 @@ Heavier development and stress scenarios are kept separately from these starter 
 That includes things like:
 
 - large BERT DDP runs
-- memory-creep stress scripts
+- large memory-creep stress scripts
 - FSDP experiments
 - heavy vision or LLM demos
 
