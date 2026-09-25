@@ -96,6 +96,8 @@ class TraceMLRuntime:
                 node_rank=self.identity.node_rank,
                 hostname=self.identity.hostname,
                 pid=self.identity.pid,
+                session_id=str(self._settings.session_id or ""),
+                run_nonce=str(self._settings.run_nonce or ""),
             ),
             logger=self._logger,
         )
@@ -228,6 +230,8 @@ class TraceMLRuntime:
                 world_size=self.identity.world_size,
                 node_rank=self.identity.node_rank,
                 hostname=self.identity.hostname,
+                session_id=str(self._settings.session_id or ""),
+                run_nonce=str(self._settings.run_nonce or ""),
             )
         )
 

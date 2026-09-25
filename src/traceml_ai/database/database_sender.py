@@ -63,7 +63,9 @@ class DBIncrementalSender:
             "hostname": <str>,
             "pid": <int>,
             "sampler": <str>,
-            "timestamp": <float>
+            "timestamp": <float>,
+            "session_id": <str | None>,
+            "run_nonce": <str | None>
         },
         "body": {
             "tables": {table_name: [row, row, ...]}
