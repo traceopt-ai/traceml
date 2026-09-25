@@ -550,7 +550,7 @@ class TraceMLAggregator:
                 f"[TraceML] WARNING: ignored {sum(senders.values())} "
                 f"payload(s) from another TraceML run: {named}. A training "
                 "process from an earlier run may still be running; stop it "
-                "to free the aggregator port.",
+                "so it no longer sends telemetry to this run.",
                 file=sys.stderr,
                 flush=True,
             )

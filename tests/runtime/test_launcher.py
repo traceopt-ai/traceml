@@ -1994,7 +1994,8 @@ def test_launcher_shares_run_nonce_only_on_single_node(
 _FOREIGN_WARNING = (
     "[TraceML] WARNING: ignored 3 payload(s) from another TraceML run: "
     "host=h pid=1 session=run-a (3). A training process from an earlier run "
-    "may still be running; stop it to free the aggregator port."
+    "may still be running; stop it so it no longer sends telemetry to this "
+    "run."
 )
 
 

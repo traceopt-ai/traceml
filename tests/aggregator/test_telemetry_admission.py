@@ -296,6 +296,7 @@ def test_stop_prints_one_warning_naming_foreign_senders(tmp_path, capsys):
     assert "host=host-a pid=4242 session=run-a (2)" in warnings[0]
     assert "host=host-a pid=? session=run-a (1)" in warnings[0]
     assert "host=host-c pid=7 session=run-c (1)" in warnings[0]
+    assert "stop it so it no longer sends telemetry to this run" in warnings[0]
 
 
 def test_stop_prints_nothing_without_foreign_payloads(tmp_path, capsys):
@@ -570,8 +571,8 @@ def test_stop_warns_about_foreign_senders_when_settle_raises(tmp_path, capsys):
     assert warnings == [
         "[TraceML] WARNING: ignored 1 payload(s) from another TraceML run: "
         "host=host-a pid=4242 session=run-a (1). A training process from "
-        "an earlier run may still be running; stop it to free the "
-        "aggregator port."
+        "an earlier run may still be running; stop it so it no longer sends "
+        "telemetry to this run."
     ]
     error = tmp_path / "run-b" / "aggregator" / "finalization_error.json"
     assert "settle failed" in error.read_text(encoding="utf-8")
