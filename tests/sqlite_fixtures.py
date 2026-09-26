@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -15,6 +14,8 @@ from traceml_ai.aggregator.sqlite_writers import (
     step_time as step_time_projection,
     system as system_projection,
 )
+from traceml_ai.samplers.schema.step_time_schema import StepTimeEventSample
+from traceml_ai.telemetry.envelope import TelemetryEnvelope, TelemetryMeta
 
 _UNSET = object()
 
@@ -226,18 +227,23 @@ def step_time_events(
     forward: float,
     backward: float,
     optimizer: float,
-    traced_step_time: float,
+    traced_step_time: float | None = None,
     h2d: float | None = None,
     clock: str = "cpu",
 ) -> dict[str, dict[str, dict[str, float | bool | int | None]]]:
-    """Encode concise phase values in the production event payload shape."""
+    """Encode concise phase values in the production event payload shape.
+
+    A ``None`` traced step time or H2D value omits that event, which is how
+    the sampler reports an unavailable signal.
+    """
     values = {
         "_traceml_internal:dataloader_next": dataloader,
         "_traceml_internal:forward_time": forward,
         "_traceml_internal:backward_time": backward,
         "_traceml_internal:optimizer_step": optimizer,
-        "_traceml_internal:step_time": traced_step_time,
     }
+    if traced_step_time is not None:
+        values["_traceml_internal:step_time"] = traced_step_time
     if h2d is not None:
         values["_traceml_internal:h2d_time"] = h2d
     is_gpu = clock == "gpu"
@@ -262,7 +268,7 @@ def insert_step_time_sample(
     row_id: int,
     rank: int,
     step: int,
-    traced_step_time: float,
+    traced_step_time: float | None = None,
     events: Mapping[str, Any] | None = None,
     dataloader: float = 1.0,
     h2d: float | None = None,
@@ -276,12 +282,15 @@ def insert_step_time_sample(
     node_rank: int | None | object = _UNSET,
     hostname: str | None | object = _UNSET,
     ts: float | None = None,
-    seq: int | None | object = _UNSET,
+    seq: int | object = _UNSET,
 ) -> None:
-    """Insert one canonical Step Time projection row.
+    """Insert one Step Time row through the production projection writer.
 
-    ``events`` replaces the generated payload verbatim, so an empty mapping
-    persists no phases instead of falling back to default timings.
+    The sample travels as a wire envelope through the writer's
+    ``build_rows`` and ``insert_rows``, so the persisted ``events_json``
+    shape and column list are the writer's own. ``events`` replaces the
+    generated wire payload, so an empty mapping persists no phases instead
+    of falling back to default timings.
     """
     payload = (
         events
@@ -296,21 +305,30 @@ def insert_step_time_sample(
             clock=clock,
         )
     )
-    _insert_row(
-        conn,
-        "step_time_samples",
-        recv_ts_ns=row_id,
-        rank=rank,
-        global_rank=rank,
-        local_rank=local_rank,
-        world_size=world_size,
-        local_world_size=local_world_size,
-        node_rank=_defaulted(node_rank, rank),
-        hostname=_defaulted(hostname, f"worker-{rank}"),
-        sample_ts_s=float(step) if ts is None else ts,
+    sample = StepTimeEventSample(
         seq=_defaulted(seq, row_id),
+        timestamp=float(step) if ts is None else ts,
         step=step,
-        events_json=json.dumps(payload),
+        events=dict(payload),
+    )
+    envelope = TelemetryEnvelope(
+        meta=TelemetryMeta.from_mapping(
+            {
+                "sampler": step_time_projection.SAMPLER_NAME,
+                "rank": rank,
+                "global_rank": rank,
+                "local_rank": local_rank,
+                "world_size": world_size,
+                "local_world_size": local_world_size,
+                "node_rank": _defaulted(node_rank, rank),
+                "hostname": _defaulted(hostname, f"worker-{rank}"),
+            }
+        ),
+        body={"tables": {"StepTimeTable": [sample.to_wire()]}},
+    )
+    step_time_projection.insert_rows(
+        conn,
+        step_time_projection.build_rows(envelope, recv_ts_ns=row_id),
     )
 
 
@@ -356,13 +374,22 @@ def insert_training_strategy(
     conn: sqlite3.Connection,
     *strategies: str,
 ) -> None:
-    """Append runtime strategy rows in observation order."""
+    """Append runtime strategy rows in observation order.
+
+    ``recv_ts_ns`` continues after the latest stored row, so repeated calls
+    keep the receive clock strictly increasing as the aggregator's does.
+    """
+    (next_recv_ts_ns,) = conn.execute(
+        "SELECT COALESCE(MAX(recv_ts_ns), 0) + 1 FROM runtime_environment"
+    ).fetchone()
     conn.executemany(
         "INSERT INTO runtime_environment(recv_ts_ns, training_strategy) "
         "VALUES (?, ?)",
         [
             (recv_ts_ns, strategy)
-            for recv_ts_ns, strategy in enumerate(strategies, start=1)
+            for recv_ts_ns, strategy in enumerate(
+                strategies, start=next_recv_ts_ns
+            )
         ],
     )
 

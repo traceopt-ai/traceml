@@ -195,7 +195,7 @@ SCENARIOS_BY_NAME: Mapping[str, StepTimeScenario] = {
 
 
 def _event_payload(profile: MetricProfile, clock: str) -> dict:
-    """Encode one rank profile in the production ``events_json`` shape."""
+    """Encode one rank profile as the sampler's wire ``events`` mapping."""
     events = {}
     for metric, value in profile.items():
         event_name = EVENT_NAMES[metric]
@@ -239,7 +239,6 @@ def create_step_time_database(
                     row_id=sequence,
                     rank=global_rank,
                     step=step,
-                    traced_step_time=profile.get("traced_step_time"),
                     events=events,
                     local_rank=global_rank,
                     world_size=world_size,

@@ -65,7 +65,6 @@ def _create_db(path: str, per_rank_events: dict) -> None:
                     row_id=row_id,
                     rank=rank,
                     step=step,
-                    traced_step_time=values_ms.get("step_time"),
                     events=_events(values_ms),
                     local_rank=rank,
                     world_size=world_size,
