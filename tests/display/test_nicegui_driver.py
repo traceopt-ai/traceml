@@ -84,6 +84,30 @@ def test_driver_passes_sampler_interval_to_process_renderer(
     assert captured["sampler_interval_s"] == 60.0
 
 
+def test_driver_passes_sampler_interval_to_step_memory_renderer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The dashboard judges step-memory rank liveness at the same
+    configured cadence as the terminal."""
+    import traceml_ai.aggregator.display_drivers.nicegui as nicegui_driver
+
+    captured: dict[str, object] = {}
+
+    class StepMemoryRendererSpy:
+        def __init__(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+    monkeypatch.setattr(
+        nicegui_driver,
+        "StepMemoryRenderer",
+        StepMemoryRendererSpy,
+    )
+
+    _driver(sampler_interval_sec=60.0)
+
+    assert captured["sampler_interval_s"] == 60.0
+
+
 def test_staleness_text_empty_before_any_data() -> None:
     driver = _driver()
     assert driver._last_data_monotonic is None

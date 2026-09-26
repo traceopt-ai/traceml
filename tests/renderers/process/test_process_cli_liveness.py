@@ -177,6 +177,32 @@ def test_dashboard_freshness_values_are_unchanged(process_db):
     ) == (4, 3, 1, 0)
 
 
+def test_a_failed_rank_read_costs_the_dashboard_its_rank_rows_only(
+    process_db, monkeypatch
+):
+    """The committed-step history still reaches the card.
+
+    The per-rank rows and their verdicts come from the one read that
+    failed, so they go. Everything read separately stays.
+    """
+    import traceml_ai.renderers.process.dashboard_compute as dashboard
+
+    _run(process_db, dies=(1, 20))
+
+    def unreadable(*_args, **_kwargs):
+        raise sqlite3.OperationalError("heartbeat unreadable")
+
+    monkeypatch.setattr(dashboard, "read_rank_clock", unreadable)
+    out = ProcessDashboardComputer(
+        db_path=process_db.path, sampler_interval_s=2.0
+    ).compute()
+
+    assert out.ranks == ()
+    assert out.window_len == 20
+    assert out.cpu is not None
+    assert out.cpu.now == pytest.approx(300.0)
+
+
 # --- the terminal panel --------------------------------------------------
 def test_process_panel_marks_the_stale_rank(process_db):
     _run(process_db, dies=(1, 20))

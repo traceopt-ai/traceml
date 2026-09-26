@@ -188,7 +188,8 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
             db_path=self._settings.db_path
         )
         self._model_diagnostics = ModelDiagnosticsRenderer(
-            db_path=self._settings.db_path
+            db_path=self._settings.db_path,
+            sampler_interval_s=self._settings.sampler_interval_sec,
         )
 
         # ---- Independent layout renderers ----
@@ -202,7 +203,10 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
                 db_path=self._settings.db_path,
                 sampler_interval_s=self._settings.sampler_interval_sec,
             ),
-            StepMemoryRenderer(db_path=self._settings.db_path),
+            StepMemoryRenderer(
+                db_path=self._settings.db_path,
+                sampler_interval_s=self._settings.sampler_interval_sec,
+            ),
         ]
 
         # ---- UI server config (resolved via traceml.yaml/env/CLI) ----
