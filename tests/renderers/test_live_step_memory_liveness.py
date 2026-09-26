@@ -10,6 +10,7 @@ dashboard uses.
 from __future__ import annotations
 
 import sqlite3
+from types import SimpleNamespace
 from typing import Mapping
 
 import pytest
@@ -35,8 +36,27 @@ T0 = 1_700_000_000.0
 STEPS = 60
 
 
-def _write_run(path: str, *, last_heartbeat: Mapping[int, int]) -> None:
-    """Two GPU ranks with `STEPS` aligned steps and per-rank heartbeats.
+def _heartbeat(conn, *, rank: int, tick: int, world: int) -> None:
+    """One 2 s process-sampler tick from ``rank``."""
+    ts = T0 + tick * 2.0
+    insert_process_sample(
+        conn,
+        row_id=int(ts * 1e9),
+        rank=rank,
+        ts=ts,
+        seq=tick,
+        gpu_available=True,
+        gpu_count=world,
+        world_size=world,
+        local_world_size=world,
+        gpu_mem_total_bytes=16.0 * GIB,
+    )
+
+
+def _write_run(
+    path: str, *, last_heartbeat: Mapping[int, int], steps: int = STEPS
+) -> None:
+    """Two GPU ranks with ``steps`` aligned steps and per-rank heartbeats.
 
     ``last_heartbeat`` maps rank -> the last 2 s sampler tick it sent.
     """
@@ -44,22 +64,10 @@ def _write_run(path: str, *, last_heartbeat: Mapping[int, int]) -> None:
     with sqlite_database(path, init_summary_schema) as conn:
         for rank in ranks:
             for tick in range(1, last_heartbeat[rank] + 1):
-                ts = T0 + tick * 2.0
-                insert_process_sample(
-                    conn,
-                    row_id=int(ts * 1e9),
-                    rank=rank,
-                    ts=ts,
-                    seq=tick,
-                    gpu_available=True,
-                    gpu_count=len(ranks),
-                    world_size=len(ranks),
-                    local_world_size=len(ranks),
-                    gpu_mem_total_bytes=16.0 * GIB,
-                )
+                _heartbeat(conn, rank=rank, tick=tick, world=len(ranks))
         row_id = 0
         for rank in ranks:
-            for step in range(STEPS):
+            for step in range(steps):
                 row_id += 1
                 insert_step_memory_sample(
                     conn,
@@ -73,12 +81,16 @@ def _write_run(path: str, *, last_heartbeat: Mapping[int, int]) -> None:
                 )
 
 
-def _panel_text(db_path: str) -> str:
+def _render(renderable) -> str:
     console = Console(
         force_terminal=True, color_system=None, width=140, record=True
     )
-    console.print(StepMemoryRenderer(db_path).get_panel_renderable())
+    console.print(renderable)
     return console.export_text()
+
+
+def _panel_text(db_path: str) -> str:
+    return _render(StepMemoryRenderer(db_path).get_panel_renderable())
 
 
 def test_combined_result_names_the_rank_that_stopped(tmp_path) -> None:
@@ -148,6 +160,53 @@ def test_held_metrics_carry_this_ticks_liveness(tmp_path) -> None:
     )
     assert held.metrics == first.metrics
     assert held.rank_liveness == now
+
+
+def test_renderer_holds_its_figures_with_this_ticks_verdict(
+    tmp_path, monkeypatch
+) -> None:
+    """The renderer's own cache holds the figures, never the verdict.
+
+    Tick 1 has figures and every rank reporting. By tick 2 no step is
+    complete, the computer's held figures have expired, and rank 1 has
+    stopped: the renderer's cached figures must name it.
+    """
+    import traceml_ai.renderers.step_memory.cli_compute as step_memory_cli
+
+    db_path = str(tmp_path / "dies_later.db")
+    _write_run(db_path, last_heartbeat={0: 60, 1: 60})
+    clock = [T0]
+    monkeypatch.setattr(
+        step_memory_cli, "time", SimpleNamespace(time=lambda: clock[0])
+    )
+    renderer = StepMemoryRenderer(db_path)
+    first = _render(renderer.get_panel_renderable())
+    assert "Peak Allocated" in first
+    assert "(stale)" not in first
+
+    with sqlite_database(db_path) as conn:
+        conn.execute("DELETE FROM step_memory_samples")
+        for tick in range(61, 101):
+            _heartbeat(conn, rank=0, tick=tick, world=2)
+    clock[0] += 31.0
+    held = _render(renderer.get_panel_renderable())
+
+    assert "Peak Allocated" in held
+    assert "rank 1: no data for 80s (stale)" in held
+
+
+def test_empty_panel_names_a_rank_that_stopped_before_the_first_step(
+    tmp_path,
+) -> None:
+    """A rank dies before any step completes: the DDP startup hang."""
+    db_path = str(tmp_path / "startup_hang.db")
+    _write_run(db_path, last_heartbeat={0: 60, 1: 20}, steps=0)
+
+    text = _panel_text(db_path)
+
+    assert "Peak Allocated" not in text
+    assert "No complete memory metrics available" in text
+    assert "rank 1: no data for 80s (stale)" in text
 
 
 def _add_unparseable_rank(path: str) -> None:
