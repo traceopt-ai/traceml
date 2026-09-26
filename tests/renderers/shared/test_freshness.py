@@ -15,6 +15,8 @@ from traceml_ai.renderers.shared.freshness import (
     MIN_STALE_AFTER_S,
     CachedPayloadTTL,
     FreshnessPolicy,
+    RankLiveness,
+    stale_rank_label,
 )
 
 
@@ -166,3 +168,11 @@ def test_a_corrupt_observed_cadence_falls_back_to_the_configured_one():
 def test_a_corrupt_age_may_not_reuse_a_cached_payload():
     """Unknown age means the cache cannot be shown to be inside its TTL."""
     assert CachedPayloadTTL(ttl_s=30.0).may_reuse(NAN) is False
+
+
+def test_the_stale_rank_marker_states_how_long_the_rank_has_been_quiet():
+    """An unknown age is said as unknown, never as a fabricated zero."""
+    quiet = RankLiveness(global_rank=1, age_s=12.7, freshness="stale")
+    assert stale_rank_label(quiet) == "rank 1: no data for 12s (stale)"
+    unknown = RankLiveness(global_rank=3, age_s=None, freshness="stale")
+    assert stale_rank_label(unknown) == "rank 3: no data (stale)"

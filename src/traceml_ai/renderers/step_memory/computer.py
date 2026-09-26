@@ -23,16 +23,19 @@ class StepMemoryMetricsComputer:
         stale_ttl_s: Optional[float] = 30.0,
         cli_window_size: int = 400,
         dashboard_window_size: int = 400,
+        sampler_interval_s: Optional[float] = None,
     ) -> None:
         self._cli = StepMemoryCLIComputer(
             db_path=db_path,
             window_size=cli_window_size,
             stale_ttl_s=stale_ttl_s,
+            sampler_interval_s=sampler_interval_s,
         )
         self._dashboard = StepMemoryDashboardComputer(
             db_path=db_path,
             window_size=dashboard_window_size,
             stale_ttl_s=stale_ttl_s,
+            sampler_interval_s=sampler_interval_s,
         )
 
     def compute_cli(self) -> StepMemoryCombinedResult:
