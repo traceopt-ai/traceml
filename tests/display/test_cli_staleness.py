@@ -90,6 +90,7 @@ def _driver(
 def _use_clock(driver: CLIDisplayDriver, now_fn: Callable[[], float]) -> None:
     """One aggregator clock for the Process read and the driver."""
     driver._process._computer._cli._now_fn = now_fn
+    driver._process._now_fn = now_fn
     driver._now_fn = now_fn
 
 
@@ -309,6 +310,29 @@ def test_an_arrival_stamped_before_the_finish_is_not_newer(tmp_path) -> None:
     clock.now_s = T0 + 80.0
     driver.tick()
 
+    assert "no new data" not in _screen(driver)
+
+
+def test_a_panel_read_that_raises_holds_the_line_only_within_the_ttl(
+    tmp_path, monkeypatch
+) -> None:
+    """The last good run verdict answers for a Process read that raised,
+    as the per-rank verdicts do, for the stale TTL (30 s) and no longer.
+    """
+    _, clock, driver = _finished_quiet_run(tmp_path)
+    driver.tick()
+    assert "no new data for 60s (stale)" in _screen(driver)
+
+    def raising_read():
+        raise RuntimeError("process read failed")
+
+    monkeypatch.setattr(driver._process._computer, "compute_cli", raising_read)
+    clock.now_s = T0 + 90.0
+    driver.tick()
+    assert "no new data for 60s (stale)" in _screen(driver)
+
+    clock.now_s = T0 + 91.0
+    driver.tick()
     assert "no new data" not in _screen(driver)
 
 

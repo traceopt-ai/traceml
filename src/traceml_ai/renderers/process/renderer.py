@@ -5,7 +5,8 @@ This module contains all presentation logic for process-level telemetry.
 """
 
 import shutil
-from typing import Optional
+import time
+from typing import Any, Callable, Dict, Optional, Tuple
 
 from rich.panel import Panel
 from rich.table import Table
@@ -14,6 +15,8 @@ from traceml_ai.aggregator.display_drivers.layout import PROCESS_LAYOUT
 from traceml_ai.loggers.error_log import get_error_logger
 from traceml_ai.renderers.base_renderer import BaseRenderer
 from traceml_ai.renderers.shared.freshness import (
+    CachedPayloadTTL,
+    LastGoodVerdict,
     RankLiveness,
     RunLiveness,
     stale_rank_label,
@@ -47,6 +50,15 @@ class ProcessRenderer(BaseRenderer):
         # The run-wide verdict from the latest panel read, so the
         # terminal's run-wide line costs no read of its own.
         self._run_liveness: Optional[RunLiveness] = None
+        # A read that raised is answered by the last good verdict for the
+        # stale TTL the per-rank verdicts are carried for, then by none. A
+        # read that worked is a 1-tuple even without a verdict, so only a
+        # failed one is carried over.
+        self._run_reads: LastGoodVerdict[Tuple[Optional[RunLiveness]]] = (
+            LastGoodVerdict(CachedPayloadTTL())
+        )
+        # The aggregator's clock; injectable to test the TTL.
+        self._now_fn: Callable[[], float] = time.time
 
     def get_staleness_text(self, after_s: Optional[float] = None) -> str:
         """``no new data for 42s (stale)`` once the whole run went quiet.
@@ -65,6 +77,25 @@ class ProcessRenderer(BaseRenderer):
             return ""
         return stale_run_label(run)
 
+    def _read_snapshot(self) -> Dict[str, Any]:
+        """This tick's snapshot, keeping its run-wide verdict.
+
+        A read that raises still re-raises, for the driver to show, after
+        leaving the last good verdict in place only within the TTL.
+        """
+        now_s = self._now_fn()
+        try:
+            snap = self._computer.compute_cli()
+            run = snap.get("run_liveness")
+            read = (RunLiveness(**run) if run else None,)
+        except Exception:
+            carried = self._run_reads.carry(None, now_s=now_s)
+            self._run_liveness = carried[0] if carried else None
+            raise
+        self._run_reads.carry(read, now_s=now_s)
+        self._run_liveness = read[0]
+        return snap
+
     def get_panel_renderable(self) -> Panel:
         """
         Build the Rich panel for process telemetry.
@@ -75,9 +106,7 @@ class ProcessRenderer(BaseRenderer):
         - a rank that stopped reporting is named, because the figures
           above stay anchored on its last seq
         """
-        snap = self._computer.compute_cli()
-        run = snap.get("run_liveness")
-        self._run_liveness = RunLiveness(**run) if run else None
+        snap = self._read_snapshot()
 
         table = Table.grid(padding=(0, 2))
         table.add_column(justify="left", style="bright_white", no_wrap=True)
