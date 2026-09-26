@@ -12,9 +12,13 @@ Semantics
 """
 
 import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
-from traceml_ai.renderers.shared.freshness import RankLiveness
+from traceml_ai.renderers.shared.freshness import (
+    CachedPayloadTTL,
+    LastGoodVerdict,
+    RankLiveness,
+)
 
 from .common import ProcessCLISnapshot
 from .liveness import read_rank_clock
@@ -35,6 +39,9 @@ class ProcessCLIComputer:
     sampler_interval_s:
         Configured process-sampling cadence used until an observed cadence
         is available for judging rank freshness.
+    now_fn:
+        The clock that times how long the last good rank verdicts may
+        answer for a heartbeat read that failed.
     """
 
     def __init__(
@@ -42,13 +49,20 @@ class ProcessCLIComputer:
         db_path: str,
         stale_ttl_s: Optional[float] = 30.0,
         sampler_interval_s: Optional[float] = None,
+        now_fn: Callable[[], float] = time.time,
     ) -> None:
         self._db = ProcessRepository(db_path=db_path)
         self._configured_interval_s = sampler_interval_s
+        # Injectable so the last good verdicts' expiry can be tested at a
+        # chosen moment rather than by sleeping.
+        self._now_fn = now_fn
         self._last_ok: Optional[Dict[str, Any]] = None
         self._last_ok_ts: float = 0.0
         self._stale_ttl_s: Optional[float] = (
             float(stale_ttl_s) if stale_ttl_s is not None else None
+        )
+        self._liveness: LastGoodVerdict[Tuple[RankLiveness, ...]] = (
+            LastGoodVerdict(CachedPayloadTTL(ttl_s=self._stale_ttl_s))
         )
 
     def compute(self) -> Dict[str, Any]:
@@ -71,13 +85,27 @@ class ProcessCLIComputer:
         self._last_ok_ts = time.time()
         return out
 
+    def _read_liveness(self, conn) -> Optional[Tuple[RankLiveness, ...]]:
+        """Every rank's last-seen clock, or ``None`` when there is none.
+
+        Best-effort: a heartbeat that cannot be read costs the verdicts,
+        never the panel's figures. The last good verdicts answer for it
+        within the stale TTL; after that, ``None``.
+        """
+        now_s = self._now_fn()
+        try:
+            read = read_rank_clock(
+                self._db,
+                conn,
+                newest_ts=self._db.newest_sample_ts(conn),
+                configured_interval_s=self._configured_interval_s,
+            ).liveness()
+        except Exception:
+            read = None
+        return self._liveness.carry(read, now_s=now_s)
+
     def _compute_impl(self, conn) -> Dict[str, Any]:
-        liveness = read_rank_clock(
-            self._db,
-            conn,
-            newest_ts=self._db.newest_sample_ts(conn),
-            configured_interval_s=self._configured_interval_s,
-        ).liveness()
+        liveness = self._read_liveness(conn)
 
         committed_seq = self._db.fetch_committed_seq(conn)
         if committed_seq is None or committed_seq < 0:
@@ -156,7 +184,7 @@ class ProcessCLIComputer:
         return self._empty_snapshot()
 
     def _empty_snapshot(
-        self, liveness: Tuple[RankLiveness, ...] = ()
+        self, liveness: Optional[Tuple[RankLiveness, ...]] = None
     ) -> Dict[str, Any]:
         return ProcessCLISnapshot(
             seq=None,

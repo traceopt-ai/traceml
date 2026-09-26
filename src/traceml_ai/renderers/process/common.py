@@ -24,7 +24,8 @@ class ProcessCLISnapshot:
     gpu_used_imbalance: Optional[float]
     # Every rank's last-seen clock, so the card can name a rank that
     # stopped instead of silently holding the slowest rank's last seq.
-    rank_liveness: Tuple[RankLiveness, ...] = ()
+    # None when the heartbeat could not be read this tick.
+    rank_liveness: Optional[Tuple[RankLiveness, ...]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -35,5 +36,9 @@ class ProcessCLISnapshot:
             "gpu_total": self.gpu_total,
             "gpu_rank": self.gpu_rank,
             "gpu_used_imbalance": self.gpu_used_imbalance,
-            "rank_liveness": [asdict(r) for r in self.rank_liveness],
+            "rank_liveness": (
+                None
+                if self.rank_liveness is None
+                else [asdict(r) for r in self.rank_liveness]
+            ),
         }

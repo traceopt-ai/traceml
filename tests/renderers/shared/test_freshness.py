@@ -15,6 +15,7 @@ from traceml_ai.renderers.shared.freshness import (
     MIN_STALE_AFTER_S,
     CachedPayloadTTL,
     FreshnessPolicy,
+    LastGoodVerdict,
     RankLiveness,
     stale_rank_label,
 )
@@ -176,3 +177,16 @@ def test_the_stale_rank_marker_states_how_long_the_rank_has_been_quiet():
     assert stale_rank_label(quiet) == "rank 1: no data for 12s (stale)"
     unknown = RankLiveness(global_rank=3, age_s=None, freshness="stale")
     assert stale_rank_label(unknown) == "rank 3: no data (stale)"
+
+
+def test_the_last_good_verdict_answers_for_a_failed_read_inside_its_ttl():
+    """``None`` is an unreadable verdict: the last good one stands in.
+
+    For as long as a cached payload may, and no longer.
+    """
+    held = LastGoodVerdict(CachedPayloadTTL(ttl_s=30.0))
+    assert held.carry(None, now_s=0.0) is None
+    assert held.carry("rank 1 stale", now_s=100.0) == "rank 1 stale"
+    assert held.carry(None, now_s=130.0) == "rank 1 stale"
+    assert held.carry(None, now_s=130.5) is None
+    assert held.carry("all fresh", now_s=131.0) == "all fresh"

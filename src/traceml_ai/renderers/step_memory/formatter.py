@@ -92,7 +92,7 @@ class StepMemoryRichFormatter(Formatter[StepMemoryCombinedResult, Panel]):
         """One marker per rank that stopped; the figures hold its last step."""
         return [
             f"[bold yellow]{stale_rank_label(rank)}[/bold yellow]"
-            for rank in payload.rank_liveness
+            for rank in payload.rank_liveness or ()
             if rank.is_stale
         ]
 

@@ -76,11 +76,12 @@ class StepMemoryCombinedResult:
 
     `rank_liveness` is every rank's last-seen clock from its process
     heartbeat. The metrics align on the slowest rank's latest step, so a
-    rank that stopped freezes them; this names it. Empty when the
-    heartbeat could not be read.
+    rank that stopped freezes them; this names it. None when the
+    heartbeat could not be read; empty when it was read and no rank has
+    reported.
     """
 
     metrics: List[StepMemoryCombinedMetric]
     status_message: str
     gpu_total_bytes: Optional[float] = None
-    rank_liveness: Tuple[RankLiveness, ...] = ()
+    rank_liveness: Optional[Tuple[RankLiveness, ...]] = None

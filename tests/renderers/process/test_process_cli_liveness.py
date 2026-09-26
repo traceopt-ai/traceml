@@ -15,10 +15,13 @@ went quiet instead of silently holding its numbers.
 
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 from rich.console import Console
 
 from tests.renderers.process.conftest import GB
+from traceml_ai.renderers.process.cli_compute import ProcessCLIComputer
 from traceml_ai.renderers.process.computer import ProcessMetricsComputer
 from traceml_ai.renderers.process.dashboard_compute import (
     ProcessDashboardComputer,
@@ -97,6 +100,42 @@ def test_cli_snapshot_reports_every_rank_fresh_when_all_report(process_db):
     ]
 
 
+def test_a_failed_heartbeat_read_on_a_metrics_tick_keeps_the_last_verdicts(
+    process_db, monkeypatch
+):
+    """Unreadable is not "no rank stopped", even when the figures read.
+
+    The last good verdicts answer for a failed read as long as a cached
+    payload may (30 s here), then there is no verdict at all.
+    """
+    import traceml_ai.renderers.process.cli_compute as cli_compute
+
+    _run(process_db, dies=(1, 20))
+    now = [T0 + 121.0]
+    computer = ProcessCLIComputer(
+        db_path=process_db.path,
+        sampler_interval_s=2.0,
+        now_fn=lambda: now[0],
+    )
+    first = computer.compute()
+    stale = [r for r in first["rank_liveness"] if r["freshness"] == "stale"]
+    assert [r["global_rank"] for r in stale] == [1]
+
+    def unreadable(*_args, **_kwargs):
+        raise sqlite3.OperationalError("heartbeat unreadable")
+
+    monkeypatch.setattr(cli_compute, "read_rank_clock", unreadable)
+    now[0] += 10.0
+    held = computer.compute()
+    assert held["seq"] == 20
+    assert held["rank_liveness"] == first["rank_liveness"]
+
+    now[0] += 21.0  # 31 s since the last good read
+    expired = computer.compute()
+    assert expired["seq"] == 20
+    assert expired["rank_liveness"] is None
+
+
 def test_cli_and_dashboard_judge_every_rank_identically(process_db):
     """One owner for the judgement: both surfaces must agree per rank."""
     _run(process_db, ranks=4, samples=200, dies=(3, 20))
@@ -161,3 +200,35 @@ def test_process_panel_has_no_marker_when_every_rank_reports(process_db):
     )
     assert "(stale)" not in text
     assert "no data for" not in text
+
+
+def test_unparseable_rank_cell_is_skipped_and_the_other_ranks_judged(
+    process_db,
+):
+    """One bad heartbeat row costs its own row, never every verdict."""
+    _run(process_db, dies=(1, 20))
+    process_db.insert(
+        recv_ts_ns=int((T0 + 2.0) * 1e9),
+        rank=0,
+        global_rank="not-a-rank",
+        seq=1,
+        sample_ts_s=T0 + 2.0,
+        cpu_percent=1.0,
+    )
+
+    snap = ProcessMetricsComputer(
+        db_path=process_db.path, sampler_interval_s=2.0
+    ).compute_cli()
+    text = _render(
+        ProcessRenderer(
+            db_path=process_db.path, sampler_interval_s=2.0
+        ).get_panel_renderable()
+    )
+
+    assert snap["seq"] == 20
+    assert snap["cpu_used"] == pytest.approx(300.0)
+    assert [
+        (r["global_rank"], r["freshness"]) for r in snap["rank_liveness"]
+    ] == [(0, "fresh"), (1, "stale")]
+    assert "rank 1: no data for 80s (stale)" in text
+    assert "3.00 cores" in text

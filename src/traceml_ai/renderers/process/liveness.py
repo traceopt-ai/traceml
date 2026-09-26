@@ -13,9 +13,9 @@ heartbeat. This module reads it once per tick and applies the shared
 :class:`FreshnessPolicy`, so the terminal and the dashboard judge a rank
 by one rule and one clock.
 
-Moved out of ``dashboard_compute.py`` unchanged (issue #358): the
-dashboard already judged rank freshness this way, and the terminal now
-reuses the same read rather than a second rule.
+Moved out of ``dashboard_compute.py`` (issue #358): the dashboard already
+judged rank freshness this way, and the terminal now reuses the same read
+rather than a second rule.
 """
 
 from __future__ import annotations
@@ -47,10 +47,17 @@ def opt_float(value: Any) -> Optional[float]:
 
 
 def _rank_id(row: Any) -> Optional[int]:
+    """The row's rank, or ``None`` so a row without a usable one is skipped.
+
+    One malformed cell must cost its own row, never every rank's verdict.
+    """
     rank_id = row["global_rank"]
     if rank_id is None:
         rank_id = row["rank"]
-    return int(rank_id) if rank_id is not None else None
+    try:
+        return int(rank_id) if rank_id is not None else None
+    except (TypeError, ValueError, OverflowError):
+        return None
 
 
 def observed_cadence(by_rank: Dict[int, List[Any]]) -> Optional[float]:

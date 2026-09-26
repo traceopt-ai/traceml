@@ -42,6 +42,7 @@ class StepMemoryMetricsDB:
 
     def __init__(self, db_path: str) -> None:
         self._db_path = str(db_path)
+        self._process = ProcessRepository(db_path=self._db_path)
 
     def connect(self) -> sqlite3.Connection:
         """Open a short-lived SQLite connection configured for named rows."""
@@ -83,7 +84,7 @@ class StepMemoryMetricsDB:
         conn: sqlite3.Connection,
         *,
         configured_interval_s: Optional[float] = None,
-    ) -> Tuple[RankLiveness, ...]:
+    ) -> Optional[Tuple[RankLiveness, ...]]:
         """
         Every rank's last-seen clock, from its process-sampler heartbeat.
 
@@ -91,19 +92,19 @@ class StepMemoryMetricsDB:
         and Process judge a rank by one rule. Step-memory rows are not the
         heartbeat: they stop on every rank once a survivor blocks in a
         collective waiting for a dead peer, and a long legitimate step
-        would read as a dead rank. Best-effort: an unreadable heartbeat
-        yields no verdict rather than a guessed one.
+        would read as a dead rank. Best-effort: ``None`` when the heartbeat
+        cannot be read (no verdict rather than a guessed one, and never a
+        lost panel); ``()`` when it was read and no rank has reported.
         """
-        repo = ProcessRepository(db_path=self._db_path)
         try:
             return read_rank_clock(
-                repo,
+                self._process,
                 conn,
-                newest_ts=repo.newest_sample_ts(conn),
+                newest_ts=self._process.newest_sample_ts(conn),
                 configured_interval_s=configured_interval_s,
             ).liveness()
-        except sqlite3.Error:
-            return ()
+        except Exception:
+            return None
 
     def detect_gpu_available(self, conn: sqlite3.Connection) -> Optional[bool]:
         """
