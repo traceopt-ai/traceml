@@ -16,8 +16,10 @@ logger's floor. These tests pin both halves of the fix.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -103,6 +105,7 @@ from traceml_ai.aggregator.display_drivers.server_readiness import (
 from traceml_ai.runtime.settings import TraceMLSettings
 
 port = int(sys.argv[1])
+page_path = sys.argv[2]
 driver = NiceGUIDisplayDriver(
     logging.getLogger("child"),
     TraceMLSettings(
@@ -118,15 +121,46 @@ status = None
 if listening:
     with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=10) as r:
         status = r.status
+        with open(page_path, "wb") as page:
+            page.write(r.read())
 print(f"LISTENING={listening} HTTP={status}", flush=True)
 sys.exit(0 if listening and status == 200 else 1)
 """
 
+# Every section card titles itself with a ``ctitle`` label; the default
+# ``run`` profile shows all five, in page order.
+_SECTION_TITLES = [
+    "Step Time",
+    "System",
+    "Process resources · recent 60s",
+    "Step memory",
+    "Diagnostics",
+]
 
-def test_real_server_binds_and_serves_http() -> None:
+
+def _section_titles(page: str) -> list:
+    """Texts of the ``ctitle`` elements in the served page, in page order.
+
+    NiceGUI renders the DOM in the browser, but the page it serves embeds
+    the whole element tree as JSON (element id -> tag, text, classes).
+    Reading that tree checks what the server assembled without a browser,
+    and is insensitive to key order, whitespace and escaping.
+    """
+    start = re.search(r'\{"0"\s*:\s*\{', page)
+    assert start, "no NiceGUI element tree in the served page"
+    tree, _ = json.JSONDecoder().raw_decode(page, start.start())
+    return [
+        tree[key].get("text")
+        for key in sorted(tree, key=int)
+        if "ctitle" in (tree[key].get("class") or [])
+    ]
+
+
+def test_real_server_binds_and_serves_http(tmp_path: Path) -> None:
     import traceml_ai
 
     port = _free_port()
+    page_path = tmp_path / "page.html"
     src_root = str(Path(traceml_ai.__file__).resolve().parents[1])
     # pytest exports PYTEST_* markers that NiceGUI reads as "running under
     # pytest" and then switches ui.run() to its screen-test port hook; the
@@ -136,7 +170,7 @@ def test_real_server_binds_and_serves_http() -> None:
         p for p in (src_root, env.get("PYTHONPATH", "")) if p
     )
     proc = subprocess.run(
-        [sys.executable, "-c", _CHILD, str(port)],
+        [sys.executable, "-c", _CHILD, str(port), str(page_path)],
         env=env,
         capture_output=True,
         text=True,
@@ -148,3 +182,6 @@ def test_real_server_binds_and_serves_http() -> None:
     # The ready line names the serving stack so a field log is diagnosable.
     assert "Dashboard ready at" in proc.stderr, detail
     assert "nicegui" in proc.stderr, detail
+    # The page the server assembled carries every section, once each.
+    page = page_path.read_text(encoding="utf-8")
+    assert _section_titles(page) == _SECTION_TITLES, detail

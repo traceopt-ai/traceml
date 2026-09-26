@@ -254,6 +254,20 @@ def test_a_cpu_only_run_marks_both_gpu_tiles_absent():
     assert panel["subs"]["reserved"].text == "no GPU"
 
 
+def test_an_empty_first_tick_does_not_claim_a_cpu_only_run():
+    """Before any rank reports, nothing is known about the GPU either way.
+
+    The empty payload answers ``gpu_available`` with False only because it
+    has no ranks to ask, so printing "no GPU" there would state a fact the
+    telemetry never carried.
+    """
+    panel = _panel()
+    process_section.update_process_section(panel, ProcessDashboardPayload())
+    for key in ("reserved", "alloc"):
+        assert panel["tiles"][key].content == "n/a"
+        assert panel["subs"][key].text == ""
+
+
 def test_a_payload_of_the_wrong_type_is_ignored():
     panel = _panel()
     process_section.update_process_section(panel, None)
@@ -305,6 +319,41 @@ def test_a_retained_chart_says_it_is_rolling():
     )
     process_section.update_process_section(panel, payload)
     assert "rolling 2 min" in panel["cpu_label"].text
+
+
+def test_an_unchanged_tick_does_not_resend_the_charts():
+    """The UI timer outpaces telemetry; a repeat tick sends no chart.
+
+    A new sample on any rank is what earns a redraw.
+    """
+    panel = _panel()
+    payload = _payload()
+    process_section.update_process_section(panel, payload)
+    process_section.update_process_section(panel, payload)
+    assert panel["cpu_chart"].updates == 1
+    assert panel["rss_chart"].updates == 1
+
+    chart = payload.cpu_capacity_chart
+    newer = RankChart(
+        mode=chart.mode,
+        window_s=chart.window_s,
+        traces=tuple(
+            RankTrace(
+                global_rank=trace.global_rank,
+                timestamps=trace.timestamps + (trace.timestamps[-1] + 2.0,),
+                values=trace.values + (trace.values[-1],),
+            )
+            for trace in chart.traces
+        ),
+    )
+    process_section.update_process_section(
+        panel,
+        ProcessDashboardPayload(
+            **{**payload.__dict__, "cpu_capacity_chart": newer}
+        ),
+    )
+    assert panel["cpu_chart"].updates == 2
+    assert panel["rss_chart"].updates == 2
 
 
 def test_an_empty_chart_leaves_the_label_bare():
@@ -373,6 +422,21 @@ def test_the_hint_states_coverage_without_classifying_it():
     assert "reserved imbalance 22%" in hint
     for verdict in ("bad", "high", "warning", "critical", "unhealthy"):
         assert verdict not in hint.lower()
+
+
+def test_the_hint_says_when_no_rank_is_reporting():
+    """Every rank stale: nothing was excluded, so the hint must not say so.
+
+    With no live rank the aggregates are the last numbers every rank sent,
+    and "excluded" would tell the reader they were computed without them.
+    """
+    panel = _panel()
+    process_section.update_process_section(
+        panel, _payload(ranks=(0, 1), stale=2)
+    )
+    hint = panel["rows_hint"].text
+    assert "2 ranks · none reporting" in hint
+    assert "excluded" not in hint
 
 
 def test_a_rank_without_a_clock_is_named_in_the_hint():
