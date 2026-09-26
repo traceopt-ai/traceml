@@ -173,10 +173,19 @@ def test_a_corrupt_age_may_not_reuse_a_cached_payload():
 
 def test_the_stale_rank_marker_states_how_long_the_rank_has_been_quiet():
     """An unknown age is said as unknown, never as a fabricated zero."""
-    quiet = RankLiveness(global_rank=1, age_s=12.7, freshness="stale")
+    quiet = RankLiveness(global_rank=1, age_s=12.4, freshness="stale")
     assert stale_rank_label(quiet) == "rank 1: no data for 12s (stale)"
     unknown = RankLiveness(global_rank=3, age_s=None, freshness="stale")
     assert stale_rank_label(unknown) == "rank 3: no data (stale)"
+
+
+@pytest.mark.parametrize(
+    ("age_s", "shown"), [(5.99, "6s"), (12.5, "13s"), (80.0, "80s")]
+)
+def test_the_quiet_age_is_rounded_to_the_nearest_second(age_s, shown):
+    """5.99 s is six seconds, not five: truncation undersells the age."""
+    quiet = RankLiveness(global_rank=1, age_s=age_s, freshness="stale")
+    assert stale_rank_label(quiet) == f"rank 1: no data for {shown} (stale)"
 
 
 def test_the_last_good_verdict_answers_for_a_failed_read_inside_its_ttl():
