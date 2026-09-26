@@ -676,11 +676,6 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
             raise SystemExit(
                 "[TraceML] ERROR: guard pilot runs require mode=summary."
             )
-        if not cfg["history_enabled"]:
-            raise SystemExit(
-                "[TraceML] ERROR: guard pilot runs require history to be "
-                "enabled."
-            )
 
         trace_max_steps = getattr(args, "trace_max_steps", None)
         if trace_max_steps is not None and guard_contract.end_step > int(

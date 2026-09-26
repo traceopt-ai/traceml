@@ -45,11 +45,11 @@ def test_minimal_contract_normalizes_optional_parameters() -> None:
     }
 
 
-def test_contract_trims_name_and_sorts_scalar_parameters() -> None:
+def test_contract_sorts_scalar_parameters() -> None:
     contract = parse_guard_contract(
         _contract(
             workload={
-                "name": "  image-training  ",
+                "name": "image-training",
                 "parameters": {
                     "precision": "bf16",
                     "enabled": True,
@@ -136,6 +136,10 @@ def test_contract_accepts_exact_supported_boundaries() -> None:
         (_contract(workload={}), "guard.workload.name is required"),
         (_contract(workload={"name": 42}), "name must be a string"),
         (_contract(workload={"name": "   "}), "name must not be empty"),
+        (
+            _contract(workload={"name": " image-training "}),
+            "name must not have surrounding whitespace",
+        ),
         (
             _contract(workload={"name": "x", "parameters": []}),
             "parameters must be a mapping",

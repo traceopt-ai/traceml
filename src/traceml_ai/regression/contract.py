@@ -100,18 +100,21 @@ def _workload_name(value: Any) -> str:
     path = "guard.workload.name"
     if not isinstance(value, str):
         raise ContractValidationError(f"{path} must be a string")
-    normalized = value.strip()
-    if not normalized:
+    if not value.strip():
         raise ContractValidationError(f"{path} must not be empty")
-    if len(normalized) > MAX_WORKLOAD_NAME_LENGTH:
+    if value != value.strip():
+        raise ContractValidationError(
+            f"{path} must not have surrounding whitespace"
+        )
+    if len(value) > MAX_WORKLOAD_NAME_LENGTH:
         raise ContractValidationError(
             f"{path} must be at most {MAX_WORKLOAD_NAME_LENGTH} characters"
         )
-    if _has_control_characters(normalized):
+    if _has_control_characters(value):
         raise ContractValidationError(
             f"{path} must not contain control characters"
         )
-    return normalized
+    return value
 
 
 def _parameter_key(value: Any) -> str:

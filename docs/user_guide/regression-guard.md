@@ -46,22 +46,33 @@ history recording. One-process and multi-process single-node runs are allowed.
 `traceml watch`, `traceml serve`, and direct `traceml.init()` launches ignore
 the guard declaration.
 
+## Contract fields
+
+| Field | Required | Type | Rules |
+| --- | --- | --- | --- |
+| `guard.schema_version` | Yes | Integer | Must be `1`. |
+| `guard.workload.name` | Yes | String | Nonempty, no surrounding whitespace, at most 128 characters. |
+| `guard.workload.parameters` | No | Mapping | Defaults to `{}` and may contain at most 32 entries. |
+| Parameter key | Yes per entry | String | Nonempty, no surrounding whitespace, at most 64 characters. |
+| Parameter value | Yes per entry | Scalar | A nonempty string, signed integer, finite float, or Boolean. Strings may contain at most 256 characters. |
+| `guard.measurement.start_step` | Yes | Integer | First completed step to measure; must be at least `1`. |
+| `guard.measurement.completed_steps` | Yes | Integer | Number of completed steps to measure; must be at least `1`. |
+
+Unknown fields, lists, nested parameter mappings, and null parameter values
+are rejected. Integers and the inclusive measurement end must fit in a signed
+64-bit value.
+
 ## Workload identity
 
 `workload.name` is the only required workload field. Choose a stable name that
-identifies the work being compared.
+identifies the work being compared. TraceML stores it exactly as written, so
+surrounding whitespace is rejected instead of being removed silently.
 
 `workload.parameters` is optional. Record values that materially change the
 work, such as model, data revision, precision, batch size, sequence length, or
 image dimensions. Model and data fields are recommended for training but are
 not required because TraceML also supports synthetic and pipeline-focused
 workloads.
-
-Workload names may contain at most 128 characters. A contract may contain up
-to 32 parameters; parameter keys may contain at most 64 characters and string
-values at most 256 characters. Parameter keys cannot be empty or contain
-surrounding whitespace. String values cannot be empty or contain surrounding
-whitespace.
 
 Parameter values may be strings, integers, finite floating-point values, or
 Booleans. Lists, nested mappings, and null values are not supported in schema
@@ -70,8 +81,11 @@ declarations match exactly.
 
 YAML scalar spelling affects the stored type. PyYAML reads `1e-3` as a string,
 while `0.001` and `1.0e-3` are floating-point values; `yes`, `no`, `on`, and
-`off` are Booleans. Quote values that should remain strings and use an explicit
-decimal form for floating-point parameters.
+`off` are Booleans. It also follows YAML 1.1 integer forms: unquoted `010` is
+the integer `8`, and `1:30` is the integer `90`. TraceML accepts those parsed
+integers; for clarity, write step fields as ordinary decimal integers such as
+`10`. Quote a value such as `"010"` when it is an identifier that must remain a
+string. Use an explicit decimal form for floating-point parameters.
 
 These values are user declarations. TraceML records them but does not infer or
 verify that the training program used them. Do not include secrets, credentials,

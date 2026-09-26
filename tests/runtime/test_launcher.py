@@ -782,7 +782,7 @@ def test_guard_contract_is_captured_once_in_manifest(
         project_dir,
         "  schema_version: 1\n"
         "  workload:\n"
-        "    name: '  smoke  '\n"
+        "    name: smoke\n"
         "    parameters:\n"
         "      precision: fp32\n"
         "  measurement:\n"
