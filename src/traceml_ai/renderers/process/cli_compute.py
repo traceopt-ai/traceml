@@ -174,6 +174,12 @@ class ProcessCLIComputer:
         ).to_dict()
 
     def _return_stale(self) -> Dict[str, Any]:
+        """The last good snapshot within the TTL, else an empty one.
+
+        The empty one still carries a verdict: the one this tick's
+        heartbeat read gave before the figures failed, or the last good
+        one inside the TTL. Unreadable figures are not "no rank stopped".
+        """
         now = time.time()
         if self._last_ok is not None:
             if (
@@ -181,7 +187,9 @@ class ProcessCLIComputer:
                 or (now - self._last_ok_ts) <= self._stale_ttl_s
             ):
                 return self._last_ok
-        return self._empty_snapshot()
+        return self._empty_snapshot(
+            self._liveness.carry(None, now_s=self._now_fn())
+        )
 
     def _empty_snapshot(
         self, liveness: Optional[Tuple[RankLiveness, ...]] = None
