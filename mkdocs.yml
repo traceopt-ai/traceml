@@ -104,6 +104,7 @@ nav:
           - DeepSpeed: user_guide/integrations/deepspeed.md
           - W&B / MLflow: user_guide/integrations/wandb-mlflow.md
       - FAQ: user_guide/faq.md
+      - When Training Crashes: user_guide/training-crashes.md
       - Compare Runs: user_guide/compare.md
       - Public API: user_guide/public-api.md
   - Developer Guide:
