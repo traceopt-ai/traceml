@@ -143,13 +143,15 @@ class RankClock:
             for rank_id in sorted(self.newest_by_rank)
         )
 
-    def run_liveness(self, now_s: float) -> RunLiveness:
+    def run_liveness(self, current_s: float) -> RunLiveness:
         """The whole run's verdict: its newest arrival from any rank.
 
-        ``now_s`` is the aggregator's current time. The aggregator also
-        stamps every arrival (``recv_ts_ns``), so both ends are one clock
-        and a rank host's skewed clock never enters. Judged by this tick's
-        policy, at the observed cadence, like every per-rank verdict.
+        ``current_s`` is the aggregator's current time, unlike ``now_s``,
+        the newest arrival that per-rank verdicts are measured from. The
+        aggregator also stamps every arrival (``recv_ts_ns``), so both
+        ends are one clock and a rank host's skewed clock never enters.
+        Judged by this tick's policy, at the observed cadence, like every
+        per-rank verdict.
         """
         seen = [
             rank.last_seen_s
@@ -157,7 +159,7 @@ class RankClock:
             if rank.last_seen_s is not None
         ]
         last_seen = max(seen) if seen else None
-        age = self.policy.age_of(last_seen, now_s=now_s)
+        age = self.policy.age_of(last_seen, now_s=current_s)
         return RunLiveness(
             last_seen_s=last_seen,
             age_s=age,
