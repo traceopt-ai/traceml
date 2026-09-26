@@ -151,7 +151,8 @@ The aggregator finalizes without waiting out its deadline, and `telemetry_status
 
 After a native crash, the rank never reports that it finished.
 Telemetry still queued inside the crashed process is lost.
-The aggregator keeps waiting for that rank until its finalize deadline, then finalizes anyway.
+The crashed process's connection to the aggregator closes when it dies.
+Once no rank connection is still open, the aggregator waits one short quiet window for data already in flight, then finalizes.
 It writes `aggregator/finalization_warning.json` with the missing rank in `missing_ranks`.
 The manifest records `telemetry_status: degraded` with `telemetry_reason: finalization_warning`.
 The terminal prints this line:
@@ -164,10 +165,8 @@ The final summary is still written.
 It covers only the telemetry that reached the aggregator before the crash.
 A crash early in training can leave too few steps for a diagnosis.
 
-The finalize deadline comes from `--finalize-timeout-sec`, which defaults to 300 seconds.
-Part of that budget is reserved for closing the telemetry database.
-With the default, `traceml run` can wait about four minutes after a native crash before it exits.
-Pass a smaller `--finalize-timeout-sec` if you want a crashed run to exit sooner.
+A rank that hangs instead of dying keeps its connection open.
+In that case the aggregator waits until its finalize deadline, `--finalize-timeout-sec` (300 seconds by default), before it finalizes.
 
 ---
 
