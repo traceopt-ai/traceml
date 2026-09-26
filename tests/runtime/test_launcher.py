@@ -724,18 +724,6 @@ def test_run_rejects_duplicate_guard_before_manifest_or_processes(
         ),
         (
             "mode: summary\n",
-            [
-                "--mode",
-                "summary",
-                "--nnodes",
-                "2",
-                "--run-name",
-                "guard",
-            ],
-            "require --nnodes=1",
-        ),
-        (
-            "mode: summary\n",
             ["--mode", "summary", "--trace-max-steps", "12"],
             "ends after --trace-max-steps",
         ),
@@ -768,7 +756,7 @@ def test_guard_rejects_unsupported_launch_before_processes(
         replacement.assert_not_called()
 
 
-def test_guard_contract_is_captured_once_in_manifest(
+def test_guard_contract_is_captured_once_for_multi_node_run(
     monkeypatch, tmp_path, capsys
 ) -> None:
     project_dir = tmp_path / "project"
@@ -793,6 +781,10 @@ def test_guard_contract_is_captured_once_in_manifest(
         [
             "run",
             str(script),
+            "--nnodes",
+            "2",
+            "--nproc-per-node",
+            "1",
             "--run-name",
             "guard-run",
             "--logs-dir",
@@ -858,12 +850,101 @@ def test_guard_contract_is_captured_once_in_manifest(
             "measurement": {"start_step": 1, "completed_steps": 5},
         }
     }
+    assert write_manifest.call_args.kwargs["nnodes"] == 2
+    assert write_manifest.call_args.kwargs["nproc_per_node"] == 1
     confirmation = (
         f"[TraceML] Measurement contract captured from {config_path}: "
         "workload=smoke, steps=1-5"
     )
     assert capsys.readouterr().err.count(confirmation) == 1
     start_training.assert_not_called()
+
+
+@pytest.mark.parametrize("recording_fails", [False, True])
+def test_guarded_node_records_training_outcome_without_changing_exit_code(
+    monkeypatch, tmp_path, capsys, recording_fails
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    script = tmp_path / "train.py"
+    script.write_text("print('unused')\n", encoding="utf-8")
+    _write_guard_config(
+        tmp_path,
+        "  schema_version: 1\n"
+        "  workload:\n"
+        "    name: multi-node-smoke\n"
+        "  measurement:\n"
+        "    start_step: 1\n"
+        "    completed_steps: 5\n",
+    )
+    session_root = tmp_path / "logs" / "guarded-run"
+    session_root.mkdir(parents=True)
+    (session_root / "manifest.json").write_text(
+        json.dumps(
+            {
+                "session_id": "guarded-run",
+                "created_at": "2026-09-26T10:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+    args = build_parser().parse_args(
+        [
+            "run",
+            str(script),
+            "--nnodes",
+            "2",
+            "--node-rank",
+            "1",
+            "--nproc-per-node",
+            "1",
+            "--master-addr",
+            "node-0.internal",
+            "--run-name",
+            "guarded-run",
+            "--logs-dir",
+            str(tmp_path / "logs"),
+            "--no-save-training-output",
+        ]
+    )
+    training = Mock(returncode=0)
+    training.poll.return_value = 0
+
+    monkeypatch.setattr(launcher_commands, "setup_error_logger", Mock())
+    monkeypatch.setattr(launcher_commands, "install_shutdown_handlers", Mock())
+    monkeypatch.setattr(
+        launcher_commands, "wait_for_tcp_listen", Mock(return_value=True)
+    )
+    monkeypatch.setattr(
+        launcher_commands,
+        "start_training_process",
+        Mock(return_value=training),
+    )
+    monkeypatch.setattr(
+        launcher_commands.TorchrunLaunchConfig,
+        "to_command",
+        Mock(return_value=[sys.executable]),
+    )
+    if recording_fails:
+        monkeypatch.setattr(
+            launcher_commands,
+            "write_guard_outcome",
+            Mock(side_effect=OSError("shared run directory unavailable")),
+        )
+
+    with pytest.raises(SystemExit) as exc:
+        launch_process(str(script), args)
+
+    assert exc.value.code == 0
+    outcome_path = session_root / "nodes" / "node_1" / "guard_outcome.json"
+    if recording_fails:
+        assert not outcome_path.exists()
+        assert "failed to record the guarded training outcome" in (
+            capsys.readouterr().err
+        )
+    else:
+        outcome = json.loads(outcome_path.read_text(encoding="utf-8"))
+        assert outcome["node_rank"] == 1
+        assert outcome["training"] == {"status": "completed", "exit_code": 0}
 
 
 def test_watch_ignores_guard_semantics(monkeypatch, tmp_path) -> None:
@@ -1245,6 +1326,7 @@ def test_started_training_result_is_authoritative(
         "guard"
         not in replacements["write_run_manifest"].call_args.kwargs["extra"]
     )
+    assert not list((tmp_path / "logs").rglob("guard_outcome.json"))
     assert output_manifest["enabled"] is save_output
     assert output_manifest["scope"] == "node"
     replacements["_start_aggregator_output"].assert_called_once_with(

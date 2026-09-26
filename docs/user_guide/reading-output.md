@@ -180,6 +180,18 @@ Python output, native file-descriptor writes, torchrun diagnostics, and output
 from local workers that inherit the descriptors. They are intentionally not
 per-rank files.
 
+A guarded `traceml run` also writes one node-scoped execution record after the
+local torchrun process exits:
+
+```text
+logs/<run-name>/nodes/node_<node-rank>/guard_outcome.json
+```
+
+This atomic JSON file records the bounded launcher outcome used by the guard
+pilot. It is a filesystem coordination artifact, not a telemetry stream or a
+copy of training output. Guarded multi-node runs place `--logs-dir` on shared
+storage so node 0 can later read every node's record.
+
 Summary and dashboard modes mirror the saved streams live. CLI mode suppresses
 live mirroring so training output cannot corrupt the Rich display; if training
 fails, TraceML stops the display and prints at most the final 40 stderr lines
