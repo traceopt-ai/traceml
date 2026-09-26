@@ -136,6 +136,32 @@ def test_a_failed_heartbeat_read_on_a_metrics_tick_keeps_the_last_verdicts(
     assert expired["rank_liveness"] is None
 
 
+def test_unreadable_figures_keep_the_verdict_the_heartbeat_gave(process_db):
+    """A metric cell that cannot be read costs the figures, not the marker.
+
+    The heartbeat read succeeds and names rank 1; the committed seq's
+    figures then fail to parse, and no good snapshot is held yet.
+    """
+    _run(process_db, dies=(1, 20))
+    conn = sqlite3.connect(process_db.path)
+    conn.execute(
+        "UPDATE process_samples SET cpu_percent = 'abc' "
+        "WHERE rank = 1 AND seq = 20"
+    )
+    conn.commit()
+    conn.close()
+
+    renderer = ProcessRenderer(db_path=process_db.path, sampler_interval_s=2.0)
+    snap = renderer._computer.compute_cli()
+    text = _render(renderer.get_panel_renderable())
+
+    assert snap["seq"] is None
+    assert [
+        (r["global_rank"], r["freshness"]) for r in snap["rank_liveness"]
+    ] == [(0, "fresh"), (1, "stale")]
+    assert "rank 1: no data for 80s (stale)" in text
+
+
 def test_cli_and_dashboard_judge_every_rank_identically(process_db):
     """One owner for the judgement: both surfaces must agree per rank."""
     _run(process_db, ranks=4, samples=200, dies=(3, 20))
