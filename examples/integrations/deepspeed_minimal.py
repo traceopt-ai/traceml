@@ -1,3 +1,16 @@
+"""Minimal DeepSpeed loop wrapped with traceml.trace_step.
+
+Requires ``deepspeed`` and a CUDA GPU; exits cleanly without them. Run with:
+
+    traceml run examples/integrations/deepspeed_minimal.py --mode=summary
+
+Use ``--epochs`` or ``--steps`` to change the run length::
+
+    traceml run examples/integrations/deepspeed_minimal.py \
+        --mode=summary --args --steps 20
+"""
+
+import argparse
 import os
 import sys
 
@@ -19,6 +32,37 @@ CONFIG_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     "deepspeed_config_minimal.json",
 )
+
+
+def positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    length = parser.add_mutually_exclusive_group()
+    length.add_argument(
+        "--epochs",
+        type=positive_int,
+        default=EPOCHS,
+        help="Number of full epochs to run.",
+    )
+    length.add_argument(
+        "--steps",
+        type=positive_int,
+        default=None,
+        help=(
+            "Number of optimizer steps per rank. Replaces --epochs; by "
+            "default, run --epochs full epochs."
+        ),
+    )
+    return parser.parse_args()
 
 
 class TinyMLP(nn.Module):
@@ -67,6 +111,7 @@ def prepare_data(rank: int, world_size: int):
 
 
 def main() -> None:
+    args = parse_args()
     try:
         import deepspeed
     except ImportError:
@@ -115,8 +160,11 @@ def main() -> None:
 
     model_engine.train()
     global_step = 0
+    epochs = args.epochs
+    if args.steps is not None:
+        epochs = (args.steps + len(train_loader) - 1) // len(train_loader)
 
-    for epoch in range(EPOCHS):
+    for epoch in range(epochs):
         train_sampler.set_epoch(epoch)
         running_loss = torch.zeros((), device=device)
 
@@ -147,6 +195,9 @@ def main() -> None:
                     f"loss: {float(running_loss) / 50:.4f}"
                 )
                 running_loss.zero_()
+
+            if args.steps is not None and global_step >= args.steps:
+                break
 
     if rank == 0:
         print("Done.")
