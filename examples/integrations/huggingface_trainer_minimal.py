@@ -1,3 +1,17 @@
+"""Minimal Hugging Face Trainer example with TraceMLTrainerCallback.
+
+Run with:
+
+    traceml run examples/integrations/huggingface_trainer_minimal.py
+
+Use ``--steps`` to change the number of optimizer steps::
+
+    traceml run examples/integrations/huggingface_trainer_minimal.py \
+        --args --steps 20
+"""
+
+import argparse
+
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset
@@ -12,6 +26,27 @@ NUM_CLASSES = 10
 NUM_SAMPLES = 4096
 BATCH_SIZE = 64
 MAX_STEPS = 200
+
+
+def positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--steps",
+        type=positive_int,
+        default=MAX_STEPS,
+        help="Number of optimizer steps (Trainer max_steps) to run.",
+    )
+    return parser.parse_args()
 
 
 class SyntheticClassificationDataset(Dataset):
@@ -53,6 +88,7 @@ class TinyMLPForTrainer(nn.Module):
 
 
 def main() -> None:
+    args = parse_args()
     torch.manual_seed(SEED)
 
     traceml_hf.init()
@@ -63,7 +99,7 @@ def main() -> None:
     training_args = TrainingArguments(
         output_dir="./hf_minimal_output",
         per_device_train_batch_size=BATCH_SIZE,
-        max_steps=MAX_STEPS,
+        max_steps=args.steps,
         logging_steps=50,
         save_strategy="no",
         report_to="none",
