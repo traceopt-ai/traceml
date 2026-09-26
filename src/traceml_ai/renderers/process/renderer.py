@@ -48,15 +48,20 @@ class ProcessRenderer(BaseRenderer):
         # terminal's run-wide line costs no read of its own.
         self._run_liveness: Optional[RunLiveness] = None
 
-    def get_staleness_text(self) -> str:
+    def get_staleness_text(self, after_s: Optional[float] = None) -> str:
         """``no new data for 42s (stale)`` once the whole run went quiet.
 
         From the read :meth:`get_panel_renderable` made this tick, so call
         it after that. Empty while any rank still reports, before the
-        first read, and when there is no verdict to go on.
+        first read, and when there is no verdict to go on. With
+        ``after_s``, on the arrival clock, also empty unless the run's
+        newest arrival is later than that.
         """
         run = self._run_liveness
         if run is None or not run.is_stale:
+            return ""
+        seen = run.last_seen_s
+        if after_s is not None and (seen is None or seen <= after_s):
             return ""
         return stale_run_label(run)
 

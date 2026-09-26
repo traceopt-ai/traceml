@@ -112,6 +112,8 @@ class TraceMLAggregator:
             1, int(getattr(settings, "expected_world_size", 1) or 1)
         )
         self._finished_ranks: dict[int, RankFinishedControl] = {}
+        # Set once the display driver has been told the run finished.
+        self._run_finished_notified = False
         self._foreign_senders: dict[_ForeignSender, int] = {}
         self._started = False
         self._drain_lock = threading.Lock()
@@ -678,6 +680,34 @@ class TraceMLAggregator:
         self._drain_tcp()
         return bool(self._sqlite_writer.force_flush(0.0))
 
+    def _notify_run_finished(self) -> None:
+        """Tell the display driver, once, that every rank has finished.
+
+        Loop thread only. Reads the same state the end-of-run settle
+        reads, and changes none of it. SQLite stamps an arrival when it
+        flushes it, so the batch that came with the finish markers is
+        flushed first: every arrival of the finished run is then stamped
+        at or before the moment the driver is told. Best effort on both
+        steps; the flush waits at most one render interval.
+        """
+        if self._run_finished_notified:
+            return
+        if len(self._finished_ranks) < self._expected_world_size:
+            return
+        self._run_finished_notified = True
+        _safe(
+            self._logger,
+            "SQLite flush before display run_finished failed",
+            lambda: self._sqlite_writer.force_flush(
+                float(self._settings.render_interval_sec)
+            ),
+        )
+        _safe(
+            self._logger,
+            "Display driver run_finished failed",
+            self._display_driver.run_finished,
+        )
+
     def _loop(self) -> None:
         """
         Run the event-driven drain and display tick loop.
@@ -697,6 +727,7 @@ class TraceMLAggregator:
             # Wake immediately when data arrives, or after interval_sec at most.
             self._tcp_server.wait_for_data(timeout=interval_sec)
             self._drain_tcp()
+            self._notify_run_finished()
 
             # Rate-limit the UI tick to interval_sec cadence.
             now = time.monotonic()
@@ -715,6 +746,7 @@ class TraceMLAggregator:
 
         # Final drain and final display tick on shutdown.
         self._drain_tcp()
+        self._notify_run_finished()
         _safe(
             self._logger,
             "Final summary service poll failed",

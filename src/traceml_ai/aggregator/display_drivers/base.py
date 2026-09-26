@@ -17,6 +17,7 @@ class BaseDisplayDriver(ABC):
     The aggregator relies ONLY on this interface:
       - start()
       - tick()
+      - run_finished() (optional; a no-op unless overridden)
       - stop()
     """
 
@@ -33,6 +34,16 @@ class BaseDisplayDriver(ABC):
     def tick(self) -> None:
         """Perform one UI update cycle (must be safe to call repeatedly)."""
         raise NotImplementedError
+
+    def run_finished(self) -> None:
+        """Every expected rank has reported finished (best effort).
+
+        Called once, from the aggregator's loop thread, the first time
+        every expected rank has sent its finish marker. Ticks continue
+        after it, and a later run on the same aggregator may still send
+        data. A driver that shows no staleness has nothing to do.
+        """
+        return None
 
     @abstractmethod
     def stop(self) -> None:

@@ -5,6 +5,7 @@ CLI display driver for TraceML (Rich Live dashboard).
 - Make CLI layout + renderer wiring a single, cohesive unit
 """
 
+import time
 from dataclasses import dataclass
 from typing import Any, Callable, List, Optional
 
@@ -60,6 +61,7 @@ class CLIDisplayDriver(BaseDisplayDriver):
     Contract used by TraceMLAggregator:
       - start(): start Rich Live display
       - tick(): update all panels
+      - run_finished(): stop calling the quiet after the run a stall
       - stop(): stop display / cleanup
 
     Renderers:
@@ -81,6 +83,11 @@ class CLIDisplayDriver(BaseDisplayDriver):
 
         self._registered = False
         self._bindings: List[_SectionBinding] = []
+
+        # The aggregator's clock, the one that stamps every arrival.
+        self._now_fn: Callable[[], float] = time.time
+        # When every expected rank had finished, on that clock.
+        self._finished_at_s: Optional[float] = None
 
         # Kept by name: its per-rank read also answers the run-wide line.
         self._process = ProcessRenderer(
@@ -131,6 +138,16 @@ class CLIDisplayDriver(BaseDisplayDriver):
             self._live = None
             self._bindings.clear()
             self._registered = False
+
+    def run_finished(self) -> None:
+        """Every expected rank finished: the quiet that follows is expected.
+
+        The aggregator flushed every arrival before calling, so each one
+        so far is at or before this moment. The run-wide line stays hidden
+        until an arrival newer than that shows up, such as a second run on
+        the same ``traceml serve``.
+        """
+        self._finished_at_s = self._now_fn()
 
     def tick(self) -> None:
         """
@@ -291,9 +308,10 @@ class CLIDisplayDriver(BaseDisplayDriver):
         its peers, so a single-rank run, or every rank stopping together,
         never looks stale to them. This measures the newest arrival from
         any rank against the aggregator's clock, from the Process panel's
-        read this tick, so it runs after the panels update.
+        read this tick, so it runs after the panels update. Once the run
+        finished, only an arrival after that counts.
         """
-        return self._process.get_staleness_text()
+        return self._process.get_staleness_text(after_s=self._finished_at_s)
 
     def _update_staleness(self) -> None:
         """Show the run-wide staleness line only while it has text."""
