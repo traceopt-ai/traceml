@@ -24,12 +24,14 @@ It keeps the evidence that Python and torchrun already produce, and it saves the
 torchrun prints a traceback of its own `ChildFailedError` whenever a worker fails.
 A `Traceback` line alone therefore does not mean that your code raised an exception.
 
-The terminal prints the exact paths of the saved logs after every run:
+When the logs are saved, which is the default, the terminal prints their absolute paths at the end of the run:
 
 ```text
-[TraceML] Stderr: logs/<run-name>/nodes/node_0/training.stderr.log
-[TraceML] Stdout: logs/<run-name>/nodes/node_0/training.stdout.log
+[TraceML] Stderr: /path/to/logs/<run-name>/nodes/node_0/training.stderr.log
+[TraceML] Stdout: /path/to/logs/<run-name>/nodes/node_0/training.stdout.log
 ```
+
+With `--no-save-training-output`, no logs are saved and these lines are not printed.
 
 ---
 
@@ -62,6 +64,9 @@ When the process receives a fatal signal, `training.stderr.log` therefore contai
 ```text
 Fatal Python error: Segmentation fault
 
+Thread 0x... (most recent call first):
+  ...
+
 Current thread 0x... (most recent call first):
   File "/path/to/train.py", line 23 in main
   ...
@@ -71,12 +76,19 @@ The dump lists the Python frames of every thread at the moment of the crash.
 It shows which line of your script was running.
 It does not show the native C, C++, or CUDA frame that faulted.
 
-torchrun then reports the dead worker in its `Root Cause` block:
+torchrun then reports the dead worker in its `Root Cause` block.
+The time, host, and PID differ on every run.
 
 ```text
-  exitcode  : -11 (pid: 12345)  (SIGSEGV)
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-09-26_12:56:04
+  host      : my-host
+  rank      : 0 (local_rank: 0)
+  exitcode  : -11 (pid: 38968)  (SIGSEGV)
   error_file: <N/A>
-  traceback : Signal 11 (SIGSEGV) received by PID 12345
+  traceback : Signal 11 (SIGSEGV) received by PID 38968
+============================================================
 ```
 
 The training process that TraceML supervises is torchrun, not the worker.
@@ -99,8 +111,8 @@ The excerpt covers at most the last 40 lines and the last 8 KiB.
 ```text
 [TraceML] Training stderr excerpt:
 <last lines of training stderr>
-[TraceML] Stderr: logs/<run-name>/nodes/node_0/training.stderr.log
-[TraceML] Stdout: logs/<run-name>/nodes/node_0/training.stdout.log
+[TraceML] Stderr: /path/to/logs/<run-name>/nodes/node_0/training.stderr.log
+[TraceML] Stdout: /path/to/logs/<run-name>/nodes/node_0/training.stdout.log
 [TraceML] Telemetry <status line>
 [TraceML] Training failed — torchrun exited with code <code>.
 ```
@@ -155,10 +167,10 @@ The crashed process's connection to the aggregator closes when it dies.
 Once no rank connection is still open, the aggregator waits one short quiet window for data already in flight, then finalizes.
 It writes `aggregator/finalization_warning.json` with the missing rank in `missing_ranks`.
 The manifest records `telemetry_status: degraded` with `telemetry_reason: finalization_warning`.
-The terminal prints this line:
+The terminal prints this line, which ends with the absolute path of the aggregator's stderr log:
 
 ```text
-[TraceML] Telemetry degraded: finalization completed with warnings.
+[TraceML] Telemetry degraded: finalization completed with warnings. Aggregator stderr: /path/to/logs/<run-name>/aggregator/process.stderr.log
 ```
 
 The final summary is still written.
