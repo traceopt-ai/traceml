@@ -49,6 +49,13 @@ _SQLITE_FINALIZE_TINY_FLOOR_SEC = 0.001
 # Longest wait between flush attempts before telling the display driver
 # that a run finished, while the writer keeps failing to flush.
 _RUN_FINISHED_RETRY_MAX_SEC = 30.0
+# The first retry waits at least this long, so a zero render interval
+# cannot turn the retry into a flush per loop iteration.
+_RUN_FINISHED_RETRY_MIN_SEC = 1.0
+# Each flush attempt waits at most this long (it can block the loop for
+# twice this), however long the render interval is.
+_RUN_FINISHED_FLUSH_TIMEOUT_MAX_SEC = 2.0
+_RUN_FINISHED_FLUSH_TIMEOUT_MIN_SEC = 0.05
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -792,11 +799,14 @@ class TraceMLAggregator:
 
         SQLite stamps an arrival when it flushes it, so everything queued
         is flushed first: every arrival of the finished run is then
-        stamped at or before the moment the driver is told. The flush can
-        block this loop for up to twice the render interval (the barrier
-        waits once to enter the queue, then once to be processed). When it
-        does not complete, the driver is not told and the run is tried
-        again on a later iteration: one render interval later, doubling
+        stamped at or before the moment the driver is told. Each attempt
+        waits the render interval, clamped to
+        ``_RUN_FINISHED_FLUSH_TIMEOUT_MIN_SEC`` ..
+        ``_RUN_FINISHED_FLUSH_TIMEOUT_MAX_SEC``, and can block this loop for
+        twice that (the barrier waits once to enter the queue, then once to
+        be processed). When it does not complete, the driver is not told
+        and the run is tried again on a later iteration: one render
+        interval later (at least ``_RUN_FINISHED_RETRY_MIN_SEC``), doubling
         per failure, never more than ``_RUN_FINISHED_RETRY_MAX_SEC`` apart.
         Once backed off, a writer that never flushes costs at most one
         such stall per that many seconds. The driver's own failure is
@@ -807,10 +817,14 @@ class TraceMLAggregator:
         if generation is None:
             return
         interval_s = float(self._settings.render_interval_sec)
+        flush_timeout_s = min(
+            max(interval_s, _RUN_FINISHED_FLUSH_TIMEOUT_MIN_SEC),
+            _RUN_FINISHED_FLUSH_TIMEOUT_MAX_SEC,
+        )
         flushed = _safe(
             self._logger,
             "SQLite flush before display run_finished failed",
-            lambda: self._sqlite_writer.force_flush(interval_s),
+            lambda: self._sqlite_writer.force_flush(flush_timeout_s),
         )
         with self._drain_lock:
             if flushed:
@@ -820,7 +834,7 @@ class TraceMLAggregator:
                 self._current_run.flush_failed(
                     generation,
                     now_s=self._retry_clock(),
-                    first_delay_s=interval_s,
+                    first_delay_s=max(interval_s, _RUN_FINISHED_RETRY_MIN_SEC),
                 )
         if told:
             _safe(

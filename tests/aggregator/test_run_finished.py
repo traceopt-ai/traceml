@@ -117,12 +117,14 @@ class _Writer:
     ) -> None:
         self._events = events
         self._results = iter(results)
+        self.timeouts: List[float] = []
 
     def ingest(self, payload: dict) -> None:
         self._events.append(f"ingest:{payload['tag']}")
 
     def force_flush(self, timeout_sec: float) -> bool:
         self._events.append("flush")
+        self.timeouts.append(timeout_sec)
         return next(self._results, True)
 
 
@@ -414,6 +416,39 @@ def test_a_writer_that_never_flushes_is_retried_with_backoff(
     assert gaps[:5] == [2.0, 4.0, 8.0, 16.0, 30.0]
     assert set(gaps[4:]) == {30.0}
     assert "run_finished" not in events
+
+
+@pytest.mark.parametrize("render_interval_sec", [0.0, 30.0])
+def test_an_extreme_render_interval_neither_floods_nor_stalls_the_loop(
+    tmp_path, render_interval_sec: float
+) -> None:
+    """A zero interval must not flush on every iteration, and a long one
+    must not let one flush attempt block the loop for a minute."""
+    agg = _aggregator(
+        tmp_path,
+        expected_world_size=1,
+        render_interval_sec=render_interval_sec,
+    )
+    events: List[str] = []
+    writer = _Writer(events, itertools.repeat(False))
+    agg._sqlite_writer = writer
+    agg._display_driver = _Driver(events)
+    clock = _Clock()
+    agg._retry_clock = clock
+    agg._split_telemetry_payloads(_finished(0, world_size=1))
+
+    attempts: List[float] = []
+    while clock.now_s < 120.0:
+        before = events.count("flush")
+        agg._notify_run_finished()
+        if events.count("flush") > before:
+            attempts.append(clock.now_s)
+        clock.now_s += 0.25
+
+    assert writer.timeouts
+    assert all(0.0 < timeout <= 2.0 for timeout in writer.timeouts)
+    gaps = [later - earlier for earlier, later in zip(attempts, attempts[1:])]
+    assert gaps and min(gaps) >= 1.0
 
 
 # --- against the real writer and the real terminal driver ----------------
