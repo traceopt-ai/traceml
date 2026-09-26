@@ -274,7 +274,9 @@ def test_run_finished_hides_the_line_from_then_on(tmp_path) -> None:
 
 
 def test_the_line_is_live_again_after_a_newer_arrival(tmp_path) -> None:
-    """A second run on the same ``traceml serve`` starts, then stops."""
+    """A second run on the same ``traceml serve`` starts, stalls, then
+    finishes: each notification moves the finish moment forward.
+    """
     db_path, clock, driver = _finished_quiet_run(tmp_path)
     driver.run_finished()
 
@@ -286,6 +288,11 @@ def test_the_line_is_live_again_after_a_newer_arrival(tmp_path) -> None:
     clock.now_s = T0 + 90.0
     driver.tick()
     assert "no new data for 20s (stale)" in _screen(driver)
+
+    driver.run_finished()
+    clock.now_s = T0 + 300.0
+    driver.tick()
+    assert "no new data" not in _screen(driver)
 
 
 def test_an_arrival_stamped_before_the_finish_is_not_newer(tmp_path) -> None:

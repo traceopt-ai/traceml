@@ -61,7 +61,7 @@ class CLIDisplayDriver(BaseDisplayDriver):
     Contract used by TraceMLAggregator:
       - start(): start Rich Live display
       - tick(): update all panels
-      - run_finished(): stop calling the quiet after the run a stall
+      - run_finished(): the run finished; the quiet after it is no stall
       - stop(): stop display / cleanup
 
     Renderers:
@@ -140,12 +140,14 @@ class CLIDisplayDriver(BaseDisplayDriver):
             self._registered = False
 
     def run_finished(self) -> None:
-        """Every expected rank finished: the quiet that follows is expected.
+        """Every rank of the run finished: the quiet that follows is
+        expected.
 
         The aggregator flushed every arrival before calling, so each one
         so far is at or before this moment. The run-wide line stays hidden
         until an arrival newer than that shows up, such as a second run on
-        the same ``traceml serve``.
+        the same ``traceml serve``, whose own finish calls this again and
+        moves the moment forward.
         """
         self._finished_at_s = self._now_fn()
 

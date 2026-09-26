@@ -33,6 +33,7 @@ from traceml_ai.telemetry.control import (
     RankFinishedControl,
     parse_rank_finished,
 )
+from traceml_ai.telemetry.envelope import TelemetryMeta
 from traceml_ai.transport.tcp_transport import TCPConfig, TCPServer
 from traceml_ai.utils.atomic_io import write_json_atomic
 
@@ -45,6 +46,9 @@ _SQLITE_FINALIZE_BUDGET_FRACTION = 0.25
 _SQLITE_FINALIZE_BUDGET_MIN_SEC = 5.0
 _SQLITE_FINALIZE_BUDGET_MAX_SEC = 60.0
 _SQLITE_FINALIZE_TINY_FLOOR_SEC = 0.001
+# Longest wait between flush attempts before telling the display driver
+# that a run finished, while the writer keeps failing to flush.
+_RUN_FINISHED_RETRY_MAX_SEC = 30.0
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -60,6 +64,95 @@ def _safe(logger: Any, label: str, fn: Callable[[], Any]) -> Any:
     except Exception:
         logger.exception(f"[TraceML] {label}")
         return None
+
+
+def _stamp_of(payload: Mapping[str, Any]) -> Mapping[str, Any]:
+    """The sender stamp: envelope ``meta``, else the top level (control
+    and legacy flat payloads)."""
+    meta = payload.get("meta")
+    return meta if isinstance(meta, Mapping) else payload
+
+
+class _CurrentRun:
+    """Which ranks of the run now reporting have sent ``rank_finished``.
+
+    Kept only to tell the display driver, once per run, that the run
+    finished; the end-of-run settle reads ``_finished_ranks`` instead.
+    ``traceml serve`` hosts one run after another on one aggregator, and
+    the run stamps cannot tell them apart there: a generated session id
+    names one process, and an explicit one is shared by every run. What
+    can is order: a rank sends its marker after its last telemetry, so a
+    rank that reports again after its marker has begun the next run.
+
+    Every rank of a run has finished once the distinct finished ranks
+    reach the configured world size or the largest one a marker named,
+    whichever is larger. Changed and read under the aggregator's
+    ``_drain_lock``.
+
+    Known limits: two runs reporting to one aggregator at the same time
+    are not told apart, and ranks that never send a marker (releases
+    before it, or a rank that never started) keep their run from being
+    told at all.
+    """
+
+    def __init__(self, expected_world_size: int) -> None:
+        self._expected_world_size = expected_world_size
+        self._finished: set[int] = set()
+        self._world_size = 0
+        self._notified = False
+        # Bumped per run, so a notification settles only the run it began.
+        self._generation = 0
+        self._retry_at: Optional[float] = None
+        self._retry_delay_s: Optional[float] = None
+
+    def rank_finished(self, control: RankFinishedControl) -> None:
+        """Count one marker toward this run."""
+        self._finished.add(control.global_rank)
+        self._world_size = max(self._world_size, control.world_size)
+
+    def rank_reported(self, rank: Optional[int]) -> None:
+        """Telemetry from ``rank``: past its marker, a new run began."""
+        if rank is None or rank not in self._finished:
+            return
+        self._finished.clear()
+        self._world_size = 0
+        self._notified = False
+        self._generation += 1
+        self._retry_at = None
+        self._retry_delay_s = None
+
+    def due(self, now_s: float) -> Optional[int]:
+        """This run's generation when the driver should be told now."""
+        if self._notified:
+            return None
+        world_size = max(self._expected_world_size, self._world_size)
+        if len(self._finished) < world_size:
+            return None
+        if self._retry_at is not None and now_s < self._retry_at:
+            return None
+        return self._generation
+
+    def notified(self, generation: int) -> bool:
+        """Mark the run told; False if a newer run began meanwhile."""
+        if generation != self._generation:
+            return False
+        self._notified = True
+        return True
+
+    def flush_failed(
+        self, generation: int, *, now_s: float, first_delay_s: float
+    ) -> None:
+        """Try this run again later: after ``first_delay_s``, doubling
+        per failure, never more than ``_RUN_FINISHED_RETRY_MAX_SEC``."""
+        if generation != self._generation:
+            return
+        delay = (
+            first_delay_s
+            if self._retry_delay_s is None
+            else self._retry_delay_s * 2.0
+        )
+        self._retry_delay_s = min(delay, _RUN_FINISHED_RETRY_MAX_SEC)
+        self._retry_at = now_s + self._retry_delay_s
 
 
 class TraceMLFinalizationError(RuntimeError):
@@ -112,8 +205,10 @@ class TraceMLAggregator:
             1, int(getattr(settings, "expected_world_size", 1) or 1)
         )
         self._finished_ranks: dict[int, RankFinishedControl] = {}
-        # Set once the display driver has been told the run finished.
-        self._run_finished_notified = False
+        # The run now reporting, to tell the display driver it finished.
+        self._current_run = _CurrentRun(self._expected_world_size)
+        # Times the flush retries; injectable so a test can step it.
+        self._retry_clock: Callable[[], float] = time.monotonic
         self._foreign_senders: dict[_ForeignSender, int] = {}
         self._started = False
         self._drain_lock = threading.Lock()
@@ -471,6 +566,8 @@ class TraceMLAggregator:
         every payload, telemetry or control, passes ``_admit`` first, so a
         rank left over from another run can neither add rows nor mark one of
         this run's ranks finished.
+
+        Callers hold ``_drain_lock``, which also guards ``_current_run``.
         """
         items = msg if isinstance(msg, list) else [msg]
         telemetry: List[Any] = []
@@ -480,7 +577,12 @@ class TraceMLAggregator:
             control = parse_rank_finished(item)
             if control is not None:
                 self._finished_ranks[control.global_rank] = control
+                self._current_run.rank_finished(control)
             else:
+                if isinstance(item, Mapping):
+                    self._current_run.rank_reported(
+                        TelemetryMeta.from_mapping(_stamp_of(item)).rank
+                    )
                 telemetry.append(item)
 
         if isinstance(msg, list):
@@ -502,8 +604,7 @@ class TraceMLAggregator:
         """
         if not isinstance(payload, Mapping):
             return True
-        meta = payload.get("meta")
-        stamp = meta if isinstance(meta, Mapping) else payload
+        stamp = _stamp_of(payload)
 
         settings = self._settings
         enforce_session = settings.enforce_session_id and not (
@@ -681,32 +782,52 @@ class TraceMLAggregator:
         return bool(self._sqlite_writer.force_flush(0.0))
 
     def _notify_run_finished(self) -> None:
-        """Tell the display driver, once, that every rank has finished.
+        """Tell the display driver, once per run, that the run finished.
 
-        Loop thread only. Reads the same state the end-of-run settle
-        reads, and changes none of it. SQLite stamps an arrival when it
-        flushes it, so the batch that came with the finish markers is
-        flushed first: every arrival of the finished run is then stamped
-        at or before the moment the driver is told. Best effort on both
-        steps; the flush waits at most one render interval.
+        Called from the loop thread. ``_current_run`` is read and changed
+        under ``_drain_lock``, the lock marker ingestion holds, because
+        ``stop()`` can still drain from the main thread when this loop
+        outlives its join. The end-of-run settle's ``_finished_ranks`` is
+        not touched.
+
+        SQLite stamps an arrival when it flushes it, so everything queued
+        is flushed first: every arrival of the finished run is then
+        stamped at or before the moment the driver is told. The flush can
+        block this loop for up to twice the render interval (the barrier
+        waits once to enter the queue, then once to be processed). When it
+        does not complete, the driver is not told and the run is tried
+        again on a later iteration: one render interval later, doubling
+        per failure, never more than ``_RUN_FINISHED_RETRY_MAX_SEC`` apart.
+        Once backed off, a writer that never flushes costs at most one
+        such stall per that many seconds. The driver's own failure is
+        logged, not retried.
         """
-        if self._run_finished_notified:
+        with self._drain_lock:
+            generation = self._current_run.due(self._retry_clock())
+        if generation is None:
             return
-        if len(self._finished_ranks) < self._expected_world_size:
-            return
-        self._run_finished_notified = True
-        _safe(
+        interval_s = float(self._settings.render_interval_sec)
+        flushed = _safe(
             self._logger,
             "SQLite flush before display run_finished failed",
-            lambda: self._sqlite_writer.force_flush(
-                float(self._settings.render_interval_sec)
-            ),
+            lambda: self._sqlite_writer.force_flush(interval_s),
         )
-        _safe(
-            self._logger,
-            "Display driver run_finished failed",
-            self._display_driver.run_finished,
-        )
+        with self._drain_lock:
+            if flushed:
+                told = self._current_run.notified(generation)
+            else:
+                told = False
+                self._current_run.flush_failed(
+                    generation,
+                    now_s=self._retry_clock(),
+                    first_delay_s=interval_s,
+                )
+        if told:
+            _safe(
+                self._logger,
+                "Display driver run_finished failed",
+                self._display_driver.run_finished,
+            )
 
     def _loop(self) -> None:
         """

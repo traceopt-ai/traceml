@@ -36,12 +36,13 @@ class BaseDisplayDriver(ABC):
         raise NotImplementedError
 
     def run_finished(self) -> None:
-        """Every expected rank has reported finished (best effort).
+        """Every rank of the run has reported finished (best effort).
 
-        Called once, from the aggregator's loop thread, the first time
-        every expected rank has sent its finish marker. Ticks continue
-        after it, and a later run on the same aggregator may still send
-        data. A driver that shows no staleness has nothing to do.
+        Called from the aggregator's loop thread, once per run, when every
+        rank the run expects has sent its finish marker. Ticks continue
+        after it, and a later run on the same aggregator (``traceml
+        serve``) sends data again and calls this again when it finishes.
+        A driver that shows no staleness has nothing to do.
         """
         return None
 

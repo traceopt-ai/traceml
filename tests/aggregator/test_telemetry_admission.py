@@ -20,7 +20,10 @@ from pathlib import Path
 
 import pytest
 
-from traceml_ai.aggregator.trace_aggregator import TraceMLAggregator
+from traceml_ai.aggregator.trace_aggregator import (
+    TraceMLAggregator,
+    _CurrentRun,
+)
 from traceml_ai.runtime.sender import SenderIdentity
 from traceml_ai.runtime.settings import TraceMLSettings
 from traceml_ai.telemetry.control import (
@@ -52,6 +55,7 @@ def _make_aggregator(tmp_path: Path, settings: TraceMLSettings):
     agg._started = True
     agg._expected_world_size = int(settings.expected_world_size)
     agg._finished_ranks = {}
+    agg._current_run = _CurrentRun(agg._expected_world_size)
     agg._foreign_senders = {}
     agg._drain_lock = threading.Lock()
     return agg
