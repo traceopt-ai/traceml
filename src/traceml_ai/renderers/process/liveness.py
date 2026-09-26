@@ -46,18 +46,35 @@ def opt_float(value: Any) -> Optional[float]:
         return None
 
 
+def _as_rank(value: Any) -> Optional[int]:
+    """A rank number from a database cell, or ``None``."""
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 def _rank_id(row: Any) -> Optional[int]:
     """The row's rank, or ``None`` so a row without a usable one is skipped.
 
-    One malformed cell must cost its own row, never every rank's verdict.
+    ``global_rank`` first; ``rank`` when that cell is NULL or cannot be
+    parsed. One malformed cell must cost its own row at most, never
+    every rank's verdict.
     """
-    rank_id = row["global_rank"]
-    if rank_id is None:
-        rank_id = row["rank"]
-    try:
-        return int(rank_id) if rank_id is not None else None
-    except (TypeError, ValueError, OverflowError):
-        return None
+    rank_id = _as_rank(row["global_rank"])
+    return rank_id if rank_id is not None else _as_rank(row["rank"])
+
+
+def _arrival(row: Any) -> float:
+    """When the aggregator received a row, oldest when unreadable."""
+    recv = opt_float(row["recv_ts_ns"])
+    return recv if recv is not None else float("-inf")
+
+
+def _sample_order(row: Any) -> Tuple[float, int]:
+    """The windowed read's own order within a rank: seq, then id."""
+    seq = opt_float(row["seq"])
+    return (seq if seq is not None else float("-inf"), int(row["id"]))
 
 
 def observed_cadence(by_rank: Dict[int, List[Any]]) -> Optional[float]:
@@ -148,11 +165,22 @@ def read_rank_clock(
         if rank_id is None:
             continue
         by_rank.setdefault(rank_id, []).append(row)
+    # A row that fell back to its ``rank`` cell arrives in a group of its
+    # own, after that rank's rows. Put it where it was sampled; rows
+    # already in the read's order stay as they are.
+    for rows in by_rank.values():
+        rows.sort(key=_sample_order)
 
     newest_by_rank: Dict[int, Any] = {}
     for row in latest_rows:
         rank_id = _rank_id(row)
-        if rank_id is not None:
+        if rank_id is None:
+            continue
+        # A row that fell back to its ``rank`` cell is the newest of its
+        # own group, not necessarily of that rank; the later arrival is
+        # the rank's last word.
+        held = newest_by_rank.get(rank_id)
+        if held is None or _arrival(row) > _arrival(held):
             newest_by_rank[rank_id] = row
 
     policy = FreshnessPolicy.from_observed_cadence(

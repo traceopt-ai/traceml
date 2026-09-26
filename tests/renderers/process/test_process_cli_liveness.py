@@ -26,7 +26,9 @@ from traceml_ai.renderers.process.computer import ProcessMetricsComputer
 from traceml_ai.renderers.process.dashboard_compute import (
     ProcessDashboardComputer,
 )
+from traceml_ai.renderers.process.liveness import read_rank_clock
 from traceml_ai.renderers.process.renderer import ProcessRenderer
+from traceml_ai.renderers.process.repository import ProcessRepository
 
 T0 = 1_700_000_000.0
 
@@ -263,10 +265,14 @@ def test_process_panel_has_no_marker_when_every_rank_reports(process_db):
     assert "no data for" not in text
 
 
-def test_unparseable_rank_cell_is_skipped_and_the_other_ranks_judged(
+def test_an_older_row_with_a_garbage_global_rank_moves_no_verdict(
     process_db,
 ):
-    """One bad heartbeat row costs its own row, never every verdict."""
+    """One bad heartbeat row never costs every verdict.
+
+    It falls back to its ``rank`` cell, rank 0, and arrived before rank
+    0's newest row, so rank 0's last word stands.
+    """
     _run(process_db, dies=(1, 20))
     process_db.insert(
         recv_ts_ns=int((T0 + 2.0) * 1e9),
@@ -293,3 +299,72 @@ def test_unparseable_rank_cell_is_skipped_and_the_other_ranks_judged(
     ] == [(0, "fresh"), (1, "stale")]
     assert "rank 1: no data for 80s (stale)" in text
     assert "3.00 cores" in text
+
+
+def test_unparseable_global_rank_falls_back_to_the_rank_cell(process_db):
+    """Rank 3's only heartbeat row has a garbage ``global_rank``.
+
+    Its ``rank`` cell still names it, so it is judged like a NULL
+    ``global_rank`` would be. A row with neither cell usable is skipped.
+    """
+    _run(process_db, ranks=3)
+    process_db.insert(
+        recv_ts_ns=int((T0 + 40.0) * 1e9),
+        rank=3,
+        global_rank="garbage",
+        seq=20,
+        sample_ts_s=T0 + 40.0,
+        cpu_percent=100.0,
+    )
+    process_db.insert(
+        recv_ts_ns=int((T0 + 120.0) * 1e9),
+        rank=None,
+        global_rank="junk",
+        seq=60,
+        sample_ts_s=T0 + 120.0,
+        cpu_percent=1.0,
+    )
+
+    snap = ProcessMetricsComputer(
+        db_path=process_db.path, sampler_interval_s=2.0
+    ).compute_cli()
+    text = _render(
+        ProcessRenderer(
+            db_path=process_db.path, sampler_interval_s=2.0
+        ).get_panel_renderable()
+    )
+
+    assert [
+        (r["global_rank"], r["freshness"]) for r in snap["rank_liveness"]
+    ] == [(0, "fresh"), (1, "fresh"), (2, "fresh"), (3, "stale")]
+    assert "rank 3: no data for 80s (stale)" in text
+
+
+def test_a_fallen_back_row_joins_its_rank_window_in_sample_order(
+    process_db,
+):
+    """Where it was sampled, as a NULL ``global_rank`` row would be.
+
+    The read returns it in a group of its own, after rank 0's rows.
+    """
+    _run(process_db)
+    process_db.insert(
+        recv_ts_ns=int((T0 + 101.0) * 1e9),
+        rank=0,
+        global_rank="garbage",
+        seq=50,
+        sample_ts_s=T0 + 101.0,
+        cpu_percent=1.0,
+    )
+    repo = ProcessRepository(db_path=process_db.path)
+    with repo.connect() as conn:
+        clock = read_rank_clock(
+            repo,
+            conn,
+            newest_ts=repo.newest_sample_ts(conn),
+            configured_interval_s=2.0,
+        )
+
+    stamps = [row["sample_ts_s"] for row in clock.by_rank[0]]
+    assert T0 + 101.0 in stamps
+    assert stamps == sorted(stamps)

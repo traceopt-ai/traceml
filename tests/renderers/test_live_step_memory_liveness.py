@@ -151,7 +151,7 @@ def test_held_metrics_carry_this_ticks_liveness(tmp_path) -> None:
 
 
 def _add_unparseable_rank(path: str) -> None:
-    """A heartbeat row whose rank cell is not a number."""
+    """An old heartbeat row for rank 0 whose global_rank is not a number."""
     with sqlite_database(path) as conn:
         insert_process_sample(
             conn,
@@ -165,10 +165,14 @@ def _add_unparseable_rank(path: str) -> None:
         )
 
 
-def test_unparseable_rank_cell_is_skipped_and_the_other_ranks_judged(
+def test_an_older_row_with_a_garbage_global_rank_moves_no_verdict(
     tmp_path,
 ) -> None:
-    """One bad heartbeat row costs its own row, never every verdict."""
+    """One bad heartbeat row never costs every verdict.
+
+    It falls back to its ``rank`` cell, rank 0, and arrived before rank
+    0's newest row, so rank 0's last word stands.
+    """
     db_path = str(tmp_path / "bad_rank.db")
     _write_run(db_path, last_heartbeat={0: 60, 1: 20})
     _add_unparseable_rank(db_path)
