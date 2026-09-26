@@ -24,7 +24,8 @@ class ProcessCLISnapshot:
     gpu_used_imbalance: Optional[float]
     # Every rank's last-seen clock, so the card can name a rank that
     # stopped instead of silently holding the slowest rank's last seq.
-    # None when the heartbeat could not be read this tick.
+    # None when there is no verdict: this tick's read failed and no good
+    # verdict is still inside the stale TTL.
     rank_liveness: Optional[Tuple[RankLiveness, ...]] = None
 
     def to_dict(self) -> Dict[str, Any]:
