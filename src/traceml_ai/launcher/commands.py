@@ -138,8 +138,8 @@ def _dashboard_access_box(dashboard_port: int) -> str:
     return _boxed_message(
         "TraceML dashboard",
         [
-            f"Open locally: {url}",
-            f"Remote SSH tunnel: {ssh_cmd}",
+            f"When the dashboard reports ready, open locally: {url}",
+            f"For remote access once ready, use an SSH tunnel: {ssh_cmd}",
             "Then open the local URL above in your browser.",
         ],
     )
