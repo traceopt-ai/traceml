@@ -566,24 +566,36 @@ class TraceMLAggregator:
 
         The aggregator keeps TCP open during this phase because worker ranks can
         finish at slightly different times on multi-node jobs. Finalization
-        proceeds once all expected ranks sent a rank-finished marker or the
-        caller's deadline expires.
+        proceeds once all expected ranks sent a rank-finished marker, once no
+        rank connection is still open, or when the caller's deadline expires.
+
+        A rank that was killed never sends its marker, and a rank whose
+        connection has closed cannot send anything more, so waiting on it would
+        only hold the aggregator port for the rest of the budget.
         """
         deadline = time.monotonic() + max(0.0, float(timeout_sec))
         quiet_sec = 0.5
+        reason = "timeout"
         # Back-compat: workers from older releases do not send a rank_finished
-        # marker, so _finished_ranks never reaches expected_world_size and this
-        # loop waits the full settle budget, then emits a nonfatal "missing
-        # ranks" warning. New workers short-circuit once all ranks report.
+        # marker, so _finished_ranks never reaches expected_world_size. They
+        # still end this loop once their connections close, and then emit a
+        # nonfatal "missing ranks" warning.
         while time.monotonic() < deadline:
             self._drain_tcp()
-            if len(self._finished_ranks) >= self._expected_world_size:
+            all_finished = (
+                len(self._finished_ranks) >= self._expected_world_size
+            )
+            if all_finished or self._tcp_server.open_connections() == 0:
+                # Wait one quiet window so frames still in flight are taken.
                 remaining = max(0.0, deadline - time.monotonic())
                 if not self._tcp_server.wait_for_data(
                     timeout=min(quiet_sec, remaining)
                 ):
                     self._drain_tcp()
-                    return None
+                    if all_finished:
+                        return None
+                    reason = "ranks_disconnected"
+                    break
                 continue
 
             remaining = max(0.0, deadline - time.monotonic())
@@ -600,13 +612,21 @@ class TraceMLAggregator:
             for rank in range(self._expected_world_size)
             if rank not in self._finished_ranks
         ]
+        if reason == "ranks_disconnected":
+            message = (
+                "Every rank connection closed before all ranks reported "
+                "finished; finalizing without the missing ranks."
+            )
+        else:
+            message = (
+                "Timed out waiting for all ranks to report finished before "
+                "end-of-run finalization."
+            )
         warning = {
             "status": "warning",
             "completed_at": utc_now_iso(),
-            "message": (
-                "Timed out waiting for all ranks to report finished before "
-                "end-of-run finalization."
-            ),
+            "reason": reason,
+            "message": message,
             "expected_world_size": self._expected_world_size,
             "finished_ranks": self._finished_ranks_snapshot(),
             "missing_ranks": missing,

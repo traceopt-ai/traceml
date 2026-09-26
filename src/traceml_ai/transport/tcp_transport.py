@@ -68,6 +68,11 @@ class TCPServer:
         self._data_ready = (
             threading.Event()
         )  # set by _handle_client on every new message
+        # Accepted peer connections that have not closed yet. A rank that dies
+        # closes its socket, so this is how the aggregator tells a rank that
+        # may still send from one that never will.
+        self._open_connections = 0
+        self._connections_lock = threading.Lock()
         self.logger = get_error_logger("TraceML-TCPServer")
 
     @property
@@ -143,6 +148,21 @@ class TCPServer:
         self._data_ready.clear()
         return signalled
 
+    def open_connections(self) -> int:
+        """
+        Number of accepted peer connections that have not closed yet.
+
+        A connection is counted from the moment its reader starts until the
+        reader has queued every frame it received and closed the socket, so
+        a count of zero means no queued frame is still on its way in.
+        """
+        with self._connections_lock:
+            return self._open_connections
+
+    def _track_connection(self, delta: int) -> None:
+        with self._connections_lock:
+            self._open_connections += delta
+
     def _run(self) -> None:
         while not self._stop_event.is_set():
             try:
@@ -191,6 +211,7 @@ class TCPServer:
         expected: Optional[int] = None
         decoder = MsgpackDecoder()
 
+        self._track_connection(1)
         try:
             while not self._stop_event.is_set():
                 try:
@@ -218,6 +239,9 @@ class TCPServer:
                 conn.close()
             except Exception:
                 pass
+            # Last, so every frame from this peer is queued before the count
+            # can reach zero.
+            self._track_connection(-1)
 
 
 # TCP Client (worker ranks)

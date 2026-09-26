@@ -1,5 +1,6 @@
 import errno
 import socket
+import time
 
 import pytest
 
@@ -199,3 +200,41 @@ def test_tcp_client_logs_send_failure_and_remains_best_effort() -> None:
         "[TraceML] TCP telemetry send_batch failed for 10.0.0.8:29765: "
         "ConnectionResetError: connection reset by peer"
     ]
+
+
+def _wait_until(predicate, timeout_sec: float = 5.0) -> bool:
+    deadline = time.monotonic() + timeout_sec
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return bool(predicate())
+
+
+def test_open_connections_tracks_peers_until_they_close() -> None:
+    """A rank that dies closes its socket, and the server must see that.
+
+    End-of-run settle waits for late telemetry from ranks that may still
+    send. A peer whose connection is gone can send nothing more, so the
+    count of live connections is what lets settle stop waiting for it.
+    """
+    server = TCPServer(TCPConfig(host="127.0.0.1", port=0))
+    server.start()
+    first = second = None
+    try:
+        assert server.open_connections() == 0
+
+        first = socket.create_connection(("127.0.0.1", server.port))
+        second = socket.create_connection(("127.0.0.1", server.port))
+        assert _wait_until(lambda: server.open_connections() == 2)
+
+        first.close()
+        assert _wait_until(lambda: server.open_connections() == 1)
+
+        second.close()
+        assert _wait_until(lambda: server.open_connections() == 0)
+    finally:
+        for sock in (first, second):
+            if sock is not None:
+                sock.close()
+        server.stop()

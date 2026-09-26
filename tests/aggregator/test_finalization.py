@@ -42,8 +42,11 @@ class _Display:
 
 
 class _TCP:
-    def __init__(self, messages=None):
+    # One live rank connection by default, so a missing rank_finished marker
+    # keeps settle waiting for the full budget as it would with a real peer.
+    def __init__(self, messages=None, open_connections=1):
         self._messages = list(messages or [])
+        self._open_connections = int(open_connections)
         self.stopped = False
 
     def poll(self):
@@ -52,6 +55,9 @@ class _TCP:
 
     def wait_for_data(self, timeout):
         return False
+
+    def open_connections(self):
+        return self._open_connections
 
     def stop(self):
         self.stopped = True
@@ -252,6 +258,122 @@ def test_stop_reserves_positive_sqlite_finalize_budget_when_ranks_missing(
 
     assert writer.finalize_timeouts
     assert writer.finalize_timeouts[-1] > 0.0
+
+
+def _read_finalization_warning(tmp_path: Path) -> dict:
+    path = tmp_path / "run" / "aggregator" / "finalization_warning.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _rank_finished(rank: int) -> dict:
+    return build_rank_finished_payload(
+        global_rank=rank,
+        world_size=2,
+        node_rank=0,
+        hostname="worker",
+    )
+
+
+def test_settle_stops_waiting_once_no_rank_connection_is_open(
+    monkeypatch,
+    tmp_path,
+):
+    # A killed rank never sends rank_finished. Before this, settle waited out
+    # its whole budget for it (240 s at the default finalize timeout) with the
+    # aggregator port still bound, so a SIGTERM looked like a hang.
+    writer = _Writer(_ok_result())
+    agg = _make_aggregator(
+        tmp_path,
+        writer=writer,
+        tcp=_TCP(messages=[_rank_finished(0)], open_connections=0),
+    )
+    monkeypatch.setattr(
+        trace_aggregator,
+        "generate_summary",
+        lambda *args, **kwargs: _write_fake_summary(tmp_path),
+    )
+
+    started = time.monotonic()
+    agg.stop(timeout_sec=30.0)
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 5.0
+    warning = _read_finalization_warning(tmp_path)
+    assert warning["reason"] == "ranks_disconnected"
+    assert warning["finished_ranks"] == [0]
+    assert warning["missing_ranks"] == [1]
+
+
+def test_settle_keeps_the_full_budget_while_a_rank_is_connected(
+    monkeypatch,
+    tmp_path,
+):
+    # A rank that is still connected may still send late telemetry, which is
+    # what settle exists for on multi-node jobs, so it keeps the whole budget.
+    class _SlowTCP(_TCP):
+        def wait_for_data(self, timeout):
+            time.sleep(float(timeout))
+            return False
+
+    writer = _Writer(_ok_result())
+    agg = _make_aggregator(
+        tmp_path,
+        writer=writer,
+        tcp=_SlowTCP(messages=[_rank_finished(0)], open_connections=1),
+    )
+    monkeypatch.setattr(
+        trace_aggregator,
+        "generate_summary",
+        lambda *args, **kwargs: _write_fake_summary(tmp_path),
+    )
+    budget = 0.6
+    settle_budget = budget - TraceMLAggregator._sqlite_finalize_budget(budget)
+
+    started = time.monotonic()
+    agg.stop(timeout_sec=budget)
+    elapsed = time.monotonic() - started
+
+    assert elapsed >= 0.8 * settle_budget
+    warning = _read_finalization_warning(tmp_path)
+    assert warning["reason"] == "timeout"
+    assert warning["missing_ranks"] == [1]
+
+
+def test_settle_drains_frames_that_arrive_as_the_last_rank_disconnects(
+    monkeypatch,
+    tmp_path,
+):
+    # Frames a dying rank sent just before its socket closed are still in
+    # flight when the connection count reaches zero. Settle must take them
+    # before it finalizes, or the early exit would lose telemetry.
+    late_frame = {"sampler": "SystemSampler", "late": True}
+
+    class _LateFrameTCP(_TCP):
+        def __init__(self):
+            super().__init__(open_connections=0)
+            self._late_pending = True
+
+        def wait_for_data(self, timeout):
+            if self._late_pending:
+                self._late_pending = False
+                self._messages.append(late_frame)
+                return True
+            return False
+
+    writer = _Writer(_ok_result())
+    agg = _make_aggregator(tmp_path, writer=writer, tcp=_LateFrameTCP())
+    monkeypatch.setattr(
+        trace_aggregator,
+        "generate_summary",
+        lambda *args, **kwargs: _write_fake_summary(tmp_path),
+    )
+
+    agg.stop(timeout_sec=30.0)
+
+    assert late_frame in writer.ingested
+    assert _read_finalization_warning(tmp_path)["reason"] == (
+        "ranks_disconnected"
+    )
 
 
 def test_drain_tcp_is_serialized(tmp_path):
