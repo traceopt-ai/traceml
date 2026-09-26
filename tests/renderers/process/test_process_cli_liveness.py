@@ -203,30 +203,39 @@ def test_dashboard_freshness_values_are_unchanged(process_db):
     ) == (4, 3, 1, 0)
 
 
-def test_a_failed_rank_read_costs_the_dashboard_its_rank_rows_only(
+def test_a_failed_rank_read_serves_the_last_good_dashboard_payload(
     process_db, monkeypatch
 ):
-    """The committed-step history still reaches the card.
+    """A failed rank read is a failed read, as on version_0.4.2.
 
-    The per-rank rows and their verdicts come from the one read that
-    failed, so they go. Everything read separately stays.
+    The last good payload answers for it, rank rows included, and is
+    not replaced by one with the rank rows blanked. A read that then
+    fails outright still gets the genuinely good payload.
     """
     import traceml_ai.renderers.process.dashboard_compute as dashboard
 
     _run(process_db, dies=(1, 20))
+    computer = ProcessDashboardComputer(
+        db_path=process_db.path, sampler_interval_s=2.0
+    )
+    first = computer.compute()
+    assert [(r.global_rank, r.freshness) for r in first.ranks] == [
+        (0, "fresh"),
+        (1, "stale"),
+    ]
 
     def unreadable(*_args, **_kwargs):
         raise sqlite3.OperationalError("heartbeat unreadable")
 
     monkeypatch.setattr(dashboard, "read_rank_clock", unreadable)
-    out = ProcessDashboardComputer(
-        db_path=process_db.path, sampler_interval_s=2.0
-    ).compute()
+    held = computer.compute()
+    assert len(held.ranks) == 2
+    assert held is first
 
-    assert out.ranks == ()
-    assert out.window_len == 20
-    assert out.cpu is not None
-    assert out.cpu.now == pytest.approx(300.0)
+    monkeypatch.setattr(computer._db, "connect", unreadable)
+    later = computer.compute()
+    assert len(later.ranks) == 2
+    assert later is first
 
 
 # --- the terminal panel --------------------------------------------------
