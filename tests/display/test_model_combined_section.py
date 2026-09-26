@@ -976,6 +976,42 @@ def test_diagnostics_payload_fills_the_rail_in_the_engine_colour(
     assert "INPUT-BOUND" in panel["body"].content
 
 
+def test_diagnostics_pill_follows_overall_not_the_first_item() -> None:
+    """Items keep registry order, so the first one need not be the worst."""
+    from traceml_ai.aggregator.display_drivers.nicegui_sections import (
+        model_diagnostics_section as mds,
+    )
+
+    panel = {
+        "overall": _FakeText(),
+        "body": _FakeHtml(),
+        "hint": _FakeText(),
+    }
+    mds.update_model_diagnostics_section(
+        panel,
+        {
+            "overall_severity": "warn",
+            "items": [
+                {
+                    "source": "step_memory",
+                    "status": "BALANCED",
+                    "severity": "info",
+                    "reason": "Memory is steady.",
+                },
+                {
+                    "source": "step_time",
+                    "status": "INPUT-BOUND",
+                    "severity": "warn",
+                    "reason": "Input wait dominates the step.",
+                },
+            ],
+        },
+    )
+
+    assert panel["overall"].text == "WARN"
+    assert theme.SEV["warn"] in panel["overall"].styles[-1]
+
+
 def test_empty_diagnostics_payload_clears_stale_hero_verdict() -> None:
     panel = _panel()
     panel["verdict"].text = "COMPUTE-BOUND"
