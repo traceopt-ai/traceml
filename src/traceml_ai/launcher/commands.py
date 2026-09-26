@@ -51,6 +51,10 @@ from traceml_ai.launcher.process import (
     wait_for_tcp_listen,
 )
 from traceml_ai.loggers.error_log import get_error_logger, setup_error_logger
+from traceml_ai.regression.outcome import (
+    OUTCOME_FILENAME,
+    write_guard_outcome,
+)
 from traceml_ai.runtime.launch_context import LaunchContext
 from traceml_ai.runtime.session import get_session_id
 from traceml_ai.runtime.settings import (
@@ -668,10 +672,6 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
             )
             raise SystemExit(1) from exc
 
-        if torchrun_cfg.nnodes != 1:
-            raise SystemExit(
-                "[TraceML] ERROR: guard pilot runs require --nnodes=1."
-            )
         if cfg["mode"] != "summary":
             raise SystemExit(
                 "[TraceML] ERROR: guard pilot runs require mode=summary."
@@ -861,6 +861,36 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     telemetry_available = False
     telemetry_startup_reason: Optional[str] = None
     port_conflict_detail: Optional[str] = None
+    guard_outcome_written = False
+
+    def record_guard_outcome(returncode: Optional[int] = None) -> None:
+        """Persist this node's training result once, without changing it."""
+        nonlocal guard_outcome_written
+        if guard_contract is None or guard_outcome_written:
+            return
+        observed_returncode = returncode
+        if observed_returncode is None and train_proc is not None:
+            observed_returncode = train_proc.returncode
+        if observed_returncode is None:
+            return
+
+        def write() -> None:
+            nonlocal guard_outcome_written
+            write_guard_outcome(
+                path=node_dir / OUTCOME_FILENAME,
+                manifest_path=session_root / "manifest.json",
+                session_id=session_id,
+                node_rank=torchrun_cfg.node_rank,
+                nnodes=torchrun_cfg.nnodes,
+                nproc_per_node=torchrun_cfg.nproc_per_node,
+                contract=guard_contract,
+                exit_code=TrainingOutcome(observed_returncode).cli_exit_code,
+            )
+            guard_outcome_written = True
+
+        _run_noncritical_launcher_step(
+            "failed to record the guarded training outcome", write
+        )
 
     def finish_aggregator_output() -> Optional[ProcessOutputResult]:
         nonlocal aggregator_output_result
@@ -883,6 +913,9 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         return aggregator_output_result
 
     def finish_process_output() -> None:
+        # Signal teardown reaches this callback after reaping the training
+        # process, so interrupted guarded runs can record their real exit code.
+        record_guard_outcome()
         training_result = (
             training_output.finish() if training_output is not None else None
         )
@@ -1082,6 +1115,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         train_rc = train_proc.poll()
         if train_rc is not None:
             outcome = TrainingOutcome(train_rc)
+            record_guard_outcome(train_rc)
             if manifest_path is not None:
                 _run_noncritical_launcher_step(
                     "failed to record the training end time",

@@ -41,10 +41,19 @@ traceml run train.py \
 TraceML searches the launch directory and its parents for `traceml.yaml`. No
 second configuration file or guard-specific launch option is required.
 
-The guard pilot currently requires `traceml run`, one node, summary mode, and
-history recording. One-process and multi-process single-node runs are allowed.
-`traceml watch`, `traceml serve`, and direct `traceml.init()` launches ignore
-the guard declaration.
+The guard pilot currently requires `traceml run`, summary mode, and history
+recording. One-process and fixed-size DDP runs on one or more nodes are
+allowed. `traceml watch`, `traceml serve`, and direct `traceml.init()` launches
+ignore the guard declaration.
+
+For multi-node DDP, use the ordinary TraceML launch shape documented in
+[Distributed Training](distributed-training.md#multi-node-ddp). Every launcher
+must discover the same `guard` declaration and use the same explicit
+`--run-name`, `--nnodes`, and `--nproc-per-node`; only `--node-rank` differs.
+Guarded multi-node runs must also resolve `--logs-dir` to the same shared
+directory on every node. Node 0 records the normalized declaration, and every
+launcher writes its outcome beneath that shared run directory. These small
+files stay on the filesystem; TraceML does not send them through telemetry.
 
 ## Contract fields
 
@@ -147,6 +156,22 @@ aggregator or training workers. After writing the manifest, it prints a short
 
 The source configuration path is not part of the portable contract. Changing
 `traceml.yaml` after launch cannot change the declaration captured for that run.
+
+After its local training process exits, every guarded launcher also writes:
+
+```text
+logs/<run-name>/nodes/node_<node-rank>/guard_outcome.json
+```
+
+The atomic, versioned record contains the session and root-manifest identity,
+node topology, normalized-contract digest, training status and exit code, and
+completion time. It excludes command arguments, paths, hostnames, environment
+contents, device identifiers, and credentials. Exit code `0` records completed
+training; any other observed exit code records failed training.
+
+This outcome is node scoped. A later guard stage consolidates the expected
+node files on node 0. Failure to write this auxiliary record emits a warning
+but never replaces the supervised training command's exit code.
 
 To inspect the captured declaration, format the manifest and look under
 `guard.contract`:
