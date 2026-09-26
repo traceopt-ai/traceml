@@ -13,30 +13,44 @@ from typing import Any, Dict, List, Optional
 
 from traceml_ai import __version__
 
+from ..terminal_card.card import summary_header_coverage
 from .banner import render_banner
 from .sections import render_sections
 from .style import STYLESHEET
 from .textutils import esc
 
-# Header chips, in display order: (payload meta key, label).
+# Header chips, in display order: (payload meta key, label, coverage field).
+# When the terminal card states a coverage segment, that exact text replaces
+# the bare meta count it already contains (e.g. world size -> "2/4 ranks").
 _META_CHIPS = (
-    ("mode", "mode"),
-    ("world_size", "world size"),
-    ("nodes_observed", "nodes"),
-    ("gpus_observed", "GPUs"),
+    ("mode", "mode", None),
+    ("world_size", "world size", "ranks"),
+    ("nodes_observed", "nodes", "nodes"),
+    ("gpus_observed", "GPUs", None),
 )
+
+
+def _coverage_chip(text: str) -> str:
+    return f'<span class="chip"><b>{esc(text)}</b></span>'
 
 
 def _chips(payload: Dict[str, Any]) -> str:
     meta = payload.get("meta") or {}
+    coverage = summary_header_coverage(payload)
     parts: List[str] = []
-    for key, label in _META_CHIPS:
+    for key, label, coverage_field in _META_CHIPS:
+        covered = getattr(coverage, coverage_field) if coverage_field else None
+        if covered:
+            parts.append(_coverage_chip(covered))
+            continue
         value = meta.get(key)
         if value is None:
             continue
         parts.append(
             f'<span class="chip">{esc(label)} <b>{esc(value)}</b></span>'
         )
+    if coverage.steps:
+        parts.append(_coverage_chip(coverage.steps))
     duration = payload.get("duration_s")
     if isinstance(duration, (int, float)):
         parts.append(
