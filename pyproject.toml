@@ -67,9 +67,9 @@ dev = [
     # Keep these three equal to the revs in .pre-commit-config.yaml, which
     # is what CI's lint job runs. A newer local formatter reformats files
     # that CI considers clean.
-    "black==24.10.0",
-    "ruff==0.9.4",
-    "isort==5.13.2",
+    "black==26.5.1",
+    "ruff==0.15.22",
+    "isort==9.0.1",
     "pre-commit",
     "codespell>=2.4.1",
     "nbstripout",

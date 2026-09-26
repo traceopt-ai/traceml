@@ -224,8 +224,7 @@ def create_step_time_database(
     world_size = len(scenario.profiles)
     conn = sqlite3.connect(db_path)
     try:
-        conn.executescript(
-            """
+        conn.executescript("""
             CREATE TABLE step_time_samples (
                 id                 INTEGER PRIMARY KEY AUTOINCREMENT,
                 recv_ts_ns         INTEGER NOT NULL,
@@ -246,8 +245,7 @@ def create_step_time_database(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 training_strategy TEXT
             );
-            """
-        )
+            """)
         conn.execute(
             "INSERT INTO runtime_environment(training_strategy) VALUES (?);",
             (scenario.training_strategy,),

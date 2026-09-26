@@ -75,15 +75,13 @@ def test_runtime_environment_projection_inserts_identity_and_strategy() -> (
     )
     runtime_environment_projection.insert_rows(conn, rows)
 
-    row = conn.execute(
-        """
+    row = conn.execute("""
         SELECT recv_ts_ns, rank, global_rank, local_rank, world_size,
                local_world_size, node_rank, hostname, pid, sample_ts_s, seq,
                topology, distributed_initialized, distributed_backend,
                training_strategy, strategy_source, strategy_confidence
         FROM runtime_environment;
-        """
-    ).fetchone()
+        """).fetchone()
 
     assert row == (
         999,

@@ -28,16 +28,14 @@ from traceml_ai.step_time.sqlite import SQLiteStepTimeRepository
 
 def _create_minimal_table(conn: sqlite3.Connection) -> None:
     """Create the smallest schema accepted by the repository."""
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE step_time_samples (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             global_rank INTEGER,
             step INTEGER,
             events_json TEXT NOT NULL
         );
-        """
-    )
+        """)
 
 
 def test_summary_deduplicates_before_analysis_windowing(
@@ -55,13 +53,11 @@ def test_summary_deduplicates_before_analysis_windowing(
     )
 
     with sqlite3.connect(db_path) as conn:
-        original = conn.execute(
-            """
+        original = conn.execute("""
             SELECT events_json
             FROM step_time_samples
             WHERE global_rank = 0 AND step = 5;
-            """
-        ).fetchone()[0]
+            """).fetchone()[0]
         latest = json.loads(original)
         latest["_traceml_internal:forward_time"]["cpu"]["cpu_ms"] = 99.0
         latest_json = json.dumps(latest)
@@ -199,13 +195,11 @@ def test_live_rank_universe_change_invalidates_cached_snapshot(
     with sqlite3.connect(db_path) as conn:
         repository = SQLiteStepTimeRepository(conn)
         first = repository.load_live(request)
-        conn.execute(
-            """
+        conn.execute("""
             INSERT INTO step_time_samples(
                 recv_ts_ns, rank, global_rank, step, events_json
             ) VALUES (2, 1, 1, NULL, '');
-            """
-        )
+            """)
         conn.commit()
         second = repository.load_live(request, previous=first)
 
@@ -260,12 +254,10 @@ def test_live_selection_cost_is_independent_of_total_run_length(
         db_path = tmp_path / f"live-cost-{stored_steps}.db"
         with sqlite3.connect(db_path) as conn:
             _create_minimal_table(conn)
-            conn.execute(
-                """
+            conn.execute("""
                 CREATE INDEX step_time_rank_step_id
                 ON step_time_samples(global_rank, step DESC, id DESC);
-                """
-            )
+                """)
             conn.executemany(
                 """
                 INSERT INTO step_time_samples(
@@ -348,13 +340,11 @@ def test_repository_returns_filtered_progress_identity_and_context(
     )
 
     with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            """
+        conn.execute("""
             INSERT INTO step_time_samples(
                 recv_ts_ns, rank, global_rank, step, events_json
             ) VALUES (99, 0, NULL, 99, '{}');
-            """
-        )
+            """)
         snapshot = SQLiteStepTimeRepository(conn).load_summary(
             StepTimeLoadRequest(rank_filter=(1,))
         )
@@ -396,12 +386,10 @@ def test_minimal_schema_and_malformed_json_remain_fail_open(
     db_path = tmp_path / "minimal.db"
     with sqlite3.connect(db_path) as conn:
         _create_minimal_table(conn)
-        conn.execute(
-            """
+        conn.execute("""
             INSERT INTO step_time_samples(global_rank, step, events_json)
             VALUES (0, 7, '{not-json');
-            """
-        )
+            """)
         snapshot = SQLiteStepTimeRepository(conn).load_summary(
             StepTimeLoadRequest(window_size=2)
         )
@@ -495,12 +483,10 @@ def test_related_reads_share_one_sqlite_snapshot(tmp_path: Path) -> None:
             nonlocal inserted
             if inserted or "FROM runtime_environment" not in statement:
                 return
-            writer.execute(
-                """
+            writer.execute("""
                 INSERT INTO runtime_environment(training_strategy)
                 VALUES ('fsdp');
-                """
-            )
+                """)
             writer.commit()
             inserted = True
 

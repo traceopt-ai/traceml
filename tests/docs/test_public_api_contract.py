@@ -7,7 +7,6 @@ from pathlib import Path
 
 import traceml_ai
 
-
 ROOT = Path(__file__).resolve().parents[2]
 PUBLIC_API_DOC = ROOT / "docs" / "user_guide" / "public-api.md"
 

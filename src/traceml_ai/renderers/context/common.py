@@ -84,14 +84,12 @@ class ContextDB:
             # that came up 20 s apart differ by 10 seq for the whole run.
             # The tick is estimated from the fastest rank's own cadence so a
             # slow sampler is never called dead between its own ticks.
-            rows = conn.execute(
-                """
+            rows = conn.execute("""
                 SELECT MIN(sample_ts_s), MAX(sample_ts_s), COUNT(*)
                 FROM process_samples
                 WHERE sample_ts_s IS NOT NULL
                 GROUP BY COALESCE(global_rank, rank)
-                """
-            ).fetchall()
+                """).fetchall()
             if rows:
                 newest = max(float(r[1]) for r in rows)
                 cadences = [
@@ -117,8 +115,7 @@ class ContextDB:
             # GPUs observed across the node set: each node's newest
             # gpu_count, summed. One node's count alone under-reports a
             # multi-node run (2 nodes x 1 GPU is 2 GPUs, not 1).
-            row = conn.execute(
-                """
+            row = conn.execute("""
                 SELECT SUM(gpu_count) FROM (
                     SELECT gpu_count FROM system_samples s
                     WHERE id = (
@@ -126,20 +123,17 @@ class ContextDB:
                         WHERE t.hostname IS s.hostname
                     )
                 )
-                """
-            ).fetchone()
+                """).fetchone()
             if row and row[0] is not None:
                 facts["gpus_observed"] = int(row[0])
         except sqlite3.Error:
             pass
         try:
-            row = conn.execute(
-                """
+            row = conn.execute("""
                 SELECT training_strategy FROM runtime_environment
                 WHERE training_strategy IS NOT NULL AND training_strategy != ''
                 ORDER BY id DESC LIMIT 1
-                """
-            ).fetchone()
+                """).fetchone()
             facts["training_strategy"] = str(row[0]) if row else ""
         except sqlite3.Error:
             pass

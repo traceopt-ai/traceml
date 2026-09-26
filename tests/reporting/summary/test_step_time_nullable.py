@@ -55,8 +55,7 @@ def _create_db(path: str, per_rank_events: dict) -> None:
     """Create a step_time db; per_rank_events maps rank -> metric ms map."""
     conn = sqlite3.connect(path)
     try:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE step_time_samples (
                 id                 INTEGER PRIMARY KEY AUTOINCREMENT,
                 recv_ts_ns         INTEGER NOT NULL,
@@ -72,16 +71,13 @@ def _create_db(path: str, per_rank_events: dict) -> None:
                 step               INTEGER,
                 events_json        TEXT NOT NULL
             );
-            """
-        )
-        conn.execute(
-            """
+            """)
+        conn.execute("""
             CREATE TABLE runtime_environment (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 training_strategy TEXT
             );
-            """
-        )
+            """)
         conn.execute(
             "INSERT INTO runtime_environment(training_strategy) VALUES (?);",
             ("ddp",),

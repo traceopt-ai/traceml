@@ -27,14 +27,12 @@ def init_summary_schema(conn: sqlite3.Connection) -> None:
         step_memory_projection.init_schema,
     ):
         initialize(conn)
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS runtime_environment (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             training_strategy TEXT
         )
-        """
-    )
+        """)
 
 
 @contextmanager

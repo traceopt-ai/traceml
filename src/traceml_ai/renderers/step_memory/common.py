@@ -56,16 +56,14 @@ class StepMemoryMetricsDB:
         dict[int, int]
             Mapping global rank -> max(step), excluding NULL rows.
         """
-        rows = conn.execute(
-            """
+        rows = conn.execute("""
             SELECT global_rank, MAX(step) AS max_step
             FROM step_memory_samples
             WHERE global_rank IS NOT NULL
               AND step IS NOT NULL
             GROUP BY global_rank
             ORDER BY global_rank ASC;
-            """
-        ).fetchall()
+            """).fetchall()
 
         out: Dict[int, int] = {}
         for row in rows:
@@ -425,7 +423,7 @@ def _common_suffix_steps_fast(
 
 
 def _majority_device(
-    per_rank_device: Dict[int, Optional[str]]
+    per_rank_device: Dict[int, Optional[str]],
 ) -> Optional[str]:
     """Return majority device string from per-rank device map."""
     devices = [d for d in per_rank_device.values() if d]

@@ -52,8 +52,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
     """
     Create the query-friendly projection table for stdout/stderr lines.
     """
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS stdout_stderr_samples (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             recv_ts_ns   INTEGER NOT NULL,
@@ -61,20 +60,15 @@ def init_schema(conn: sqlite3.Connection) -> None:
             sample_ts_s  REAL,
             line         TEXT NOT NULL
         );
-        """
-    )
-    conn.execute(
-        """
+        """)
+    conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_stdout_stderr_rank_id
         ON stdout_stderr_samples(rank, id);
-        """
-    )
-    conn.execute(
-        """
+        """)
+    conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_stdout_stderr_sample_ts
         ON stdout_stderr_samples(sample_ts_s, id);
-        """
-    )
+        """)
 
 
 def build_rows(

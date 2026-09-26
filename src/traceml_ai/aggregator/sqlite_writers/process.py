@@ -139,8 +139,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
         One row per sampled process snapshot. Includes process CPU/RAM fields,
         distributed identity, and flattened single-device GPU memory metrics.
     """
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS process_samples (
             id                       INTEGER PRIMARY KEY AUTOINCREMENT,
             recv_ts_ns               INTEGER NOT NULL,
@@ -164,8 +163,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
             gpu_mem_reserved_bytes   REAL,
             gpu_mem_total_bytes      REAL
         );
-        """
-    )
+        """)
     _ensure_column(
         conn,
         table="process_samples",
@@ -202,18 +200,14 @@ def init_schema(conn: sqlite3.Connection) -> None:
         column="hostname",
         definition="TEXT",
     )
-    conn.execute(
-        """
+    conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_process_samples_rank_ts
         ON process_samples(rank, sample_ts_s, id);
-        """
-    )
-    conn.execute(
-        """
+        """)
+    conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_process_samples_global_rank_ts
         ON process_samples(global_rank, sample_ts_s, id);
-        """
-    )
+        """)
 
 
 def build_rows(

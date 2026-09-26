@@ -104,13 +104,11 @@ def test_legacy_stdout_history_remains_readable(tmp_path) -> None:
     reader = StdoutStderrDB(str(db_path))
     with reader.connect() as conn:
         stdout_stderr.init_schema(conn)
-        conn.execute(
-            """
+        conn.execute("""
             INSERT INTO stdout_stderr_samples(
                 recv_ts_ns, rank, sample_ts_s, line
             ) VALUES (1, 2, 3.0, 'legacy output');
-            """
-        )
+            """)
         lines = reader.fetch_latest_lines(conn, rank=2)
 
     assert [line.line for line in lines] == ["legacy output"]
