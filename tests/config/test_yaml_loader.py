@@ -123,6 +123,26 @@ def test_load_yaml_config_preserves_guard_without_warning(
     assert result["guard"]["workload"]["name"] == "smoke"
 
 
+def test_load_yaml_config_is_permissive_for_non_run_consumers(
+    tmp_path: Path,
+) -> None:
+    p = _write(
+        tmp_path,
+        "mode: cli\n"
+        "logs_dir: ./my_logs\n"
+        "guard:\n"
+        "  workload:\n"
+        "    name: first\n"
+        "    name: second\n",
+    )
+
+    result = load_yaml_config(p)
+
+    assert result["mode"] == "cli"
+    assert result["logs_dir"] == "./my_logs"
+    assert result["guard"]["workload"]["name"] == "second"
+
+
 def test_guard_config_captures_are_isolated_sequentially_and_concurrently(
     tmp_path: Path,
 ) -> None:
@@ -196,6 +216,22 @@ def test_load_yaml_config_preserves_legacy_duplicate_setting_behavior(
             "      model: small\n"
             "      model: large\n"
         ),
+        (
+            "shared: &shared\n"
+            "  name: first\n"
+            "  name: second\n"
+            "guard:\n"
+            "  workload:\n"
+            "    <<: *shared\n"
+        ),
+        (
+            "shared: &shared\n"
+            "  guard:\n"
+            "    workload:\n"
+            "      name: first\n"
+            "      name: second\n"
+            "<<: *shared\n"
+        ),
     ],
 )
 def test_load_yaml_config_rejects_duplicate_guard_keys(
@@ -204,7 +240,7 @@ def test_load_yaml_config_rejects_duplicate_guard_keys(
     p = _write(tmp_path, content)
 
     with pytest.raises(ValueError, match="duplicate.*guard"):
-        load_yaml_config(p)
+        load_yaml_config(p, reject_guard_duplicates=True)
 
 
 def test_load_yaml_config_type_error_bool_field(tmp_path: Path) -> None:

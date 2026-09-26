@@ -113,14 +113,23 @@ def test_direct_runtime_settings_default_to_summary(
 def test_direct_runtime_settings_ignore_guard_semantics(
     initialization, monkeypatch, tmp_path
 ):
+    for name in ("TRACEML_UI_MODE", "TRACEML_MODE", "TRACEML_LOGS_DIR"):
+        monkeypatch.delenv(name, raising=False)
     monkeypatch.chdir(tmp_path)
     (tmp_path / "traceml.yaml").write_text(
-        "mode: summary\nguard: invalid-for-run\n", encoding="utf-8"
+        "mode: cli\n"
+        "logs_dir: ./my_logs\n"
+        "guard:\n"
+        "  workload:\n"
+        "    name: first\n"
+        "    name: second\n",
+        encoding="utf-8",
     )
 
     settings = _resolve_direct_settings(initialization)
 
-    assert settings.mode == "summary"
+    assert settings.mode == "cli"
+    assert settings.logs_dir == "./my_logs"
 
 
 def test_disabled_env_dynamically_silences_low_level_utilities(monkeypatch):

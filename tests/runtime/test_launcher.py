@@ -688,6 +688,31 @@ def test_invalid_guard_stops_before_manifest_or_processes(
         replacement.assert_not_called()
 
 
+def test_run_rejects_duplicate_guard_before_manifest_or_processes(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    script = tmp_path / "train.py"
+    script.write_text("print('unused')\n", encoding="utf-8")
+    (tmp_path / "traceml.yaml").write_text(
+        "mode: summary\n"
+        "guard:\n"
+        "  schema_version: 1\n"
+        "  schema_version: 1\n",
+        encoding="utf-8",
+    )
+    forbidden = _forbid_guard_launch_side_effects(monkeypatch)
+    args = build_parser().parse_args(["run", str(script)])
+
+    with pytest.raises(SystemExit) as exc:
+        launch_process(str(script), args)
+
+    assert exc.value.code == 1
+    assert "duplicate key in guard" in capsys.readouterr().err
+    for replacement in forbidden.values():
+        replacement.assert_not_called()
+
+
 @pytest.mark.parametrize(
     ("config_prefix", "launch_args", "match"),
     [
@@ -842,15 +867,21 @@ def test_guard_contract_is_captured_once_in_manifest(
 
 
 def test_watch_ignores_guard_semantics(monkeypatch, tmp_path) -> None:
+    for name in ("TRACEML_UI_MODE", "TRACEML_MODE", "TRACEML_LOGS_DIR"):
+        monkeypatch.delenv(name, raising=False)
     monkeypatch.chdir(tmp_path)
     script = tmp_path / "train.py"
     script.write_text("print('unused')\n", encoding="utf-8")
     (tmp_path / "traceml.yaml").write_text(
-        "mode: summary\nguard: invalid-for-run\n", encoding="utf-8"
+        "mode: cli\n"
+        "logs_dir: ./my_logs\n"
+        "guard:\n"
+        "  workload:\n"
+        "    name: first\n"
+        "    name: second\n",
+        encoding="utf-8",
     )
-    args = build_parser().parse_args(
-        ["watch", str(script), "--logs-dir", str(tmp_path / "logs")]
-    )
+    args = build_parser().parse_args(["watch", str(script)])
 
     write_manifest = Mock(return_value=tmp_path / "manifest.json")
     monkeypatch.setattr(launcher_commands, "setup_error_logger", Mock())
@@ -880,17 +911,30 @@ def test_watch_ignores_guard_semantics(monkeypatch, tmp_path) -> None:
     with pytest.raises(SystemExit):
         launch_process(str(script), args)
 
+    assert write_manifest.call_args.kwargs["ui_mode"] == "cli"
+    assert write_manifest.call_args.kwargs["logs_dir"] == "./my_logs"
     assert "guard" not in write_manifest.call_args.kwargs["extra"]
 
 
 def test_serve_ignores_guard_semantics(monkeypatch, tmp_path) -> None:
+    for name in ("TRACEML_UI_MODE", "TRACEML_MODE", "TRACEML_LOGS_DIR"):
+        monkeypatch.delenv(name, raising=False)
     monkeypatch.chdir(tmp_path)
     (tmp_path / "traceml.yaml").write_text(
-        "mode: summary\nguard: invalid-for-run\n", encoding="utf-8"
+        "mode: cli\n"
+        "logs_dir: ./my_logs\n"
+        "guard:\n"
+        "  workload:\n"
+        "    name: first\n"
+        "    name: second\n",
+        encoding="utf-8",
     )
     args = build_parser().parse_args(["serve"])
 
-    assert _resolve_serve_settings(args).mode == "summary"
+    settings = _resolve_serve_settings(args)
+
+    assert settings.mode == "cli"
+    assert settings.logs_dir == "./my_logs"
 
 
 def test_disabled_launch_validation_skips_traceml_only_checks(

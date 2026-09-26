@@ -580,7 +580,14 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     config_path = find_config_file(Path(launch_context.launch_cwd))
     try:
         yaml_cfg = (
-            load_yaml_config(config_path) if config_path is not None else {}
+            load_yaml_config(
+                config_path,
+                reject_guard_duplicates=(
+                    getattr(args, "command", None) == "run"
+                ),
+            )
+            if config_path is not None
+            else {}
         )
     except (ValueError, OSError) as exc:
         print(f"[TraceML] ERROR: {exc}", file=sys.stderr)
