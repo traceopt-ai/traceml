@@ -132,6 +132,32 @@ class FreshnessPolicy:
 
 
 @dataclass(frozen=True)
+class RankLiveness:
+    """One rank's last-seen clock and the verdict on it.
+
+    Carried to every live surface so each can name a rank that stopped
+    reporting instead of drawing its last value as current. The verdict
+    is always :meth:`FreshnessPolicy.state_of`; this type only carries it.
+    """
+
+    global_rank: int
+    last_seen_s: Optional[float] = None
+    age_s: Optional[float] = None
+    freshness: FreshnessState = "unknown"
+
+    @property
+    def is_stale(self) -> bool:
+        return self.freshness == "stale"
+
+
+def stale_rank_label(rank: RankLiveness) -> str:
+    """The terminal marker for a rank that stopped, e.g. ``rank 1: ...``."""
+    age = finite(rank.age_s)
+    quiet = f"no data for {int(age)}s" if age is not None else "no data"
+    return f"rank {rank.global_rank}: {quiet} (stale)"
+
+
+@dataclass(frozen=True)
 class CachedPayloadTTL:
     """How long a last-good payload may answer for a failed read.
 
@@ -160,4 +186,6 @@ __all__ = [
     "FreshnessPolicy",
     "FreshnessState",
     "MIN_STALE_AFTER_S",
+    "RankLiveness",
+    "stale_rank_label",
 ]

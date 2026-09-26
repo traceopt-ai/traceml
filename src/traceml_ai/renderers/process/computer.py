@@ -46,6 +46,7 @@ class ProcessMetricsComputer:
         self._cli = ProcessCLIComputer(
             db_path=db_path,
             stale_ttl_s=stale_ttl_s,
+            sampler_interval_s=sampler_interval_s,
         )
         self._dashboard = ProcessDashboardComputer(
             db_path=db_path,

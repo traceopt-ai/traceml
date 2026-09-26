@@ -95,7 +95,10 @@ class CLIDisplayDriver(BaseDisplayDriver):
                 StepTimeRenderer(
                     LiveStepTimeSession(db_path=self._settings.db_path)
                 ),
-                StepMemoryRenderer(db_path=self._settings.db_path),
+                StepMemoryRenderer(
+                    db_path=self._settings.db_path,
+                    sampler_interval_s=self._settings.sampler_interval_sec,
+                ),
             ]
 
     def start(self) -> None:
