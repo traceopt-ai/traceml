@@ -10,9 +10,11 @@ Missing signals surface as JSON ``null`` / text ``n/a`` and stay out of
 rollups and rank selection; measured zeros stay ``0.0``.
 """
 
-import json
-import sqlite3
-
+from tests.sqlite_fixtures import (
+    insert_step_time_sample,
+    insert_training_strategy,
+    summary_database,
+)
 from traceml_ai.reporting.compare.core import build_compare_payload
 from traceml_ai.reporting.sections.step_time import StepTimeSummarySection
 
@@ -34,90 +36,44 @@ _FULL_RANK_MS = {
 }
 
 
-def _events_json(values_ms: dict) -> str:
-    return json.dumps(
-        {
-            _EVENT_NAMES[key]: {
-                "cpu": {
-                    "is_gpu": False,
-                    "duration_ms": value,
-                    "cpu_ms": value,
-                    "gpu_ms": None,
-                    "n_calls": 1,
-                }
+def _events(values_ms: dict) -> dict:
+    return {
+        _EVENT_NAMES[key]: {
+            "cpu": {
+                "is_gpu": False,
+                "duration_ms": value,
+                "cpu_ms": value,
+                "gpu_ms": None,
+                "n_calls": 1,
             }
-            for key, value in values_ms.items()
         }
-    )
+        for key, value in values_ms.items()
+    }
 
 
 def _create_db(path: str, per_rank_events: dict) -> None:
     """Create a step_time db; per_rank_events maps rank -> metric ms map."""
-    conn = sqlite3.connect(path)
-    try:
-        conn.execute("""
-            CREATE TABLE step_time_samples (
-                id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-                recv_ts_ns         INTEGER NOT NULL,
-                rank               INTEGER,
-                global_rank        INTEGER,
-                local_rank         INTEGER,
-                world_size         INTEGER,
-                local_world_size   INTEGER,
-                node_rank          INTEGER,
-                hostname           TEXT,
-                sample_ts_s        REAL,
-                seq                INTEGER,
-                step               INTEGER,
-                events_json        TEXT NOT NULL
-            );
-            """)
-        conn.execute("""
-            CREATE TABLE runtime_environment (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                training_strategy TEXT
-            );
-            """)
-        conn.execute(
-            "INSERT INTO runtime_environment(training_strategy) VALUES (?);",
-            ("ddp",),
-        )
-        world_size = len(per_rank_events)
-        rows = []
+    world_size = len(per_rank_events)
+    with summary_database(path) as conn:
+        insert_training_strategy(conn, "ddp")
         row_id = 0
         for rank, values_ms in per_rank_events.items():
             for step in (1, 2):
                 row_id += 1
-                rows.append(
-                    (
-                        row_id,
-                        rank,
-                        rank,
-                        rank,
-                        world_size,
-                        world_size,
-                        0,
-                        f"worker-{rank}",
-                        float(step),
-                        step,
-                        step,
-                        _events_json(values_ms),
-                    )
+                insert_step_time_sample(
+                    conn,
+                    row_id=row_id,
+                    rank=rank,
+                    step=step,
+                    events=_events(values_ms),
+                    local_rank=rank,
+                    world_size=world_size,
+                    local_world_size=world_size,
+                    node_rank=0,
+                    hostname=f"worker-{rank}",
+                    ts=float(step),
+                    seq=step,
                 )
-        conn.executemany(
-            """
-            INSERT INTO step_time_samples(
-                recv_ts_ns, rank, global_rank, local_rank, world_size,
-                local_world_size, node_rank, hostname, sample_ts_s,
-                seq, step, events_json
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-            """,
-            rows,
-        )
-        conn.commit()
-    finally:
-        conn.close()
 
 
 def test_missing_h2d_is_null_and_measured_zero_stays_zero(tmp_path) -> None:
