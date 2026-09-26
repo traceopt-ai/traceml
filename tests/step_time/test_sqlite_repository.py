@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 from unittest.mock import patch
 
 import pytest
@@ -59,6 +59,67 @@ class _RecordingConnection:
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._conn, name)
+
+
+def _recorded_selection_query(
+    conn: sqlite3.Connection,
+    load: Callable[[SQLiteStepTimeRepository], object],
+) -> tuple[str, tuple[Any, ...]]:
+    """Return the one recursive selection query a repository load runs."""
+    recorder = _RecordingConnection(conn)
+    load(SQLiteStepTimeRepository(recorder))
+    queries = [
+        (sql, parameters)
+        for sql, parameters in recorder.statements
+        if sql.lstrip().startswith("WITH RECURSIVE")
+    ]
+    assert len(queries) == 1
+    return queries[0]
+
+
+def _query_plan(
+    conn: sqlite3.Connection,
+    sql: str,
+    parameters: tuple[Any, ...],
+) -> list[tuple[int, str]]:
+    """Return ``(parent id, detail)`` for each query plan row."""
+    return [
+        (int(row[1]), str(row[3]))
+        for row in conn.execute(
+            f"EXPLAIN QUERY PLAN {sql}", parameters
+        ).fetchall()
+    ]
+
+
+def _assert_candidate_scan_uses_index(plan: list[tuple[int, str]]) -> None:
+    """The per-rank candidate subquery must seek and group on the index.
+
+    A sort inside that subquery means the index no longer supplies step
+    order, even when the planner still names it for the rank seek.
+    """
+    candidate_scans = [
+        (parent, detail)
+        for parent, detail in plan
+        if detail.startswith("SEARCH candidate ")
+    ]
+    assert candidate_scans, plan
+    assert all(
+        _LIVE_TAIL_INDEX in detail for _, detail in candidate_scans
+    ), plan
+    candidate_parents = {parent for parent, _ in candidate_scans}
+    candidate_sorts = [
+        detail
+        for parent, detail in plan
+        if parent in candidate_parents and "USE TEMP B-TREE" in detail
+    ]
+    assert not candidate_sorts, plan
+
+
+def _typed(value: Any) -> Any:
+    """Tag JSON leaves with their type so ``1 == 1.0`` cannot pass."""
+    if isinstance(value, dict):
+        return {key: _typed(item) for key, item in value.items()}
+    return (type(value), value)
 
 
 def _create_minimal_table(conn: sqlite3.Connection) -> None:
@@ -343,30 +404,54 @@ def test_live_tail_query_uses_the_production_index(tmp_path: Path) -> None:
                 "PRAGMA index_list(step_time_samples);"
             ).fetchall()
         }
-        recorder = _RecordingConnection(conn)
-        SQLiteStepTimeRepository(recorder).load_live(
-            StepTimeLoadRequest(window_size=2)
+        sql, parameters = _recorded_selection_query(
+            conn,
+            lambda repository: repository.load_live(
+                StepTimeLoadRequest(window_size=2)
+            ),
         )
-        tail_queries = [
-            (sql, parameters)
-            for sql, parameters in recorder.statements
-            if sql.lstrip().startswith("WITH RECURSIVE")
-        ]
-        assert len(tail_queries) == 1
-        sql, parameters = tail_queries[0]
-        plan = [
-            str(row[3])
-            for row in conn.execute(
-                f"EXPLAIN QUERY PLAN {sql}", parameters
-            ).fetchall()
-        ]
+        plan = _query_plan(conn, sql, parameters)
 
     assert _LIVE_TAIL_INDEX in indexes
-    candidate_scans = [
-        detail for detail in plan if detail.startswith("SEARCH candidate ")
-    ]
-    assert candidate_scans, plan
-    assert all(_LIVE_TAIL_INDEX in detail for detail in candidate_scans), plan
+    _assert_candidate_scan_uses_index(plan)
+    # The live tail stops early only while rows arrive in index order.
+    live_sorts = [detail for _, detail in plan if "USE TEMP B-TREE" in detail]
+    assert not live_sorts, plan
+
+
+@pytest.mark.parametrize(
+    ("start_step", "end_step"),
+    [(None, None), (2, 4)],
+    ids=["whole_run", "analysis_window"],
+)
+def test_summary_candidate_scan_uses_the_production_index(
+    tmp_path: Path,
+    start_step: int | None,
+    end_step: int | None,
+) -> None:
+    """The final-summary step selection must seek the writer's index."""
+    db_path = tmp_path / "summary-index.db"
+    create_step_time_database(
+        db_path,
+        StepTimeScenario(
+            name="summary_index",
+            profiles={0: BALANCED_PROFILE, 1: BALANCED_PROFILE},
+            steps=(1, 2, 3, 4),
+        ),
+    )
+
+    with sqlite3.connect(db_path) as conn:
+        sql, parameters = _recorded_selection_query(
+            conn,
+            lambda repository: repository.load_summary(
+                StepTimeLoadRequest(start_step=start_step, end_step=end_step)
+            ),
+        )
+        plan = _query_plan(conn, sql, parameters)
+
+    # The identity lookup sorts one row per rank, so only the per-step
+    # candidate subquery is held sort-free here.
+    _assert_candidate_scan_uses_index(plan)
 
 
 def test_writer_events_json_round_trips_through_repository_decoder(
@@ -419,27 +504,30 @@ def test_writer_events_json_round_trips_through_repository_decoder(
     rows = step_time_projection.build_rows(envelope, recv_ts_ns=1)
 
     events_json = rows["step_time_samples"][0][-1]
-    assert json.loads(events_json) == {
-        event_name: {
-            "cuda:0": {
-                "is_gpu": True,
-                "duration_ms": float(index),
-                "cpu_ms": float(index) + 0.5,
-                "gpu_ms": float(index),
-                "n_calls": 2,
-            },
-            "cpu": {
-                "is_gpu": False,
-                "duration_ms": 1.0,
-                "cpu_ms": 1.0,
-                "gpu_ms": None,
-                "n_calls": 1,
-            },
+    # Integer inputs must persist as floats and call counts as integers.
+    assert _typed(json.loads(events_json)) == _typed(
+        {
+            event_name: {
+                "cuda:0": {
+                    "is_gpu": True,
+                    "duration_ms": float(index),
+                    "cpu_ms": float(index) + 0.5,
+                    "gpu_ms": float(index),
+                    "n_calls": 2,
+                },
+                "cpu": {
+                    "is_gpu": False,
+                    "duration_ms": 1.0,
+                    "cpu_ms": 1.0,
+                    "gpu_ms": None,
+                    "n_calls": 1,
+                },
+            }
+            for index, event_name in enumerate(
+                STEP_TIME_EVENT_NAMES.values(), start=1
+            )
         }
-        for index, event_name in enumerate(
-            STEP_TIME_EVENT_NAMES.values(), start=1
-        )
-    }
+    )
 
     with sqlite3.connect(tmp_path / "writer-contract.db") as conn:
         init_step_time_schema(conn)
