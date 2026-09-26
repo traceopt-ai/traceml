@@ -15,9 +15,11 @@ from __future__ import annotations
 
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from traceml_ai.reporting.summary_artifact import extract_summary_text
 from traceml_ai.reporting.terminal_card.common import (
     DOT,
     SEVERITY_RANK,
@@ -154,40 +156,90 @@ def _step_coverage_text(step_time_summary: Mapping[str, Any]) -> Optional[str]:
     return f"{steps} steps analyzed"
 
 
+@dataclass(frozen=True)
+class HeaderCoverage:
+    """Header coverage segments; each is None when the card omits it."""
+
+    ranks: Optional[str]
+    nodes: Optional[str]
+    steps: Optional[str]
+
+
+def _header_coverage(
+    *,
+    watch: bool,
+    meta: Mapping[str, Any],
+    system_summary: Mapping[str, Any],
+    process_summary: Mapping[str, Any],
+    step_time_summary: Mapping[str, Any],
+    step_memory_summary: Mapping[str, Any],
+) -> HeaderCoverage:
+    """Route each profile's header coverage to the section that owns it."""
+    if watch:
+        rank_summary = process_summary
+        distributed = rank_coverage(process_summary, meta=meta).distributed
+        steps = None
+    else:
+        rank_summary = step_time_summary
+        distributed = resolve_multi_process(
+            meta, (step_time_summary, process_summary, step_memory_summary)
+        )
+        steps = _step_coverage_text(step_time_summary)
+    return HeaderCoverage(
+        ranks=_rank_coverage_text(meta=meta, rank_summary=rank_summary),
+        nodes=_node_coverage_text(
+            system_summary=system_summary,
+            meta=meta,
+            distributed=distributed,
+        ),
+        steps=steps,
+    )
+
+
+def summary_header_coverage(
+    payload: Mapping[str, Any], *, profile: Optional[str] = None
+) -> HeaderCoverage:
+    """Return the card header's coverage segments for a stored payload.
+
+    ``profile`` defaults to the one recorded in the stored card text, so
+    other renderers state exactly the coverage the terminal card states.
+    """
+    if profile is None:
+        # Same fallback order as the artifact reader (`text`, then `card`).
+        try:
+            stored_text = extract_summary_text(dict(payload))
+        except RuntimeError:
+            stored_text = ""
+        profile = card_profile_from_text(stored_text)
+    return _header_coverage(
+        watch=str(profile).strip().lower() == WATCH_PROFILE,
+        meta=as_mapping(payload.get("meta")),
+        system_summary=as_mapping(payload.get("system")),
+        process_summary=as_mapping(payload.get("process")),
+        step_time_summary=as_mapping(payload.get("step_time")),
+        step_memory_summary=as_mapping(payload.get("step_memory")),
+    )
+
+
 def _summary_header_meta(
     *,
     meta: Mapping[str, Any],
     system_summary: Mapping[str, Any],
-    rank_summary: Mapping[str, Any],
-    step_time_summary: Optional[Mapping[str, Any]],
+    coverage: HeaderCoverage,
     duration_s: Optional[float],
-    distributed: bool,
 ) -> str:
     """Compose shared identity, topology, and optional step coverage."""
     gpus = observed_gpu_count(system_summary)
     segments: List[Optional[str]] = [
         str(meta.get("run_name")) if meta.get("run_name") else None,
-        _rank_coverage_text(
-            meta=meta,
-            rank_summary=rank_summary,
-        ),
+        coverage.ranks,
     ]
     if gpus == 0:
         segments.append("CPU only (no GPU detected)")
     elif gpus is not None:
         segments.append(f"{plural(gpus, 'GPU')} observed")
-    segments.append(
-        _node_coverage_text(
-            system_summary=system_summary,
-            meta=meta,
-            distributed=distributed,
-        )
-    )
-    steps = (
-        _step_coverage_text(step_time_summary)
-        if step_time_summary is not None
-        else None
-    )
+    segments.append(coverage.nodes)
+    steps = coverage.steps
     duration = fmt_duration(duration_s)
     if steps and duration:
         segments.append(f"{steps} {DOT} {duration}")
@@ -432,20 +484,21 @@ def build_summary_card(
 
     watch = str(profile or RUN_PROFILE).strip().lower() == WATCH_PROFILE
     doc = CardDoc(width=RUN_CARD_WIDTH)
+    meta_line = _summary_header_meta(
+        meta=run_meta,
+        system_summary=system,
+        coverage=_header_coverage(
+            watch=watch,
+            meta=run_meta,
+            system_summary=system,
+            process_summary=process,
+            step_time_summary=step_time,
+            step_memory_summary=step_memory,
+        ),
+        duration_s=duration_s,
+    )
     if watch:
-        process_coverage = rank_coverage(process, meta=run_meta)
-        _append_header(
-            doc,
-            title=WATCH_TITLE,
-            meta_line=_summary_header_meta(
-                meta=run_meta,
-                system_summary=system,
-                rank_summary=process,
-                step_time_summary=None,
-                duration_s=duration_s,
-                distributed=process_coverage.distributed,
-            ),
-        )
+        _append_header(doc, title=WATCH_TITLE, meta_line=meta_line)
         _append_watch_body(
             doc,
             system_summary=system,
@@ -456,18 +509,7 @@ def build_summary_card(
         multi = resolve_multi_process(
             run_meta, (step_time, process, step_memory)
         )
-        _append_header(
-            doc,
-            title=RUN_TITLE,
-            meta_line=_summary_header_meta(
-                meta=run_meta,
-                system_summary=system,
-                rank_summary=step_time,
-                step_time_summary=step_time,
-                duration_s=duration_s,
-                distributed=multi,
-            ),
-        )
+        _append_header(doc, title=RUN_TITLE, meta_line=meta_line)
         _append_run_body(
             doc,
             primary=primary,
@@ -618,6 +660,7 @@ __all__ = [
     "FINAL_SUMMARY_JSON_NAME",
     "CardDoc",
     "CardLine",
+    "HeaderCoverage",
     "RUN_PROFILE",
     "RUN_TITLE",
     "Span",
@@ -635,4 +678,5 @@ __all__ = [
     "fmt_duration",
     "is_multi_process",
     "stdout_supports_color",
+    "summary_header_coverage",
 ]

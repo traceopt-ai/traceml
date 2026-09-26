@@ -92,6 +92,8 @@ STYLESHEET = """
     font-size:12.5px; color:var(--muted); }
   .sw { display:inline-block; width:10px; height:10px; border-radius:2px;
     margin-right:5px; vertical-align:-1px; }
+  .sw.na { background:transparent; border:1px dashed var(--muted); }
+  .legend .na { font-style:italic; }
   .cellbar { display:flex; align-items:center; gap:8px;
     justify-content:flex-end; }
   .cellbar .track { width:84px; height:7px; border-radius:4px;
