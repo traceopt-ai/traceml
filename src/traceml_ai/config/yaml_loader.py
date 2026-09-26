@@ -33,6 +33,7 @@ from traceml_ai.telemetry.retention import (
 _log = logging.getLogger(__name__)
 
 CONFIG_FILENAME = "traceml.yaml"
+GUARD_CONFIG_KEY = "guard"
 
 # Max parent dirs to search upward for traceml.yaml.
 _MAX_WALK_LEVELS = 10
@@ -85,8 +86,69 @@ def find_config_file(start_dir: Path) -> Path | None:
     return None
 
 
-def load_yaml_config(path: Path) -> dict[str, Any]:
-    """Parse traceml.yaml. Unknown keys warn-and-skip; type errors raise ValueError."""
+def _reject_duplicate_guard_keys(yaml: Any, source: str, path: Path) -> None:
+    """Reject duplicate keys in the effective guard mapping only."""
+    loader = yaml.SafeLoader(source)
+    try:
+        root = loader.get_single_node()
+        if not isinstance(root, yaml.nodes.MappingNode):
+            return
+
+        # Resolve top-level YAML merges before locating guard. Ordinary keys
+        # remain permissive; strictness belongs only to the run guard contract.
+        loader.flatten_mapping(root)
+        guard_nodes = [
+            value_node
+            for key_node, value_node in root.value
+            if isinstance(key_node, yaml.nodes.ScalarNode)
+            and key_node.tag == "tag:yaml.org,2002:str"
+            and key_node.value == GUARD_CONFIG_KEY
+        ]
+        if len(guard_nodes) > 1:
+            line = guard_nodes[1].start_mark.line + 1
+            raise ValueError(
+                f"{path}: duplicate top-level guard key at line {line}"
+            )
+        if not guard_nodes:
+            return
+
+        visited: set[int] = set()
+
+        def walk(node: Any) -> None:
+            if id(node) in visited:
+                return
+            visited.add(id(node))
+
+            if isinstance(node, yaml.nodes.MappingNode):
+                loader.flatten_mapping(node)
+                seen: set[tuple[str, str]] = set()
+                for key_node, value_node in node.value:
+                    if isinstance(key_node, yaml.nodes.ScalarNode):
+                        key = (key_node.tag, key_node.value)
+                        if key in seen:
+                            line = key_node.start_mark.line + 1
+                            raise ValueError(
+                                f"{path}: duplicate key in guard "
+                                f"declaration at line {line}"
+                            )
+                        seen.add(key)
+                    walk(value_node)
+            elif isinstance(node, yaml.nodes.SequenceNode):
+                for value_node in node.value:
+                    walk(value_node)
+
+        walk(guard_nodes[0])
+    finally:
+        loader.dispose()
+
+
+def load_yaml_config(
+    path: Path, *, reject_guard_duplicates: bool = False
+) -> dict[str, Any]:
+    """Parse traceml.yaml, optionally rejecting duplicates inside guard.
+
+    Ordinary settings retain PyYAML's historical last-value behavior.
+    """
     try:
         import yaml  # noqa: PLC0415 — intentional late import
     except ImportError:
@@ -99,7 +161,10 @@ def load_yaml_config(path: Path) -> dict[str, Any]:
 
     try:
         with open(path, encoding="utf-8") as f:
-            raw = yaml.safe_load(f)
+            source = f.read()
+        if reject_guard_duplicates:
+            _reject_duplicate_guard_keys(yaml, source, path)
+        raw = yaml.safe_load(source)
     except OSError as exc:
         raise OSError(
             f"[TraceML] Cannot read config file {path}: {exc}"
@@ -120,6 +185,11 @@ def load_yaml_config(path: Path) -> dict[str, Any]:
 
     result: dict[str, Any] = {}
     for key, value in raw.items():
+        # The run launcher validates this nested declaration. Other consumers
+        # share traceml.yaml but intentionally ignore guard semantics.
+        if key == GUARD_CONFIG_KEY:
+            result[key] = value
+            continue
         if key not in YAML_KEY_SCHEMA:
             warnings.warn(
                 f"[TraceML] {path}: unknown config key '{key}' — ignored.",

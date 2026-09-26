@@ -633,6 +633,310 @@ def test_explicit_live_mode_allows_no_history() -> None:
     validate_launch_args(args)
 
 
+def _write_guard_config(tmp_path: Path, guard: str) -> None:
+    (tmp_path / "traceml.yaml").write_text(
+        "mode: summary\nhistory_enabled: true\nguard:\n" + guard,
+        encoding="utf-8",
+    )
+
+
+def _forbid_guard_launch_side_effects(monkeypatch) -> dict[str, Mock]:
+    forbidden = {
+        "write_run_manifest": Mock(side_effect=AssertionError("manifest")),
+        "start_aggregator_process": Mock(
+            side_effect=AssertionError("aggregator")
+        ),
+        "start_training_process": Mock(side_effect=AssertionError("training")),
+    }
+    for name, replacement in forbidden.items():
+        monkeypatch.setattr(launcher_commands, name, replacement)
+    return forbidden
+
+
+def test_invalid_guard_stops_before_manifest_or_processes(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    project_dir = tmp_path / "project"
+    launch_dir = project_dir / "runs" / "current"
+    launch_dir.mkdir(parents=True)
+    monkeypatch.chdir(launch_dir)
+    script = launch_dir / "train.py"
+    script.write_text("print('unused')\n", encoding="utf-8")
+    _write_guard_config(
+        project_dir,
+        "  schema_version: 1\n"
+        "  workload:\n"
+        "    name: smoke\n"
+        "  measurement:\n"
+        "    start_step: 0\n"
+        "    completed_steps: 5\n",
+    )
+    forbidden = _forbid_guard_launch_side_effects(monkeypatch)
+    args = build_parser().parse_args(["run", str(script)])
+
+    with pytest.raises(SystemExit) as exc:
+        launch_process(str(script), args)
+
+    assert exc.value.code == 1
+    stderr = capsys.readouterr().err
+    assert (
+        f"invalid measurement contract in {project_dir / 'traceml.yaml'}"
+        in stderr
+    )
+    assert "guard.measurement.start_step" in stderr
+    for replacement in forbidden.values():
+        replacement.assert_not_called()
+
+
+def test_run_rejects_duplicate_guard_before_manifest_or_processes(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    script = tmp_path / "train.py"
+    script.write_text("print('unused')\n", encoding="utf-8")
+    (tmp_path / "traceml.yaml").write_text(
+        "mode: summary\n"
+        "guard:\n"
+        "  schema_version: 1\n"
+        "  schema_version: 1\n",
+        encoding="utf-8",
+    )
+    forbidden = _forbid_guard_launch_side_effects(monkeypatch)
+    args = build_parser().parse_args(["run", str(script)])
+
+    with pytest.raises(SystemExit) as exc:
+        launch_process(str(script), args)
+
+    assert exc.value.code == 1
+    assert "duplicate key in guard" in capsys.readouterr().err
+    for replacement in forbidden.values():
+        replacement.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("config_prefix", "launch_args", "match"),
+    [
+        ("mode: summary\n", ["--mode", "cli"], "require mode=summary"),
+        (
+            "mode: summary\n",
+            ["--mode", "summary", "--no-history"],
+            "mode=summary requires history",
+        ),
+        (
+            "mode: summary\n",
+            [
+                "--mode",
+                "summary",
+                "--nnodes",
+                "2",
+                "--run-name",
+                "guard",
+            ],
+            "require --nnodes=1",
+        ),
+        (
+            "mode: summary\n",
+            ["--mode", "summary", "--trace-max-steps", "12"],
+            "ends after --trace-max-steps",
+        ),
+    ],
+)
+def test_guard_rejects_unsupported_launch_before_processes(
+    monkeypatch, tmp_path, config_prefix, launch_args, match
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    script = tmp_path / "train.py"
+    script.write_text("print('unused')\n", encoding="utf-8")
+    (tmp_path / "traceml.yaml").write_text(
+        config_prefix
+        + "guard:\n"
+        + "  schema_version: 1\n"
+        + "  workload:\n"
+        + "    name: smoke\n"
+        + "  measurement:\n"
+        + "    start_step: 10\n"
+        + "    completed_steps: 5\n",
+        encoding="utf-8",
+    )
+    forbidden = _forbid_guard_launch_side_effects(monkeypatch)
+    args = build_parser().parse_args(["run", str(script), *launch_args])
+
+    with pytest.raises(SystemExit, match=match):
+        launch_process(str(script), args)
+
+    for replacement in forbidden.values():
+        replacement.assert_not_called()
+
+
+def test_guard_contract_is_captured_once_in_manifest(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    project_dir = tmp_path / "project"
+    launch_dir = project_dir / "runs" / "current"
+    launch_dir.mkdir(parents=True)
+    monkeypatch.chdir(launch_dir)
+    script = launch_dir / "train.py"
+    script.write_text("print('unused')\n", encoding="utf-8")
+    config_path = project_dir / "traceml.yaml"
+    _write_guard_config(
+        project_dir,
+        "  schema_version: 1\n"
+        "  workload:\n"
+        "    name: smoke\n"
+        "    parameters:\n"
+        "      precision: fp32\n"
+        "  measurement:\n"
+        "    start_step: 1\n"
+        "    completed_steps: 5\n",
+    )
+    args = build_parser().parse_args(
+        [
+            "run",
+            str(script),
+            "--run-name",
+            "guard-run",
+            "--logs-dir",
+            str(project_dir / "logs"),
+        ]
+    )
+
+    write_manifest = Mock(return_value=project_dir / "manifest.json")
+    start_training = Mock(side_effect=AssertionError("training"))
+
+    def change_source_config(**_kwargs):
+        _write_guard_config(
+            project_dir,
+            "  schema_version: 1\n"
+            "  workload:\n"
+            "    name: changed-after-capture\n"
+            "  measurement:\n"
+            "    start_step: 20\n"
+            "    completed_steps: 2\n",
+        )
+        return None
+
+    monkeypatch.setattr(launcher_commands, "setup_error_logger", Mock())
+    monkeypatch.setattr(
+        launcher_commands,
+        "write_code_manifest",
+        Mock(side_effect=change_source_config),
+    )
+    monkeypatch.setattr(
+        launcher_commands, "write_run_manifest", write_manifest
+    )
+    monkeypatch.setattr(launcher_commands, "update_run_manifest", Mock())
+    monkeypatch.setattr(launcher_commands, "install_shutdown_handlers", Mock())
+    monkeypatch.setattr(
+        launcher_commands,
+        "ensure_aggregator_port_free",
+        Mock(
+            side_effect=AggregatorPortInUseError(
+                "port already in use", host="127.0.0.1"
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        launcher_commands,
+        "start_aggregator_process",
+        Mock(side_effect=AssertionError("aggregator")),
+    )
+    monkeypatch.setattr(
+        launcher_commands, "start_training_process", start_training
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        launch_process(str(script), args)
+
+    assert exc.value.code == 1
+    assert write_manifest.call_args.kwargs["extra"]["guard"] == {
+        "contract": {
+            "schema_version": 1,
+            "workload": {
+                "name": "smoke",
+                "parameters": {"precision": "fp32"},
+            },
+            "measurement": {"start_step": 1, "completed_steps": 5},
+        }
+    }
+    confirmation = (
+        f"[TraceML] Measurement contract captured from {config_path}: "
+        "workload=smoke, steps=1-5"
+    )
+    assert capsys.readouterr().err.count(confirmation) == 1
+    start_training.assert_not_called()
+
+
+def test_watch_ignores_guard_semantics(monkeypatch, tmp_path) -> None:
+    for name in ("TRACEML_UI_MODE", "TRACEML_MODE", "TRACEML_LOGS_DIR"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.chdir(tmp_path)
+    script = tmp_path / "train.py"
+    script.write_text("print('unused')\n", encoding="utf-8")
+    (tmp_path / "traceml.yaml").write_text(
+        "mode: cli\n"
+        "logs_dir: ./my_logs\n"
+        "guard:\n"
+        "  workload:\n"
+        "    name: first\n"
+        "    name: second\n",
+        encoding="utf-8",
+    )
+    args = build_parser().parse_args(["watch", str(script)])
+
+    write_manifest = Mock(return_value=tmp_path / "manifest.json")
+    monkeypatch.setattr(launcher_commands, "setup_error_logger", Mock())
+    monkeypatch.setattr(
+        launcher_commands, "write_code_manifest", Mock(return_value=None)
+    )
+    monkeypatch.setattr(
+        launcher_commands, "write_run_manifest", write_manifest
+    )
+    monkeypatch.setattr(launcher_commands, "update_run_manifest", Mock())
+    monkeypatch.setattr(launcher_commands, "install_shutdown_handlers", Mock())
+    monkeypatch.setattr(
+        launcher_commands,
+        "ensure_aggregator_port_free",
+        Mock(
+            side_effect=AggregatorPortInUseError(
+                "port already in use", host="127.0.0.1"
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        launcher_commands,
+        "start_training_process",
+        Mock(side_effect=AssertionError("training")),
+    )
+
+    with pytest.raises(SystemExit):
+        launch_process(str(script), args)
+
+    assert write_manifest.call_args.kwargs["ui_mode"] == "cli"
+    assert write_manifest.call_args.kwargs["logs_dir"] == "./my_logs"
+    assert "guard" not in write_manifest.call_args.kwargs["extra"]
+
+
+def test_serve_ignores_guard_semantics(monkeypatch, tmp_path) -> None:
+    for name in ("TRACEML_UI_MODE", "TRACEML_MODE", "TRACEML_LOGS_DIR"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "traceml.yaml").write_text(
+        "mode: cli\n"
+        "logs_dir: ./my_logs\n"
+        "guard:\n"
+        "  workload:\n"
+        "    name: first\n"
+        "    name: second\n",
+        encoding="utf-8",
+    )
+    args = build_parser().parse_args(["serve"])
+
+    settings = _resolve_serve_settings(args)
+
+    assert settings.mode == "cli"
+    assert settings.logs_dir == "./my_logs"
+
+
 def test_disabled_launch_validation_skips_traceml_only_checks(
     monkeypatch,
 ) -> None:
@@ -937,6 +1241,10 @@ def test_started_training_result_is_authoritative(
     output_manifest = replacements["write_run_manifest"].call_args.kwargs[
         "extra"
     ]["training_output"]
+    assert (
+        "guard"
+        not in replacements["write_run_manifest"].call_args.kwargs["extra"]
+    )
     assert output_manifest["enabled"] is save_output
     assert output_manifest["scope"] == "node"
     replacements["_start_aggregator_output"].assert_called_once_with(
@@ -964,6 +1272,9 @@ def test_started_training_result_is_authoritative(
         training_output.finish.assert_not_called()
         assert not list((tmp_path / "logs").rglob("training.*.log"))
     stderr_lines = capsys.readouterr().err.splitlines()
+    assert not any(
+        "Measurement contract captured" in line for line in stderr_lines
+    )
     if not save_output:
         assert (
             stderr_lines.count(

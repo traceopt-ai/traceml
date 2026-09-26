@@ -580,7 +580,14 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     config_path = find_config_file(Path(launch_context.launch_cwd))
     try:
         yaml_cfg = (
-            load_yaml_config(config_path) if config_path is not None else {}
+            load_yaml_config(
+                config_path,
+                reject_guard_duplicates=(
+                    getattr(args, "command", None) == "run"
+                ),
+            )
+            if config_path is not None
+            else {}
         )
     except (ValueError, OSError) as exc:
         print(f"[TraceML] ERROR: {exc}", file=sys.stderr)
@@ -643,6 +650,43 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
             f"[TraceML] ERROR: invalid mode '{cfg['mode']}'. "
             f"Valid modes: {sorted(supported_modes)}"
         )
+
+    guard_contract = None
+    if getattr(args, "command", None) == "run" and "guard" in yaml_cfg:
+        from traceml_ai.regression.contract import (
+            ContractValidationError,
+            parse_guard_contract,
+        )
+
+        try:
+            guard_contract = parse_guard_contract(yaml_cfg["guard"])
+        except ContractValidationError as exc:
+            print(
+                "[TraceML] ERROR: invalid measurement contract in "
+                f"{config_path}: {exc}",
+                file=sys.stderr,
+            )
+            raise SystemExit(1) from exc
+
+        if torchrun_cfg.nnodes != 1:
+            raise SystemExit(
+                "[TraceML] ERROR: guard pilot runs require --nnodes=1."
+            )
+        if cfg["mode"] != "summary":
+            raise SystemExit(
+                "[TraceML] ERROR: guard pilot runs require mode=summary."
+            )
+
+        trace_max_steps = getattr(args, "trace_max_steps", None)
+        if trace_max_steps is not None and guard_contract.end_step > int(
+            trace_max_steps
+        ):
+            raise SystemExit(
+                "[TraceML] ERROR: guard.measurement ends after "
+                "--trace-max-steps; increase the trace limit or shorten "
+                "the requested window."
+            )
+
     _require_dashboard_dependencies(str(cfg["mode"]))
     save_training_output = bool(getattr(args, "save_training_output", True))
     if cfg["mode"] == "cli" and not save_training_output:
@@ -741,6 +785,8 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                 "scope": "node",
             }
         }
+        if guard_contract is not None:
+            manifest_extra["guard"] = {"contract": guard_contract.to_dict()}
         if save_training_output:
             manifest_extra["training_output"].update(
                 {
@@ -782,6 +828,13 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
             db_path=db_path,
             extra=manifest_extra,
         )
+        if guard_contract is not None:
+            print(
+                "[TraceML] Measurement contract captured from "
+                f"{config_path}: workload={guard_contract.workload_name}, "
+                f"steps={guard_contract.start_step}-{guard_contract.end_step}",
+                file=sys.stderr,
+            )
 
     traceml_root = Path(__file__).resolve().parents[1]
     runner_path = str(traceml_root / "runtime" / "executor.py")

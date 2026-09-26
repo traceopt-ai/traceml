@@ -178,6 +178,23 @@ def test_two_rank_ddp_final_summary_smoke(tmp_path):
     from traceml_ai.reporting.final import SCHEMA_VERSION
 
     logs_dir = tmp_path / "logs"
+    (tmp_path / "traceml.yaml").write_text(
+        """\
+mode: summary
+history_enabled: true
+guard:
+  schema_version: 1
+  workload:
+    name: ddp-minimal-smoke
+    parameters:
+      model: linear-classifier
+      data_version: synthetic-v1
+  measurement:
+    start_step: 1
+    completed_steps: 20
+""",
+        encoding="utf-8",
+    )
     env = os.environ.copy()
     env["OMP_NUM_THREADS"] = "1"
     env["PYTHONPATH"] = os.pathsep.join(
@@ -216,7 +233,7 @@ def test_two_rank_ddp_final_summary_smoke(tmp_path):
 
     result = subprocess.run(
         cmd,
-        cwd=str(REPO_ROOT),
+        cwd=str(tmp_path),
         env=env,
         capture_output=True,
         text=True,
@@ -250,3 +267,14 @@ def test_two_rank_ddp_final_summary_smoke(tmp_path):
     assert manifest["status"] == "completed"
     assert manifest["telemetry_status"] == "complete"
     assert manifest["launch"]["nproc_per_node"] == 2
+    assert manifest["guard"]["contract"] == {
+        "schema_version": 1,
+        "workload": {
+            "name": "ddp-minimal-smoke",
+            "parameters": {
+                "data_version": "synthetic-v1",
+                "model": "linear-classifier",
+            },
+        },
+        "measurement": {"start_step": 1, "completed_steps": 20},
+    }
