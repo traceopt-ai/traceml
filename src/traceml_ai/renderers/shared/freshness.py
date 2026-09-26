@@ -25,11 +25,13 @@ enters as a value rather than a constant.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Generic, Literal, Optional, TypeVar
 
 from traceml_ai.runtime.settings import DEFAULT_INTERVAL_SEC
 
 from .run_series import finite
+
+_T = TypeVar("_T")
 
 # Ticks a rank may miss before the block stops calling it live. Three is
 # what the Process and System blocks converged on: one missed tick is
@@ -180,11 +182,35 @@ class CachedPayloadTTL:
         return usable <= limit
 
 
+class LastGoodVerdict(Generic[_T]):
+    """The last verdict a read produced, answering for reads that fail.
+
+    ``None`` from a read means it could not be read, never that nothing
+    is wrong, so the last good verdict answers instead for as long as the
+    TTL lets a cached payload answer. After that there is no verdict.
+    """
+
+    def __init__(self, ttl: CachedPayloadTTL) -> None:
+        self._ttl = ttl
+        self._value: Optional[_T] = None
+        self._at_s = 0.0
+
+    def carry(self, value: Optional[_T], *, now_s: float) -> Optional[_T]:
+        """This read's verdict, or the last good one when it failed."""
+        if value is not None:
+            self._value, self._at_s = value, now_s
+            return value
+        if self._value is not None and self._ttl.may_reuse(now_s - self._at_s):
+            return self._value
+        return None
+
+
 __all__ = [
     "CachedPayloadTTL",
     "DEFAULT_STALE_TICKS",
     "FreshnessPolicy",
     "FreshnessState",
+    "LastGoodVerdict",
     "MIN_STALE_AFTER_S",
     "RankLiveness",
     "stale_rank_label",

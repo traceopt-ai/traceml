@@ -9,6 +9,7 @@ dashboard uses.
 
 from __future__ import annotations
 
+import sqlite3
 from typing import Mapping
 
 import pytest
@@ -147,3 +148,108 @@ def test_held_metrics_carry_this_ticks_liveness(tmp_path) -> None:
     )
     assert held.metrics == first.metrics
     assert held.rank_liveness == now
+
+
+def _add_unparseable_rank(path: str) -> None:
+    """A heartbeat row whose rank cell is not a number."""
+    with sqlite_database(path) as conn:
+        insert_process_sample(
+            conn,
+            row_id=10**12,
+            rank=0,
+            global_rank="not-a-rank",
+            ts=T0 + 2.0,
+            seq=1,
+            gpu_available=True,
+            gpu_count=2,
+        )
+
+
+def test_unparseable_rank_cell_is_skipped_and_the_other_ranks_judged(
+    tmp_path,
+) -> None:
+    """One bad heartbeat row costs its own row, never every verdict."""
+    db_path = str(tmp_path / "bad_rank.db")
+    _write_run(db_path, last_heartbeat={0: 60, 1: 20})
+    _add_unparseable_rank(db_path)
+
+    out = StepMemoryCLIComputer(db_path).compute()
+    text = _panel_text(db_path)
+
+    assert out.metrics
+    assert [(r.global_rank, r.freshness) for r in out.rank_liveness] == [
+        (0, "fresh"),
+        (1, "stale"),
+    ]
+    assert "rank 1: no data for 80s (stale)" in text
+    assert "Peak" in text or "peak" in text
+
+
+def test_unreadable_heartbeat_on_an_empty_tick_keeps_the_last_markers(
+    tmp_path,
+) -> None:
+    """Unreadable is not "no rank stopped": the last verdict stands.
+
+    Tick 1 reads rank 1 as stale. Tick 2 has no complete step and cannot
+    read the heartbeat at all, so the held figures keep tick 1's verdict
+    instead of silently dropping the marker.
+    """
+    db_path = str(tmp_path / "dead.db")
+    _write_run(db_path, last_heartbeat={0: 60, 1: 20})
+    computer = StepMemoryCLIComputer(db_path)
+    first = computer.compute()
+    assert [r.global_rank for r in first.rank_liveness if r.is_stale] == [1]
+
+    with sqlite_database(db_path) as conn:
+        conn.execute("DELETE FROM step_memory_samples")
+        conn.execute("DROP TABLE process_samples")
+
+    held = computer.compute()
+
+    assert held.metrics == first.metrics
+    assert held.rank_liveness == first.rank_liveness
+
+
+def test_unreadable_heartbeat_on_a_metrics_tick_keeps_the_last_markers(
+    tmp_path, monkeypatch
+) -> None:
+    """Fresh figures do not make an unreadable heartbeat a clean one.
+
+    Tick 1 names rank 1. Tick 2 reads the metrics but not the heartbeat,
+    so the panel keeps tick 1's marker instead of dropping it.
+    """
+    import traceml_ai.renderers.step_memory.common as step_memory_common
+
+    db_path = str(tmp_path / "dead.db")
+    _write_run(db_path, last_heartbeat={0: 60, 1: 20})
+    renderer = StepMemoryRenderer(db_path)
+    console = Console(
+        force_terminal=True, color_system=None, width=140, record=True
+    )
+    console.print(renderer.get_panel_renderable())
+    renderer.get_dashboard_renderable()
+    assert "rank 1: no data for 80s (stale)" in console.export_text()
+
+    def unreadable(*_args, **_kwargs):
+        raise sqlite3.OperationalError("heartbeat unreadable")
+
+    monkeypatch.setattr(step_memory_common, "read_rank_clock", unreadable)
+    console.print(renderer.get_panel_renderable())
+    dashboard = renderer.get_dashboard_renderable()
+
+    assert "rank 1: no data for 80s (stale)" in console.export_text()
+    assert dashboard.metrics
+    assert [r.global_rank for r in dashboard.rank_liveness if r.is_stale] == [
+        1
+    ]
+
+
+def test_heartbeat_read_with_no_ranks_is_an_empty_verdict(tmp_path) -> None:
+    """Read fine, nobody reported: an empty tuple, not "unreadable"."""
+    db_path = str(tmp_path / "no_heartbeat.db")
+    with sqlite_database(db_path, init_summary_schema):
+        pass
+
+    out = StepMemoryCLIComputer(db_path).compute()
+
+    assert out.rank_liveness == ()
