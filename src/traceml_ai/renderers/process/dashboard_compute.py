@@ -306,14 +306,20 @@ class ProcessDashboardComputer:
 
         The per-rank read and the freshness verdict live in
         ``liveness.read_rank_clock``, shared with the terminal so both
-        surfaces judge a rank identically.
+        surfaces judge a rank identically. Best-effort, as on the
+        terminal: a failed read costs the rank rows it would have
+        produced, never the rest of the card.
         """
-        clock = read_rank_clock(
-            self._db,
-            conn,
-            newest_ts=newest_ts,
-            configured_interval_s=self._configured_interval_s,
-        )
+        try:
+            clock = read_rank_clock(
+                self._db,
+                conn,
+                newest_ts=newest_ts,
+                configured_interval_s=self._configured_interval_s,
+            )
+        except Exception:
+            policy = FreshnessPolicy.from_interval(self._configured_interval_s)
+            return (), policy, {}
         snapshots = [
             self._snapshot_for(
                 rank_id,
