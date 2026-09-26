@@ -60,7 +60,8 @@ the guard declaration.
 
 Unknown fields, lists, nested parameter mappings, and null parameter values
 are rejected. Integers and the inclusive measurement end must fit in a signed
-64-bit value.
+64-bit value. Workload names, parameter keys, and string values cannot contain
+Unicode category C characters, including control and format characters.
 
 ## Workload identity
 
@@ -128,7 +129,12 @@ aggregator or training workers. After writing the manifest, it prints a short
       "schema_version": 1,
       "workload": {
         "name": "resnet50-imagenet-training",
-        "parameters": {}
+        "parameters": {
+          "data_version": "imagenet-1k-v1",
+          "model": "resnet50",
+          "per_rank_batch_size": 32,
+          "precision": "bf16"
+        }
       },
       "measurement": {
         "start_step": 10,
