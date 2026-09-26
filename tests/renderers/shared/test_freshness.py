@@ -17,7 +17,9 @@ from traceml_ai.renderers.shared.freshness import (
     FreshnessPolicy,
     LastGoodVerdict,
     RankLiveness,
+    RunLiveness,
     stale_rank_label,
+    stale_run_label,
 )
 
 
@@ -186,6 +188,17 @@ def test_the_quiet_age_is_rounded_to_the_nearest_second(age_s, shown):
     """5.99 s is six seconds, not five: truncation undersells the age."""
     quiet = RankLiveness(global_rank=1, age_s=age_s, freshness="stale")
     assert stale_rank_label(quiet) == f"rank 1: no data for {shown} (stale)"
+
+
+@pytest.mark.parametrize(
+    ("age_s", "shown"), [(5.99, "6s"), (41.6, "42s"), (80.0, "80s")]
+)
+def test_the_run_wide_line_states_how_long_the_run_has_been_quiet(
+    age_s, shown
+):
+    """Rounded as the rank markers are, so the two ages agree."""
+    quiet = RunLiveness(last_seen_s=100.0, age_s=age_s, freshness="stale")
+    assert stale_run_label(quiet) == f"no new data for {shown} (stale)"
 
 
 def test_the_last_good_verdict_answers_for_a_failed_read_inside_its_ttl():

@@ -11,7 +11,8 @@ cadence, and keeps doing so while the training thread is blocked in a
 collective waiting for a dead peer. That makes this table the per-rank
 heartbeat. This module reads it once per tick and applies the shared
 :class:`FreshnessPolicy`, so the terminal and the dashboard judge a rank
-by one rule and one clock.
+by one rule and one clock. The terminal's run-wide verdict, for every
+rank stopping at once, comes from the same read.
 
 Moved out of ``dashboard_compute.py`` (issue #358): the dashboard already
 judged rank freshness this way, and the terminal now reuses the same read
@@ -23,7 +24,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from traceml_ai.renderers.shared.freshness import FreshnessPolicy, RankLiveness
+from traceml_ai.renderers.shared.freshness import (
+    FreshnessPolicy,
+    RankLiveness,
+    RunLiveness,
+)
 from traceml_ai.renderers.shared.run_series import finite
 
 from .repository import ProcessRepository
@@ -136,6 +141,27 @@ class RankClock:
         return tuple(
             self.liveness_of(rank_id)
             for rank_id in sorted(self.newest_by_rank)
+        )
+
+    def run_liveness(self, now_s: float) -> RunLiveness:
+        """The whole run's verdict: its newest arrival from any rank.
+
+        ``now_s`` is the aggregator's current time. The aggregator also
+        stamps every arrival (``recv_ts_ns``), so both ends are one clock
+        and a rank host's skewed clock never enters. Judged by this tick's
+        policy, at the observed cadence, like every per-rank verdict.
+        """
+        seen = [
+            rank.last_seen_s
+            for rank in self.liveness()
+            if rank.last_seen_s is not None
+        ]
+        last_seen = max(seen) if seen else None
+        age = self.policy.age_of(last_seen, now_s=now_s)
+        return RunLiveness(
+            last_seen_s=last_seen,
+            age_s=age,
+            freshness=self.policy.state_of(age),
         )
 
 

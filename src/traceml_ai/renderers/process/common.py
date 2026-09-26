@@ -8,7 +8,7 @@ consumes.
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, Optional, Tuple
 
-from traceml_ai.renderers.shared.freshness import RankLiveness
+from traceml_ai.renderers.shared.freshness import RankLiveness, RunLiveness
 
 
 @dataclass(frozen=True)
@@ -27,6 +27,10 @@ class ProcessCLISnapshot:
     # None when there is no verdict: this tick's read failed and no good
     # verdict is still inside the stale TTL.
     rank_liveness: Optional[Tuple[RankLiveness, ...]] = None
+    # The whole run's newest arrival, for the terminal's run-wide line.
+    # From the same read and carried with it, so None exactly when
+    # rank_liveness is None.
+    run_liveness: Optional[RunLiveness] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -41,5 +45,10 @@ class ProcessCLISnapshot:
                 None
                 if self.rank_liveness is None
                 else [asdict(r) for r in self.rank_liveness]
+            ),
+            "run_liveness": (
+                None
+                if self.run_liveness is None
+                else asdict(self.run_liveness)
             ),
         }

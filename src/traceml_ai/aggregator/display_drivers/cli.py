@@ -30,6 +30,9 @@ from traceml_ai.renderers.system.renderer import SystemRenderer
 from traceml_ai.runtime.settings import TraceMLSettings
 from traceml_ai.step_time.pipeline import LiveStepTimeSession
 
+# One line above the panels, shown only while the whole run is quiet.
+_STALENESS_SECTION = "staleness"
+
 
 def _safe(logger: Any, label: str, fn: Callable[[], Any]) -> Any:
     """Best-effort execution helper; log and continue."""
@@ -79,14 +82,17 @@ class CLIDisplayDriver(BaseDisplayDriver):
         self._registered = False
         self._bindings: List[_SectionBinding] = []
 
+        # Kept by name: its per-rank read also answers the run-wide line.
+        self._process = ProcessRenderer(
+            db_path=self._settings.db_path,
+            sampler_interval_s=self._settings.sampler_interval_sec,
+        )
+
         # CLI chooses its renderer set (can differ from dashboard)
         # Watch profile
         self._renderers: List[CLIRenderer] = [
             SystemRenderer(db_path=self._settings.db_path),
-            ProcessRenderer(
-                db_path=self._settings.db_path,
-                sampler_interval_s=self._settings.sampler_interval_sec,
-            ),
+            self._process,
         ]
 
         # Run profile
@@ -138,6 +144,7 @@ class CLIDisplayDriver(BaseDisplayDriver):
             self._register_once()
 
         self._update_all_sections()
+        self._update_staleness()
         self._refresh()
 
     # -------------------------
@@ -153,8 +160,14 @@ class CLIDisplayDriver(BaseDisplayDriver):
             return self._create_watch_layout()
         return self._create_run_layout()
 
+    def _split_root(self) -> None:
+        self._layout.split_column(
+            Layout(name=_STALENESS_SECTION, size=1, visible=False),
+            Layout(name="dashboard"),
+        )
+
     def _create_watch_layout(self) -> Layout:
-        self._layout.split_column(Layout(name="dashboard"))
+        self._split_root()
         dashboard = self._layout["dashboard"]
         dashboard.split_row(
             Layout(name=SYSTEM_LAYOUT, ratio=4),
@@ -163,7 +176,7 @@ class CLIDisplayDriver(BaseDisplayDriver):
         return dashboard
 
     def _create_run_layout(self) -> Layout:
-        self._layout.split_column(Layout(name="dashboard"))
+        self._split_root()
         dashboard = self._layout["dashboard"]
         dashboard.split_column(
             Layout(name="upper_row", ratio=2),
@@ -270,6 +283,28 @@ class CLIDisplayDriver(BaseDisplayDriver):
                 self._logger.error(
                     f"[TraceML] CLI render error in {b.section}: {e}"
                 )
+
+    def staleness_text(self) -> str:
+        """``no new data for Ns (stale)`` once the whole run went quiet.
+
+        The per-rank markers inside the panels measure each rank against
+        its peers, so a single-rank run, or every rank stopping together,
+        never looks stale to them. This measures the newest arrival from
+        any rank against the aggregator's clock, from the Process panel's
+        read this tick, so it runs after the panels update.
+        """
+        return self._process.get_staleness_text()
+
+    def _update_staleness(self) -> None:
+        """Show the run-wide staleness line only while it has text."""
+        if not self._has_section(_STALENESS_SECTION):
+            return
+        text = _safe(
+            self._logger, "CLI staleness check failed", self.staleness_text
+        )
+        section = self._layout[_STALENESS_SECTION]
+        section.visible = bool(text)
+        section.update(Text(text or "", style="bold yellow", justify="center"))
 
     def _refresh(self) -> None:
         """Refresh the live display."""

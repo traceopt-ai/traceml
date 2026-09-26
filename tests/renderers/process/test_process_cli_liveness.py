@@ -164,6 +164,107 @@ def test_unreadable_figures_keep_the_verdict_the_heartbeat_gave(process_db):
     assert "rank 1: no data for 80s (stale)" in text
 
 
+# --- the run-wide verdict ------------------------------------------------
+def _unreadable(*_args, **_kwargs):
+    raise sqlite3.OperationalError("heartbeat unreadable")
+
+
+@pytest.mark.parametrize("ranks", [1, 2], ids=["only_rank", "every_rank"])
+@pytest.mark.parametrize(
+    ("quiet_s", "freshness"), [(6.0, "fresh"), (6.5, "stale")]
+)
+def test_run_wide_verdict_ages_the_newest_arrival_on_the_aggregators_clock(
+    process_db, ranks, quiet_s, freshness
+):
+    """The run stopped at seq 60, which arrived at T0+120 s.
+
+    With the only rank, or every rank at once, no peer is left to age a
+    rank against, so every rank verdict stays fresh. Only the
+    aggregator's current time can tell. The ranks were seen to sample
+    every 2 s, so the shared policy calls the run stale past 6 s.
+    """
+    _run(process_db, ranks=ranks)
+    snap = ProcessCLIComputer(
+        db_path=process_db.path,
+        sampler_interval_s=2.0,
+        now_fn=lambda: T0 + 120.0 + quiet_s,
+    ).compute()
+
+    assert snap["run_liveness"] == {
+        "last_seen_s": pytest.approx(T0 + 120.0),
+        "age_s": pytest.approx(quiet_s),
+        "freshness": freshness,
+    }
+    assert [r["freshness"] for r in snap["rank_liveness"]] == ["fresh"] * ranks
+
+
+def test_run_wide_verdict_is_fresh_while_any_rank_reports(process_db):
+    """Rank 1 stopped at seq 20; rank 0's arrivals keep the run live."""
+    _run(process_db, dies=(1, 20))
+    snap = ProcessCLIComputer(
+        db_path=process_db.path,
+        sampler_interval_s=2.0,
+        now_fn=lambda: T0 + 121.0,
+    ).compute()
+
+    assert snap["run_liveness"]["freshness"] == "fresh"
+    assert snap["run_liveness"]["last_seen_s"] == pytest.approx(T0 + 120.0)
+
+
+def test_run_wide_verdict_is_unknown_before_any_rank_reports(process_db):
+    snap = ProcessCLIComputer(db_path=process_db.path).compute()
+    assert snap["run_liveness"] == {
+        "last_seen_s": None,
+        "age_s": None,
+        "freshness": "unknown",
+    }
+
+
+def test_a_failed_heartbeat_read_keeps_the_last_run_wide_verdict(
+    process_db, monkeypatch
+):
+    """Carried with the rank verdicts, for as long as they are."""
+    import traceml_ai.renderers.process.cli_compute as cli_compute
+
+    _run(process_db, ranks=1)
+    now = [T0 + 160.0]
+    computer = ProcessCLIComputer(
+        db_path=process_db.path,
+        sampler_interval_s=2.0,
+        now_fn=lambda: now[0],
+    )
+    first = computer.compute()
+    assert first["run_liveness"]["freshness"] == "stale"
+
+    monkeypatch.setattr(cli_compute, "read_rank_clock", _unreadable)
+    now[0] += 10.0
+    assert computer.compute()["run_liveness"] == first["run_liveness"]
+
+    now[0] += 21.0  # 31 s since the last good read
+    assert computer.compute()["run_liveness"] is None
+
+
+def test_unreadable_figures_keep_the_run_wide_verdict_the_heartbeat_gave(
+    process_db,
+):
+    """The figures fail to parse after the heartbeat read named the run."""
+    _run(process_db, ranks=1)
+    conn = sqlite3.connect(process_db.path)
+    conn.execute("UPDATE process_samples SET cpu_percent = 'abc'")
+    conn.commit()
+    conn.close()
+
+    snap = ProcessCLIComputer(
+        db_path=process_db.path,
+        sampler_interval_s=2.0,
+        now_fn=lambda: T0 + 160.0,
+    ).compute()
+
+    assert snap["seq"] is None
+    assert snap["run_liveness"]["freshness"] == "stale"
+    assert snap["run_liveness"]["age_s"] == pytest.approx(40.0)
+
+
 def test_cli_and_dashboard_judge_every_rank_identically(process_db):
     """One owner for the judgement: both surfaces must agree per rank."""
     _run(process_db, ranks=4, samples=200, dies=(3, 20))

@@ -15,7 +15,9 @@ from traceml_ai.loggers.error_log import get_error_logger
 from traceml_ai.renderers.base_renderer import BaseRenderer
 from traceml_ai.renderers.shared.freshness import (
     RankLiveness,
+    RunLiveness,
     stale_rank_label,
+    stale_run_label,
 )
 from traceml_ai.utils.formatting import fmt_mem_new, fmt_mem_triple
 
@@ -42,6 +44,21 @@ class ProcessRenderer(BaseRenderer):
             sampler_interval_s=sampler_interval_s,
         )
         self._logger = get_error_logger(self.NAME + "Renderer")
+        # The run-wide verdict from the latest panel read, so the
+        # terminal's run-wide line costs no read of its own.
+        self._run_liveness: Optional[RunLiveness] = None
+
+    def get_staleness_text(self) -> str:
+        """``no new data for 42s (stale)`` once the whole run went quiet.
+
+        From the read :meth:`get_panel_renderable` made this tick, so call
+        it after that. Empty while any rank still reports, before the
+        first read, and when there is no verdict to go on.
+        """
+        run = self._run_liveness
+        if run is None or not run.is_stale:
+            return ""
+        return stale_run_label(run)
 
     def get_panel_renderable(self) -> Panel:
         """
@@ -54,6 +71,8 @@ class ProcessRenderer(BaseRenderer):
           above stay anchored on its last seq
         """
         snap = self._computer.compute_cli()
+        run = snap.get("run_liveness")
+        self._run_liveness = RunLiveness(**run) if run else None
 
         table = Table.grid(padding=(0, 2))
         table.add_column(justify="left", style="bright_white", no_wrap=True)

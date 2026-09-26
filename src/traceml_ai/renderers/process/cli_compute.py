@@ -9,6 +9,7 @@ Semantics
 - cross-rank aggregation
 - output keys match the current terminal renderer expectations
 - per-rank last-seen and freshness, judged as the dashboard judges them
+- the whole run's newest arrival, for the terminal's run-wide line
 """
 
 import time
@@ -18,11 +19,14 @@ from traceml_ai.renderers.shared.freshness import (
     CachedPayloadTTL,
     LastGoodVerdict,
     RankLiveness,
+    RunLiveness,
 )
 
 from .common import ProcessCLISnapshot
 from .liveness import read_rank_clock
 from .repository import ProcessRepository
+
+_Verdicts = Tuple[Optional[Tuple[RankLiveness, ...]], Optional[RunLiveness]]
 
 
 class ProcessCLIComputer:
@@ -40,8 +44,9 @@ class ProcessCLIComputer:
         Configured process-sampling cadence used until an observed cadence
         is available for judging rank freshness.
     now_fn:
-        The clock that times how long the last good rank verdicts may
-        answer for a heartbeat read that failed.
+        The aggregator's clock, the one that stamps every arrival. It
+        ages the run's newest arrival and times how long the last good
+        verdicts may answer for a heartbeat read that failed.
     """
 
     def __init__(
@@ -53,16 +58,16 @@ class ProcessCLIComputer:
     ) -> None:
         self._db = ProcessRepository(db_path=db_path)
         self._configured_interval_s = sampler_interval_s
-        # Injectable so the last good verdicts' expiry can be tested at a
-        # chosen moment rather than by sleeping.
+        # Injectable so the run-wide verdict and the last good verdicts'
+        # expiry can be tested at a chosen moment rather than by sleeping.
         self._now_fn = now_fn
         self._last_ok: Optional[Dict[str, Any]] = None
         self._last_ok_ts: float = 0.0
         self._stale_ttl_s: Optional[float] = (
             float(stale_ttl_s) if stale_ttl_s is not None else None
         )
-        self._liveness: LastGoodVerdict[Tuple[RankLiveness, ...]] = (
-            LastGoodVerdict(CachedPayloadTTL(ttl_s=self._stale_ttl_s))
+        self._verdicts: LastGoodVerdict[_Verdicts] = LastGoodVerdict(
+            CachedPayloadTTL(ttl_s=self._stale_ttl_s)
         )
 
     def compute(self) -> Dict[str, Any]:
@@ -85,35 +90,40 @@ class ProcessCLIComputer:
         self._last_ok_ts = time.time()
         return out
 
-    def _read_liveness(self, conn) -> Optional[Tuple[RankLiveness, ...]]:
-        """Every rank's last-seen clock, or ``None`` when there is none.
+    def _read_verdicts(self, conn) -> _Verdicts:
+        """Every rank's verdict and the run-wide one, from one read.
 
         Best-effort: a heartbeat that cannot be read costs the verdicts,
         never the panel's figures. The last good verdicts answer for it
-        within the stale TTL; after that, ``None``.
+        within the stale TTL; after that, ``None`` for both.
         """
         now_s = self._now_fn()
         try:
-            read = read_rank_clock(
+            clock = read_rank_clock(
                 self._db,
                 conn,
                 newest_ts=self._db.newest_sample_ts(conn),
                 configured_interval_s=self._configured_interval_s,
-            ).liveness()
+            )
+            read = (clock.liveness(), clock.run_liveness(now_s))
         except Exception:
             read = None
-        return self._liveness.carry(read, now_s=now_s)
+        return self._carry(read, now_s=now_s)
+
+    def _carry(self, read: Optional[_Verdicts], *, now_s: float) -> _Verdicts:
+        """This read's verdicts, the last good ones, or ``(None, None)``."""
+        return self._verdicts.carry(read, now_s=now_s) or (None, None)
 
     def _compute_impl(self, conn) -> Dict[str, Any]:
-        liveness = self._read_liveness(conn)
+        verdicts = self._read_verdicts(conn)
 
         committed_seq = self._db.fetch_committed_seq(conn)
         if committed_seq is None or committed_seq < 0:
-            return self._empty_snapshot(liveness)
+            return self._empty_snapshot(verdicts)
 
         rows = self._db.fetch_rows_for_seq_all_ranks(conn, committed_seq)
         if not rows:
-            return self._empty_snapshot(liveness)
+            return self._empty_snapshot(verdicts)
 
         cpu_used = max(float(r["cpu_percent"] or 0.0) for r in rows)
 
@@ -170,15 +180,16 @@ class ProcessCLIComputer:
             gpu_total=gpu_total,
             gpu_rank=gpu_rank,
             gpu_used_imbalance=gpu_used_imbalance,
-            rank_liveness=liveness,
+            rank_liveness=verdicts[0],
+            run_liveness=verdicts[1],
         ).to_dict()
 
     def _return_stale(self) -> Dict[str, Any]:
         """The last good snapshot within the TTL, else an empty one.
 
-        The empty one still carries a verdict: the one this tick's
+        The empty one still carries the verdicts: the ones this tick's
         heartbeat read gave before the figures failed, or the last good
-        one inside the TTL. Unreadable figures are not "no rank stopped".
+        ones inside the TTL. Unreadable figures are not "no rank stopped".
         """
         now = time.time()
         if self._last_ok is not None:
@@ -187,12 +198,10 @@ class ProcessCLIComputer:
                 or (now - self._last_ok_ts) <= self._stale_ttl_s
             ):
                 return self._last_ok
-        return self._empty_snapshot(
-            self._liveness.carry(None, now_s=self._now_fn())
-        )
+        return self._empty_snapshot(self._carry(None, now_s=self._now_fn()))
 
     def _empty_snapshot(
-        self, liveness: Optional[Tuple[RankLiveness, ...]] = None
+        self, verdicts: _Verdicts = (None, None)
     ) -> Dict[str, Any]:
         return ProcessCLISnapshot(
             seq=None,
@@ -202,5 +211,6 @@ class ProcessCLIComputer:
             gpu_total=None,
             gpu_rank=None,
             gpu_used_imbalance=None,
-            rank_liveness=liveness,
+            rank_liveness=verdicts[0],
+            run_liveness=verdicts[1],
         ).to_dict()

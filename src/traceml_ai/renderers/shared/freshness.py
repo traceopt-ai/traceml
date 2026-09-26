@@ -152,6 +152,25 @@ class RankLiveness:
         return self.freshness == "stale"
 
 
+@dataclass(frozen=True)
+class RunLiveness:
+    """The whole run's last-seen clock: its newest arrival from any rank.
+
+    Per-rank verdicts measure each rank against its peers, so they cannot
+    see every rank stopping at once, or the only rank of a single-process
+    run. This one measures the newest arrival against the aggregator's
+    current time. The verdict is always :meth:`FreshnessPolicy.state_of`.
+    """
+
+    last_seen_s: Optional[float] = None
+    age_s: Optional[float] = None
+    freshness: FreshnessState = "unknown"
+
+    @property
+    def is_stale(self) -> bool:
+        return self.freshness == "stale"
+
+
 def _whole_seconds(age_s: Optional[float]) -> Optional[int]:
     """An age as the nearest whole second, or ``None`` when unknown.
 
@@ -167,6 +186,13 @@ def stale_rank_label(rank: RankLiveness) -> str:
     seconds = _whole_seconds(rank.age_s)
     quiet = f"no data for {seconds}s" if seconds is not None else "no data"
     return f"rank {rank.global_rank}: {quiet} (stale)"
+
+
+def stale_run_label(run: RunLiveness) -> str:
+    """The terminal line for a run that stopped reporting altogether."""
+    seconds = _whole_seconds(run.age_s)
+    quiet = f" for {seconds}s" if seconds is not None else ""
+    return f"no new data{quiet} (stale)"
 
 
 @dataclass(frozen=True)
@@ -223,5 +249,7 @@ __all__ = [
     "LastGoodVerdict",
     "MIN_STALE_AFTER_S",
     "RankLiveness",
+    "RunLiveness",
     "stale_rank_label",
+    "stale_run_label",
 ]
