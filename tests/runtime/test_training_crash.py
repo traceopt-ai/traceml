@@ -36,10 +36,13 @@ pytestmark = pytest.mark.skipif(
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC_DIR = REPO_ROOT / "src"
-# A short settle budget keeps the crash case fast: the dead rank never sends
-# its rank-finished marker, so the aggregator waits out this budget.
+# The dead rank never sends its rank-finished marker, but its connection
+# closes, so the aggregator finalizes after one short quiet window. This
+# budget is only a cap for a rank that hangs with its connection open.
 FINALIZE_TIMEOUT_SEC = 10.0
-SUBPROCESS_TIMEOUT_SEC = 240
+# Each run takes a few seconds. Even if the warm-up and all three tests hang,
+# the bounds add up to 4 minutes, well inside the CI job's 15-minute limit.
+SUBPROCESS_TIMEOUT_SEC = 60
 EXCEPTION_MESSAGE = "traceml crash test python failure"
 STDERR_MARKER = "TRACEML_CRASH_TEST_STDERR_BEFORE_EXIT"
 STDOUT_MARKER = "TRACEML_CRASH_TEST_STEPS_DONE"
@@ -102,7 +105,7 @@ def _env() -> dict[str, str]:
 def _warm_import_caches(tmp_path_factory) -> None:
     # A cold checkout compiles bytecode on first import, which can push the
     # aggregator past the launcher's fixed readiness window.
-    subprocess.run(
+    result = subprocess.run(
         [sys.executable, "-c", "import traceml_ai.aggregator.aggregator_main"],
         cwd=str(tmp_path_factory.mktemp("warm")),
         env=_env(),
@@ -110,6 +113,9 @@ def _warm_import_caches(tmp_path_factory) -> None:
         text=True,
         timeout=SUBPROCESS_TIMEOUT_SEC,
     )
+    assert (
+        result.returncode == 0
+    ), f"Warm import failed (exit {result.returncode}):\n{result.stderr}"
 
 
 def _run_traceml(tmp_path: Path, outcome: str):
@@ -186,7 +192,7 @@ def _assert_raw_streams_saved(
     return saved_stderr
 
 
-def _assert_current_final_summary(session_root: Path, manifest: dict) -> None:
+def _assert_current_final_summary(session_root: Path, manifest: dict) -> dict:
     summary_path = session_root / "final_summary.json"
     assert summary_path.is_file()
     assert (session_root / "final_summary.txt").is_file()
@@ -194,6 +200,7 @@ def _assert_current_final_summary(session_root: Path, manifest: dict) -> None:
     assert datetime.fromisoformat(payload["generated_at"]) >= (
         datetime.fromisoformat(manifest["lifecycle"]["training_ended_at"])
     )
+    return payload
 
 
 def _assert_failure_excerpt(result) -> str:
@@ -230,8 +237,11 @@ def test_native_sigsegv_keeps_native_evidence_and_finalizes(tmp_path):
     assert manifest["lifecycle"]["training_ended_at"] is not None
 
     saved_stderr = _assert_raw_streams_saved(result, session_root, manifest)
-    # torchrun's error recorder enables faulthandler in the worker, so the
-    # dump names the crashing frame. It is a frame dump, not an exception.
+    # These strings come from torch, not TraceML. torchelastic's error
+    # recorder enables faulthandler in the worker, so the dump names the
+    # crashing frame. It is a frame dump, not an exception. torchrun's Root
+    # Cause block writes the SIGSEGV lines. A failure here after a torch
+    # upgrade can be a torch wording change, not a TraceML regression.
     assert "Fatal Python error: Segmentation fault" in saved_stderr, details
     assert f'File "{script_path}", line {CRASH_LINE} in main' in saved_stderr
     assert "Signal 11 (SIGSEGV)" in saved_stderr, details
@@ -240,8 +250,8 @@ def test_native_sigsegv_keeps_native_evidence_and_finalizes(tmp_path):
     excerpt = _assert_failure_excerpt(result)
     assert "SIGSEGV" in excerpt, details
 
-    # The dead rank never reports finished, so the aggregator finalizes on
-    # its settle deadline and records a warning instead of hanging.
+    # The dead rank never reports finished, but its closed connection ends
+    # the settle early, so the warning names the disconnect, not a timeout.
     assert manifest["telemetry_status"] == "degraded", details
     assert manifest["telemetry_reason"] == "finalization_warning"
     assert manifest["aggregator_exit_code"] == 0
@@ -250,12 +260,18 @@ def test_native_sigsegv_keeps_native_evidence_and_finalizes(tmp_path):
             encoding="utf-8"
         )
     )
+    assert warning["reason"] == "ranks_disconnected", warning
+    assert warning["finished_ranks"] == []
     assert warning["missing_ranks"] == [0]
     assert (
         "[TraceML] Telemetry degraded: finalization completed with warnings."
         in result.stderr
     )
-    _assert_current_final_summary(session_root, manifest)
+    payload = _assert_current_final_summary(session_root, manifest)
+    # Rank 0's runtime sent telemetry before the crash, so this fails if the
+    # runtime never started. Steps are not required: step telemetry leaves on
+    # the sampler interval, so these few steps can die with the process.
+    assert payload["process"]["metadata"]["global_ranks_seen"] >= 1, details
 
 
 def test_python_exception_keeps_traceback_and_completes_telemetry(tmp_path):
