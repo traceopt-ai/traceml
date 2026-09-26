@@ -110,6 +110,19 @@ def test_direct_runtime_settings_default_to_summary(
     assert settings.mode == "summary"
 
 
+def test_direct_runtime_settings_ignore_guard_semantics(
+    initialization, monkeypatch, tmp_path
+):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "traceml.yaml").write_text(
+        "mode: summary\nguard: invalid-for-run\n", encoding="utf-8"
+    )
+
+    settings = _resolve_direct_settings(initialization)
+
+    assert settings.mode == "summary"
+
+
 def test_disabled_env_dynamically_silences_low_level_utilities(monkeypatch):
     import torch.nn as nn
 

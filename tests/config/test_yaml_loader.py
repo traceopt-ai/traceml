@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import textwrap
 import warnings
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,7 @@ from traceml_ai.config.yaml_loader import (
     load_yaml_config,
     resolve_config,
 )
+from traceml_ai.regression.contract import parse_guard_contract
 
 # find_config_file
 
@@ -93,6 +95,116 @@ def test_load_yaml_config_unknown_key_warns(tmp_path: Path) -> None:
         result = load_yaml_config(p)
     assert "unknown_key" not in result
     assert any("unknown config key" in str(warning.message) for warning in w)
+
+
+def test_load_yaml_config_preserves_guard_without_warning(
+    tmp_path: Path,
+) -> None:
+    p = _write(
+        tmp_path,
+        """\
+        mode: summary
+        guard:
+          schema_version: 1
+          workload:
+            name: smoke
+          measurement:
+            start_step: 1
+            completed_steps: 5
+        """,
+    )
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        result = load_yaml_config(p)
+
+    assert not caught
+    assert result["mode"] == "summary"
+    assert result["guard"]["workload"]["name"] == "smoke"
+
+
+def test_guard_config_captures_are_isolated_sequentially_and_concurrently(
+    tmp_path: Path,
+) -> None:
+    paths = []
+    for name, start_step in (("first", 1), ("second", 20)):
+        run_dir = tmp_path / name
+        run_dir.mkdir()
+        paths.append(
+            _write(
+                run_dir,
+                f"""\
+                guard:
+                  schema_version: 1
+                  workload:
+                    name: {name}
+                  measurement:
+                    start_step: {start_step}
+                    completed_steps: 5
+                """,
+            )
+        )
+
+    def capture(path: Path) -> dict:
+        raw = load_yaml_config(path)["guard"]
+        return parse_guard_contract(raw).to_dict()
+
+    sequential = [capture(path) for path in paths]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        concurrent = list(pool.map(capture, paths))
+
+    assert concurrent == sequential
+    first, second = sequential
+    assert first["workload"]["name"] == "first"
+    assert first["measurement"]["start_step"] == 1
+    assert second["workload"]["name"] == "second"
+    assert second["measurement"]["start_step"] == 20
+
+
+@pytest.mark.parametrize("with_guard", [False, True])
+def test_load_yaml_config_preserves_legacy_duplicate_setting_behavior(
+    tmp_path: Path, with_guard: bool
+) -> None:
+    content = "mode: summary\ninterval: 1\ninterval: 2\n"
+    if with_guard:
+        content += (
+            "guard:\n"
+            "  schema_version: 1\n"
+            "  workload:\n"
+            "    name: smoke\n"
+            "  measurement:\n"
+            "    start_step: 1\n"
+            "    completed_steps: 5\n"
+        )
+
+    result = load_yaml_config(_write(tmp_path, content))
+
+    assert result["interval"] == 2.0
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "guard: {}\nguard: {}\n",
+        "guard:\n  schema_version: 1\n  schema_version: 1\n",
+        (
+            "guard:\n"
+            "  schema_version: 1\n"
+            "  workload:\n"
+            "    name: smoke\n"
+            "    parameters:\n"
+            "      model: small\n"
+            "      model: large\n"
+        ),
+    ],
+)
+def test_load_yaml_config_rejects_duplicate_guard_keys(
+    tmp_path: Path, content: str
+) -> None:
+    p = _write(tmp_path, content)
+
+    with pytest.raises(ValueError, match="duplicate.*guard"):
+        load_yaml_config(p)
 
 
 def test_load_yaml_config_type_error_bool_field(tmp_path: Path) -> None:
