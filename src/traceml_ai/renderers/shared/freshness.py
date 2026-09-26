@@ -152,10 +152,20 @@ class RankLiveness:
         return self.freshness == "stale"
 
 
+def _whole_seconds(age_s: Optional[float]) -> Optional[int]:
+    """An age as the nearest whole second, or ``None`` when unknown.
+
+    Rounded half up, not truncated: 5.99 s reads as six seconds.
+    Ages are clamped at zero by :meth:`FreshnessPolicy.age_of`.
+    """
+    age = finite(age_s)
+    return int(age + 0.5) if age is not None else None
+
+
 def stale_rank_label(rank: RankLiveness) -> str:
     """The terminal marker for a rank that stopped, e.g. ``rank 1: ...``."""
-    age = finite(rank.age_s)
-    quiet = f"no data for {int(age)}s" if age is not None else "no data"
+    seconds = _whole_seconds(rank.age_s)
+    quiet = f"no data for {seconds}s" if seconds is not None else "no data"
     return f"rank {rank.global_rank}: {quiet} (stale)"
 
 
