@@ -19,6 +19,10 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
+from traceml_ai.renderers.process.liveness import read_rank_clock
+from traceml_ai.renderers.process.repository import ProcessRepository
+from traceml_ai.renderers.shared.freshness import RankLiveness
+
 from .schema import (
     StepMemoryCombinedCoverage,
     StepMemoryCombinedMetric,
@@ -38,6 +42,7 @@ class StepMemoryMetricsDB:
 
     def __init__(self, db_path: str) -> None:
         self._db_path = str(db_path)
+        self._process = ProcessRepository(db_path=self._db_path)
 
     def connect(self) -> sqlite3.Connection:
         """Open a short-lived SQLite connection configured for named rows."""
@@ -73,6 +78,33 @@ class StepMemoryMetricsDB:
                 continue
             out[int(rank)] = int(max_step)
         return out
+
+    def fetch_rank_liveness(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        configured_interval_s: Optional[float] = None,
+    ) -> Optional[Tuple[RankLiveness, ...]]:
+        """
+        Every rank's last-seen clock, from its process-sampler heartbeat.
+
+        Read through the Process domain's own liveness read so Step Memory
+        and Process judge a rank by one rule. Step-memory rows are not the
+        heartbeat: they stop on every rank once a survivor blocks in a
+        collective waiting for a dead peer, and a long legitimate step
+        would read as a dead rank. Best-effort: ``None`` when the heartbeat
+        cannot be read (no verdict rather than a guessed one, and never a
+        lost panel); ``()`` when it was read and no rank has reported.
+        """
+        try:
+            return read_rank_clock(
+                self._process,
+                conn,
+                newest_ts=self._process.newest_sample_ts(conn),
+                configured_interval_s=configured_interval_s,
+            ).liveness()
+        except Exception:
+            return None
 
     def detect_gpu_available(self, conn: sqlite3.Connection) -> Optional[bool]:
         """
@@ -240,6 +272,7 @@ def build_step_memory_combined_result(
     db: StepMemoryMetricsDB,
     window_size: int = 100,
     metric_keys: Sequence[str] = ("peak_allocated", "peak_reserved"),
+    configured_interval_s: Optional[float] = None,
 ) -> StepMemoryCombinedResult:
     """
     Compute combined step-memory metrics for CLI/dashboard.
@@ -249,10 +282,15 @@ def build_step_memory_combined_result(
     - Align across global ranks on completed steps only.
     - Use largest common suffix up to `window_size`.
     - Keep all values in bytes.
+    - Carry every rank's last-seen clock, so a surface can name the rank
+      that is holding the aligned step back.
     """
     ws = max(1, int(window_size))
     gpu_available = db.detect_gpu_available(conn)
     gpu_total_bytes = load_gpu_total_bytes(conn)
+    rank_liveness = db.fetch_rank_liveness(
+        conn, configured_interval_s=configured_interval_s
+    )
     latest_per_rank = db.fetch_latest_step_per_global_rank(conn)
 
     if not latest_per_rank:
@@ -260,6 +298,7 @@ def build_step_memory_combined_result(
             metrics=[],
             status_message="Waiting for first fully completed step across all ranks…",
             gpu_total_bytes=gpu_total_bytes,
+            rank_liveness=rank_liveness,
         )
 
     world_size = len(latest_per_rank)
@@ -378,6 +417,7 @@ def build_step_memory_combined_result(
             )
         ),
         gpu_total_bytes=gpu_total_bytes,
+        rank_liveness=rank_liveness,
     )
 
 

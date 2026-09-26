@@ -28,6 +28,7 @@ This table is intentionally stable and low-noise.
 Per-step volatility belongs in plots, not summaries.
 """
 
+from dataclasses import replace
 from typing import Optional
 
 from rich.panel import Panel
@@ -52,12 +53,19 @@ class StepMemoryRenderer(BaseRenderer):
     without overwhelming the user with per-step noise.
     """
 
-    def __init__(self, db_path: str):
+    def __init__(
+        self,
+        db_path: str,
+        sampler_interval_s: Optional[float] = None,
+    ):
         super().__init__(
             name="Model Step Memory",
             layout_section_name=MODEL_MEMORY_LAYOUT,
         )
-        self._computer = StepMemoryMetricsComputer(db_path=db_path)
+        self._computer = StepMemoryMetricsComputer(
+            db_path=db_path,
+            sampler_interval_s=sampler_interval_s,
+        )
         self._formatter = StepMemoryRichFormatter()
         self._cached: Optional[StepMemoryCombinedResult] = None
 
@@ -66,7 +74,10 @@ class StepMemoryRenderer(BaseRenderer):
         Fetch latest computed payload.
 
         Uses a simple cache to avoid flicker when data is temporarily
-        incomplete (e.g., ranks slightly out of sync).
+        incomplete (e.g., ranks slightly out of sync). The cached metrics
+        carry this tick's rank liveness, so a rank that stopped is named
+        even while the figures are held. The computer already answers an
+        unreadable heartbeat with the last good verdict.
         """
         payload = self._computer.compute_cli()
         if payload and payload.metrics:
@@ -74,7 +85,7 @@ class StepMemoryRenderer(BaseRenderer):
             return payload
 
         if self._cached is not None:
-            return self._cached
+            return replace(self._cached, rank_liveness=payload.rank_liveness)
 
         return payload
 

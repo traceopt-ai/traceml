@@ -25,11 +25,13 @@ enters as a value rather than a constant.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Generic, Literal, Optional, TypeVar
 
 from traceml_ai.runtime.settings import DEFAULT_INTERVAL_SEC
 
 from .run_series import finite
+
+_T = TypeVar("_T")
 
 # Ticks a rank may miss before the block stops calling it live. Three is
 # what the Process and System blocks converged on: one missed tick is
@@ -132,6 +134,42 @@ class FreshnessPolicy:
 
 
 @dataclass(frozen=True)
+class RankLiveness:
+    """One rank's last-seen clock and the verdict on it.
+
+    Carried to every live surface so each can name a rank that stopped
+    reporting instead of drawing its last value as current. The verdict
+    is always :meth:`FreshnessPolicy.state_of`; this type only carries it.
+    """
+
+    global_rank: int
+    last_seen_s: Optional[float] = None
+    age_s: Optional[float] = None
+    freshness: FreshnessState = "unknown"
+
+    @property
+    def is_stale(self) -> bool:
+        return self.freshness == "stale"
+
+
+def _whole_seconds(age_s: Optional[float]) -> Optional[int]:
+    """An age as the nearest whole second, or ``None`` when unknown.
+
+    Rounded half up, not truncated: 5.99 s reads as six seconds.
+    Ages are clamped at zero by :meth:`FreshnessPolicy.age_of`.
+    """
+    age = finite(age_s)
+    return int(age + 0.5) if age is not None else None
+
+
+def stale_rank_label(rank: RankLiveness) -> str:
+    """The terminal marker for a rank that stopped, e.g. ``rank 1: ...``."""
+    seconds = _whole_seconds(rank.age_s)
+    quiet = f"no data for {seconds}s" if seconds is not None else "no data"
+    return f"rank {rank.global_rank}: {quiet} (stale)"
+
+
+@dataclass(frozen=True)
 class CachedPayloadTTL:
     """How long a last-good payload may answer for a failed read.
 
@@ -154,10 +192,36 @@ class CachedPayloadTTL:
         return usable <= limit
 
 
+class LastGoodVerdict(Generic[_T]):
+    """The last verdict a read produced, answering for reads that fail.
+
+    ``None`` from a read means it could not be read, never that nothing
+    is wrong, so the last good verdict answers instead for as long as the
+    TTL lets a cached payload answer. After that there is no verdict.
+    """
+
+    def __init__(self, ttl: CachedPayloadTTL) -> None:
+        self._ttl = ttl
+        self._value: Optional[_T] = None
+        self._at_s = 0.0
+
+    def carry(self, value: Optional[_T], *, now_s: float) -> Optional[_T]:
+        """This read's verdict, or the last good one when it failed."""
+        if value is not None:
+            self._value, self._at_s = value, now_s
+            return value
+        if self._value is not None and self._ttl.may_reuse(now_s - self._at_s):
+            return self._value
+        return None
+
+
 __all__ = [
     "CachedPayloadTTL",
     "DEFAULT_STALE_TICKS",
     "FreshnessPolicy",
     "FreshnessState",
+    "LastGoodVerdict",
     "MIN_STALE_AFTER_S",
+    "RankLiveness",
+    "stale_rank_label",
 ]

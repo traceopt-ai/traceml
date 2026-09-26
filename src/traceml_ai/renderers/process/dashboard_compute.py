@@ -36,7 +36,6 @@ from traceml_ai.renderers.shared.freshness import (
 from traceml_ai.renderers.shared.run_series import (
     DEFAULT_RUN_SERIES_POLICY,
     RunSeriesPolicy,
-    finite,
     plan_run_series,
 )
 
@@ -53,18 +52,17 @@ from .dashboard_models import (
     RankSnapshot,
     RankTrace,
 )
+from .liveness import RECENT_WINDOW_S, RankClock
+from .liveness import opt_float as _opt_float
+from .liveness import read_rank_clock
 from .repository import ProcessRepository
 
 # How many committed steps the card describes. Kept at the value the
 # section applied to its own history slice on 0.3.7.
 DASHBOARD_WINDOW = 100
 
-# The recent window the tiles describe, as a DURATION. A sample count
-# means a different span at every sampling rate, so two runs sampling at
-# different cadences could not be compared and the card could not say what
-# period it was summarising. The same duration drives both the repository
-# read and the recent-to-retained chart transition.
-RECENT_WINDOW_S = 60.0
+# ``RECENT_WINDOW_S``, the recent window the tiles describe, lives in
+# ``liveness.py`` with the per-rank read it bounds.
 
 # A rolling mean over minutes cannot visibly change between two ticks, so
 # the whole-run reads refresh on their own slower clock. Recomputing them
@@ -93,16 +91,6 @@ def percentile(values: Sequence[Optional[float]], p: float) -> float:
     if low == high:
         return float(clean[low])
     return float(clean[low] * (high - k) + clean[high] * (k - low))
-
-
-def _opt_float(value: Any) -> Optional[float]:
-    """A usable number from a database cell, or ``None``."""
-    if value is None:
-        return None
-    try:
-        return finite(float(value))
-    except (TypeError, ValueError):
-        return None
 
 
 def _median(values: Sequence[float]) -> Optional[float]:
@@ -316,78 +304,26 @@ class ProcessDashboardComputer:
     ]:
         """Every rank's own state, read on its own clock.
 
-        Two reads, on purpose. The windowed one carries each rank's recent
-        history; the latest-row one carries every rank that has EVER
-        reported, so a rank silent for longer than the window still appears
-        with its true age instead of vanishing from the block.
+        The per-rank read and the freshness verdict live in
+        ``liveness.read_rank_clock``, shared with the terminal so both
+        surfaces judge a rank identically.
         """
-        window_rows = self._db.fetch_recent_rank_window(
-            conn, window_s=RECENT_WINDOW_S, newest_ts=newest_ts
+        clock = read_rank_clock(
+            self._db,
+            conn,
+            newest_ts=newest_ts,
+            configured_interval_s=self._configured_interval_s,
         )
-        latest_rows = self._db.fetch_rank_latest(conn)
-
-        by_rank: Dict[int, List[Any]] = {}
-        for row in window_rows:
-            rank_id = row["global_rank"]
-            if rank_id is None:
-                rank_id = row["rank"]
-            if rank_id is None:
-                continue
-            by_rank.setdefault(int(rank_id), []).append(row)
-
-        newest_by_rank: Dict[int, Any] = {}
-        for row in latest_rows:
-            rank_id = row["global_rank"]
-            if rank_id is None:
-                rank_id = row["rank"]
-            if rank_id is not None:
-                newest_by_rank[int(rank_id)] = row
-
-        policy = FreshnessPolicy.from_observed_cadence(
-            self._observed_cadence(by_rank),
-            configured_s=self._configured_interval_s,
-        )
-        now_s = self._newest_recv(list(newest_by_rank.values()))
-
         snapshots = [
             self._snapshot_for(
                 rank_id,
-                by_rank.get(rank_id, []),
-                newest_by_rank[rank_id],
-                policy=policy,
-                now_s=now_s,
+                clock.by_rank.get(rank_id, []),
+                clock.newest_by_rank[rank_id],
+                clock=clock,
             )
-            for rank_id in sorted(newest_by_rank)
+            for rank_id in sorted(clock.newest_by_rank)
         ]
-        return tuple(snapshots), policy, by_rank
-
-    def _observed_cadence(
-        self, by_rank: Dict[int, List[Any]]
-    ) -> Optional[float]:
-        """The gap the ranks actually sample at, from the busiest rank."""
-        best: Optional[float] = None
-        for rows in by_rank.values():
-            stamps = [
-                value
-                for value in (_opt_float(r["sample_ts_s"]) for r in rows)
-                if value is not None
-            ]
-            if len(stamps) < 2:
-                continue
-            span = max(stamps) - min(stamps)
-            cadence = finite(span / float(len(stamps) - 1))
-            if cadence and cadence > 0:
-                best = cadence if best is None else min(best, cadence)
-        return best
-
-    def _newest_recv(self, rows: Sequence[Any]) -> float:
-        """The aggregator's newest arrival clock, the reference for age."""
-        stamps = [
-            value / 1e9
-            for value in (_opt_float(r["recv_ts_ns"]) for r in rows)
-            if value is not None
-        ]
-        return max(stamps) if stamps else 0.0
+        return tuple(snapshots), clock.policy, clock.by_rank
 
     def _snapshot_for(
         self,
@@ -395,8 +331,7 @@ class ProcessDashboardComputer:
         rows: List[Any],
         newest_row: Any,
         *,
-        policy: FreshnessPolicy,
-        now_s: float,
+        clock: RankClock,
     ) -> RankSnapshot:
         reported = [row for row in rows if _gpu_reported(row)]
         # The newest row is not always a reading: the last samples of a run
@@ -405,10 +340,7 @@ class ProcessDashboardComputer:
         # inspects a finished run.
         newest_gpu = reported[-1] if reported else None
 
-        recv = _opt_float(newest_row["recv_ts_ns"])
-        age = policy.age_of(
-            recv / 1e9 if recv is not None else None, now_s=now_s
-        )
+        liveness = clock.liveness_of(rank_id)
 
         return RankSnapshot(
             global_rank=rank_id,
@@ -453,8 +385,8 @@ class ProcessDashboardComputer:
                 if newest_gpu is not None
                 else None
             ),
-            age_s=age,
-            freshness=policy.state_of(age),
+            age_s=liveness.age_s,
+            freshness=liveness.freshness,
         )
 
     # --- describing ------------------------------------------------------

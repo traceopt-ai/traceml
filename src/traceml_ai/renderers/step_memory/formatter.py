@@ -16,6 +16,7 @@ from traceml_ai.diagnostics.step_memory import (
     build_step_memory_diagnosis,
 )
 from traceml_ai.diagnostics.step_memory_formatters import format_cli_diagnosis
+from traceml_ai.renderers.shared.freshness import stale_rank_label
 from traceml_ai.utils.formatting import fmt_mem_new
 
 from .schema import StepMemoryCombinedMetric, StepMemoryCombinedResult
@@ -30,13 +31,15 @@ class StepMemoryRichFormatter(Formatter[StepMemoryCombinedResult, Panel]):
         """
         Convert a step-memory payload into the CLI Rich panel.
         """
+        stale = self._stale_rank_lines(payload)
         if not payload.metrics:
+            message = (
+                payload.status_message
+                if payload.status_message
+                else "Waiting for first fully completed step across all ranks…"
+            )
             return Panel(
-                (
-                    payload.status_message
-                    if payload.status_message
-                    else "Waiting for first fully completed step across all ranks…"
-                ),
+                "\n".join([message, *stale]),
                 title="Model Step Memory",
             )
 
@@ -74,6 +77,7 @@ class StepMemoryRichFormatter(Formatter[StepMemoryCombinedResult, Panel]):
         return Panel(
             Group(
                 diag_text,
+                *stale,
                 "",
                 table,
                 footer,
@@ -82,6 +86,15 @@ class StepMemoryRichFormatter(Formatter[StepMemoryCombinedResult, Panel]):
             border_style="cyan",
             width=width,
         )
+
+    @staticmethod
+    def _stale_rank_lines(payload: StepMemoryCombinedResult) -> list[str]:
+        """One marker per rank that stopped; the figures hold its last step."""
+        return [
+            f"[bold yellow]{stale_rank_label(rank)}[/bold yellow]"
+            for rank in payload.rank_liveness or ()
+            if rank.is_stale
+        ]
 
     @staticmethod
     def _sort_metrics(
