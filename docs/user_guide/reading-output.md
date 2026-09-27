@@ -190,7 +190,10 @@ logs/<run-name>/nodes/node_<node-rank>/guard_outcome.json
 This atomic JSON file records the bounded launcher outcome used by the guard
 pilot. It is a filesystem coordination artifact, not a telemetry stream or a
 copy of training output. Guarded multi-node runs place `--logs-dir` on shared
-storage so node 0 can later read every node's record.
+storage so node 0 can read every node's record. Node 0 waits within the
+configured finalization timeout and stores the consolidated result under
+`guard.training` in `manifest.json`. A completed result means every expected
+launcher reported exit code `0`; it does not verify telemetry or step IDs.
 
 Summary and dashboard modes mirror the saved streams live. CLI mode suppresses
 live mirroring so training output cannot corrupt the Rich display; if training

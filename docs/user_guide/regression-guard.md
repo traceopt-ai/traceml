@@ -1,8 +1,9 @@
 # Regression guard measurement contract
 
-TraceML's local regression guard is an experimental **v0.1 pilot**. The first
-piece is a run-bound measurement contract: a small declaration of the workload
-and completed training steps that a later guard check will evaluate.
+TraceML's local regression guard is an experimental **v0.1 pilot**. A guarded
+run captures a small workload declaration and records whether the training
+command completed on every launcher node. A later guard check will compare two
+completed run artifacts.
 
 The contract format uses `schema_version: 1`. This identifies the first file
 format; it does not indicate that the pilot is a stable 1.0 feature.
@@ -115,14 +116,10 @@ measurement:
 requests steps 10 through 59. If `--trace-max-steps` is used, it must include
 the complete requested range.
 
-The complete window must also remain inside `history_retention` until the run
-is finalized. This capture stage records the request but does not extend
-retention. A later guard check will treat an evicted or incomplete window as
-inconclusive.
-
-This first implementation records the request. A later guard stage will verify
-that every expected rank produced the complete window before allowing a
-comparison.
+The complete window should remain inside `history_retention` until the run is
+finalized. The guard records the request but does not extend retention or query
+SQLite to verify individual step IDs. The later pairwise check uses the saved
+final summary and reports its analyzed-step count.
 
 ## Captured artifact
 
@@ -163,19 +160,54 @@ After its local training process exits, every guarded launcher also writes:
 logs/<run-name>/nodes/node_<node-rank>/guard_outcome.json
 ```
 
-The atomic, versioned record contains the session and root-manifest identity,
-node topology, normalized-contract digest, training status and exit code, and
-completion time. It excludes command arguments, paths, hostnames, environment
-contents, device identifiers, and credentials. Exit code `0` records completed
-training; any other observed exit code records failed training.
+The atomic, versioned record contains the public run name, manifest creation
+time, node topology, normalized-contract digest, training status and exit code,
+and completion time. It excludes command arguments, paths, hostnames,
+environment contents, device identifiers, and credentials. Exit code `0`
+records completed training; any other observed exit code records failed
+training.
 
-The session, manifest creation time, topology, and contract digest are checked
-together, so a file left in a reused run directory cannot be accepted as an
-outcome for the current launch.
+The run name, topology, and contract digest bind the record to its run. The
+manifest creation time is descriptive metadata and is not used as another run
+identity.
 
-This outcome is node scoped. A later guard stage consolidates the expected
-node files on node 0. Failure to write this auxiliary record emits a warning
-but never replaces the supervised training command's exit code.
+Node 0 waits for the expected files within the existing finalization timeout,
+then writes a bounded result beside the contract in `manifest.json`:
+
+```json
+{
+  "guard": {
+    "training": {
+      "status": "completed",
+      "nodes_expected": 2,
+      "nodes_observed": 2,
+      "reasons": [],
+      "nodes": [
+        {"node_rank": 0, "exit_code": 0},
+        {"node_rank": 1, "exit_code": 0}
+      ]
+    }
+  }
+}
+```
+
+`completed` means every expected launcher reported exit code `0`. Missing,
+malformed, conflicting, or nonzero outcomes produce `incomplete` with stable
+reason codes. This establishes training-command completion only; it does not
+prove telemetry or measurement-window completeness. Collection and recording
+failures emit warnings but never replace the supervised training command's
+exit code.
+
+| Reason | Meaning |
+| --- | --- |
+| `node_outcome_missing` | An expected launcher did not report before the timeout. |
+| `node_outcome_invalid` | An expected record was malformed, unreadable, or too large. |
+| `node_outcome_conflict` | A record's run name, topology, or contract did not match. |
+| `node_training_failed` | At least one valid record contained a nonzero exit code. |
+| `node_outcome_collection_failed` | Node 0 could not complete collection because of an internal error. |
+
+`guard.training` is independent of the manifest's top-level run and telemetry
+statuses. Read all three fields when diagnosing an incomplete run.
 
 To inspect the captured declaration, format the manifest and look under
 `guard.contract`:
@@ -185,4 +217,5 @@ python -m json.tool logs/reference/manifest.json
 ```
 
 This stage does not compare runs or return a CI regression decision. Those
-capabilities will consume the captured contract in later pilot releases.
+capabilities will consume the contract, consolidated training result, and
+existing final summary in later pilot releases.

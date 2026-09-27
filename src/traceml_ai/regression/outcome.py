@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -19,6 +21,8 @@ from traceml_ai.utils.atomic_io import write_json_atomic
 
 OUTCOME_FILENAME = "guard_outcome.json"
 OUTCOME_SCHEMA_VERSION = 1
+MAX_OUTCOME_BYTES = 16 * 1024
+OUTCOME_POLL_INTERVAL_S = 0.05
 
 
 class OutcomeValidationError(ValueError):
@@ -27,6 +31,37 @@ class OutcomeValidationError(ValueError):
     def __init__(self, reason: str, message: str) -> None:
         super().__init__(message)
         self.reason = reason
+
+
+@dataclass(frozen=True, slots=True)
+class NodeTrainingOutcome:
+    """Validated training result reported by one launcher node."""
+
+    node_rank: int
+    exit_code: int
+
+    def to_dict(self) -> dict[str, int]:
+        return {"node_rank": self.node_rank, "exit_code": self.exit_code}
+
+
+@dataclass(frozen=True, slots=True)
+class GuardTrainingResult:
+    """Consolidated launcher outcome stored in the root run manifest."""
+
+    status: str
+    nodes_expected: int
+    nodes_observed: int
+    reasons: tuple[str, ...]
+    nodes: tuple[NodeTrainingOutcome, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "nodes_expected": self.nodes_expected,
+            "nodes_observed": self.nodes_observed,
+            "reasons": list(self.reasons),
+            "nodes": [node.to_dict() for node in self.nodes],
+        }
 
 
 def contract_digest(contract: MeasurementContract) -> str:
@@ -41,37 +76,41 @@ def contract_digest(contract: MeasurementContract) -> str:
     return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
 
 
-def _manifest_created_at(manifest_path: Path, session_id: str) -> str:
-    """Read the current root manifest identity from the shared run directory."""
+def _manifest_identity(
+    manifest_path: Path, session_id: str
+) -> tuple[str, str]:
+    """Read the public run identity and creation time from the root manifest."""
     with open(manifest_path, "r", encoding="utf-8") as handle:
         manifest: Any = json.load(handle)
     if not isinstance(manifest, dict):
         raise ValueError("root manifest must contain a JSON object")
     if manifest.get("session_id") != session_id:
         raise ValueError("root manifest belongs to a different session")
+    run = manifest.get("run")
+    run_name = run.get("run_name") if isinstance(run, dict) else None
+    if not isinstance(run_name, str) or not run_name:
+        raise ValueError("root manifest is missing run.run_name")
     created_at = manifest.get("created_at")
     if not isinstance(created_at, str) or not created_at:
         raise ValueError("root manifest is missing created_at")
-    return created_at
+    return run_name, created_at
 
 
 def validate_guard_outcome_binding(
     outcome: Any,
     *,
-    session_id: str,
-    manifest_created_at: str,
+    run_name: str,
     node_rank: int,
     nnodes: int,
     nproc_per_node: int,
     contract: MeasurementContract,
-) -> None:
-    """Require a node outcome to belong to the expected guarded run.
+) -> NodeTrainingOutcome:
+    """Validate and return one node's outcome for the expected guarded run.
 
-    Session and manifest identity distinguish a new run from files left in a
-    reused run directory. Topology and contract checks then ensure that every
-    accepted node participated in the same launch and measurement declaration.
-    Parsing the training result belongs to node-0 collection, which consumes
-    this binding check before accepting an outcome.
+    The public run name identifies the run directory. Topology and contract
+    checks then ensure that every accepted node participated in the same launch
+    and measurement declaration. Parsing the training result belongs to node-0
+    collection, which consumes this check before accepting an outcome.
     """
     if not isinstance(outcome, dict):
         raise OutcomeValidationError(
@@ -88,18 +127,13 @@ def validate_guard_outcome_binding(
             "node outcome schema version is unsupported",
         )
 
-    if not isinstance(outcome.get("session_id"), str) or not isinstance(
-        outcome.get("manifest_created_at"), str
-    ):
+    if not isinstance(outcome.get("run_name"), str):
         raise OutcomeValidationError(
             "node_outcome_invalid", "node outcome run identity is invalid"
         )
-    if (
-        outcome["session_id"] != session_id
-        or outcome["manifest_created_at"] != manifest_created_at
-    ):
+    if outcome["run_name"] != run_name:
         raise OutcomeValidationError(
-            "node_outcome_stale", "node outcome belongs to another run"
+            "node_outcome_conflict", "node outcome belongs to another run"
         )
 
     topology = tuple(
@@ -130,6 +164,114 @@ def validate_guard_outcome_binding(
             "node outcome conflicts with the captured measurement contract",
         )
 
+    for field in ("manifest_created_at", "completed_at"):
+        if not isinstance(outcome.get(field), str) or not outcome[field]:
+            raise OutcomeValidationError(
+                "node_outcome_invalid",
+                f"node outcome {field} is invalid",
+            )
+
+    training = outcome.get("training")
+    if not isinstance(training, dict):
+        raise OutcomeValidationError(
+            "node_outcome_invalid", "node outcome training result is invalid"
+        )
+    exit_code = training.get("exit_code")
+    status = training.get("status")
+    if (
+        isinstance(exit_code, bool)
+        or not isinstance(exit_code, int)
+        or exit_code < 0
+        or status not in {"completed", "failed"}
+        or (exit_code == 0) != (status == "completed")
+    ):
+        raise OutcomeValidationError(
+            "node_outcome_invalid", "node outcome training result is invalid"
+        )
+    return NodeTrainingOutcome(node_rank=node_rank, exit_code=exit_code)
+
+
+def _read_outcome(path: Path) -> Any:
+    """Read one bounded JSON outcome file."""
+    with open(path, "rb") as handle:
+        encoded = handle.read(MAX_OUTCOME_BYTES + 1)
+    if len(encoded) > MAX_OUTCOME_BYTES:
+        raise ValueError("node outcome exceeds the size limit")
+    return json.loads(encoded.decode("utf-8"))
+
+
+def collect_guard_outcomes(
+    *,
+    session_root: Path,
+    run_name: str,
+    nnodes: int,
+    nproc_per_node: int,
+    contract: MeasurementContract,
+    timeout_s: float,
+) -> GuardTrainingResult:
+    """Collect the expected launcher outcomes within one bounded wait."""
+    expected = max(1, int(nnodes))
+    pending = set(range(expected))
+    observed: dict[int, NodeTrainingOutcome] = {}
+    reasons: list[str] = []
+    deadline = time.monotonic() + max(0.0, float(timeout_s))
+    root = Path(session_root).resolve()
+
+    def add_reason(reason: str) -> None:
+        if reason not in reasons:
+            reasons.append(reason)
+
+    while pending:
+        for node_rank in sorted(pending):
+            path = root / "nodes" / f"node_{node_rank}" / OUTCOME_FILENAME
+            try:
+                payload = _read_outcome(path)
+            except FileNotFoundError:
+                continue
+            except (OSError, ValueError):
+                add_reason("node_outcome_invalid")
+                pending.remove(node_rank)
+                continue
+
+            try:
+                node = validate_guard_outcome_binding(
+                    payload,
+                    run_name=run_name,
+                    node_rank=node_rank,
+                    nnodes=expected,
+                    nproc_per_node=nproc_per_node,
+                    contract=contract,
+                )
+            except OutcomeValidationError as exc:
+                add_reason(exc.reason)
+            else:
+                observed[node_rank] = node
+                if node.exit_code != 0:
+                    add_reason("node_training_failed")
+            pending.remove(node_rank)
+
+        if not pending or time.monotonic() >= deadline:
+            break
+        time.sleep(
+            min(OUTCOME_POLL_INTERVAL_S, max(0.0, deadline - time.monotonic()))
+        )
+
+    if pending:
+        add_reason("node_outcome_missing")
+
+    nodes = tuple(observed[rank] for rank in sorted(observed))
+    return GuardTrainingResult(
+        status=(
+            "completed"
+            if not reasons and len(nodes) == expected
+            else "incomplete"
+        ),
+        nodes_expected=expected,
+        nodes_observed=len(nodes),
+        reasons=tuple(reasons),
+        nodes=nodes,
+    )
+
 
 def write_guard_outcome(
     *,
@@ -144,12 +286,13 @@ def write_guard_outcome(
 ) -> Path:
     """Atomically write the completed local launcher's guarded outcome."""
     destination = Path(path).resolve()
+    run_name, manifest_created_at = _manifest_identity(
+        Path(manifest_path).resolve(), session_id
+    )
     payload = {
         "schema_version": OUTCOME_SCHEMA_VERSION,
-        "session_id": session_id,
-        "manifest_created_at": _manifest_created_at(
-            Path(manifest_path).resolve(), session_id
-        ),
+        "run_name": run_name,
+        "manifest_created_at": manifest_created_at,
         "node_rank": int(node_rank),
         "nnodes": int(nnodes),
         "nproc_per_node": int(nproc_per_node),
@@ -165,9 +308,13 @@ def write_guard_outcome(
 
 
 __all__ = [
+    "GuardTrainingResult",
+    "MAX_OUTCOME_BYTES",
+    "NodeTrainingOutcome",
     "OUTCOME_FILENAME",
     "OUTCOME_SCHEMA_VERSION",
     "OutcomeValidationError",
+    "collect_guard_outcomes",
     "contract_digest",
     "validate_guard_outcome_binding",
     "write_guard_outcome",

@@ -15,8 +15,11 @@ import pytest
 
 from traceml_ai.regression.contract import parse_guard_contract
 from traceml_ai.regression.outcome import (
+    MAX_OUTCOME_BYTES,
     OUTCOME_SCHEMA_VERSION,
+    NodeTrainingOutcome,
     OutcomeValidationError,
+    collect_guard_outcomes,
     contract_digest,
     validate_guard_outcome_binding,
     write_guard_outcome,
@@ -48,6 +51,7 @@ def test_write_guard_outcome_records_only_bounded_node_facts(
         json.dumps(
             {
                 "session_id": "guarded-run",
+                "run": {"run_name": "guarded-run"},
                 "created_at": "2026-09-26T10:00:00+00:00",
             }
         ),
@@ -71,7 +75,7 @@ def test_write_guard_outcome_records_only_bounded_node_facts(
     payload = json.loads(outcome_path.read_text(encoding="utf-8"))
     assert payload == {
         "schema_version": OUTCOME_SCHEMA_VERSION,
-        "session_id": "guarded-run",
+        "run_name": "guarded-run",
         "manifest_created_at": "2026-09-26T10:00:00+00:00",
         "node_rank": 1,
         "nnodes": 2,
@@ -87,8 +91,16 @@ def test_write_guard_outcome_records_only_bounded_node_facts(
     "manifest",
     [
         [],
-        {"session_id": "another-run", "created_at": "created"},
-        {"session_id": "guarded-run"},
+        {
+            "session_id": "another-run",
+            "run": {"run_name": "guarded-run"},
+            "created_at": "created",
+        },
+        {"session_id": "guarded-run", "created_at": "created"},
+        {
+            "session_id": "guarded-run",
+            "run": {"run_name": "guarded-run"},
+        },
     ],
 )
 def test_write_guard_outcome_requires_current_root_manifest(
@@ -118,6 +130,7 @@ def _write_current_outcome(tmp_path):
         json.dumps(
             {
                 "session_id": "guarded-run",
+                "run": {"run_name": "guarded-run"},
                 "created_at": "2026-09-26T10:00:00+00:00",
             }
         ),
@@ -142,8 +155,7 @@ def _validate_current_outcome(outcome_path, contract):
     payload = json.loads(outcome_path.read_text(encoding="utf-8"))
     return validate_guard_outcome_binding(
         payload,
-        session_id="guarded-run",
-        manifest_created_at="2026-09-26T10:00:00+00:00",
+        run_name="guarded-run",
         node_rank=1,
         nnodes=2,
         nproc_per_node=4,
@@ -154,20 +166,32 @@ def _validate_current_outcome(outcome_path, contract):
 def test_outcome_binding_accepts_current_run_identity(tmp_path) -> None:
     outcome_path, contract = _write_current_outcome(tmp_path)
 
-    assert _validate_current_outcome(outcome_path, contract) is None
+    assert _validate_current_outcome(outcome_path, contract) == (
+        NodeTrainingOutcome(node_rank=1, exit_code=0)
+    )
 
 
-@pytest.mark.parametrize("field", ["session_id", "manifest_created_at"])
-def test_outcome_binding_rejects_stale_run_identity(tmp_path, field) -> None:
+def test_outcome_binding_rejects_another_run_name(tmp_path) -> None:
     outcome_path, contract = _write_current_outcome(tmp_path)
     payload = json.loads(outcome_path.read_text(encoding="utf-8"))
-    payload[field] = "previous-run"
+    payload["run_name"] = "another-run"
     outcome_path.write_text(json.dumps(payload), encoding="utf-8")
 
     with pytest.raises(OutcomeValidationError) as caught:
         _validate_current_outcome(outcome_path, contract)
 
-    assert caught.value.reason == "node_outcome_stale"
+    assert caught.value.reason == "node_outcome_conflict"
+
+
+def test_outcome_binding_does_not_use_manifest_creation_time(tmp_path) -> None:
+    outcome_path, contract = _write_current_outcome(tmp_path)
+    payload = json.loads(outcome_path.read_text(encoding="utf-8"))
+    payload["manifest_created_at"] = "another-time"
+    outcome_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    assert _validate_current_outcome(outcome_path, contract) == (
+        NodeTrainingOutcome(node_rank=1, exit_code=0)
+    )
 
 
 @pytest.mark.parametrize(
@@ -197,7 +221,7 @@ def test_outcome_binding_rejects_conflicting_run_facts(
     "change",
     [
         lambda payload: payload.update(schema_version=True),
-        lambda payload: payload.pop("session_id"),
+        lambda payload: payload.pop("run_name"),
         lambda payload: payload.update(node_rank="1"),
         lambda payload: payload.update(contract_digest=None),
     ],
@@ -212,3 +236,151 @@ def test_outcome_binding_rejects_malformed_records(tmp_path, change) -> None:
         _validate_current_outcome(outcome_path, contract)
 
     assert caught.value.reason == "node_outcome_invalid"
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda payload: payload.pop("manifest_created_at"),
+        lambda payload: payload.update(completed_at=None),
+        lambda payload: payload.update(training=[]),
+        lambda payload: payload.update(
+            training={"status": "completed", "exit_code": 3}
+        ),
+        lambda payload: payload.update(
+            training={"status": "failed", "exit_code": 0}
+        ),
+        lambda payload: payload.update(
+            training={"status": "failed", "exit_code": True}
+        ),
+    ],
+)
+def test_outcome_binding_rejects_invalid_training_result(
+    tmp_path, change
+) -> None:
+    outcome_path, contract = _write_current_outcome(tmp_path)
+    payload = json.loads(outcome_path.read_text(encoding="utf-8"))
+    change(payload)
+
+    with pytest.raises(OutcomeValidationError) as caught:
+        validate_guard_outcome_binding(
+            payload,
+            run_name="guarded-run",
+            node_rank=1,
+            nnodes=2,
+            nproc_per_node=4,
+            contract=contract,
+        )
+
+    assert caught.value.reason == "node_outcome_invalid"
+
+
+def _write_node_outcome(
+    root, *, node_rank, nnodes=2, exit_code=0, contract=None
+):
+    manifest_path = root / "manifest.json"
+    if not manifest_path.exists():
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "session_id": "guarded-run",
+                    "run": {"run_name": "guarded-run"},
+                    "created_at": "2026-09-26T10:00:00+00:00",
+                }
+            ),
+            encoding="utf-8",
+        )
+    write_guard_outcome(
+        path=root / "nodes" / f"node_{node_rank}" / "guard_outcome.json",
+        manifest_path=manifest_path,
+        session_id="guarded-run",
+        node_rank=node_rank,
+        nnodes=nnodes,
+        nproc_per_node=1,
+        contract=contract or _contract(),
+        exit_code=exit_code,
+    )
+
+
+def _collect(root, *, nnodes=2, contract=None, timeout_s=0):
+    return collect_guard_outcomes(
+        session_root=root,
+        run_name="guarded-run",
+        nnodes=nnodes,
+        nproc_per_node=1,
+        contract=contract or _contract(),
+        timeout_s=timeout_s,
+    )
+
+
+def test_collect_guard_outcomes_returns_canonical_completed_result(
+    tmp_path,
+) -> None:
+    _write_node_outcome(tmp_path, node_rank=1)
+    _write_node_outcome(tmp_path, node_rank=0)
+    unrelated = tmp_path / "nodes" / "node_99" / "guard_outcome.json"
+    unrelated.parent.mkdir(parents=True)
+    unrelated.write_text("{malformed", encoding="utf-8")
+
+    result = _collect(tmp_path)
+
+    assert result.to_dict() == {
+        "status": "completed",
+        "nodes_expected": 2,
+        "nodes_observed": 2,
+        "reasons": [],
+        "nodes": [
+            {"node_rank": 0, "exit_code": 0},
+            {"node_rank": 1, "exit_code": 0},
+        ],
+    }
+
+
+def test_collect_guard_outcomes_records_failed_and_missing_nodes(
+    tmp_path,
+) -> None:
+    _write_node_outcome(tmp_path, node_rank=0, nnodes=3, exit_code=17)
+    _write_node_outcome(tmp_path, node_rank=1, nnodes=3)
+
+    result = _collect(tmp_path, nnodes=3)
+
+    assert result.status == "incomplete"
+    assert result.nodes_expected == 3
+    assert result.nodes_observed == 2
+    assert result.reasons == (
+        "node_training_failed",
+        "node_outcome_missing",
+    )
+    assert [node.to_dict() for node in result.nodes] == [
+        {"node_rank": 0, "exit_code": 17},
+        {"node_rank": 1, "exit_code": 0},
+    ]
+
+
+@pytest.mark.parametrize(
+    ("replacement", "reason"),
+    [
+        ("{malformed", "node_outcome_invalid"),
+        ("oversized", "node_outcome_invalid"),
+        ("conflict", "node_outcome_conflict"),
+    ],
+)
+def test_collect_guard_outcomes_rejects_invalid_expected_file(
+    tmp_path, replacement, reason
+) -> None:
+    _write_node_outcome(tmp_path, node_rank=0, nnodes=1)
+    path = tmp_path / "nodes" / "node_0" / "guard_outcome.json"
+    if replacement == "oversized":
+        path.write_text(" " * (MAX_OUTCOME_BYTES + 1), encoding="utf-8")
+    elif replacement == "conflict":
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload["run_name"] = "another-run"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+    else:
+        path.write_text(replacement, encoding="utf-8")
+
+    result = _collect(tmp_path, nnodes=1)
+
+    assert result.status == "incomplete"
+    assert result.nodes_observed == 0
+    assert result.reasons == (reason,)

@@ -50,6 +50,10 @@ from traceml_ai.launcher.process import (
     TrainingOutcome,
     ensure_aggregator_port_free,
 )
+from traceml_ai.regression.outcome import (
+    GuardTrainingResult,
+    NodeTrainingOutcome,
+)
 from traceml_ai.runtime.settings import (
     DEFAULT_FINALIZE_TIMEOUT_SEC,
     resolve_on_missing_aggregator,
@@ -860,9 +864,10 @@ def test_guard_contract_is_captured_once_for_multi_node_run(
     start_training.assert_not_called()
 
 
+@pytest.mark.parametrize("training_returncode", [0, 17])
 @pytest.mark.parametrize("recording_fails", [False, True])
 def test_guarded_node_records_training_outcome_without_changing_exit_code(
-    monkeypatch, tmp_path, capsys, recording_fails
+    monkeypatch, tmp_path, capsys, recording_fails, training_returncode
 ) -> None:
     monkeypatch.chdir(tmp_path)
     script = tmp_path / "train.py"
@@ -882,6 +887,7 @@ def test_guarded_node_records_training_outcome_without_changing_exit_code(
         json.dumps(
             {
                 "session_id": "guarded-run",
+                "run": {"run_name": "guarded-run"},
                 "created_at": "2026-09-26T10:00:00+00:00",
             }
         ),
@@ -906,8 +912,8 @@ def test_guarded_node_records_training_outcome_without_changing_exit_code(
             "--no-save-training-output",
         ]
     )
-    training = Mock(returncode=0)
-    training.poll.return_value = 0
+    training = Mock(returncode=training_returncode)
+    training.poll.return_value = training_returncode
 
     monkeypatch.setattr(launcher_commands, "setup_error_logger", Mock())
     monkeypatch.setattr(launcher_commands, "install_shutdown_handlers", Mock())
@@ -934,7 +940,7 @@ def test_guarded_node_records_training_outcome_without_changing_exit_code(
     with pytest.raises(SystemExit) as exc:
         launch_process(str(script), args)
 
-    assert exc.value.code == 0
+    assert exc.value.code == training_returncode
     outcome_path = session_root / "nodes" / "node_1" / "guard_outcome.json"
     if recording_fails:
         assert not outcome_path.exists()
@@ -944,7 +950,122 @@ def test_guarded_node_records_training_outcome_without_changing_exit_code(
     else:
         outcome = json.loads(outcome_path.read_text(encoding="utf-8"))
         assert outcome["node_rank"] == 1
-        assert outcome["training"] == {"status": "completed", "exit_code": 0}
+        assert outcome["training"] == {
+            "status": ("completed" if training_returncode == 0 else "failed"),
+            "exit_code": training_returncode,
+        }
+
+
+@pytest.mark.parametrize("collection_fails", [False, True])
+def test_guarded_root_consolidates_node_outcomes_before_shutdown(
+    monkeypatch, tmp_path, capsys, collection_fails
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    script = tmp_path / "train.py"
+    script.write_text("print('unused')\n", encoding="utf-8")
+    _write_guard_config(
+        tmp_path,
+        "  schema_version: 1\n"
+        "  workload:\n"
+        "    name: multi-node-smoke\n"
+        "  measurement:\n"
+        "    start_step: 1\n"
+        "    completed_steps: 5\n",
+    )
+    args = build_parser().parse_args(
+        [
+            "run",
+            str(script),
+            "--nnodes",
+            "2",
+            "--node-rank",
+            "0",
+            "--nproc-per-node",
+            "1",
+            "--run-name",
+            "guarded-run",
+            "--logs-dir",
+            str(tmp_path / "logs"),
+            "--no-save-training-output",
+        ]
+    )
+    aggregator = Mock(pid=10, returncode=0)
+    training = Mock(returncode=0)
+    training.poll.return_value = 0
+    aggregator_output = Mock()
+    aggregator_output.finish.return_value = ProcessOutputResult(
+        stdout_path=None,
+        stderr_path=None,
+        stderr_tail=b"",
+        warning=None,
+    )
+    collected = GuardTrainingResult(
+        status="completed",
+        nodes_expected=2,
+        nodes_observed=2,
+        reasons=(),
+        nodes=(
+            NodeTrainingOutcome(node_rank=0, exit_code=0),
+            NodeTrainingOutcome(node_rank=1, exit_code=0),
+        ),
+    )
+    events: list[str] = []
+    collect = Mock(return_value=collected)
+    if collection_fails:
+        collect.side_effect = OSError("shared run directory unavailable")
+
+    def stop_aggregator(*_args, **_kwargs) -> None:
+        events.append("stop")
+
+    def collect_outcomes(**_kwargs):
+        events.append("collect")
+        return collect(**_kwargs)
+
+    update_manifest = Mock()
+    replacements = {
+        "setup_error_logger": Mock(),
+        "install_shutdown_handlers": Mock(),
+        "write_code_manifest": Mock(return_value=None),
+        "write_run_manifest": Mock(return_value=tmp_path / "manifest.json"),
+        "update_run_manifest": update_manifest,
+        "ensure_aggregator_port_free": Mock(),
+        "start_aggregator_process": Mock(return_value=aggregator),
+        "_start_aggregator_output": Mock(return_value=aggregator_output),
+        "wait_for_tcp_listen": Mock(return_value=True),
+        "start_training_process": Mock(return_value=training),
+        "terminate_process_group": Mock(side_effect=stop_aggregator),
+        "write_guard_outcome": Mock(),
+        "collect_guard_outcomes": Mock(side_effect=collect_outcomes),
+    }
+    for name, replacement in replacements.items():
+        monkeypatch.setattr(launcher_commands, name, replacement)
+
+    with pytest.raises(SystemExit) as exc:
+        launch_process(str(script), args)
+
+    assert exc.value.code == 0
+    assert events == ["collect", "stop"]
+    collect_kwargs = collect.call_args.kwargs
+    assert collect_kwargs["run_name"] == "guarded-run"
+    assert collect_kwargs["nnodes"] == 2
+    assert collect_kwargs["nproc_per_node"] == 1
+    assert collect_kwargs["timeout_s"] > 0
+
+    final_update = update_manifest.call_args_list[-1].kwargs
+    training_result = final_update["extra"]["guard"]["training"]
+    if collection_fails:
+        assert training_result == {
+            "status": "incomplete",
+            "nodes_expected": 2,
+            "nodes_observed": 0,
+            "reasons": ["node_outcome_collection_failed"],
+            "nodes": [],
+        }
+        assert "failed to collect guarded training outcomes" in (
+            capsys.readouterr().err
+        )
+    else:
+        assert training_result == collected.to_dict()
 
 
 def test_watch_ignores_guard_semantics(monkeypatch, tmp_path) -> None:

@@ -53,6 +53,8 @@ from traceml_ai.launcher.process import (
 from traceml_ai.loggers.error_log import get_error_logger, setup_error_logger
 from traceml_ai.regression.outcome import (
     OUTCOME_FILENAME,
+    GuardTrainingResult,
+    collect_guard_outcomes,
     write_guard_outcome,
 )
 from traceml_ai.runtime.launch_context import LaunchContext
@@ -862,6 +864,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     telemetry_startup_reason: Optional[str] = None
     port_conflict_detail: Optional[str] = None
     guard_outcome_written = False
+    guard_training_result: Optional[GuardTrainingResult] = None
 
     def record_guard_outcome(returncode: Optional[int] = None) -> None:
         """Persist this node's training result once, without changing it."""
@@ -892,6 +895,56 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
             "failed to record the guarded training outcome", write
         )
 
+    def collect_guard_training(timeout_s: float) -> None:
+        """Collect node outcomes once on the root launcher."""
+        nonlocal guard_training_result
+        if (
+            guard_contract is None
+            or not is_root_writer
+            or guard_training_result is not None
+        ):
+            return
+        try:
+            guard_training_result = collect_guard_outcomes(
+                session_root=session_root,
+                run_name=run_identity.run_name,
+                nnodes=torchrun_cfg.nnodes,
+                nproc_per_node=torchrun_cfg.nproc_per_node,
+                contract=guard_contract,
+                timeout_s=timeout_s,
+            )
+        except Exception as exc:
+            _log_launcher_exception(
+                "failed to collect guarded training outcomes", exc
+            )
+            print(
+                "[TraceML] WARNING: failed to collect guarded training "
+                f"outcomes: {exc}",
+                file=sys.stderr,
+            )
+            guard_training_result = GuardTrainingResult(
+                status="incomplete",
+                nodes_expected=torchrun_cfg.nnodes,
+                nodes_observed=0,
+                reasons=("node_outcome_collection_failed",),
+                nodes=(),
+            )
+
+        result = guard_training_result
+        if result.status == "completed":
+            print(
+                "[TraceML] Guarded training outcomes complete "
+                f"({result.nodes_observed}/{result.nodes_expected} nodes).",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "[TraceML] WARNING: guarded training outcomes incomplete "
+                f"({result.nodes_observed}/{result.nodes_expected} nodes; "
+                f"reasons={','.join(result.reasons)}).",
+                file=sys.stderr,
+            )
+
     def finish_aggregator_output() -> Optional[ProcessOutputResult]:
         nonlocal aggregator_output_result
         nonlocal confirmed_aggregator_stderr_path
@@ -916,6 +969,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         # Signal teardown reaches this callback after reaping the training
         # process, so interrupted guarded runs can record their real exit code.
         record_guard_outcome()
+        collect_guard_training(timeout_s=0.0)
         training_result = (
             training_output.finish() if training_output is not None else None
         )
@@ -937,8 +991,21 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                         if path is not None
                     }
                 )
-            if artifacts:
-                update_run_manifest(manifest_path, artifacts=artifacts)
+            extra = None
+            if (
+                guard_contract is not None
+                and guard_training_result is not None
+            ):
+                extra = {
+                    "guard": {
+                        "contract": guard_contract.to_dict(),
+                        "training": guard_training_result.to_dict(),
+                    }
+                }
+            if artifacts or extra:
+                update_run_manifest(
+                    manifest_path, artifacts=artifacts, extra=extra
+                )
 
     def aggregator_output_artifacts() -> Optional[dict[str, str]]:
         if confirmed_aggregator_stderr_path is None:
@@ -1116,6 +1183,9 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         if train_rc is not None:
             outcome = TrainingOutcome(train_rc)
             record_guard_outcome(train_rc)
+            collect_guard_training(
+                timeout_s=float(env["TRACEML_FINALIZE_TIMEOUT_SEC"])
+            )
             if manifest_path is not None:
                 _run_noncritical_launcher_step(
                     "failed to record the training end time",
@@ -1204,6 +1274,17 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                         telemetry_status=telemetry_status,
                         telemetry_reason=telemetry_reason,
                         aggregator_exit_code=aggregator_exit_code,
+                        extra=(
+                            {
+                                "guard": {
+                                    "contract": guard_contract.to_dict(),
+                                    "training": guard_training_result.to_dict(),
+                                }
+                            }
+                            if guard_contract is not None
+                            and guard_training_result is not None
+                            else None
+                        ),
                     ),
                 )
             _print_training_output(
