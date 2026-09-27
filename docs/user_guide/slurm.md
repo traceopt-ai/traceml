@@ -32,7 +32,7 @@ telemetry **aggregator**:
 | `--node-rank` | `$SLURM_NODEID` | Per-node rank `0..N-1`. Valid when you run **one task per node**. |
 | `--nproc-per-node` | `$SLURM_GPUS_ON_NODE` | GPUs allocated on this node → one worker per GPU. |
 | `--master-addr` | first host of `$SLURM_JOB_NODELIST` | `scontrol show hostnames "$SLURM_JOB_NODELIST" \| head -n 1`. |
-| `--run-name` | e.g. `ddp-$SLURM_JOB_ID` | Required for multi-node; must match on every node. |
+| `--run-name` | e.g. `ddp-$SLURM_JOB_ID-$SLURM_RESTART_COUNT` | Required for multi-node; must match on every node and be new for each launch. |
 
 !!! note "Why `SLURM_GPUS_ON_NODE`?"
     Prefer `SLURM_GPUS_ON_NODE` over `SLURM_GPUS_PER_NODE`. The latter is only
@@ -177,7 +177,7 @@ set -euo pipefail
 # export NCCL_DEBUG=INFO
 
 export MASTER_ADDR="$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)"
-export RUN_NAME="ddp-${SLURM_JOB_ID}"
+export RUN_NAME="ddp-${SLURM_JOB_ID}-${SLURM_RESTART_COUNT:-0}"
 
 cd "$SLURM_SUBMIT_DIR"
 srun examples/slurm/launch.sh
@@ -226,7 +226,11 @@ or set `TRACEML_FINALIZE_TIMEOUT_SEC`.
       before `srun`. If `traceml` is not found on the worker nodes, also
       activate the environment inside `launch.sh`.
     - **Shared filesystem.** `launch.sh`, your training script, and `--logs-dir`
-      should live on storage visible to every node.
+      should live on storage visible to every node. For `--logs-dir` this is
+      required: node 0 creates the run folder and the other nodes join it.
+    - **Requeued jobs.** A requeued job keeps its job id, so the run name also
+      uses `SLURM_RESTART_COUNT`. TraceML refuses a run name whose folder
+      already exists.
     - **Firewall.** Allow inbound traffic to node 0 on the `torchrun` master
       port (`29500`) and the aggregator port (`29765`).
     - **NCCL.** If multi-node NCCL hangs or fails to connect, pin the network

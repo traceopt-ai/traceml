@@ -72,8 +72,8 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         default="",
         help=(
             "Human-readable TraceML run name. Determines the output folder "
-            "under --logs-dir. Required for multi-node runs unless "
-            "--session-id is used."
+            "under --logs-dir, which must not already exist. Required for "
+            "multi-node runs unless --session-id is used."
         ),
     )
     parser.add_argument(

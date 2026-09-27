@@ -50,6 +50,7 @@ from traceml_ai.launcher.process import (
     TrainingOutcome,
     ensure_aggregator_port_free,
 )
+from traceml_ai.launcher.run_directory import reserve_run_root
 from traceml_ai.runtime.settings import (
     DEFAULT_FINALIZE_TIMEOUT_SEC,
     resolve_on_missing_aggregator,
@@ -1160,8 +1161,13 @@ def test_started_training_result_is_authoritative(
         / "aggregator"
         / "process.stderr.log"
     )
-    aggregator_stderr_path.parent.mkdir(parents=True)
-    aggregator_stderr_path.write_bytes(b"aggregator details\n")
+
+    def start_aggregator(**_kwargs):
+        # Written after node 0 reserved the run directory.
+        aggregator_stderr_path.parent.mkdir(parents=True)
+        aggregator_stderr_path.write_bytes(b"aggregator details\n")
+        return aggregator
+
     aggregator_output_result = ProcessOutputResult(
         stdout_path=None,
         stderr_path=aggregator_stderr_path,
@@ -1199,7 +1205,7 @@ def test_started_training_result_is_authoritative(
     replacements = {
         "install_shutdown_handlers": Mock(),
         "ensure_aggregator_port_free": Mock(),
-        "start_aggregator_process": Mock(return_value=aggregator),
+        "start_aggregator_process": Mock(side_effect=start_aggregator),
         "wait_for_tcp_listen": Mock(return_value=True),
         "start_training_process": Mock(return_value=training),
         "_start_aggregator_output": Mock(return_value=aggregator_output),
@@ -1439,6 +1445,8 @@ def test_strict_aggregator_failure_does_not_start_training(
     else:
         start_aggregator.assert_not_called()
         update_manifest.assert_not_called()
+        # A non-root launcher never creates the run directory itself.
+        assert not (tmp_path / "logs" / "strict-run").exists()
 
 
 def test_stderr_from_process_exiting_before_readiness_is_exact(
@@ -1640,6 +1648,24 @@ def test_aggregator_port_probe_releases_a_free_port() -> None:
     server.stop()
 
 
+def _reserve_as_node_zero(run_root: Path, *, status: str = "running") -> None:
+    """Stand in for node 0: reserve the run directory and write its manifest."""
+    reserve_run_root(run_root)
+    (run_root / "manifest.json").write_text(
+        json.dumps({"status": status, "run": {"launch_id": "node0"}}),
+        encoding="utf-8",
+    )
+
+
+def _tree(root: Path) -> dict[str, bytes]:
+    return {
+        str(path.relative_to(root)): (
+            path.read_bytes() if path.is_file() else b"<dir>"
+        )
+        for path in sorted(root.rglob("*"))
+    }
+
+
 @pytest.mark.parametrize(
     ("owner", "ready"),
     [(True, False), (False, False), (False, True)],
@@ -1707,6 +1733,8 @@ def test_launcher_scopes_telemetry_health_to_aggregator_owner(
         return training
 
     monkeypatch.chdir(tmp_path)
+    if not owner:
+        _reserve_as_node_zero(tmp_path / "logs" / "warn-run")
     setup_error_logger = Mock()
     monkeypatch.setattr(
         launcher_commands, "setup_error_logger", setup_error_logger
@@ -1838,6 +1866,189 @@ def test_launcher_scopes_telemetry_health_to_aggregator_owner(
         assert (
             install_shutdown_handlers.call_args.kwargs["manifest_path"] is None
         )
+
+
+def _node_args(script: Path, logs_dir: Path, run_name: str, node_rank: int):
+    return build_parser().parse_args(
+        [
+            "run",
+            str(script),
+            "--logs-dir",
+            str(logs_dir),
+            "--run-name",
+            run_name,
+            "--nnodes",
+            "2",
+            "--node-rank",
+            str(node_rank),
+        ]
+    )
+
+
+@pytest.mark.parametrize("flag", ["--run-name", "--session-id"])
+def test_existing_run_directory_is_left_untouched(
+    monkeypatch, tmp_path, flag
+) -> None:
+    script = tmp_path / "train.py"
+    script.write_text("print('train')\n", encoding="utf-8")
+    run_root = tmp_path / "logs" / "taken"
+    (run_root / "aggregator").mkdir(parents=True)
+    (run_root / "aggregator" / "telemetry").write_bytes(b"old telemetry")
+    (run_root / "manifest.json").write_text(
+        '{"status": "completed"}', encoding="utf-8"
+    )
+    before = _tree(run_root)
+    forbidden = {
+        name: Mock(side_effect=AssertionError(name))
+        for name in (
+            "setup_error_logger",
+            "write_code_manifest",
+            "write_run_manifest",
+            "ensure_aggregator_port_free",
+            "start_aggregator_process",
+            "start_training_process",
+        )
+    }
+    for name, replacement in forbidden.items():
+        monkeypatch.setattr(launcher_commands, name, replacement)
+    monkeypatch.chdir(tmp_path)
+    args = build_parser().parse_args(
+        [
+            "run",
+            str(script),
+            "--logs-dir",
+            str(tmp_path / "logs"),
+            flag,
+            "taken",
+        ]
+    )
+
+    with pytest.raises(SystemExit, match="run directory already exists"):
+        launch_process(str(script), args)
+
+    assert _tree(run_root) == before
+    for replacement in forbidden.values():
+        replacement.assert_not_called()
+
+
+def test_non_root_launcher_needs_node_zero_reservation(
+    monkeypatch, tmp_path
+) -> None:
+    script = tmp_path / "train.py"
+    script.write_text("print('train')\n", encoding="utf-8")
+    start_training = Mock()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(launcher_commands, "install_shutdown_handlers", Mock())
+    monkeypatch.setattr(
+        launcher_commands, "wait_for_tcp_listen", Mock(return_value=True)
+    )
+    monkeypatch.setattr(
+        launcher_commands, "start_training_process", start_training
+    )
+
+    with pytest.raises(SystemExit, match="node 0 has not reserved"):
+        launch_process(
+            str(script), _node_args(script, tmp_path / "logs", "free", 1)
+        )
+
+    assert not (tmp_path / "logs").exists()
+    start_training.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("status", "node_one_exists"),
+    [("completed", False), ("running", True)],
+)
+def test_non_root_launcher_refuses_an_earlier_run(
+    monkeypatch, tmp_path, status, node_one_exists
+) -> None:
+    script = tmp_path / "train.py"
+    script.write_text("print('train')\n", encoding="utf-8")
+    run_root = tmp_path / "logs" / "old-run"
+    _reserve_as_node_zero(run_root, status=status)
+    if node_one_exists:
+        (run_root / "nodes" / "node_1").mkdir()
+    before = _tree(run_root)
+    start_training = Mock()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(launcher_commands, "install_shutdown_handlers", Mock())
+    monkeypatch.setattr(
+        launcher_commands, "wait_for_tcp_listen", Mock(return_value=True)
+    )
+    monkeypatch.setattr(
+        launcher_commands, "start_training_process", start_training
+    )
+
+    with pytest.raises(SystemExit, match="belongs to an earlier launch"):
+        launch_process(
+            str(script), _node_args(script, tmp_path / "logs", "old-run", 1)
+        )
+
+    assert _tree(run_root) == before
+    start_training.assert_not_called()
+
+
+def test_multinode_nodes_share_one_run_directory(
+    monkeypatch, tmp_path
+) -> None:
+    script = tmp_path / "train.py"
+    script.write_text("print('train')\n", encoding="utf-8")
+    logs_dir = tmp_path / "logs"
+    node_one_exit = []
+
+    def start_training(*, train_cmd, env, cwd, capture_output):
+        if env["TRACEML_NODE_RANK"] == "0":
+            # Node 1 joins while node 0 is running.
+            with pytest.raises(SystemExit) as exc:
+                launch_process(
+                    str(script), _node_args(script, logs_dir, "shared", 1)
+                )
+            node_one_exit.append(exc.value.code)
+        return Mock(**{"poll.return_value": 0})
+
+    def output_drainer(*_args, **_kwargs):
+        return Mock(
+            **{
+                "finish.return_value": ProcessOutputResult(
+                    stdout_path=None,
+                    stderr_path=None,
+                    stderr_tail=b"",
+                    warning=None,
+                )
+            }
+        )
+
+    replacements = {
+        "install_shutdown_handlers": Mock(),
+        "setup_error_logger": Mock(),
+        "write_code_manifest": Mock(return_value=None),
+        "ensure_aggregator_port_free": Mock(),
+        "start_aggregator_process": Mock(
+            return_value=Mock(
+                pid=10, returncode=0, **{"poll.return_value": None}
+            )
+        ),
+        "wait_for_tcp_listen": Mock(return_value=True),
+        "start_training_process": start_training,
+        "_start_aggregator_output": output_drainer,
+        "_start_training_output": output_drainer,
+        "terminate_process_group": Mock(),
+    }
+    for name, replacement in replacements.items():
+        monkeypatch.setattr(launcher_commands, name, replacement)
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(SystemExit) as exc:
+        launch_process(str(script), _node_args(script, logs_dir, "shared", 0))
+
+    assert exc.value.code == 0
+    assert node_one_exit == [0]
+    run_root = logs_dir / "shared"
+    assert (run_root / "nodes" / "node_0").is_dir()
+    assert (run_root / "nodes" / "node_1").is_dir()
+    manifest = json.loads((run_root / "manifest.json").read_text("utf-8"))
+    assert manifest["run"]["launch_id"]
+    assert manifest["launch"]["node_rank"] == 0
 
 
 @pytest.mark.parametrize(

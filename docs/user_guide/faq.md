@@ -195,6 +195,10 @@ yet supported.
 `--session-id` remains accepted as a backward-compatible alias for
 `--run-name`.
 
+Pick a new `--run-name` for each launch. TraceML refuses to start if
+`<logs-dir>/<run-name>` already exists, and leaves that folder untouched. For
+multi-node runs, `--logs-dir` must be on storage that every node can see.
+
 ---
 
 ## Does TraceML support FSDP?
