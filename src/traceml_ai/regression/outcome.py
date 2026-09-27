@@ -21,6 +21,14 @@ OUTCOME_FILENAME = "guard_outcome.json"
 OUTCOME_SCHEMA_VERSION = 1
 
 
+class OutcomeValidationError(ValueError):
+    """Raised when a node outcome is invalid or belongs to another run."""
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
 def contract_digest(contract: MeasurementContract) -> str:
     """Return a stable digest of one normalized measurement contract."""
     encoded = json.dumps(
@@ -45,6 +53,82 @@ def _manifest_created_at(manifest_path: Path, session_id: str) -> str:
     if not isinstance(created_at, str) or not created_at:
         raise ValueError("root manifest is missing created_at")
     return created_at
+
+
+def validate_guard_outcome_binding(
+    outcome: Any,
+    *,
+    session_id: str,
+    manifest_created_at: str,
+    node_rank: int,
+    nnodes: int,
+    nproc_per_node: int,
+    contract: MeasurementContract,
+) -> None:
+    """Require a node outcome to belong to the expected guarded run.
+
+    Session and manifest identity distinguish a new run from files left in a
+    reused run directory. Topology and contract checks then ensure that every
+    accepted node participated in the same launch and measurement declaration.
+    Parsing the training result belongs to node-0 collection, which consumes
+    this binding check before accepting an outcome.
+    """
+    if not isinstance(outcome, dict):
+        raise OutcomeValidationError(
+            "node_outcome_invalid",
+            "node outcome must contain a JSON object",
+        )
+    schema_version = outcome.get("schema_version")
+    if (
+        isinstance(schema_version, bool)
+        or schema_version != OUTCOME_SCHEMA_VERSION
+    ):
+        raise OutcomeValidationError(
+            "node_outcome_invalid",
+            "node outcome schema version is unsupported",
+        )
+
+    if not isinstance(outcome.get("session_id"), str) or not isinstance(
+        outcome.get("manifest_created_at"), str
+    ):
+        raise OutcomeValidationError(
+            "node_outcome_invalid", "node outcome run identity is invalid"
+        )
+    if (
+        outcome["session_id"] != session_id
+        or outcome["manifest_created_at"] != manifest_created_at
+    ):
+        raise OutcomeValidationError(
+            "node_outcome_stale", "node outcome belongs to another run"
+        )
+
+    topology = tuple(
+        outcome.get(field)
+        for field in ("node_rank", "nnodes", "nproc_per_node")
+    )
+    if any(
+        isinstance(value, bool) or not isinstance(value, int)
+        for value in topology
+    ):
+        raise OutcomeValidationError(
+            "node_outcome_invalid", "node outcome launch topology is invalid"
+        )
+    if topology != (node_rank, nnodes, nproc_per_node):
+        raise OutcomeValidationError(
+            "node_outcome_conflict",
+            "node outcome conflicts with the captured launch topology",
+        )
+
+    digest = outcome.get("contract_digest")
+    if not isinstance(digest, str):
+        raise OutcomeValidationError(
+            "node_outcome_invalid", "node outcome contract digest is invalid"
+        )
+    if digest != contract_digest(contract):
+        raise OutcomeValidationError(
+            "node_outcome_conflict",
+            "node outcome conflicts with the captured measurement contract",
+        )
 
 
 def write_guard_outcome(
@@ -83,6 +167,8 @@ def write_guard_outcome(
 __all__ = [
     "OUTCOME_FILENAME",
     "OUTCOME_SCHEMA_VERSION",
+    "OutcomeValidationError",
     "contract_digest",
+    "validate_guard_outcome_binding",
     "write_guard_outcome",
 ]

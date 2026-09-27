@@ -169,6 +169,10 @@ completion time. It excludes command arguments, paths, hostnames, environment
 contents, device identifiers, and credentials. Exit code `0` records completed
 training; any other observed exit code records failed training.
 
+The session, manifest creation time, topology, and contract digest are checked
+together, so a file left in a reused run directory cannot be accepted as an
+outcome for the current launch.
+
 This outcome is node scoped. A later guard stage consolidates the expected
 node files on node 0. Failure to write this auxiliary record emits a warning
 but never replaces the supervised training command's exit code.

@@ -16,7 +16,9 @@ import pytest
 from traceml_ai.regression.contract import parse_guard_contract
 from traceml_ai.regression.outcome import (
     OUTCOME_SCHEMA_VERSION,
+    OutcomeValidationError,
     contract_digest,
+    validate_guard_outcome_binding,
     write_guard_outcome,
 )
 
@@ -108,3 +110,105 @@ def test_write_guard_outcome_requires_current_root_manifest(
         )
 
     assert not (tmp_path / "guard_outcome.json").exists()
+
+
+def _write_current_outcome(tmp_path):
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "session_id": "guarded-run",
+                "created_at": "2026-09-26T10:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+    outcome_path = tmp_path / "guard_outcome.json"
+    contract = _contract()
+    write_guard_outcome(
+        path=outcome_path,
+        manifest_path=manifest_path,
+        session_id="guarded-run",
+        node_rank=1,
+        nnodes=2,
+        nproc_per_node=4,
+        contract=contract,
+        exit_code=0,
+    )
+    return outcome_path, contract
+
+
+def _validate_current_outcome(outcome_path, contract):
+    payload = json.loads(outcome_path.read_text(encoding="utf-8"))
+    return validate_guard_outcome_binding(
+        payload,
+        session_id="guarded-run",
+        manifest_created_at="2026-09-26T10:00:00+00:00",
+        node_rank=1,
+        nnodes=2,
+        nproc_per_node=4,
+        contract=contract,
+    )
+
+
+def test_outcome_binding_accepts_current_run_identity(tmp_path) -> None:
+    outcome_path, contract = _write_current_outcome(tmp_path)
+
+    assert _validate_current_outcome(outcome_path, contract) is None
+
+
+@pytest.mark.parametrize("field", ["session_id", "manifest_created_at"])
+def test_outcome_binding_rejects_stale_run_identity(tmp_path, field) -> None:
+    outcome_path, contract = _write_current_outcome(tmp_path)
+    payload = json.loads(outcome_path.read_text(encoding="utf-8"))
+    payload[field] = "previous-run"
+    outcome_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(OutcomeValidationError) as caught:
+        _validate_current_outcome(outcome_path, contract)
+
+    assert caught.value.reason == "node_outcome_stale"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("node_rank", 0),
+        ("nnodes", 3),
+        ("nproc_per_node", 8),
+        ("contract_digest", "sha256:" + "0" * 64),
+    ],
+)
+def test_outcome_binding_rejects_conflicting_run_facts(
+    tmp_path, field, value
+) -> None:
+    outcome_path, contract = _write_current_outcome(tmp_path)
+    payload = json.loads(outcome_path.read_text(encoding="utf-8"))
+    payload[field] = value
+    outcome_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(OutcomeValidationError) as caught:
+        _validate_current_outcome(outcome_path, contract)
+
+    assert caught.value.reason == "node_outcome_conflict"
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda payload: payload.update(schema_version=True),
+        lambda payload: payload.pop("session_id"),
+        lambda payload: payload.update(node_rank="1"),
+        lambda payload: payload.update(contract_digest=None),
+    ],
+)
+def test_outcome_binding_rejects_malformed_records(tmp_path, change) -> None:
+    outcome_path, contract = _write_current_outcome(tmp_path)
+    payload = json.loads(outcome_path.read_text(encoding="utf-8"))
+    change(payload)
+    outcome_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(OutcomeValidationError) as caught:
+        _validate_current_outcome(outcome_path, contract)
+
+    assert caught.value.reason == "node_outcome_invalid"
