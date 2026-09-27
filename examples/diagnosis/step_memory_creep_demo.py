@@ -1,14 +1,30 @@
-"""
-Memory-creep synthetic-MLP DDP scenario for TraceOpt demo data.
+"""Step-memory creep demo for the STEP MEMORY diagnosis.
 
-This keeps the healthy baseline data, model, loss, and DDP loop, but retains a
-small CUDA tensor every step on every rank. The leak is intentionally uniform
-across ranks and below high-pressure thresholds, so TraceML should report
-MEMORY CREEP rather than rank imbalance or near-OOM pressure.
+This synthetic-MLP DDP loop retains a small CUDA tensor every step on every
+rank. The leak is intentionally uniform across ranks and below high-pressure
+thresholds, so TraceML should report MEMORY CREEP rather than rank imbalance
+or near-OOM pressure.
+
+Requires a CUDA GPU for the verdict. Step memory is read from torch's CUDA
+memory statistics, so on CPU the script still runs but leaks nothing, and
+the STEP MEMORY section reports NO GPU.
+
+Run with::
+
+    traceml run examples/diagnosis/step_memory_creep_demo.py \
+        --args --steps 300
+    traceml run examples/diagnosis/step_memory_creep_demo.py \
+        --nproc-per-node=2 --args --steps 300
+
+A few hundred steps is enough: confirmed creep needs at least 50 steps and
+a rise of about 1 GiB per rank across the analyzed window, and the leak
+adds 8 MiB per step. Without ``--steps`` or ``--epochs`` the demo runs two
+epochs (1024 steps on one rank), which retains about 8 GiB per rank.
 """
 
 from __future__ import annotations
 
+import argparse
 import os
 import random
 
@@ -36,6 +52,37 @@ LOG_EVERY_STEPS = 50
 # for confirmed creep while staying far below high-pressure memory thresholds.
 LEAK_MIB_PER_STEP = 8
 LEAK_BYTES_PER_STEP = LEAK_MIB_PER_STEP * 1024 * 1024
+
+
+def positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    length = parser.add_mutually_exclusive_group()
+    length.add_argument(
+        "--epochs",
+        type=positive_int,
+        default=EPOCHS,
+        help="Number of full epochs to run.",
+    )
+    length.add_argument(
+        "--steps",
+        type=positive_int,
+        default=None,
+        help=(
+            "Number of optimizer steps per rank. Replaces --epochs; by "
+            "default, run --epochs full epochs."
+        ),
+    )
+    return parser.parse_args()
 
 
 class BaselineMLP(nn.Module):
@@ -126,6 +173,7 @@ def prepare_data(rank: int, world_size: int):
 
 
 def main() -> None:
+    args = parse_args()
     rank = int(os.environ.get("RANK", 0))
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     world_size = int(os.environ.get("WORLD_SIZE", 1))
@@ -170,12 +218,16 @@ def main() -> None:
     retained_tensors: list[torch.Tensor] = []
 
     model.train()
-    total_steps = EPOCHS * len(train_loader)
+    epochs = args.epochs
+    total_steps = epochs * len(train_loader)
+    if args.steps is not None:
+        epochs = (args.steps + len(train_loader) - 1) // len(train_loader)
+        total_steps = args.steps
     global_step = 0
     running_loss = 0.0
     running_acc = 0.0
 
-    for epoch in range(EPOCHS):
+    for epoch in range(epochs):
         train_sampler.set_epoch(epoch)
 
         for features, labels in train_loader:
@@ -222,6 +274,9 @@ def main() -> None:
                 )
                 running_loss = 0.0
                 running_acc = 0.0
+
+            if args.steps is not None and global_step >= args.steps:
+                break
 
     if rank == 0:
         print("[memory-creep] done")
