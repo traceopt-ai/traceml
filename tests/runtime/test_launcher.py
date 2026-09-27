@@ -760,6 +760,55 @@ def test_guard_rejects_unsupported_launch_before_processes(
         replacement.assert_not_called()
 
 
+def test_guarded_root_refuses_an_existing_run_manifest_before_side_effects(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    script = tmp_path / "train.py"
+    script.write_text("print('unused')\n", encoding="utf-8")
+    _write_guard_config(
+        tmp_path,
+        "  schema_version: 1\n"
+        "  workload:\n"
+        "    name: smoke\n"
+        "  measurement:\n"
+        "    start_step: 1\n"
+        "    completed_steps: 5\n",
+    )
+    manifest_path = tmp_path / "logs" / "guarded-run" / "manifest.json"
+    manifest_path.parent.mkdir(parents=True)
+    original_manifest = '{"existing": true}\n'
+    manifest_path.write_text(original_manifest, encoding="utf-8")
+    args = build_parser().parse_args(
+        [
+            "run",
+            str(script),
+            "--run-name",
+            "guarded-run",
+            "--logs-dir",
+            str(tmp_path / "logs"),
+        ]
+    )
+    forbidden = _forbid_guard_launch_side_effects(monkeypatch)
+    setup_logger = Mock(side_effect=AssertionError("logger"))
+    write_code_manifest = Mock(side_effect=AssertionError("code manifest"))
+    monkeypatch.setattr(launcher_commands, "setup_error_logger", setup_logger)
+    monkeypatch.setattr(
+        launcher_commands, "write_code_manifest", write_code_manifest
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        launch_process(str(script), args)
+
+    assert exc.value.code == 1
+    assert "guarded run name already exists" in capsys.readouterr().err
+    assert manifest_path.read_text(encoding="utf-8") == original_manifest
+    setup_logger.assert_not_called()
+    write_code_manifest.assert_not_called()
+    for replacement in forbidden.values():
+        replacement.assert_not_called()
+
+
 def test_guard_contract_is_captured_once_for_multi_node_run(
     monkeypatch, tmp_path, capsys
 ) -> None:
@@ -956,9 +1005,28 @@ def test_guarded_node_records_training_outcome_without_changing_exit_code(
         }
 
 
-@pytest.mark.parametrize("collection_fails", [False, True])
+@pytest.mark.parametrize(
+    (
+        "training_returncode",
+        "recording_fails",
+        "collection_fails",
+        "expects_wait",
+    ),
+    [
+        (0, False, False, True),
+        (17, False, False, False),
+        (0, True, False, False),
+        (0, False, True, True),
+    ],
+)
 def test_guarded_root_consolidates_node_outcomes_before_shutdown(
-    monkeypatch, tmp_path, capsys, collection_fails
+    monkeypatch,
+    tmp_path,
+    capsys,
+    training_returncode,
+    recording_fails,
+    collection_fails,
+    expects_wait,
 ) -> None:
     monkeypatch.chdir(tmp_path)
     script = tmp_path / "train.py"
@@ -990,8 +1058,8 @@ def test_guarded_root_consolidates_node_outcomes_before_shutdown(
         ]
     )
     aggregator = Mock(pid=10, returncode=0)
-    training = Mock(returncode=0)
-    training.poll.return_value = 0
+    training = Mock(returncode=training_returncode)
+    training.poll.return_value = training_returncode
     aggregator_output = Mock()
     aggregator_output.finish.return_value = ProcessOutputResult(
         stdout_path=None,
@@ -999,15 +1067,29 @@ def test_guarded_root_consolidates_node_outcomes_before_shutdown(
         stderr_tail=b"",
         warning=None,
     )
-    collected = GuardTrainingResult(
-        status="completed",
-        nodes_expected=2,
-        nodes_observed=2,
-        reasons=(),
-        nodes=(
+    if recording_fails:
+        collected_nodes = ()
+        collected_reasons = ("node_outcome_missing",)
+    elif training_returncode != 0:
+        collected_nodes = (
+            NodeTrainingOutcome(node_rank=0, exit_code=training_returncode),
+        )
+        collected_reasons = (
+            "node_training_failed",
+            "node_outcome_missing",
+        )
+    else:
+        collected_nodes = (
             NodeTrainingOutcome(node_rank=0, exit_code=0),
             NodeTrainingOutcome(node_rank=1, exit_code=0),
-        ),
+        )
+        collected_reasons = ()
+    collected = GuardTrainingResult(
+        status="completed" if not collected_reasons else "incomplete",
+        nodes_expected=2,
+        nodes_observed=len(collected_nodes),
+        reasons=collected_reasons,
+        nodes=collected_nodes,
     )
     events: list[str] = []
     collect = Mock(return_value=collected)
@@ -1034,7 +1116,13 @@ def test_guarded_root_consolidates_node_outcomes_before_shutdown(
         "wait_for_tcp_listen": Mock(return_value=True),
         "start_training_process": Mock(return_value=training),
         "terminate_process_group": Mock(side_effect=stop_aggregator),
-        "write_guard_outcome": Mock(),
+        "write_guard_outcome": Mock(
+            side_effect=(
+                OSError("shared run directory unavailable")
+                if recording_fails
+                else None
+            )
+        ),
         "collect_guard_outcomes": Mock(side_effect=collect_outcomes),
     }
     for name, replacement in replacements.items():
@@ -1043,16 +1131,20 @@ def test_guarded_root_consolidates_node_outcomes_before_shutdown(
     with pytest.raises(SystemExit) as exc:
         launch_process(str(script), args)
 
-    assert exc.value.code == 0
+    assert exc.value.code == training_returncode
     assert events == ["collect", "stop"]
     collect_kwargs = collect.call_args.kwargs
     assert collect_kwargs["run_name"] == "guarded-run"
     assert collect_kwargs["nnodes"] == 2
     assert collect_kwargs["nproc_per_node"] == 1
-    assert collect_kwargs["timeout_s"] > 0
+    assert (collect_kwargs["timeout_s"] > 0) is expects_wait
 
     final_update = update_manifest.call_args_list[-1].kwargs
     training_result = final_update["extra"]["guard"]["training"]
+    stderr = capsys.readouterr().err
+    assert ("Waiting up to" in stderr) is expects_wait
+    if recording_fails:
+        assert "failed to record the guarded training outcome" in stderr
     if collection_fails:
         assert training_result == {
             "status": "incomplete",
@@ -1061,9 +1153,7 @@ def test_guarded_root_consolidates_node_outcomes_before_shutdown(
             "reasons": ["node_outcome_collection_failed"],
             "nodes": [],
         }
-        assert "failed to collect guarded training outcomes" in (
-            capsys.readouterr().err
-        )
+        assert "failed to collect guarded training outcomes" in stderr
     else:
         assert training_result == collected.to_dict()
 

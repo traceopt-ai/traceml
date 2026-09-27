@@ -56,6 +56,10 @@ directory on every node. Node 0 records the normalized declaration, and every
 launcher writes its outcome beneath that shared run directory. These small
 files stay on the filesystem; TraceML does not send them through telemetry.
 
+A guarded run name identifies exactly one execution. Node 0 refuses to start
+when `logs/<run-name>/manifest.json` already exists, so choose a fresh
+`--run-name` for every guarded launch. TraceML leaves the existing run intact.
+
 ## Contract fields
 
 | Field | Required | Type | Rules |
@@ -160,16 +164,13 @@ After its local training process exits, every guarded launcher also writes:
 logs/<run-name>/nodes/node_<node-rank>/guard_outcome.json
 ```
 
-The atomic, versioned record contains the public run name, manifest creation
-time, node topology, normalized-contract digest, training status and exit code,
-and completion time. It excludes command arguments, paths, hostnames,
-environment contents, device identifiers, and credentials. Exit code `0`
-records completed training; any other observed exit code records failed
-training.
+The atomic, versioned record contains the public run name, node topology,
+normalized-contract digest, training status and exit code, and completion time.
+It excludes command arguments, paths, hostnames, environment contents, device
+identifiers, and credentials. Exit code `0` records completed training; any
+other observed exit code records failed training.
 
-The run name, topology, and contract digest bind the record to its run. The
-manifest creation time is descriptive metadata and is not used as another run
-identity.
+The fresh run name, topology, and contract digest bind the record to its run.
 
 Node 0 waits for the expected files within the existing finalization timeout,
 then writes a bounded result beside the contract in `manifest.json`:

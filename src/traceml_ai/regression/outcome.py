@@ -76,10 +76,8 @@ def contract_digest(contract: MeasurementContract) -> str:
     return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
 
 
-def _manifest_identity(
-    manifest_path: Path, session_id: str
-) -> tuple[str, str]:
-    """Read the public run identity and creation time from the root manifest."""
+def _manifest_run_name(manifest_path: Path, session_id: str) -> str:
+    """Read the public run identity from the current root manifest."""
     with open(manifest_path, "r", encoding="utf-8") as handle:
         manifest: Any = json.load(handle)
     if not isinstance(manifest, dict):
@@ -90,10 +88,7 @@ def _manifest_identity(
     run_name = run.get("run_name") if isinstance(run, dict) else None
     if not isinstance(run_name, str) or not run_name:
         raise ValueError("root manifest is missing run.run_name")
-    created_at = manifest.get("created_at")
-    if not isinstance(created_at, str) or not created_at:
-        raise ValueError("root manifest is missing created_at")
-    return run_name, created_at
+    return run_name
 
 
 def validate_guard_outcome_binding(
@@ -164,12 +159,14 @@ def validate_guard_outcome_binding(
             "node outcome conflicts with the captured measurement contract",
         )
 
-    for field in ("manifest_created_at", "completed_at"):
-        if not isinstance(outcome.get(field), str) or not outcome[field]:
-            raise OutcomeValidationError(
-                "node_outcome_invalid",
-                f"node outcome {field} is invalid",
-            )
+    if (
+        not isinstance(outcome.get("completed_at"), str)
+        or not outcome["completed_at"]
+    ):
+        raise OutcomeValidationError(
+            "node_outcome_invalid",
+            "node outcome completed_at is invalid",
+        )
 
     training = outcome.get("training")
     if not isinstance(training, dict):
@@ -286,13 +283,10 @@ def write_guard_outcome(
 ) -> Path:
     """Atomically write the completed local launcher's guarded outcome."""
     destination = Path(path).resolve()
-    run_name, manifest_created_at = _manifest_identity(
-        Path(manifest_path).resolve(), session_id
-    )
+    run_name = _manifest_run_name(Path(manifest_path).resolve(), session_id)
     payload = {
         "schema_version": OUTCOME_SCHEMA_VERSION,
         "run_name": run_name,
-        "manifest_created_at": manifest_created_at,
         "node_rank": int(node_rank),
         "nnodes": int(nnodes),
         "nproc_per_node": int(nproc_per_node),

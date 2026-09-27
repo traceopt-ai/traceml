@@ -757,6 +757,19 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
 
     session_id = env["TRACEML_SESSION_ID"]
     session_root = Path(cfg["logs_dir"]).resolve() / session_id
+    existing_manifest_path = session_root / "manifest.json"
+    if (
+        guard_contract is not None
+        and is_root_writer
+        and existing_manifest_path.exists()
+    ):
+        print(
+            "[TraceML] ERROR: guarded run name already exists at "
+            f"{existing_manifest_path}. Choose a new --run-name; TraceML "
+            "will not mix outcomes from separate executions.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
     aggregator_dir = session_root / "aggregator"
     db_path = aggregator_dir / "telemetry"
     aggregator_stderr_log_path = aggregator_dir / "process.stderr.log"
@@ -904,6 +917,13 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
             or guard_training_result is not None
         ):
             return
+        if torchrun_cfg.nnodes > 1 and timeout_s > 0.0:
+            print(
+                "[TraceML] Waiting up to "
+                f"{timeout_s:g}s for {torchrun_cfg.nnodes} guarded "
+                "launcher outcomes...",
+                file=sys.stderr,
+            )
         try:
             guard_training_result = collect_guard_outcomes(
                 session_root=session_root,
@@ -1183,9 +1203,12 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         if train_rc is not None:
             outcome = TrainingOutcome(train_rc)
             record_guard_outcome(train_rc)
-            collect_guard_training(
-                timeout_s=float(env["TRACEML_FINALIZE_TIMEOUT_SEC"])
+            outcome_wait_s = (
+                float(env["TRACEML_FINALIZE_TIMEOUT_SEC"])
+                if outcome.cli_exit_code == 0 and guard_outcome_written
+                else 0.0
             )
+            collect_guard_training(timeout_s=outcome_wait_s)
             if manifest_path is not None:
                 _run_noncritical_launcher_step(
                     "failed to record the training end time",

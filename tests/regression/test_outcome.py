@@ -76,7 +76,6 @@ def test_write_guard_outcome_records_only_bounded_node_facts(
     assert payload == {
         "schema_version": OUTCOME_SCHEMA_VERSION,
         "run_name": "guarded-run",
-        "manifest_created_at": "2026-09-26T10:00:00+00:00",
         "node_rank": 1,
         "nnodes": 2,
         "nproc_per_node": 4,
@@ -97,10 +96,7 @@ def test_write_guard_outcome_records_only_bounded_node_facts(
             "created_at": "created",
         },
         {"session_id": "guarded-run", "created_at": "created"},
-        {
-            "session_id": "guarded-run",
-            "run": {"run_name": "guarded-run"},
-        },
+        {"session_id": "guarded-run", "run": {}},
     ],
 )
 def test_write_guard_outcome_requires_current_root_manifest(
@@ -183,17 +179,6 @@ def test_outcome_binding_rejects_another_run_name(tmp_path) -> None:
     assert caught.value.reason == "node_outcome_conflict"
 
 
-def test_outcome_binding_does_not_use_manifest_creation_time(tmp_path) -> None:
-    outcome_path, contract = _write_current_outcome(tmp_path)
-    payload = json.loads(outcome_path.read_text(encoding="utf-8"))
-    payload["manifest_created_at"] = "another-time"
-    outcome_path.write_text(json.dumps(payload), encoding="utf-8")
-
-    assert _validate_current_outcome(outcome_path, contract) == (
-        NodeTrainingOutcome(node_rank=1, exit_code=0)
-    )
-
-
 @pytest.mark.parametrize(
     ("field", "value"),
     [
@@ -241,7 +226,6 @@ def test_outcome_binding_rejects_malformed_records(tmp_path, change) -> None:
 @pytest.mark.parametrize(
     "change",
     [
-        lambda payload: payload.pop("manifest_created_at"),
         lambda payload: payload.update(completed_at=None),
         lambda payload: payload.update(training=[]),
         lambda payload: payload.update(
