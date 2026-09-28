@@ -913,9 +913,9 @@ def test_guard_contract_is_captured_once_for_multi_node_run(
     start_training.assert_not_called()
 
 
-@pytest.mark.parametrize("training_returncode", [0, 17])
+@pytest.mark.parametrize("training_returncode", [0, 17, -signal.SIGTERM])
 @pytest.mark.parametrize("recording_fails", [False, True])
-def test_guarded_node_records_training_outcome_without_changing_exit_code(
+def test_guarded_node_records_training_outcome_with_cli_exit_code(
     monkeypatch, tmp_path, capsys, recording_fails, training_returncode
 ) -> None:
     monkeypatch.chdir(tmp_path)
@@ -989,7 +989,8 @@ def test_guarded_node_records_training_outcome_without_changing_exit_code(
     with pytest.raises(SystemExit) as exc:
         launch_process(str(script), args)
 
-    assert exc.value.code == training_returncode
+    expected_exit_code = TrainingOutcome(training_returncode).cli_exit_code
+    assert exc.value.code == expected_exit_code
     outcome_path = session_root / "nodes" / "node_1" / "guard_outcome.json"
     if recording_fails:
         assert not outcome_path.exists()
@@ -1000,8 +1001,8 @@ def test_guarded_node_records_training_outcome_without_changing_exit_code(
         outcome = json.loads(outcome_path.read_text(encoding="utf-8"))
         assert outcome["node_rank"] == 1
         assert outcome["training"] == {
-            "status": ("completed" if training_returncode == 0 else "failed"),
-            "exit_code": training_returncode,
+            "status": ("completed" if expected_exit_code == 0 else "failed"),
+            "exit_code": expected_exit_code,
         }
 
 
@@ -1096,6 +1097,10 @@ def test_guarded_root_consolidates_node_outcomes_before_shutdown(
     if collection_fails:
         collect.side_effect = OSError("shared run directory unavailable")
 
+    def start_training(**_kwargs):
+        events.append("training_spawned")
+        return training
+
     def stop_aggregator(*_args, **_kwargs) -> None:
         events.append("stop")
 
@@ -1103,7 +1108,14 @@ def test_guarded_root_consolidates_node_outcomes_before_shutdown(
         events.append("collect")
         return collect(**_kwargs)
 
-    update_manifest = Mock()
+    def record_training_end(*_args, **kwargs) -> None:
+        lifecycle = kwargs.get("extra", {}).get("lifecycle", {})
+        if "training_started_at" in lifecycle:
+            events.append("training_start")
+        elif "training_ended_at" in lifecycle:
+            events.append("training_end")
+
+    update_manifest = Mock(side_effect=record_training_end)
     replacements = {
         "setup_error_logger": Mock(),
         "install_shutdown_handlers": Mock(),
@@ -1114,7 +1126,7 @@ def test_guarded_root_consolidates_node_outcomes_before_shutdown(
         "start_aggregator_process": Mock(return_value=aggregator),
         "_start_aggregator_output": Mock(return_value=aggregator_output),
         "wait_for_tcp_listen": Mock(return_value=True),
-        "start_training_process": Mock(return_value=training),
+        "start_training_process": Mock(side_effect=start_training),
         "terminate_process_group": Mock(side_effect=stop_aggregator),
         "write_guard_outcome": Mock(
             side_effect=(
@@ -1132,7 +1144,13 @@ def test_guarded_root_consolidates_node_outcomes_before_shutdown(
         launch_process(str(script), args)
 
     assert exc.value.code == training_returncode
-    assert events == ["collect", "stop"]
+    assert events == [
+        "training_spawned",
+        "training_start",
+        "training_end",
+        "collect",
+        "stop",
+    ]
     collect_kwargs = collect.call_args.kwargs
     assert collect_kwargs["run_name"] == "guarded-run"
     assert collect_kwargs["nnodes"] == 2

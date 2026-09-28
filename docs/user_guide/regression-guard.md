@@ -172,8 +172,9 @@ other observed exit code records failed training.
 
 The fresh run name, topology, and contract digest bind the record to its run.
 
-Node 0 waits for the expected files within the existing finalization timeout,
-then writes a bounded result beside the contract in `manifest.json`:
+Node 0 gives outcome collection up to the configured finalization timeout,
+then writes a bounded result beside the contract in `manifest.json`. Aggregator
+shutdown is a separate bounded phase.
 
 ```json
 {

@@ -1180,6 +1180,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         cwd=execution_cwd,
         capture_output=save_training_output,
     )
+    training_started_at = utc_now_iso()
     if save_training_output:
         training_output = _start_training_output(
             train_proc,
@@ -1192,7 +1193,9 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
             "failed to record the training start time",
             lambda: update_run_manifest(
                 manifest_path,
-                extra={"lifecycle": {"training_started_at": utc_now_iso()}},
+                extra={
+                    "lifecycle": {"training_started_at": training_started_at}
+                },
             ),
         )
     if owns_aggregator and telemetry_available and cfg["mode"] == "dashboard":
@@ -1201,7 +1204,20 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     while True:
         train_rc = train_proc.poll()
         if train_rc is not None:
+            training_ended_at = utc_now_iso()
             outcome = TrainingOutcome(train_rc)
+            if manifest_path is not None:
+                _run_noncritical_launcher_step(
+                    "failed to record the training end time",
+                    lambda: update_run_manifest(
+                        manifest_path,
+                        extra={
+                            "lifecycle": {
+                                "training_ended_at": training_ended_at
+                            }
+                        },
+                    ),
+                )
             record_guard_outcome(train_rc)
             outcome_wait_s = (
                 float(env["TRACEML_FINALIZE_TIMEOUT_SEC"])
@@ -1209,16 +1225,6 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                 else 0.0
             )
             collect_guard_training(timeout_s=outcome_wait_s)
-            if manifest_path is not None:
-                _run_noncritical_launcher_step(
-                    "failed to record the training end time",
-                    lambda: update_run_manifest(
-                        manifest_path,
-                        extra={
-                            "lifecycle": {"training_ended_at": utc_now_iso()}
-                        },
-                    ),
-                )
             output_result = (
                 training_output.finish()
                 if training_output is not None

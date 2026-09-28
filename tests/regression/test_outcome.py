@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from datetime import datetime
 
 import pytest
@@ -341,6 +342,24 @@ def test_collect_guard_outcomes_records_failed_and_missing_nodes(
     ]
 
 
+def test_collect_guard_outcomes_waits_for_delayed_outcome(tmp_path) -> None:
+    writer = threading.Timer(
+        0.1,
+        _write_node_outcome,
+        args=(tmp_path,),
+        kwargs={"node_rank": 0, "nnodes": 1},
+    )
+    writer.start()
+    try:
+        result = _collect(tmp_path, nnodes=1, timeout_s=1.0)
+    finally:
+        writer.join()
+
+    assert result.status == "completed"
+    assert result.nodes_observed == 1
+    assert result.reasons == ()
+
+
 @pytest.mark.parametrize(
     ("replacement", "reason"),
     [
@@ -355,7 +374,10 @@ def test_collect_guard_outcomes_rejects_invalid_expected_file(
     _write_node_outcome(tmp_path, node_rank=0, nnodes=1)
     path = tmp_path / "nodes" / "node_0" / "guard_outcome.json"
     if replacement == "oversized":
-        path.write_text(" " * (MAX_OUTCOME_BYTES + 1), encoding="utf-8")
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload["padding"] = "x" * MAX_OUTCOME_BYTES
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        assert path.stat().st_size > MAX_OUTCOME_BYTES
     elif replacement == "conflict":
         payload = json.loads(path.read_text(encoding="utf-8"))
         payload["run_name"] = "another-run"
