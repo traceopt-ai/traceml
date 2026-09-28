@@ -201,6 +201,130 @@ def test_unreadable_figures_keep_the_status_this_tick_read(process_db):
     assert "No Process data from rank 1 for 80s." in text
 
 
+# --- the run-wide status -------------------------------------------------
+@pytest.mark.parametrize("ranks", [1, 2], ids=["only_rank", "every_rank"])
+@pytest.mark.parametrize(
+    ("quiet_s", "freshness"), [(6.0, "fresh"), (6.5, "stale")]
+)
+def test_run_wide_status_ages_the_newest_arrival_on_the_aggregators_clock(
+    process_db, ranks, quiet_s, freshness
+):
+    """The run stopped at seq 60, which arrived at T0+120 s.
+
+    With the only rank, or every rank at once, no peer is left to age a
+    rank against, so every rank status stays fresh. Only the
+    aggregator's current time can tell. The ranks were seen to sample
+    every 2 s, so the shared policy calls the run stale past 6 s.
+    """
+    _run(process_db, ranks=ranks)
+    snap = ProcessCLIComputer(
+        db_path=process_db.path,
+        sampler_interval_s=2.0,
+        now_fn=lambda: T0 + 120.0 + quiet_s,
+    ).compute()
+
+    assert snap["run_reporting"] == {
+        "last_seen_s": pytest.approx(T0 + 120.0),
+        "age_s": pytest.approx(quiet_s),
+        "freshness": freshness,
+    }
+    assert [r["freshness"] for r in snap["rank_reporting"]] == [
+        "fresh"
+    ] * ranks
+
+
+def test_run_wide_status_is_fresh_while_any_rank_sends(process_db):
+    """Rank 1 stopped at seq 20; rank 0's arrivals keep the run live."""
+    _run(process_db, dies=(1, 20))
+    snap = ProcessCLIComputer(
+        db_path=process_db.path,
+        sampler_interval_s=2.0,
+        now_fn=lambda: T0 + 121.0,
+    ).compute()
+
+    assert snap["run_reporting"]["freshness"] == "fresh"
+    assert snap["run_reporting"]["last_seen_s"] == pytest.approx(T0 + 120.0)
+
+
+def test_run_wide_status_is_unknown_before_any_rank_sends(process_db):
+    snap = ProcessCLIComputer(db_path=process_db.path).compute()
+    assert snap["run_reporting"] == {
+        "last_seen_s": None,
+        "age_s": None,
+        "freshness": "unknown",
+    }
+
+
+def test_a_failed_status_read_leaves_no_run_wide_status(
+    process_db, monkeypatch
+):
+    """Tick 1 finds the run quiet. Tick 2 cannot read the status.
+
+    Tick 2 has no run-wide status; tick 1's is not shown again.
+    """
+    import traceml_ai.renderers.process.cli_compute as cli_compute
+
+    _run(process_db, ranks=1)
+    computer = ProcessCLIComputer(
+        db_path=process_db.path,
+        sampler_interval_s=2.0,
+        now_fn=lambda: T0 + 160.0,
+    )
+    first = computer.compute()
+    assert first["run_reporting"]["freshness"] == "stale"
+
+    monkeypatch.setattr(cli_compute, "read_rank_clock", _unreadable)
+    held = computer.compute()
+    assert held["seq"] == first["seq"]
+    assert held["run_reporting"] is None
+
+
+def test_held_figures_carry_this_ticks_run_wide_status(
+    process_db, monkeypatch
+):
+    """Tick 1 is live. By tick 2 the run went quiet and the figures
+    cannot be read: the held figures come with tick 2's run status."""
+    _run(process_db, ranks=1)
+    now = [T0 + 121.0]
+    computer = ProcessCLIComputer(
+        db_path=process_db.path,
+        sampler_interval_s=2.0,
+        now_fn=lambda: now[0],
+    )
+    first = computer.compute()
+    assert first["run_reporting"]["freshness"] == "fresh"
+
+    monkeypatch.setattr(
+        computer._db, "fetch_rows_for_seq_all_ranks", _unreadable
+    )
+    now[0] += 39.0
+    held = computer.compute()
+    assert held["seq"] == first["seq"]
+    assert held["run_reporting"]["freshness"] == "stale"
+    assert held["run_reporting"]["age_s"] == pytest.approx(40.0)
+
+
+def test_unreadable_figures_keep_the_run_wide_status_this_tick_read(
+    process_db,
+):
+    """The figures fail to parse after the status read named the run."""
+    _run(process_db, ranks=1)
+    conn = sqlite3.connect(process_db.path)
+    conn.execute("UPDATE process_samples SET cpu_percent = 'abc'")
+    conn.commit()
+    conn.close()
+
+    snap = ProcessCLIComputer(
+        db_path=process_db.path,
+        sampler_interval_s=2.0,
+        now_fn=lambda: T0 + 160.0,
+    ).compute()
+
+    assert snap["seq"] is None
+    assert snap["run_reporting"]["freshness"] == "stale"
+    assert snap["run_reporting"]["age_s"] == pytest.approx(40.0)
+
+
 def test_cli_and_dashboard_judge_every_rank_identically(process_db):
     """One owner for the judgement: both surfaces must agree per rank."""
     _run(process_db, ranks=4, samples=200, dies=(3, 20))

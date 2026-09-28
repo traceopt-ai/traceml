@@ -16,7 +16,9 @@ from traceml_ai.renderers.shared.freshness import (
     CachedPayloadTTL,
     FreshnessPolicy,
     RankReporting,
+    RunReporting,
     stale_rank_label,
+    stale_run_label,
 )
 
 
@@ -186,4 +188,15 @@ def test_the_quiet_age_is_rounded_to_the_nearest_second(age_s, shown):
     quiet = RankReporting(global_rank=1, age_s=age_s, freshness="stale")
     assert stale_rank_label(quiet) == (
         f"No Process data from rank 1 for {shown}."
+    )
+
+
+@pytest.mark.parametrize(
+    ("age_s", "shown"), [(5.99, "6s"), (41.6, "42s"), (80.0, "80s")]
+)
+def test_the_run_wide_line_states_how_long_no_process_data_came(age_s, shown):
+    """Rounded as the rank lines are, so the two ages agree."""
+    quiet = RunReporting(last_seen_s=100.0, age_s=age_s, freshness="stale")
+    assert stale_run_label(quiet) == (
+        f"No Process data from any rank for {shown}."
     )

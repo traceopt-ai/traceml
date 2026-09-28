@@ -5,7 +5,7 @@ This module contains all presentation logic for process-level telemetry.
 """
 
 import shutil
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from rich.panel import Panel
 from rich.table import Table
@@ -15,7 +15,9 @@ from traceml_ai.loggers.error_log import get_error_logger
 from traceml_ai.renderers.base_renderer import BaseRenderer
 from traceml_ai.renderers.shared.freshness import (
     RankReporting,
+    RunReporting,
     stale_rank_label,
+    stale_run_label,
 )
 from traceml_ai.utils.formatting import fmt_mem_new, fmt_mem_triple
 
@@ -42,6 +44,38 @@ class ProcessRenderer(BaseRenderer):
             sampler_interval_s=sampler_interval_s,
         )
         self._logger = get_error_logger(self.NAME + "Renderer")
+        # The run-wide status from the latest panel read, so the
+        # terminal's run-wide line costs no read of its own.
+        self._run_reporting: Optional[RunReporting] = None
+
+    def get_staleness_text(self, after_s: Optional[float] = None) -> str:
+        """``No Process data from any rank for 42s.`` once the run is quiet.
+
+        From the read :meth:`get_panel_renderable` made this tick, so call
+        it after that. Empty while any rank still sends, before the first
+        read, and when this tick has no status. With ``after_s``, on the
+        arrival clock, also empty unless the run's newest arrival is later
+        than that.
+        """
+        run = self._run_reporting
+        if run is None or not run.is_stale:
+            return ""
+        seen = run.last_seen_s
+        if after_s is not None and (seen is None or seen <= after_s):
+            return ""
+        return stale_run_label(run)
+
+    def _read_snapshot(self) -> Dict[str, Any]:
+        """This tick's snapshot, keeping its run-wide status.
+
+        A read that raises leaves no run-wide status, then re-raises for
+        the driver to show. An earlier tick's status never stands in.
+        """
+        self._run_reporting = None
+        snap = self._computer.compute_cli()
+        run = snap.get("run_reporting")
+        self._run_reporting = RunReporting(**run) if run else None
+        return snap
 
     def get_panel_renderable(self) -> Panel:
         """
@@ -53,7 +87,7 @@ class ProcessRenderer(BaseRenderer):
         - a rank that stopped sending Process data is named, because the
           figures above stay anchored on its last seq
         """
-        snap = self._computer.compute_cli()
+        snap = self._read_snapshot()
 
         table = Table.grid(padding=(0, 2))
         table.add_column(justify="left", style="bright_white", no_wrap=True)

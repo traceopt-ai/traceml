@@ -10,6 +10,8 @@ Every rank's sampler thread writes a ``process_samples`` row on its own
 cadence. This module reads the newest arrival per rank once per tick and
 applies the shared :class:`FreshnessPolicy`, so the terminal and the
 dashboard judge a rank's reporting status by one rule and one clock.
+The terminal's run-wide status, for every rank stopping at once, comes
+from the same read.
 
 This is the reporting status of Process telemetry, not the health of the
 training thread. The sampler keeps reporting while training is blocked
@@ -29,6 +31,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from traceml_ai.renderers.shared.freshness import (
     FreshnessPolicy,
     RankReporting,
+    RunReporting,
 )
 from traceml_ai.renderers.shared.run_series import finite
 
@@ -142,6 +145,29 @@ class RankClock:
         return tuple(
             self.reporting_of(rank_id)
             for rank_id in sorted(self.newest_by_rank)
+        )
+
+    def run_reporting(self, current_s: float) -> RunReporting:
+        """The whole run's status: its newest arrival from any rank.
+
+        ``current_s`` is the aggregator's current time, unlike ``now_s``,
+        the newest arrival that per-rank verdicts are measured from. The
+        aggregator also stamps every arrival (``recv_ts_ns``), so both
+        ends are one clock and a rank host's skewed clock never enters.
+        Judged by this tick's policy, at the observed cadence, like every
+        per-rank verdict.
+        """
+        seen = [
+            rank.last_seen_s
+            for rank in self.reporting()
+            if rank.last_seen_s is not None
+        ]
+        last_seen = max(seen) if seen else None
+        age = self.policy.age_of(last_seen, now_s=current_s)
+        return RunReporting(
+            last_seen_s=last_seen,
+            age_s=age,
+            freshness=self.policy.state_of(age),
         )
 
 

@@ -29,7 +29,10 @@ from traceml_ai.aggregator.sqlite_writer import (
     SQLiteWriterConfig,
     SQLiteWriterSimple,
 )
-from traceml_ai.aggregator.trace_aggregator import TraceMLAggregator
+from traceml_ai.aggregator.trace_aggregator import (
+    TraceMLAggregator,
+    _CurrentRun,
+)
 from traceml_ai.runtime.settings import TraceMLSettings
 from traceml_ai.samplers.schema.system import SystemSample
 from traceml_ai.transport.tcp_transport import TCPClient, TCPConfig, TCPServer
@@ -71,6 +74,7 @@ def _make_aggregator(
     agg._started = True
     agg._expected_world_size = 1
     agg._finished_ranks = {}
+    agg._current_run = _CurrentRun(1)
     agg._foreign_senders = {}
     agg._drain_lock = threading.Lock()
     agg._tcp_server = tcp_server

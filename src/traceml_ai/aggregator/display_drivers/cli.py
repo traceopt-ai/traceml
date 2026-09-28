@@ -5,6 +5,7 @@ CLI display driver for TraceML (Rich Live dashboard).
 - Make CLI layout + renderer wiring a single, cohesive unit
 """
 
+import time
 from dataclasses import dataclass
 from typing import Any, Callable, List, Optional
 
@@ -29,6 +30,9 @@ from traceml_ai.renderers.step_time.renderer import StepTimeRenderer
 from traceml_ai.renderers.system.renderer import SystemRenderer
 from traceml_ai.runtime.settings import TraceMLSettings
 from traceml_ai.step_time.pipeline import LiveStepTimeSession
+
+# One line above the panels, shown only while the whole run is quiet.
+_STALENESS_SECTION = "staleness"
 
 
 def _safe(logger: Any, label: str, fn: Callable[[], Any]) -> Any:
@@ -57,6 +61,7 @@ class CLIDisplayDriver(BaseDisplayDriver):
     Contract used by TraceMLAggregator:
       - start(): start Rich Live display
       - tick(): update all panels
+      - run_finished(): the run finished; the quiet after it is no stall
       - stop(): stop display / cleanup
 
     Renderers:
@@ -79,14 +84,22 @@ class CLIDisplayDriver(BaseDisplayDriver):
         self._registered = False
         self._bindings: List[_SectionBinding] = []
 
+        # The aggregator's clock, the one that stamps every arrival.
+        self._now_fn: Callable[[], float] = time.time
+        # When every expected rank had finished, on that clock.
+        self._finished_at_s: Optional[float] = None
+
+        # Kept by name: its per-rank read also answers the run-wide line.
+        self._process = ProcessRenderer(
+            db_path=self._settings.db_path,
+            sampler_interval_s=self._settings.sampler_interval_sec,
+        )
+
         # CLI chooses its renderer set (can differ from dashboard)
         # Watch profile
         self._renderers: List[CLIRenderer] = [
             SystemRenderer(db_path=self._settings.db_path),
-            ProcessRenderer(
-                db_path=self._settings.db_path,
-                sampler_interval_s=self._settings.sampler_interval_sec,
-            ),
+            self._process,
         ]
 
         # Run profile
@@ -126,6 +139,18 @@ class CLIDisplayDriver(BaseDisplayDriver):
             self._bindings.clear()
             self._registered = False
 
+    def run_finished(self) -> None:
+        """Every rank of the run finished: the quiet that follows is
+        expected.
+
+        The aggregator flushed every arrival before calling, so each one
+        so far is at or before this moment. The run-wide line stays hidden
+        until an arrival newer than that shows up, such as a second run on
+        the same ``traceml serve``, whose own finish calls this again and
+        moves the moment forward.
+        """
+        self._finished_at_s = self._now_fn()
+
     def tick(self) -> None:
         """
         Periodic update called by the aggregator loop.
@@ -138,6 +163,7 @@ class CLIDisplayDriver(BaseDisplayDriver):
             self._register_once()
 
         self._update_all_sections()
+        self._update_staleness()
         self._refresh()
 
     # -------------------------
@@ -153,8 +179,14 @@ class CLIDisplayDriver(BaseDisplayDriver):
             return self._create_watch_layout()
         return self._create_run_layout()
 
+    def _split_root(self) -> None:
+        self._layout.split_column(
+            Layout(name=_STALENESS_SECTION, size=1, visible=False),
+            Layout(name="dashboard"),
+        )
+
     def _create_watch_layout(self) -> Layout:
-        self._layout.split_column(Layout(name="dashboard"))
+        self._split_root()
         dashboard = self._layout["dashboard"]
         dashboard.split_row(
             Layout(name=SYSTEM_LAYOUT, ratio=4),
@@ -163,7 +195,7 @@ class CLIDisplayDriver(BaseDisplayDriver):
         return dashboard
 
     def _create_run_layout(self) -> Layout:
-        self._layout.split_column(Layout(name="dashboard"))
+        self._split_root()
         dashboard = self._layout["dashboard"]
         dashboard.split_column(
             Layout(name="upper_row", ratio=2),
@@ -270,6 +302,29 @@ class CLIDisplayDriver(BaseDisplayDriver):
                 self._logger.error(
                     f"[TraceML] CLI render error in {b.section}: {e}"
                 )
+
+    def staleness_text(self) -> str:
+        """``No Process data from any rank for Ns.`` once the run is quiet.
+
+        The per-rank lines inside the panels measure each rank against
+        its peers, so a single-rank run, or every rank stopping together,
+        never looks stale to them. This measures the newest arrival from
+        any rank against the aggregator's clock, from the Process panel's
+        read this tick, so it runs after the panels update. Once the run
+        finished, only an arrival after that counts.
+        """
+        return self._process.get_staleness_text(after_s=self._finished_at_s)
+
+    def _update_staleness(self) -> None:
+        """Show the run-wide staleness line only while it has text."""
+        if not self._has_section(_STALENESS_SECTION):
+            return
+        text = _safe(
+            self._logger, "CLI staleness check failed", self.staleness_text
+        )
+        section = self._layout[_STALENESS_SECTION]
+        section.visible = bool(text)
+        section.update(Text(text or "", style="bold yellow", justify="center"))
 
     def _refresh(self) -> None:
         """Refresh the live display."""

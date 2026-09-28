@@ -151,6 +151,26 @@ class RankReporting:
         return self.freshness == "stale"
 
 
+@dataclass(frozen=True)
+class RunReporting:
+    """The whole run's Process reporting status: its newest arrival.
+
+    Per-rank statuses measure each rank against its peers, so they cannot
+    see every rank stopping at once, or the only rank of a single-process
+    run. This one measures the newest arrival from any rank against the
+    aggregator's current time. The verdict is always
+    :meth:`FreshnessPolicy.state_of`.
+    """
+
+    last_seen_s: Optional[float] = None
+    age_s: Optional[float] = None
+    freshness: FreshnessState = "unknown"
+
+    @property
+    def is_stale(self) -> bool:
+        return self.freshness == "stale"
+
+
 def _whole_seconds(age_s: Optional[float]) -> Optional[int]:
     """An age as the nearest whole second, or ``None`` when unknown.
 
@@ -169,6 +189,16 @@ def stale_rank_label(rank: RankReporting) -> str:
     seconds = _whole_seconds(rank.age_s)
     since = f" for {seconds}s" if seconds is not None else ""
     return f"No Process data from rank {rank.global_rank}{since}."
+
+
+def stale_run_label(run: RunReporting) -> str:
+    """The terminal line for a run with no recent Process data at all.
+
+    For example ``No Process data from any rank for 42s.``
+    """
+    seconds = _whole_seconds(run.age_s)
+    since = f" for {seconds}s" if seconds is not None else ""
+    return f"No Process data from any rank{since}."
 
 
 @dataclass(frozen=True)
@@ -201,5 +231,7 @@ __all__ = [
     "FreshnessState",
     "MIN_STALE_AFTER_S",
     "RankReporting",
+    "RunReporting",
     "stale_rank_label",
+    "stale_run_label",
 ]
