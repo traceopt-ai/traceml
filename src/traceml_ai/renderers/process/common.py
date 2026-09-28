@@ -6,9 +6,9 @@ consumes.
 """
 
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
-from traceml_ai.renderers.shared.freshness import RankLiveness
+from traceml_ai.renderers.shared.freshness import RankReporting
 
 
 @dataclass(frozen=True)
@@ -22,11 +22,10 @@ class ProcessCLISnapshot:
     gpu_total: Optional[float]
     gpu_rank: Optional[int]
     gpu_used_imbalance: Optional[float]
-    # Every rank's last-seen clock, so the card can name a rank that
-    # stopped instead of silently holding the slowest rank's last seq.
-    # None when there is no verdict: this tick's read failed and no good
-    # verdict is still inside the stale TTL.
-    rank_liveness: Optional[Tuple[RankLiveness, ...]] = None
+    # Every rank's Process reporting status, so the card can name a rank
+    # that stopped sending Process data instead of silently holding the
+    # slowest rank's last seq. None when this tick's read failed.
+    rank_reporting: Optional[Tuple[RankReporting, ...]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -37,9 +36,14 @@ class ProcessCLISnapshot:
             "gpu_total": self.gpu_total,
             "gpu_rank": self.gpu_rank,
             "gpu_used_imbalance": self.gpu_used_imbalance,
-            "rank_liveness": (
-                None
-                if self.rank_liveness is None
-                else [asdict(r) for r in self.rank_liveness]
-            ),
+            "rank_reporting": rank_reporting_dicts(self.rank_reporting),
         }
+
+
+def rank_reporting_dicts(
+    reporting: Optional[Tuple[RankReporting, ...]],
+) -> Optional[List[Dict[str, Any]]]:
+    """The snapshot's ``rank_reporting`` value: plain dicts, or ``None``."""
+    if reporting is None:
+        return None
+    return [asdict(r) for r in reporting]

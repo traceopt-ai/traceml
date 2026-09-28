@@ -89,10 +89,10 @@ class StepMemoryRichFormatter(Formatter[StepMemoryCombinedResult, Panel]):
 
     @staticmethod
     def _stale_rank_lines(payload: StepMemoryCombinedResult) -> list[str]:
-        """One marker per rank that stopped; the figures hold its last step."""
+        """One line per rank with no recent Process data."""
         return [
             f"[bold yellow]{stale_rank_label(rank)}[/bold yellow]"
-            for rank in payload.rank_liveness or ()
+            for rank in payload.rank_reporting or ()
             if rank.is_stale
         ]
 

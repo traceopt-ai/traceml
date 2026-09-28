@@ -14,7 +14,7 @@ from traceml_ai.aggregator.display_drivers.layout import PROCESS_LAYOUT
 from traceml_ai.loggers.error_log import get_error_logger
 from traceml_ai.renderers.base_renderer import BaseRenderer
 from traceml_ai.renderers.shared.freshness import (
-    RankLiveness,
+    RankReporting,
     stale_rank_label,
 )
 from traceml_ai.utils.formatting import fmt_mem_new, fmt_mem_triple
@@ -50,8 +50,8 @@ class ProcessRenderer(BaseRenderer):
         The snapshot is already aggregated by ProcessMetricsComputer:
         - CPU is worst-rank CPU at latest committed seq
         - GPU memory is taken from the least-headroom rank
-        - a rank that stopped reporting is named, because the figures
-          above stay anchored on its last seq
+        - a rank that stopped sending Process data is named, because the
+          figures above stay anchored on its last seq
         """
         snap = self._computer.compute_cli()
 
@@ -94,10 +94,10 @@ class ProcessRenderer(BaseRenderer):
                 fmt_mem_new(gpu_imbalance),
             )
 
-        for rank in snap.get("rank_liveness") or ():
+        for rank in snap.get("rank_reporting") or ():
             if rank.get("freshness") == "stale":
                 table.add_row(
-                    f"[bold yellow]{stale_rank_label(RankLiveness(**rank))}"
+                    f"[bold yellow]{stale_rank_label(RankReporting(**rank))}"
                     "[/bold yellow]",
                     "",
                 )

@@ -1,10 +1,10 @@
-"""Step Memory names a rank that stopped reporting (issue #358).
+"""The terminal Step Memory panel names a rank with no recent Process data.
 
 The combined result aligns on the slowest rank's latest completed step, so
-a dead rank freezes the panel on its last step. Liveness comes from each
-rank's process-sampler heartbeat, which keeps arriving while a surviving
+a rank that stops freezes the panel on its last step. The status comes
+from each rank's Process samples, which keep arriving while a surviving
 rank blocks in a collective, and is judged by the same rule the Process
-dashboard uses.
+dashboard uses (issue #358).
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from tests.sqlite_fixtures import (
     sqlite_database,
 )
 
-from traceml_ai.renderers.shared.freshness import RankLiveness
+from traceml_ai.renderers.shared.freshness import RankReporting
 from traceml_ai.renderers.step_memory.cli_compute import (
     StepMemoryCLIComputer,
 )
@@ -34,6 +34,10 @@ from traceml_ai.renderers.step_memory.renderer import StepMemoryRenderer
 GIB = 1024.0**3
 T0 = 1_700_000_000.0
 STEPS = 60
+
+
+def _unreadable(*_args, **_kwargs):
+    raise sqlite3.OperationalError("unreadable")
 
 
 def _heartbeat(conn, *, rank: int, tick: int, world: int) -> None:
@@ -99,25 +103,15 @@ def test_combined_result_names_the_rank_that_stopped(tmp_path) -> None:
 
     out = StepMemoryMetricsComputer(db_path).compute_cli()
 
-    by_rank = {r.global_rank: r for r in out.rank_liveness}
+    by_rank = {r.global_rank: r for r in out.rank_reporting}
     assert sorted(by_rank) == [0, 1]
     assert by_rank[0].freshness == "fresh"
     assert by_rank[1].freshness == "stale"
-    # Tick 20 arrived at T0+40 s, the newest heartbeat at T0+120 s.
+    # Tick 20 arrived at T0+40 s, the newest process sample at T0+120 s.
     assert by_rank[1].age_s == pytest.approx(80.0)
     # The held figures are still the real ones.
     assert out.metrics
     assert out.metrics[0].summary.worst_peak == pytest.approx(2.0 * GIB)
-
-
-def test_dashboard_result_carries_the_same_liveness(tmp_path) -> None:
-    db_path = str(tmp_path / "dead.db")
-    _write_run(db_path, last_heartbeat={0: 60, 1: 20})
-
-    computer = StepMemoryMetricsComputer(db_path)
-    assert computer.compute_dashboard().rank_liveness == (
-        computer.compute_cli().rank_liveness
-    )
 
 
 def test_step_memory_panel_marks_the_stale_rank(tmp_path) -> None:
@@ -126,8 +120,8 @@ def test_step_memory_panel_marks_the_stale_rank(tmp_path) -> None:
 
     text = _panel_text(db_path)
 
-    assert "rank 1: no data for 80s (stale)" in text
-    assert "rank 0:" not in text
+    assert "No Process data from rank 1 for 80s." in text
+    assert "from rank 0" not in text
 
 
 def test_step_memory_panel_has_no_marker_when_every_rank_reports(
@@ -138,12 +132,11 @@ def test_step_memory_panel_has_no_marker_when_every_rank_reports(
 
     text = _panel_text(db_path)
 
-    assert "(stale)" not in text
-    assert "no data for" not in text
+    assert "No Process data" not in text
 
 
-def test_held_metrics_carry_this_ticks_liveness(tmp_path) -> None:
-    """A tick with no complete step reuses the figures, not the verdict.
+def test_held_metrics_carry_this_ticks_status(tmp_path) -> None:
+    """A tick with no complete step reuses the figures, not the status.
 
     Otherwise the rank that stopped would stay unnamed for as long as the
     last good figures are being held.
@@ -152,20 +145,20 @@ def test_held_metrics_carry_this_ticks_liveness(tmp_path) -> None:
     _write_run(db_path, last_heartbeat={0: 60, 1: 60})
     computer = StepMemoryCLIComputer(db_path)
     first = computer.compute()
-    assert first.metrics and not any(r.is_stale for r in first.rank_liveness)
+    assert first.metrics and not any(r.is_stale for r in first.rank_reporting)
 
-    now = (RankLiveness(global_rank=1, age_s=30.0, freshness="stale"),)
+    now = (RankReporting(global_rank=1, age_s=30.0, freshness="stale"),)
     held = computer._return_stale_or_empty(
-        "STALE (no metrics this tick)", rank_liveness=now
+        "STALE (no metrics this tick)", rank_reporting=now
     )
     assert held.metrics == first.metrics
-    assert held.rank_liveness == now
+    assert held.rank_reporting == now
 
 
 def test_renderer_holds_its_figures_with_this_ticks_verdict(
     tmp_path, monkeypatch
 ) -> None:
-    """The renderer's own cache holds the figures, never the verdict.
+    """The renderer's own cache holds the figures, never the status.
 
     Tick 1 has figures and every rank reporting. By tick 2 no step is
     complete, the computer's held figures have expired, and rank 1 has
@@ -182,7 +175,7 @@ def test_renderer_holds_its_figures_with_this_ticks_verdict(
     renderer = StepMemoryRenderer(db_path)
     first = _render(renderer.get_panel_renderable())
     assert "Peak Allocated" in first
-    assert "(stale)" not in first
+    assert "No Process data" not in first
 
     with sqlite_database(db_path) as conn:
         conn.execute("DELETE FROM step_memory_samples")
@@ -192,7 +185,7 @@ def test_renderer_holds_its_figures_with_this_ticks_verdict(
     held = _render(renderer.get_panel_renderable())
 
     assert "Peak Allocated" in held
-    assert "rank 1: no data for 80s (stale)" in held
+    assert "No Process data from rank 1 for 80s." in held
 
 
 def test_empty_panel_names_a_rank_that_stopped_before_the_first_step(
@@ -206,11 +199,11 @@ def test_empty_panel_names_a_rank_that_stopped_before_the_first_step(
 
     assert "Peak Allocated" not in text
     assert "No complete memory metrics available" in text
-    assert "rank 1: no data for 80s (stale)" in text
+    assert "No Process data from rank 1 for 80s." in text
 
 
 def _add_unparseable_rank(path: str) -> None:
-    """An old heartbeat row for rank 0 whose global_rank is not a number."""
+    """An old process row for rank 0 whose global_rank is not a number."""
     with sqlite_database(path) as conn:
         insert_process_sample(
             conn,
@@ -227,7 +220,7 @@ def _add_unparseable_rank(path: str) -> None:
 def test_an_older_row_with_a_garbage_global_rank_moves_no_verdict(
     tmp_path,
 ) -> None:
-    """One bad heartbeat row never costs every verdict.
+    """One bad process row never costs every rank's status.
 
     It falls back to its ``rank`` cell, rank 0, and arrived before rank
     0's newest row, so rank 0's last word stands.
@@ -240,28 +233,25 @@ def test_an_older_row_with_a_garbage_global_rank_moves_no_verdict(
     text = _panel_text(db_path)
 
     assert out.metrics
-    assert [(r.global_rank, r.freshness) for r in out.rank_liveness] == [
+    assert [(r.global_rank, r.freshness) for r in out.rank_reporting] == [
         (0, "fresh"),
         (1, "stale"),
     ]
-    assert "rank 1: no data for 80s (stale)" in text
+    assert "No Process data from rank 1 for 80s." in text
     assert "Peak" in text or "peak" in text
 
 
-def test_unreadable_heartbeat_on_an_empty_tick_keeps_the_last_markers(
-    tmp_path,
-) -> None:
-    """Unreadable is not "no rank stopped": the last verdict stands.
+def test_unreadable_status_on_an_empty_tick_is_unavailable(tmp_path) -> None:
+    """Tick 1 names rank 1. Tick 2 has no complete step and cannot read
+    the status at all.
 
-    Tick 1 reads rank 1 as stale. Tick 2 has no complete step and cannot
-    read the heartbeat at all, so the held figures keep tick 1's verdict
-    instead of silently dropping the marker.
+    The held figures come back without a status, not with tick 1's.
     """
     db_path = str(tmp_path / "dead.db")
     _write_run(db_path, last_heartbeat={0: 60, 1: 20})
     computer = StepMemoryCLIComputer(db_path)
     first = computer.compute()
-    assert [r.global_rank for r in first.rank_liveness if r.is_stale] == [1]
+    assert [r.global_rank for r in first.rank_reporting if r.is_stale] == [1]
 
     with sqlite_database(db_path) as conn:
         conn.execute("DELETE FROM step_memory_samples")
@@ -270,44 +260,45 @@ def test_unreadable_heartbeat_on_an_empty_tick_keeps_the_last_markers(
     held = computer.compute()
 
     assert held.metrics == first.metrics
-    assert held.rank_liveness == first.rank_liveness
+    assert held.rank_reporting is None
 
 
-def test_unreadable_heartbeat_on_a_metrics_tick_keeps_the_last_markers(
+def test_unreadable_status_on_a_metrics_tick_drops_the_line(
     tmp_path, monkeypatch
 ) -> None:
-    """Fresh figures do not make an unreadable heartbeat a clean one.
+    """Tick 1 names rank 1. Tick 2 reads the metrics but not the status.
 
-    Tick 1 names rank 1. Tick 2 reads the metrics but not the heartbeat,
-    so the panel keeps tick 1's marker instead of dropping it.
+    The panel shows tick 2's figures with no line, rather than repeating
+    tick 1's.
     """
     import traceml_ai.renderers.step_memory.common as step_memory_common
 
     db_path = str(tmp_path / "dead.db")
     _write_run(db_path, last_heartbeat={0: 60, 1: 20})
     renderer = StepMemoryRenderer(db_path)
-    console = Console(
-        force_terminal=True, color_system=None, width=140, record=True
-    )
-    console.print(renderer.get_panel_renderable())
-    renderer.get_dashboard_renderable()
-    assert "rank 1: no data for 80s (stale)" in console.export_text()
+    first = _render(renderer.get_panel_renderable())
+    assert "No Process data from rank 1 for 80s." in first
 
-    def unreadable(*_args, **_kwargs):
-        raise sqlite3.OperationalError("heartbeat unreadable")
+    monkeypatch.setattr(step_memory_common, "read_rank_clock", _unreadable)
+    second = _render(renderer.get_panel_renderable())
 
-    monkeypatch.setattr(step_memory_common, "read_rank_clock", unreadable)
-    console.print(renderer.get_panel_renderable())
-    dashboard = renderer.get_dashboard_renderable()
-
-    assert "rank 1: no data for 80s (stale)" in console.export_text()
-    assert dashboard.metrics
-    assert [r.global_rank for r in dashboard.rank_liveness if r.is_stale] == [
-        1
-    ]
+    assert "Peak Allocated" in second
+    assert "No Process data" not in second
 
 
-def test_heartbeat_read_with_no_ranks_is_an_empty_verdict(tmp_path) -> None:
+def test_the_dashboard_result_carries_no_reporting_status(tmp_path) -> None:
+    """The dashboard's Step Memory section does not show the status, so
+    its computer does not read it."""
+    db_path = str(tmp_path / "dead.db")
+    _write_run(db_path, last_heartbeat={0: 60, 1: 20})
+
+    out = StepMemoryMetricsComputer(db_path).compute_dashboard()
+
+    assert out.metrics
+    assert out.rank_reporting is None
+
+
+def test_status_read_with_no_ranks_is_an_empty_tuple(tmp_path) -> None:
     """Read fine, nobody reported: an empty tuple, not "unreadable"."""
     db_path = str(tmp_path / "no_heartbeat.db")
     with sqlite_database(db_path, init_summary_schema):
@@ -315,4 +306,4 @@ def test_heartbeat_read_with_no_ranks_is_an_empty_verdict(tmp_path) -> None:
 
     out = StepMemoryCLIComputer(db_path).compute()
 
-    assert out.rank_liveness == ()
+    assert out.rank_reporting == ()

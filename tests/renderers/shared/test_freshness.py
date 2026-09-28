@@ -15,8 +15,7 @@ from traceml_ai.renderers.shared.freshness import (
     MIN_STALE_AFTER_S,
     CachedPayloadTTL,
     FreshnessPolicy,
-    LastGoodVerdict,
-    RankLiveness,
+    RankReporting,
     stale_rank_label,
 )
 
@@ -171,12 +170,12 @@ def test_a_corrupt_age_may_not_reuse_a_cached_payload():
     assert CachedPayloadTTL(ttl_s=30.0).may_reuse(NAN) is False
 
 
-def test_the_stale_rank_marker_states_how_long_the_rank_has_been_quiet():
+def test_the_quiet_rank_line_states_how_long_no_process_data_came():
     """An unknown age is said as unknown, never as a fabricated zero."""
-    quiet = RankLiveness(global_rank=1, age_s=12.4, freshness="stale")
-    assert stale_rank_label(quiet) == "rank 1: no data for 12s (stale)"
-    unknown = RankLiveness(global_rank=3, age_s=None, freshness="stale")
-    assert stale_rank_label(unknown) == "rank 3: no data (stale)"
+    quiet = RankReporting(global_rank=1, age_s=12.4, freshness="stale")
+    assert stale_rank_label(quiet) == "No Process data from rank 1 for 12s."
+    unknown = RankReporting(global_rank=3, age_s=None, freshness="stale")
+    assert stale_rank_label(unknown) == "No Process data from rank 3."
 
 
 @pytest.mark.parametrize(
@@ -184,18 +183,7 @@ def test_the_stale_rank_marker_states_how_long_the_rank_has_been_quiet():
 )
 def test_the_quiet_age_is_rounded_to_the_nearest_second(age_s, shown):
     """5.99 s is six seconds, not five: truncation undersells the age."""
-    quiet = RankLiveness(global_rank=1, age_s=age_s, freshness="stale")
-    assert stale_rank_label(quiet) == f"rank 1: no data for {shown} (stale)"
-
-
-def test_the_last_good_verdict_answers_for_a_failed_read_inside_its_ttl():
-    """``None`` is an unreadable verdict: the last good one stands in.
-
-    For as long as a cached payload may, and no longer.
-    """
-    held = LastGoodVerdict(CachedPayloadTTL(ttl_s=30.0))
-    assert held.carry(None, now_s=0.0) is None
-    assert held.carry("rank 1 stale", now_s=100.0) == "rank 1 stale"
-    assert held.carry(None, now_s=130.0) == "rank 1 stale"
-    assert held.carry(None, now_s=130.5) is None
-    assert held.carry("all fresh", now_s=131.0) == "all fresh"
+    quiet = RankReporting(global_rank=1, age_s=age_s, freshness="stale")
+    assert stale_rank_label(quiet) == (
+        f"No Process data from rank 1 for {shown}."
+    )

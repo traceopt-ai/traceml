@@ -7,7 +7,7 @@ It returns one structured payload for the NiceGUI "Model Diagnostics" section.
 Live Step Time freshness remains owned by ``LiveStepTimeSession``.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from rich.panel import Panel
 
@@ -31,20 +31,13 @@ class ModelDiagnosticsRenderer(BaseRenderer):
 
     NAME = "ModelDiagnostics"
 
-    def __init__(
-        self,
-        db_path: str,
-        sampler_interval_s: Optional[float] = None,
-    ) -> None:
+    def __init__(self, db_path: str) -> None:
         super().__init__(
             name=self.NAME,
             layout_section_name=MODEL_DIAGNOSTICS_LAYOUT,
         )
         self._logger = get_error_logger("ModelDiagnosticsRenderer")
-        self._step_memory = StepMemoryMetricsComputer(
-            db_path=db_path,
-            sampler_interval_s=sampler_interval_s,
-        )
+        self._step_memory = StepMemoryMetricsComputer(db_path=db_path)
 
     def get_panel_renderable(self) -> Panel:
         """

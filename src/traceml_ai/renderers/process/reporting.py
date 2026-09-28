@@ -4,14 +4,17 @@
 # you may not use this file except in compliance with the License.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Which ranks are still reporting, read from the process heartbeat.
+"""Which ranks are still sending Process data.
 
 Every rank's sampler thread writes a ``process_samples`` row on its own
-cadence, and keeps doing so while the training thread is blocked in a
-collective waiting for a dead peer. That makes this table the per-rank
-heartbeat. This module reads it once per tick and applies the shared
-:class:`FreshnessPolicy`, so the terminal and the dashboard judge a rank
-by one rule and one clock.
+cadence. This module reads the newest arrival per rank once per tick and
+applies the shared :class:`FreshnessPolicy`, so the terminal and the
+dashboard judge a rank's reporting status by one rule and one clock.
+
+This is the reporting status of Process telemetry, not the health of the
+training thread. The sampler keeps reporting while training is blocked
+in a collective, and a rank whose sampler stops is quiet here even if it
+is still training.
 
 Moved out of ``dashboard_compute.py`` (issue #358): the dashboard already
 judged rank freshness this way, and the terminal now reuses the same read
@@ -23,7 +26,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from traceml_ai.renderers.shared.freshness import FreshnessPolicy, RankLiveness
+from traceml_ai.renderers.shared.freshness import (
+    FreshnessPolicy,
+    RankReporting,
+)
 from traceml_ai.renderers.shared.run_series import finite
 
 from .repository import ProcessRepository
@@ -119,22 +125,22 @@ class RankClock:
     by_rank: Dict[int, List[Any]]
     newest_by_rank: Dict[int, Any]
 
-    def liveness_of(self, rank_id: int) -> RankLiveness:
+    def reporting_of(self, rank_id: int) -> RankReporting:
         """The last-seen clock and verdict for one rank."""
         recv = opt_float(self.newest_by_rank[rank_id]["recv_ts_ns"])
         last_seen = recv / 1e9 if recv is not None else None
         age = self.policy.age_of(last_seen, now_s=self.now_s)
-        return RankLiveness(
+        return RankReporting(
             global_rank=rank_id,
             last_seen_s=last_seen,
             age_s=age,
             freshness=self.policy.state_of(age),
         )
 
-    def liveness(self) -> Tuple[RankLiveness, ...]:
+    def reporting(self) -> Tuple[RankReporting, ...]:
         """Every rank that has reported, in rank order."""
         return tuple(
-            self.liveness_of(rank_id)
+            self.reporting_of(rank_id)
             for rank_id in sorted(self.newest_by_rank)
         )
 

@@ -75,9 +75,8 @@ class StepMemoryRenderer(BaseRenderer):
 
         Uses a simple cache to avoid flicker when data is temporarily
         incomplete (e.g., ranks slightly out of sync). The cached metrics
-        carry this tick's rank liveness, so a rank that stopped is named
-        even while the figures are held. The computer already answers an
-        unreadable heartbeat with the last good verdict.
+        carry this tick's rank reporting status, so a rank that stopped
+        sending Process data is named even while the figures are held.
         """
         payload = self._computer.compute_cli()
         if payload and payload.metrics:
@@ -85,7 +84,7 @@ class StepMemoryRenderer(BaseRenderer):
             return payload
 
         if self._cached is not None:
-            return replace(self._cached, rank_liveness=payload.rank_liveness)
+            return replace(self._cached, rank_reporting=payload.rank_reporting)
 
         return payload
 

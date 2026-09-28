@@ -35,7 +35,6 @@ class StepMemoryMetricsComputer:
             db_path=db_path,
             window_size=dashboard_window_size,
             stale_ttl_s=stale_ttl_s,
-            sampler_interval_s=sampler_interval_s,
         )
 
     def compute_cli(self) -> StepMemoryCombinedResult:

@@ -52,9 +52,9 @@ from .dashboard_models import (
     RankSnapshot,
     RankTrace,
 )
-from .liveness import RECENT_WINDOW_S, RankClock
-from .liveness import opt_float as _opt_float
-from .liveness import read_rank_clock
+from .reporting import RECENT_WINDOW_S, RankClock
+from .reporting import opt_float as _opt_float
+from .reporting import read_rank_clock
 from .repository import ProcessRepository
 
 # How many committed steps the card describes. Kept at the value the
@@ -62,7 +62,7 @@ from .repository import ProcessRepository
 DASHBOARD_WINDOW = 100
 
 # ``RECENT_WINDOW_S``, the recent window the tiles describe, lives in
-# ``liveness.py`` with the per-rank read it bounds.
+# ``reporting.py`` with the per-rank read it bounds.
 
 # A rolling mean over minutes cannot visibly change between two ticks, so
 # the whole-run reads refresh on their own slower clock. Recomputing them
@@ -305,7 +305,7 @@ class ProcessDashboardComputer:
         """Every rank's own state, read on its own clock.
 
         The per-rank read and the freshness verdict live in
-        ``liveness.read_rank_clock``, shared with the terminal so both
+        ``reporting.read_rank_clock``, shared with the terminal so both
         surfaces judge a rank identically.
         """
         clock = read_rank_clock(
@@ -340,7 +340,7 @@ class ProcessDashboardComputer:
         # inspects a finished run.
         newest_gpu = reported[-1] if reported else None
 
-        liveness = clock.liveness_of(rank_id)
+        reporting = clock.reporting_of(rank_id)
 
         return RankSnapshot(
             global_rank=rank_id,
@@ -385,8 +385,8 @@ class ProcessDashboardComputer:
                 if newest_gpu is not None
                 else None
             ),
-            age_s=liveness.age_s,
-            freshness=liveness.freshness,
+            age_s=reporting.age_s,
+            freshness=reporting.freshness,
         )
 
     # --- describing ------------------------------------------------------
