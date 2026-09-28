@@ -40,7 +40,7 @@ def _unreadable(*_args, **_kwargs):
     raise sqlite3.OperationalError("unreadable")
 
 
-def _heartbeat(conn, *, rank: int, tick: int, world: int) -> None:
+def _process_sample(conn, *, rank: int, tick: int, world: int) -> None:
     """One 2 s process-sampler tick from ``rank``."""
     ts = T0 + tick * 2.0
     insert_process_sample(
@@ -58,17 +58,17 @@ def _heartbeat(conn, *, rank: int, tick: int, world: int) -> None:
 
 
 def _write_run(
-    path: str, *, last_heartbeat: Mapping[int, int], steps: int = STEPS
+    path: str, *, last_sample: Mapping[int, int], steps: int = STEPS
 ) -> None:
-    """Two GPU ranks with ``steps`` aligned steps and per-rank heartbeats.
+    """Two GPU ranks with ``steps`` aligned steps and per-rank process samples.
 
-    ``last_heartbeat`` maps rank -> the last 2 s sampler tick it sent.
+    ``last_sample`` maps rank -> the last 2 s sampler tick it sent.
     """
-    ranks = sorted(last_heartbeat)
+    ranks = sorted(last_sample)
     with sqlite_database(path, init_summary_schema) as conn:
         for rank in ranks:
-            for tick in range(1, last_heartbeat[rank] + 1):
-                _heartbeat(conn, rank=rank, tick=tick, world=len(ranks))
+            for tick in range(1, last_sample[rank] + 1):
+                _process_sample(conn, rank=rank, tick=tick, world=len(ranks))
         row_id = 0
         for rank in ranks:
             for step in range(steps):
@@ -99,7 +99,7 @@ def _panel_text(db_path: str) -> str:
 
 def test_combined_result_names_the_rank_that_stopped(tmp_path) -> None:
     db_path = str(tmp_path / "dead.db")
-    _write_run(db_path, last_heartbeat={0: 60, 1: 20})
+    _write_run(db_path, last_sample={0: 60, 1: 20})
 
     out = StepMemoryMetricsComputer(db_path).compute_cli()
 
@@ -116,7 +116,7 @@ def test_combined_result_names_the_rank_that_stopped(tmp_path) -> None:
 
 def test_step_memory_panel_marks_the_stale_rank(tmp_path) -> None:
     db_path = str(tmp_path / "dead.db")
-    _write_run(db_path, last_heartbeat={0: 60, 1: 20})
+    _write_run(db_path, last_sample={0: 60, 1: 20})
 
     text = _panel_text(db_path)
 
@@ -128,7 +128,7 @@ def test_step_memory_panel_has_no_marker_when_every_rank_reports(
     tmp_path,
 ) -> None:
     db_path = str(tmp_path / "alive.db")
-    _write_run(db_path, last_heartbeat={0: 60, 1: 60})
+    _write_run(db_path, last_sample={0: 60, 1: 60})
 
     text = _panel_text(db_path)
 
@@ -142,7 +142,7 @@ def test_held_metrics_carry_this_ticks_status(tmp_path) -> None:
     last good figures are being held.
     """
     db_path = str(tmp_path / "dead.db")
-    _write_run(db_path, last_heartbeat={0: 60, 1: 60})
+    _write_run(db_path, last_sample={0: 60, 1: 60})
     computer = StepMemoryCLIComputer(db_path)
     first = computer.compute()
     assert first.metrics and not any(r.is_stale for r in first.rank_reporting)
@@ -167,7 +167,7 @@ def test_renderer_holds_its_figures_with_this_ticks_verdict(
     import traceml_ai.renderers.step_memory.cli_compute as step_memory_cli
 
     db_path = str(tmp_path / "dies_later.db")
-    _write_run(db_path, last_heartbeat={0: 60, 1: 60})
+    _write_run(db_path, last_sample={0: 60, 1: 60})
     clock = [T0]
     monkeypatch.setattr(
         step_memory_cli, "time", SimpleNamespace(time=lambda: clock[0])
@@ -180,7 +180,7 @@ def test_renderer_holds_its_figures_with_this_ticks_verdict(
     with sqlite_database(db_path) as conn:
         conn.execute("DELETE FROM step_memory_samples")
         for tick in range(61, 101):
-            _heartbeat(conn, rank=0, tick=tick, world=2)
+            _process_sample(conn, rank=0, tick=tick, world=2)
     clock[0] += 31.0
     held = _render(renderer.get_panel_renderable())
 
@@ -193,7 +193,7 @@ def test_empty_panel_names_a_rank_that_stopped_before_the_first_step(
 ) -> None:
     """A rank dies before any step completes: the DDP startup hang."""
     db_path = str(tmp_path / "startup_hang.db")
-    _write_run(db_path, last_heartbeat={0: 60, 1: 20}, steps=0)
+    _write_run(db_path, last_sample={0: 60, 1: 20}, steps=0)
 
     text = _panel_text(db_path)
 
@@ -226,7 +226,7 @@ def test_an_older_row_with_a_garbage_global_rank_moves_no_verdict(
     0's newest row, so rank 0's last word stands.
     """
     db_path = str(tmp_path / "bad_rank.db")
-    _write_run(db_path, last_heartbeat={0: 60, 1: 20})
+    _write_run(db_path, last_sample={0: 60, 1: 20})
     _add_unparseable_rank(db_path)
 
     out = StepMemoryCLIComputer(db_path).compute()
@@ -248,7 +248,7 @@ def test_unreadable_status_on_an_empty_tick_is_unavailable(tmp_path) -> None:
     The held figures come back without a status, not with tick 1's.
     """
     db_path = str(tmp_path / "dead.db")
-    _write_run(db_path, last_heartbeat={0: 60, 1: 20})
+    _write_run(db_path, last_sample={0: 60, 1: 20})
     computer = StepMemoryCLIComputer(db_path)
     first = computer.compute()
     assert [r.global_rank for r in first.rank_reporting if r.is_stale] == [1]
@@ -274,7 +274,7 @@ def test_unreadable_status_on_a_metrics_tick_drops_the_line(
     import traceml_ai.renderers.step_memory.common as step_memory_common
 
     db_path = str(tmp_path / "dead.db")
-    _write_run(db_path, last_heartbeat={0: 60, 1: 20})
+    _write_run(db_path, last_sample={0: 60, 1: 20})
     renderer = StepMemoryRenderer(db_path)
     first = _render(renderer.get_panel_renderable())
     assert "No Process data from rank 1 for 80s." in first
@@ -290,7 +290,7 @@ def test_the_dashboard_result_carries_no_reporting_status(tmp_path) -> None:
     """The dashboard's Step Memory section does not show the status, so
     its computer does not read it."""
     db_path = str(tmp_path / "dead.db")
-    _write_run(db_path, last_heartbeat={0: 60, 1: 20})
+    _write_run(db_path, last_sample={0: 60, 1: 20})
 
     out = StepMemoryMetricsComputer(db_path).compute_dashboard()
 
@@ -300,7 +300,7 @@ def test_the_dashboard_result_carries_no_reporting_status(tmp_path) -> None:
 
 def test_status_read_with_no_ranks_is_an_empty_tuple(tmp_path) -> None:
     """Read fine, nobody reported: an empty tuple, not "unreadable"."""
-    db_path = str(tmp_path / "no_heartbeat.db")
+    db_path = str(tmp_path / "no_process_samples.db")
     with sqlite_database(db_path, init_summary_schema):
         pass
 
