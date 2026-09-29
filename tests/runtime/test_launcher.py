@@ -937,6 +937,7 @@ def test_guarded_node_records_training_outcome_with_cli_exit_code(
         json.dumps(
             {
                 "session_id": "guarded-run",
+                "status": "running",
                 "run": {"run_name": "guarded-run"},
                 "created_at": "2026-09-26T10:00:00+00:00",
             }
