@@ -42,8 +42,9 @@ export MASTER_ADDR="$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 # export MASTER_ADDR="$(srun --nodes=1 --ntasks=1 -w "$MASTER_ADDR" hostname --ip-address)"
 
 # --run-name is required for multi-node runs so every node writes into the same
-# TraceML run. Tagging it with the job id keeps concurrent jobs from colliding.
-export RUN_NAME="ddp-${SLURM_JOB_ID}"
+# TraceML run. It must be new for each launch, so tag it with the job id and
+# the restart count (a requeued job keeps its job id).
+export RUN_NAME="ddp-${SLURM_JOB_ID}-${SLURM_RESTART_COUNT:-0}"
 
 # Run from the submit directory; launch.sh and the training script paths are
 # relative to it.

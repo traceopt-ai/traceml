@@ -73,6 +73,12 @@ aggregator process.
 `--session-id` remains accepted as a backward-compatible alias for
 `--run-name`.
 
+A run name is used once. Node 0 creates `<logs-dir>/<run-name>` before it
+starts anything, and stops with an error if that folder already exists. Other
+nodes join the folder node 0 created. They stop with an error if they cannot
+see it, or if it belongs to an earlier launch. Put `--logs-dir` on storage
+that every node can see, and pick a new `--run-name` for each launch.
+
 At the end of a summary run, node 0 waits for rank-finished markers, drains
 late telemetry, checkpoints SQLite, and then writes `final_summary.*`. The
 default finalization budget is 300 seconds. On slow shared filesystems or

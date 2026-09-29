@@ -50,6 +50,11 @@ from traceml_ai.launcher.process import (
     terminate_process_group,
     wait_for_tcp_listen,
 )
+from traceml_ai.launcher.run_directory import (
+    RunDirectoryError,
+    join_run_root,
+    reserve_run_root,
+)
 from traceml_ai.loggers.error_log import get_error_logger, setup_error_logger
 from traceml_ai.regression.outcome import (
     OUTCOME_FILENAME,
@@ -295,6 +300,26 @@ def _run_noncritical_launcher_step(
             f"[TraceML] WARNING: {description}: {exc}",
             file=sys.stderr,
         )
+
+
+def _claim_run_dir_or_exit(claim: Callable[[], None]) -> None:
+    """Claim the run directory, or exit before training starts."""
+    try:
+        claim()
+    except (RunDirectoryError, OSError) as exc:
+        raise SystemExit(f"[TraceML] ERROR: {exc}") from exc
+
+
+def _setup_launcher_error_logger(session_root: Path, node_rank: int) -> None:
+    """Set up this node's launcher error log without risking the launch."""
+    try:
+        setup_error_logger(
+            role="launcher",
+            session_root=session_root,
+            node_rank=node_rank,
+        )
+    except Exception:
+        pass
 
 
 def _resolve_cli_missing_aggregator_policy(args: argparse.Namespace) -> str:
@@ -716,10 +741,11 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         require_explicit=torchrun_cfg.nnodes > 1,
     )
     env["TRACEML_SESSION_ID"] = run_identity.session_id
-    # A rerun with the same run name reuses the session id, so a surviving
-    # rank from the earlier launch would still match it. A fresh nonce per
-    # launch tells them apart. Only a single-node launcher starts every rank,
-    # so multi-node runs send no nonce and rely on the session id alone.
+    # A run name can be reused after its old directory is removed, and a
+    # surviving rank from that launch would still match the session id. A
+    # fresh nonce per launch tells them apart. Only a single-node launcher
+    # starts every rank, so multi-node runs send no nonce and rely on the
+    # session id alone.
     env["TRACEML_RUN_NONCE"] = (
         secrets.token_hex(16) if torchrun_cfg.nnodes == 1 else ""
     )
@@ -777,19 +803,11 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     training_stdout_path = node_dir / "training.stdout.log"
     training_stderr_path = node_dir / "training.stderr.log"
 
-    # Every node launcher owns one structured internal-error file. Logging is
-    # diagnostic only and must never prevent training from starting.
-    try:
-        setup_error_logger(
-            role="launcher",
-            session_root=session_root,
-            node_rank=torchrun_cfg.node_rank,
-        )
-    except Exception:
-        pass
-
     manifest_path: Optional[Path] = None
     if is_root_writer:
+        # Node 0 owns the run directory; other nodes join it later.
+        _claim_run_dir_or_exit(lambda: reserve_run_root(session_root))
+        _setup_launcher_error_logger(session_root, torchrun_cfg.node_rank)
         code_manifest_path = write_code_manifest(
             session_root=session_root,
             script_path=script_path,
@@ -1156,6 +1174,16 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     else:
         telemetry_available = True
         print("[TraceML] Aggregator ready.")
+
+    if not is_root_writer:
+        _claim_run_dir_or_exit(
+            lambda: join_run_root(
+                session_root,
+                run_name=run_identity.run_name,
+                node_rank=torchrun_cfg.node_rank,
+            )
+        )
+        _setup_launcher_error_logger(session_root, torchrun_cfg.node_rank)
 
     if manifest_path is not None:
         _run_noncritical_launcher_step(
