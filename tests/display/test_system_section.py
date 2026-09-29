@@ -390,12 +390,24 @@ def test_whole_run_charts_share_one_clock_axis() -> None:
     )
     assert panel["cpu_value_tip"].text.endswith(CPU_DEFINITION)
     assert panel["cpu_label_tip"].text.startswith("Available history, ")
+    assert "Each point averages the previous 2 min." in (
+        panel["cpu_label_tip"].text
+    )
     assert panel["cpu_label_tip"].text.endswith(CPU_DEFINITION)
     assert panel["power_label"].text == (
         "gpu power · per GPU vs 70 W limit · recent history · "
         "average and lowest every 2 min"
     )
     assert "min," not in panel["cpu_label"].text
+
+    # A span or window that formats empty drops its clause instead of
+    # leaving "Available history, ." or "the previous ." behind.
+    payload["series"]["cpu_run"] = dict(
+        payload["series"]["cpu_run"], span_s=0.0, window_s=0.0
+    )
+    update_system_section(panel, as_payload(payload))
+    assert panel["cpu_label"].text == "cpu utilization · recent history"
+    assert panel["cpu_label_tip"].text == CPU_DEFINITION
 
 
 def test_power_chart_draws_limit_and_floor_reference_lines() -> None:
@@ -1173,6 +1185,22 @@ def test_gpu_slots_fold_only_once_a_sample_says_there_is_no_gpu() -> None:
     assert gpu_layout(has_data=True, gpu_available=False) == "cpu_only"
     assert gpu_layout(has_data=True, gpu_available=True) == "gpu"
     assert gpu_layout(has_data=False, gpu_available=True) == "gpu"
+    # A sample said there is no GPU, so a later payload without data
+    # keeps the fold. Any other card waits, as it did before.
+    for previous, expected in (
+        ("cpu_only", "cpu_only"),
+        ("gpu", "waiting"),
+        ("waiting", "waiting"),
+    ):
+        assert (
+            gpu_layout(has_data=False, gpu_available=False, previous=previous)
+            == expected
+        ), previous
+    # A sample always decides for itself.
+    assert (
+        gpu_layout(has_data=True, gpu_available=True, previous="cpu_only")
+        == "gpu"
+    )
 
 
 def _visible_texts(root) -> list:
@@ -1235,6 +1263,10 @@ def test_a_cpu_only_card_shows_what_exists_and_no_absence() -> None:
 
     with ui.element("div") as root:
         panel = build_system_section()
+    # A real run passes through the waiting layout before its first
+    # sample arrives.
+    update_system_section(panel, as_payload({}))
+    assert panel["gpu_layout"] == "waiting"
     update_system_section(panel, as_payload(_cpu_only_payload()))
 
     assert panel["gpu_layout"] == "cpu_only"
@@ -1259,9 +1291,102 @@ def test_a_cpu_only_card_shows_what_exists_and_no_absence() -> None:
     assert "ram usage" in shown
     assert "8.4 / 25.8 GB" in shown
     assert "used / total" in shown
-    # The CPU chart keeps its heading and its labelled median.
+    # The CPU chart keeps its heading and its labelled median, the label
+    # directly before the value.
     assert "cpu utilization · last 58 s" in shown
-    assert "median" in shown and "42%" in shown
+    assert shown.index("median") + 1 == shown.index("42%")
+    # Both tooltips wrap, each opening from its own edge of the card.
+    for key, edge in (("cpu_label_tip", "left"), ("cpu_value_tip", "right")):
+        props = panel[key].props
+        assert props["max-width"] == "min(320px, 80vw)", key
+        assert props[":offset"] == "[0, 14]", key
+        assert props["anchor"] == f"bottom {edge}", key
+        assert props["self"] == f"top {edge}", key
+
+
+def test_a_cpu_only_card_stays_folded_when_its_reads_go_stale(
+    tmp_path, monkeypatch
+) -> None:
+    """A read failure past the stale TTL does not bring the GPU slots back.
+
+    The compute layer then sends a payload without data whose
+    ``gpu_available`` is its default False, the same shape it sends before
+    the first sample. On a card that a sample already folded, reading it
+    as "not read yet" regrew three "n/a" GPU tiles, the 150 px power
+    placeholder and the per-GPU rows. Driven through the real compute
+    layer so the payload is the one production sends.
+    """
+    from nicegui import ui
+
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section import (  # noqa: E501
+        build_system_section,
+        update_system_section,
+    )
+    from traceml_ai.renderers.system.dashboard_compute import (
+        SystemDashboardComputer,
+    )
+
+    _cpu_db(tmp_path / "run.db", [40.0, 42.0, 44.0])
+    computer = SystemDashboardComputer(
+        str(tmp_path / "run.db"), stale_ttl_s=0.0
+    )
+    with ui.element("div") as root:
+        panel = build_system_section()
+    update_system_section(panel, computer.compute())
+    assert panel["gpu_layout"] == "cpu_only"
+
+    monkeypatch.setattr(
+        computer._db,
+        "connect",
+        lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("locked")),
+    )
+    stale = computer.compute()
+    assert stale.window_len == 0
+    assert stale.rollups.status == "No fresh system data"
+    update_system_section(panel, stale)
+
+    assert panel["gpu_layout"] == "cpu_only"
+    for key in ("util", "mem", "temp"):
+        assert _display(panel["tile_els"][key]) == "none", key
+        # Hidden and cleared, so no absence marker waits inside them.
+        assert panel["tiles"][key].content == "", key
+    for key in (
+        "power_head",
+        "power_chart",
+        "power_placeholder",
+        "rows",
+        "rows_placeholder",
+    ):
+        assert _display(panel[key]) == "none", key
+    assert panel["power_placeholder"].text == ""
+    assert panel["rows_placeholder"].text == ""
+    shown = _visible_texts(root)
+    assert "gpu" not in " | ".join(shown).lower(), shown
+    # The one "n/a" left is the RAM tile, which has no fresh reading.
+    assert [text for text in shown if "n/a" in text] == ["n/a"], shown
+    assert panel["tiles"]["ram"].content == "n/a"
+    assert "No fresh system data" in panel["note"].text
+
+
+def test_a_measured_idle_host_reads_median_0_percent() -> None:
+    """A median of 0.0 is a measurement, so it is printed and labelled."""
+    from nicegui import ui
+
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section import (  # noqa: E501
+        build_system_section,
+        update_system_section,
+    )
+
+    idle = _cpu_only_payload()
+    idle["rollups"] = dict(
+        idle["rollups"], cpu={"now": 0.0, "p50": 0.0, "p95": 0.0}
+    )
+    with ui.element("div"):
+        panel = build_system_section()
+    update_system_section(panel, as_payload(idle))
+
+    assert panel["cpu_value"].text == "0%"
+    assert panel["cpu_value_name"].text == "median"
 
 
 def test_a_cpu_only_card_gets_its_gpu_slots_back_when_one_reports() -> None:
