@@ -432,7 +432,8 @@ row ids are unchanged.
 ## Contract scenarios
 
 [`tests/step_time/scenarios.py`](https://github.com/traceopt-ai/traceml/blob/main/tests/step_time/scenarios.py)
-defines six explicit SQLite scenarios:
+defines nine explicit SQLite scenarios.
+Every rank in the first six writes one identical payload on every step:
 
 | Scenario | Contract protected |
 |---|---|
@@ -442,6 +443,15 @@ defines six explicit SQLite scenarios:
 | `single_rank_cpu` | single-rank statistics and diagnosis without fabricated cross-rank skew |
 | `ddp_rank_straggler` | DDP visible-backward attribution and critical severity after a confident window |
 | `fsdp_rank_straggler` | FSDP strategy propagation, attribution behavior, and warning severity cap |
+
+The other three vary over time.
+Their variation is seeded, so every run writes the same rows:
+
+| Scenario | Contract protected |
+|---|---|
+| `jittered_ddp` | per-step variation on every metric, and a rank whose backward is slower |
+| `rank_missing_steps` | a rank that stops reporting for four steps mid-window drops those steps from the aligned window |
+| `intermittent_metrics` | `optimizer_step` and `h2d` that occur on some steps stay measured; a forward missing on one step leaves that rank's forward, compute and residual unknown |
 
 The cross-surface tests cover:
 
@@ -454,6 +464,23 @@ The cross-surface tests cover:
 They intentionally do not snapshot timestamps, private cache state, complete
 Rich/NiceGUI markup, or dictionary ordering.
 
+`tests/step_time/test_public_schema_golden.py` builds the Step Time summary
+section for all nine scenarios and compares it with
+`tests/step_time/golden/step_time_public_schema.json`.
+The golden holds the public key set, and, per scenario and per metric, which
+values are present and which are `null`.
+A renamed key or a changed `null` pattern fails the test with a diff.
+To accept an intended change, bump `SCHEMA_VERSION` in
+`src/traceml_ai/reporting/final.py`, add a `CHANGELOG.md` entry, and run:
+
+```bash
+pytest tests/step_time/test_public_schema_golden.py --update-golden
+```
+
+The command refuses to rewrite a key or `null`-pattern change at an unchanged
+schema version.
+Adding a scenario needs no version bump.
+
 ## Changing Step Time safely
 
 Before submitting a Step Time change:
@@ -464,8 +491,8 @@ Before submitting a Step Time change:
 3. Run the cross-surface tests and inspect CLI, dashboard, and summary effects
    together.
 4. If SQL changes, record fresh benchmark measurements.
-5. If public summary keys or meanings change, update `reporting/SCHEMA.md` and
-   consider schema-version compatibility.
+5. If public summary keys or meanings change, update `reporting/SCHEMA.md`,
+   bump the schema version, and regenerate the public-schema golden.
 6. If diagnosis vocabulary or thresholds change, update
    `diagnostics/DIAGNOSIS.md` and user-facing interpretation guidance.
 
