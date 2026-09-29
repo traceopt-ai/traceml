@@ -262,6 +262,34 @@ def test_no_relative_tick_label_repeats(span):
     assert ticks == sorted(ticks) and len(ticks) <= 4
 
 
+@pytest.mark.parametrize(
+    "span, expected",
+    [
+        (7.0, ["−7s", "−4s", "−2s", "Now"]),
+        (368.0, ["−6m 08s", "−4m 00s", "−2m 00s", "Now"]),
+        (450.0, ["−7m 30s", "−4m 00s", "−2m 00s", "Now"]),
+    ],
+)
+def test_a_span_just_past_a_step_still_gets_a_round_tick(span, expected):
+    """The coarser step's only tick sat too near the leftmost and dropped.
+
+    Spans of 7 s and 361-450 s read just the span and "Now".
+    """
+    ticks = charting.relative_ticks(span)
+    words = [
+        "Now" if tick == 0 else "−" + format_elapsed(-tick) for tick in ticks
+    ]
+    assert words == expected
+
+
+def test_every_span_from_two_seconds_gets_an_interior_tick():
+    for span in range(2, 200_000):
+        ticks = charting.relative_ticks(float(span))
+        assert 3 <= len(ticks) <= 4, (span, ticks)
+        words = [format_elapsed(-tick) for tick in ticks]
+        assert len(set(words)) == len(words), (span, words)
+
+
 _NODE = shutil.which("node")
 
 

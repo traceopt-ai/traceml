@@ -194,15 +194,31 @@ def relative_ticks(span: float) -> List[float]:
     than crowding it.
     """
     span = max(float(span), 1.0)
-    step = next((s for s in _TICK_STEPS if span / s <= 3.0), None)
-    if step is None:
-        step = math.ceil(span / 3.0 / 86400.0) * 86400
-    inner = [
+    index = next(
+        (i for i, s in enumerate(_TICK_STEPS) if span / s <= 3.0), None
+    )
+    if index is None:
+        return [-span, *_inner_ticks(span, _day_step(span)), 0.0]
+    inner = _inner_ticks(span, _TICK_STEPS[index])
+    if not inner and index > 0:
+        # The step fits, but its one tick sat within half a step of the
+        # leftmost and was dropped, so a 6m 08s axis read only its two
+        # ends. The next finer step always leaves a tick; keep the two
+        # nearest "Now" so the axis stays at four labels.
+        inner = _inner_ticks(span, _TICK_STEPS[index - 1])[-2:]
+    return [-span, *inner, 0.0]
+
+
+def _day_step(span: float) -> float:
+    return math.ceil(span / 3.0 / 86400.0) * 86400.0
+
+
+def _inner_ticks(span: float, step: float) -> List[float]:
+    return [
         -float(k * step)
         for k in range(int(span // step), 0, -1)
         if span - k * step > step / 2.0
     ]
-    return [-span, *inner, 0.0]
 
 
 def apply_span_axis(
