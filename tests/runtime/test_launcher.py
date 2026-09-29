@@ -1963,7 +1963,7 @@ def _reserve_as_node_zero(run_root: Path, *, status: str = "running") -> None:
     """Stand in for node 0: reserve the run directory and write its manifest."""
     reserve_run_root(run_root)
     (run_root / "manifest.json").write_text(
-        json.dumps({"status": status, "run": {"launch_id": "node0"}}),
+        json.dumps({"status": status, "run": {"run_name": run_root.name}}),
         encoding="utf-8",
     )
 
@@ -2358,7 +2358,7 @@ def test_multinode_nodes_share_one_run_directory(
     assert (run_root / "nodes" / "node_0").is_dir()
     assert (run_root / "nodes" / "node_1").is_dir()
     manifest = json.loads((run_root / "manifest.json").read_text("utf-8"))
-    assert manifest["run"]["launch_id"]
+    assert manifest["run"]["run_name"] == "shared"
     assert manifest["launch"]["node_rank"] == 0
 
 

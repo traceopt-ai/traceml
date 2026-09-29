@@ -838,10 +838,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         manifest_path = write_run_manifest(
             session_root=session_root,
             session_id=session_id,
-            run={
-                **run_identity.to_manifest(),
-                "launch_id": secrets.token_hex(16),
-            },
+            run=run_identity.to_manifest(),
             script_path=script_path,
             profile=env["TRACEML_PROFILE"],
             ui_mode=cfg["mode"],
@@ -1180,7 +1177,11 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
 
     if not is_root_writer:
         _claim_run_dir_or_exit(
-            lambda: join_run_root(session_root, torchrun_cfg.node_rank)
+            lambda: join_run_root(
+                session_root,
+                run_name=run_identity.run_name,
+                node_rank=torchrun_cfg.node_rank,
+            )
         )
         _setup_launcher_error_logger(session_root, torchrun_cfg.node_rank)
 

@@ -87,9 +87,11 @@ def test_claim_never_creates_a_missing_run_root(tmp_path) -> None:
 def test_join_claims_this_node_in_a_reserved_run(tmp_path) -> None:
     run_root = tmp_path / "logs" / "shared"
     reserve_run_root(run_root)
-    _write_manifest(run_root, {"status": "running", "run": {"launch_id": "a"}})
+    _write_manifest(
+        run_root, {"status": "running", "run": {"run_name": "shared"}}
+    )
 
-    join_run_root(run_root, 1)
+    join_run_root(run_root, run_name="shared", node_rank=1)
 
     assert (run_root / "nodes" / "node_1").is_dir()
 
@@ -98,20 +100,25 @@ def test_join_claims_this_node_in_a_reserved_run(tmp_path) -> None:
     ("manifest", "node_one_exists", "message"),
     [
         (None, False, "node 0 has not reserved"),
-        ({"status": "running", "run": {}}, False, "earlier launch"),
+        ({"status": "running", "run": {}}, False, "belongs to run None"),
         (
-            {"status": "completed", "run": {"launch_id": "a"}},
+            {"status": "running", "run": {"run_name": "other"}},
+            False,
+            "belongs to run 'other'",
+        ),
+        (
+            {"status": "completed", "run": {"run_name": "old"}},
             False,
             "earlier launch",
         ),
         (
-            {"status": "running", "run": {"launch_id": "a"}},
+            {"status": "running", "run": {"run_name": "old"}},
             True,
             "earlier launch",
         ),
     ],
 )
-def test_join_refuses_a_run_not_reserved_by_this_launch(
+def test_join_refuses_a_run_that_is_not_joinable(
     tmp_path, manifest, node_one_exists, message
 ) -> None:
     run_root = tmp_path / "logs" / "old"
@@ -123,6 +130,6 @@ def test_join_refuses_a_run_not_reserved_by_this_launch(
     before = _tree(run_root)
 
     with pytest.raises(RunDirectoryError, match=message):
-        join_run_root(run_root, 1)
+        join_run_root(run_root, run_name="old", node_rank=1)
 
     assert _tree(run_root) == before

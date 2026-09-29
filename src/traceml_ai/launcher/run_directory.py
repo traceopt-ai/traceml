@@ -54,8 +54,8 @@ def claim_node_dir(run_root: Path, node_rank: int) -> None:
         raise _earlier_launch_error(run_root) from None
 
 
-def join_run_root(run_root: Path, node_rank: int) -> None:
-    """Join the run directory node 0 reserved for this launch."""
+def join_run_root(run_root: Path, *, run_name: str, node_rank: int) -> None:
+    """Join the active run directory node 0 reserved for this run name."""
     run_root = Path(run_root).resolve()
     try:
         with open(run_root / "manifest.json", "r", encoding="utf-8") as f:
@@ -68,11 +68,13 @@ def join_run_root(run_root: Path, node_rank: int) -> None:
         ) from None
 
     run = manifest.get("run") if isinstance(manifest, dict) else None
-    if (
-        not isinstance(run, dict)
-        or not run.get("launch_id")
-        or manifest.get("status") not in _JOINABLE_STATUSES
-    ):
+    found_name = run.get("run_name") if isinstance(run, dict) else None
+    if found_name != run_name:
+        raise RunDirectoryError(
+            f"run directory {run_root} belongs to run {found_name!r}, not "
+            f"{run_name!r}, and was left untouched."
+        )
+    if manifest.get("status") not in _JOINABLE_STATUSES:
         raise _earlier_launch_error(run_root)
     claim_node_dir(run_root, node_rank)
 
