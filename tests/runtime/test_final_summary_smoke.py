@@ -23,6 +23,7 @@ SRC_DIR = REPO_ROOT / "src"
 DDP_SCRIPT = REPO_ROOT / "examples" / "distributed" / "ddp_minimal.py"
 RUN_NAME = "smoke-test"
 DDP_RUN_NAME = "ddp-smoke-test"
+MULTI_NODE_DDP_RUN_NAME = "multi-node-ddp-smoke-test"
 FINALIZE_TIMEOUT_SEC = 60.0
 SUBPROCESS_TIMEOUT_SEC = 240
 
@@ -277,4 +278,132 @@ guard:
             },
         },
         "measurement": {"start_step": 1, "completed_steps": 20},
+    }
+    assert manifest["guard"]["training"] == {
+        "status": "completed",
+        "nodes_expected": 1,
+        "nodes_observed": 1,
+        "reasons": [],
+        "nodes": [{"node_rank": 0, "exit_code": 0}],
+    }
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="End-to-end torchrun smoke run not yet verified on Windows.",
+)
+def test_two_node_ddp_guard_outcomes_smoke(tmp_path):
+    logs_dir = tmp_path / "logs"
+    (tmp_path / "traceml.yaml").write_text(
+        """\
+mode: summary
+history_enabled: true
+guard:
+  schema_version: 1
+  workload:
+    name: multi-node-ddp-smoke
+    parameters:
+      model: linear-classifier
+      data_version: synthetic-v1
+  measurement:
+    start_step: 1
+    completed_steps: 20
+""",
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env["OMP_NUM_THREADS"] = "1"
+    env["PYTHONPATH"] = os.pathsep.join(
+        part for part in (str(SRC_DIR), env.get("PYTHONPATH", "")) if part
+    )
+    aggregator_port = _free_tcp_port()
+    master_port = _free_tcp_port()
+    while master_port == aggregator_port:
+        master_port = _free_tcp_port()
+
+    base_cmd = [
+        sys.executable,
+        "-c",
+        "from traceml_ai.launcher.cli import main; main()",
+        "run",
+        str(DDP_SCRIPT),
+        "--mode",
+        "summary",
+        "--run-name",
+        MULTI_NODE_DDP_RUN_NAME,
+        "--logs-dir",
+        str(logs_dir),
+        "--nnodes",
+        "2",
+        "--nproc-per-node",
+        "1",
+        "--master-addr",
+        "127.0.0.1",
+        "--master-port",
+        str(master_port),
+        "--aggregator-host",
+        "127.0.0.1",
+        "--aggregator-port",
+        str(aggregator_port),
+        "--finalize-timeout-sec",
+        str(FINALIZE_TIMEOUT_SEC),
+        "--args",
+        "--steps",
+        "20",
+    ]
+    script_args_index = base_cmd.index("--args")
+    processes = [
+        subprocess.Popen(
+            [
+                *base_cmd[:script_args_index],
+                "--node-rank",
+                str(node_rank),
+                *base_cmd[script_args_index:],
+            ],
+            cwd=str(tmp_path),
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        for node_rank in range(2)
+    ]
+
+    outputs: list[tuple[str, str]] = []
+    try:
+        for process in processes:
+            outputs.append(process.communicate(timeout=SUBPROCESS_TIMEOUT_SEC))
+    except subprocess.TimeoutExpired:
+        for process in processes:
+            process.kill()
+        for process in processes:
+            process.communicate()
+        pytest.fail("two-node TraceML smoke run timed out")
+
+    session_root = logs_dir / MULTI_NODE_DDP_RUN_NAME
+    for node_rank, (process, output) in enumerate(zip(processes, outputs)):
+        stdout, stderr = output
+        assert process.returncode == 0, (
+            f"node {node_rank} exited with {process.returncode}\n"
+            f"Artifacts: {session_root}\n"
+            f"STDOUT:\n{stdout}\nSTDERR:\n{stderr}"
+        )
+        assert (
+            session_root / "nodes" / f"node_{node_rank}" / "guard_outcome.json"
+        ).is_file()
+
+    manifest = json.loads(
+        (session_root / "manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["status"] == "completed"
+    assert manifest["telemetry_status"] == "complete"
+    assert manifest["guard"]["training"] == {
+        "status": "completed",
+        "nodes_expected": 2,
+        "nodes_observed": 2,
+        "reasons": [],
+        "nodes": [
+            {"node_rank": 0, "exit_code": 0},
+            {"node_rank": 1, "exit_code": 0},
+        ],
     }
