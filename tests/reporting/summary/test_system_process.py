@@ -163,7 +163,7 @@ def test_system_section_reports_scoped_multinode_primary_issue(tmp_path):
         "node_rank": 1,
         "gpu_idx": 0,
     }
-    assert "1 gpu0" in payload["diagnosis"]["summary"]
+    assert "on node 1, gpu0" in payload["diagnosis"]["summary"]
     assert payload["issues"][0]["evidence"]["scope"]["node"] == "1"
     assert "diagnosis" not in payload["groups"]["rows"]["1"]
     assert "issues" not in payload["groups"]["rows"]["1"]
