@@ -432,7 +432,7 @@ row ids are unchanged.
 ## Contract scenarios
 
 [`tests/step_time/scenarios.py`](https://github.com/traceopt-ai/traceml/blob/main/tests/step_time/scenarios.py)
-defines nine explicit SQLite scenarios.
+defines eleven explicit SQLite scenarios.
 Every rank in the first six writes one identical payload on every step:
 
 | Scenario | Contract protected |
@@ -444,7 +444,7 @@ Every rank in the first six writes one identical payload on every step:
 | `ddp_rank_straggler` | DDP visible-backward attribution and critical severity after a confident window |
 | `fsdp_rank_straggler` | FSDP strategy propagation, attribution behavior, and warning severity cap |
 
-The other three vary over time.
+Three more vary over time.
 Their variation is seeded, so every run writes the same rows:
 
 | Scenario | Contract protected |
@@ -452,6 +452,14 @@ Their variation is seeded, so every run writes the same rows:
 | `jittered_ddp` | per-step variation on every metric, and a rank whose backward is slower |
 | `rank_missing_steps` | a rank that stops reporting for four steps mid-window drops those steps from the aligned window |
 | `intermittent_metrics` | `optimizer_step` and `h2d` that occur on some steps stay measured; a forward missing on one step leaves that rank's forward, compute and residual unknown |
+
+The last two reach diagnoses the others never do, so their evidence keys are
+covered too:
+
+| Scenario | Contract protected |
+|---|---|
+| `h2d_bound_gpu` | H2D-bound diagnosis on the GPU clock |
+| `forward_missing_everywhere` | incomplete-data diagnosis when no rank reports forward |
 
 The cross-surface tests cover:
 
@@ -465,7 +473,8 @@ They intentionally do not snapshot timestamps, private cache state, complete
 Rich/NiceGUI markup, or dictionary ordering.
 
 `tests/step_time/test_public_schema_golden.py` builds the Step Time summary
-section for all nine scenarios and compares it with
+section for all eleven scenarios, with the analysis window the final report
+resolves, and compares it with
 `tests/step_time/golden/step_time_public_schema.json`.
 The golden holds the public key set, and, per scenario and per metric, which
 values are present and which are `null`.
@@ -479,7 +488,9 @@ pytest tests/step_time/test_public_schema_golden.py --update-golden
 
 The command refuses to rewrite a key or `null`-pattern change at an unchanged
 schema version.
-Adding a scenario needs no version bump.
+A new scenario that brings no new key needs no version bump.
+The check runs when the golden is regenerated, not in CI, so deleting or
+hand-editing the golden file bypasses it.
 
 ## Changing Step Time safely
 
