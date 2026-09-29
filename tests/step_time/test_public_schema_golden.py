@@ -7,7 +7,8 @@
 """Public-schema golden for the Step Time section of the final summary.
 
 Every scenario is written through the production projection writer and read
-back by the real summary builder. The golden pins two things readers depend
+back by the real summary builder, with the analysis window the final report
+resolves for it. The golden pins two things readers depend
 on: the exact set of public keys, and, per scenario and per metric, which
 values are present and which are null. The null pattern is per metric on
 purpose: ``optimizer_step`` and ``h2d`` occur only on some steps and still
@@ -17,7 +18,8 @@ for some of them.
 
 A rename, a dropped key or a changed null pattern fails this test with a
 diff. Regenerate with ``UPDATE_COMMAND``; it refuses to rewrite a key or
-null-pattern change unless ``SCHEMA_VERSION`` was bumped first.
+null-pattern change unless ``SCHEMA_VERSION`` was bumped first. The guard
+runs on regeneration only: deleting or hand-editing the golden bypasses it.
 """
 
 from __future__ import annotations
@@ -33,6 +35,7 @@ from tests.step_time.scenarios import (
     ALL_SCENARIOS,
     create_step_time_database,
 )
+from traceml_ai.reporting.analysis_window import resolve_analysis_window
 from traceml_ai.reporting.final import SCHEMA_VERSION
 from traceml_ai.reporting.sections.step_time import (
     STEP_TIME_METRIC_NAMES,
@@ -93,7 +96,9 @@ def build_snapshot(tmp_path: Path) -> dict[str, Any]:
     for scenario in ALL_SCENARIOS:
         db_path = tmp_path / f"{scenario.name}.db"
         create_step_time_database(db_path, scenario)
-        payload = StepTimeSummarySection().build(str(db_path)).payload
+        window = resolve_analysis_window(str(db_path))
+        section = StepTimeSummarySection(analysis_window=window)
+        payload = section.build(str(db_path)).payload
         keys |= _key_paths(payload)
         metrics[scenario.name] = _metric_table(payload)
     return {
@@ -113,9 +118,10 @@ def schema_change_without_bump(
 ) -> list[str]:
     """Why ``new`` may not replace ``old`` at the same schema version.
 
-    A new scenario may be added freely. Changing the key set, or the null
-    pattern of a scenario the golden already has, changes what readers of
-    ``final_summary.json`` see, so it needs a ``SCHEMA_VERSION`` bump.
+    Changing the key set, or the null pattern of a scenario the golden
+    already has, changes what readers of ``final_summary.json`` see, so it
+    needs a ``SCHEMA_VERSION`` bump. A new scenario that brings no new key
+    needs none.
     """
     if old.get("schema_version") != new.get("schema_version"):
         return []
@@ -131,46 +137,64 @@ def schema_change_without_bump(
     return reasons
 
 
+def write_golden(path: Path, snapshot: Mapping[str, Any]) -> list[str]:
+    """Write ``snapshot`` to ``path`` unless that needs a version bump.
+
+    Returns the reasons it refused, empty when it wrote the file.
+    """
+    if path.exists():
+        old = json.loads(path.read_text(encoding="utf-8"))
+        reasons = schema_change_without_bump(old, snapshot)
+        if reasons:
+            return reasons
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(render(snapshot), encoding="utf-8")
+    return []
+
+
+def refusal_message(reasons: list[str]) -> str:
+    return (
+        f"Refusing to rewrite the golden at schema_version {SCHEMA_VERSION}: "
+        + "; ".join(reasons)
+        + ". Bump SCHEMA_VERSION in src/traceml_ai/reporting/final.py and "
+        "add a CHANGELOG.md entry, then run it again."
+    )
+
+
+def drift_message(expected: str, current: str) -> str:
+    diff = "".join(
+        difflib.unified_diff(
+            expected.splitlines(keepends=True),
+            current.splitlines(keepends=True),
+            fromfile="golden",
+            tofile="current",
+        )
+    )
+    return (
+        "The Step Time public schema changed:\n"
+        f"{diff}\n"
+        "If this is intended, bump SCHEMA_VERSION in "
+        "src/traceml_ai/reporting/final.py, add a CHANGELOG.md entry, "
+        f"and regenerate with: {UPDATE_COMMAND}"
+    )
+
+
 def test_public_schema_matches_golden(
     tmp_path: Path, request: pytest.FixtureRequest
 ) -> None:
     snapshot = build_snapshot(tmp_path)
-    text = render(snapshot)
 
     if request.config.getoption("--update-golden"):
-        if GOLDEN_PATH.exists():
-            old = json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))
-            reasons = schema_change_without_bump(old, snapshot)
-            if reasons:
-                pytest.fail(
-                    "Refusing to rewrite the golden at schema_version "
-                    f"{SCHEMA_VERSION}: " + "; ".join(reasons) + ". Bump "
-                    "SCHEMA_VERSION in src/traceml_ai/reporting/final.py "
-                    "and add a CHANGELOG.md entry, then run it again."
-                )
-        GOLDEN_PATH.parent.mkdir(parents=True, exist_ok=True)
-        GOLDEN_PATH.write_text(text, encoding="utf-8")
+        reasons = write_golden(GOLDEN_PATH, snapshot)
+        if reasons:
+            pytest.fail(refusal_message(reasons), pytrace=False)
         return
 
     assert GOLDEN_PATH.exists(), f"No golden yet. Run: {UPDATE_COMMAND}"
     expected = GOLDEN_PATH.read_text(encoding="utf-8")
-    if text != expected:
-        diff = "".join(
-            difflib.unified_diff(
-                expected.splitlines(keepends=True),
-                text.splitlines(keepends=True),
-                fromfile="golden",
-                tofile="current",
-            )
-        )
-        pytest.fail(
-            "The Step Time public schema changed:\n"
-            f"{diff}\n"
-            "If this is intended, bump SCHEMA_VERSION in "
-            "src/traceml_ai/reporting/final.py, add a CHANGELOG.md entry, "
-            f"and regenerate with: {UPDATE_COMMAND}",
-            pytrace=False,
-        )
+    current = render(snapshot)
+    if current != expected:
+        pytest.fail(drift_message(expected, current), pytrace=False)
 
 
 _OLD = {
@@ -209,3 +233,26 @@ def test_regeneration_needs_a_version_bump_for_a_schema_change(
     new: Mapping[str, Any], refused: bool
 ) -> None:
     assert bool(schema_change_without_bump(_OLD, new)) is refused
+
+
+def test_regeneration_writes_and_refuses_as_documented(tmp_path: Path) -> None:
+    golden = tmp_path / "golden.json"
+    assert write_golden(golden, _OLD) == []
+    assert json.loads(golden.read_text(encoding="utf-8")) == _OLD
+
+    renamed = {**_OLD, "keys": ["global.average.fwd_ms"]}
+    assert write_golden(golden, renamed)
+    assert json.loads(golden.read_text(encoding="utf-8")) == _OLD
+
+    bumped = {**renamed, "schema_version": 1.9}
+    assert write_golden(golden, bumped) == []
+    assert json.loads(golden.read_text(encoding="utf-8")) == bumped
+
+
+def test_the_messages_say_what_to_do() -> None:
+    drift = drift_message("a\n", "b\n")
+    assert "-a" in drift and "+b" in drift
+    assert UPDATE_COMMAND in drift
+    assert "SCHEMA_VERSION" in drift and "CHANGELOG.md" in drift
+    refusal = refusal_message(["keys added ['x'], removed []"])
+    assert "SCHEMA_VERSION" in refusal and "CHANGELOG.md" in refusal

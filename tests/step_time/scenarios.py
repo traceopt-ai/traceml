@@ -216,7 +216,7 @@ SCENARIOS: tuple[StepTimeScenario, ...] = (
 # Time-varying windows: per-step variation, a rank that drops out
 # mid-window, and metrics that do not occur on every step. They are kept
 # apart from SCENARIOS, whose hand-written goldens assume one identical
-# payload per rank; the public-schema golden covers both sets.
+# payload per rank; the public-schema golden covers every set.
 REALISM_SCENARIOS: tuple[StepTimeScenario, ...] = (
     StepTimeScenario(
         name="jittered_ddp",
@@ -243,7 +243,31 @@ REALISM_SCENARIOS: tuple[StepTimeScenario, ...] = (
     ),
 )
 
-ALL_SCENARIOS: tuple[StepTimeScenario, ...] = SCENARIOS + REALISM_SCENARIOS
+# Windows that reach the diagnoses the scenarios above never do, so the
+# public-schema golden sees their evidence keys too.
+EVIDENCE_SCENARIOS: tuple[StepTimeScenario, ...] = (
+    StepTimeScenario(
+        name="h2d_bound_gpu",
+        profiles={
+            0: _profile(h2d=25.0, forward=15.0),
+            1: _profile(h2d=25.0, forward=15.0),
+        },
+        steps=tuple(range(200, 224)),
+        clock="gpu",
+    ),
+    StepTimeScenario(
+        name="forward_missing_everywhere",
+        profiles={
+            0: _without(_profile(), "forward"),
+            1: _without(_profile(), "forward"),
+        },
+        steps=tuple(range(230, 254)),
+    ),
+)
+
+ALL_SCENARIOS: tuple[StepTimeScenario, ...] = (
+    SCENARIOS + REALISM_SCENARIOS + EVIDENCE_SCENARIOS
+)
 
 SCENARIOS_BY_NAME: Mapping[str, StepTimeScenario] = {
     scenario.name: scenario for scenario in ALL_SCENARIOS
@@ -338,6 +362,7 @@ def create_step_time_database(
 __all__ = [
     "ALL_SCENARIOS",
     "BALANCED_PROFILE",
+    "EVIDENCE_SCENARIOS",
     "REALISM_SCENARIOS",
     "SCENARIOS",
     "SCENARIOS_BY_NAME",
