@@ -21,6 +21,15 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--update-golden",
+        action="store_true",
+        default=False,
+        help="Rewrite committed golden files instead of comparing to them.",
+    )
+
+
 @pytest.fixture(autouse=True)
 def _contain_traceml_disabled_env():
     """Keep TRACEML_DISABLED from leaking out of the test that set it.
