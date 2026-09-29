@@ -161,3 +161,76 @@ def test_two_reference_lines_both_survive():
         ]
     )
     assert [e["yAxis"] for e in out["data"]] == [70.0, 33.0]
+
+
+# --- the relative time axis (#511) ---------------------------------------
+def test_a_span_axis_is_labelled_relative_to_the_newest_sample():
+    """``-58s ... Now``: the card names its window once, in the header.
+
+    A wall-clock tick on every axis repeated what the header says and
+    made two stacked charts read as two different periods.
+    """
+    options = charting.multi_line_options("%")
+    charting.apply_span_axis(options, 58.0, 1_700_000_000.0)
+
+    axis = options["xAxis"]
+    assert (axis["min"], axis["max"]) == (-58.0, 0)
+    label = axis["axisLabel"]
+    assert label["show"] is True
+    assert "'Now'" in label[":formatter"]
+    assert "\u2212" in label[":formatter"]
+    assert "getHours" not in label[":formatter"], "no wall clock on ticks"
+
+
+def test_relative_tick_labels_look_like_the_value_axis_labels():
+    """Same colour, font and size on both axes of one chart."""
+    options = charting.multi_line_options(" GB")
+    charting.apply_span_axis(options, 58.0, 1_700_000_000.0)
+    x_label = options["xAxis"]["axisLabel"]
+    y_label = options["yAxis"]["axisLabel"]
+    for key in ("color", "fontFamily", "fontSize"):
+        assert x_label[key] == y_label[key], key
+
+
+def test_the_hover_keeps_the_clock_beside_the_relative_reading():
+    """Logs are keyed on the clock, so the hover still carries it."""
+    options = charting.multi_line_options("%")
+    charting.apply_span_axis(options, 58.0, 1_700_000_000.0)
+    pointer = options["tooltip"]["axisPointer"]["label"][":formatter"]
+    assert "getHours" in pointer
+    assert "'Now'" in pointer
+
+
+def test_relative_ticks_do_not_need_the_newest_epoch():
+    """Without an epoch there is no clock, but the offsets still hold."""
+    options = charting.multi_line_options("%")
+    charting.apply_span_axis(options, 58.0)
+    assert options["xAxis"]["axisLabel"]["show"] is True
+    assert "'Now'" in options["xAxis"]["axisLabel"][":formatter"]
+
+
+@pytest.mark.parametrize(
+    "value,span,expected",
+    [
+        (1.1111, 0.05, "1.111 GB"),
+        (1.52, 1.0, "1.52 GB"),
+        (45.0, 25.0, "45 GB"),
+    ],
+)
+def test_a_value_axis_label_is_written_at_the_formatters_precision(
+    value, span, expected
+):
+    """The Python twin of the JS formatter, used to size label room."""
+    assert charting.value_axis_label(value, span, " GB") == expected
+    decimals = str(len(expected.split(" ")[0].partition(".")[2]))
+    assert f"toFixed({decimals})" in charting.value_axis_formatter(span, " GB")
+
+
+def test_a_unit_axis_label_is_the_value_then_the_unit():
+    assert charting.unit_axis_label(30.0, "%") == "30%"
+    assert charting.unit_axis_formatter("%") == "v=>v+'%'"
+
+
+def test_padded_tick_labels_share_one_width():
+    padded = charting.pad_tick_labels("v=>v+'%'", 8)
+    assert padded == "v=>(v=>v+'%')(v).padStart(8)"

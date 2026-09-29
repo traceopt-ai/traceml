@@ -137,7 +137,7 @@ sys.exit(0 if listening and status == 200 else 1)
 _SECTION_TITLES = [
     "Step Time",
     "System",
-    "Process resources · recent 60s",
+    "Trainer process",
     "Step memory",
     "Diagnostics",
 ]

@@ -86,21 +86,63 @@ def drift_axis_bounds(
     return (low, high, (high - low) / 2.0)
 
 
+def _decimals(span: float) -> int:
+    if span >= 20:
+        return 0
+    if span >= 2:
+        return 1
+    if span >= 0.2:
+        return 2
+    return 3
+
+
 def value_axis_formatter(span: float, unit: str) -> str:
     """Tick formatter whose precision comes from the axis RANGE.
 
     Magnitude alone is not enough: an axis fitted to a 20 MB drift around
     1.4 GB would label every tick "1.4 GB" and say nothing.
     """
-    if span >= 20:
-        decimals = 0
-    elif span >= 2:
-        decimals = 1
-    elif span >= 0.2:
-        decimals = 2
-    else:
-        decimals = 3
-    return f"v=>v.toFixed({decimals})+'{unit}'"
+    return f"v=>v.toFixed({_decimals(span)})+'{unit}'"
+
+
+def value_axis_label(value: float, span: float, unit: str) -> str:
+    """The label :func:`value_axis_formatter` writes for ``value``."""
+    return f"{float(value):.{_decimals(span)}f}{unit}"
+
+
+def unit_axis_formatter(unit: str) -> str:
+    """Tick formatter that prints the value as it is, then the unit."""
+    return f"v=>v+'{unit}'"
+
+
+def unit_axis_label(value: float, unit: str) -> str:
+    """The label :func:`unit_axis_formatter` writes for a round ``value``."""
+    return f"{float(value):g}{unit}"
+
+
+def pad_tick_labels(formatter: str, width: int) -> str:
+    """Wrap a tick formatter so every label is ``width`` characters wide.
+
+    Two charts stacked in one card fit their y labels separately, so a
+    "30%" axis and a "1.111 GB" axis start their plots at different x and
+    the same moment sits at two positions. Tick labels are monospace and
+    right-aligned against the axis, so leading spaces move no visible
+    text; they make both charts reserve the same room for their labels.
+    """
+    return f"v=>({formatter})(v).padStart({int(width)})"
+
+
+# Seconds before the newest sample, written the way
+# ``formatting.format_elapsed`` writes a duration ("58s", "2m 26s",
+# "3h 12m") behind a minus sign, and "Now" at the newest sample. The card
+# header prints its window with that same helper, so the leftmost tick and
+# the header name the same span in the same words.
+_RELATIVE = (
+    "(v=>{const t=Math.round(-v);if(t<1)return 'Now';"
+    "const q=n=>('0'+n).slice(-2);const h=Math.floor(t/3600),"
+    "m=Math.floor((t%3600)/60),s=t%60;"
+    "return '\u2212'+(h?h+'h '+q(m)+'m':(m?m+'m '+q(s)+'s':s+'s'));})"
+)
 
 
 def apply_span_axis(
@@ -108,36 +150,34 @@ def apply_span_axis(
     span: float,
     newest_epoch: Optional[float] = None,
 ) -> None:
-    """Pin a chart to its span and label it in wall-clock time.
+    """Pin a chart to its span and label it relative to the newest sample.
 
-    The x values are seconds before the newest sample, which keeps the
-    series arithmetic simple, but a reader debugging a slowdown needs the
-    clock: it is what their logs are keyed on. The formatters convert on
-    the fly from the newest sample's epoch, and the hover label carries
-    both readings ("19:10 · 45 min ago") so the axis and the tooltip never
-    speak two different vocabularies.
+    The x values are seconds before the newest sample, and the ticks say
+    so ("-58s ... Now"): the card names its window once, in its header,
+    and two stacked charts labelled in wall-clock time read as two
+    different periods. A reader debugging a slowdown still needs the
+    clock, because it is what their logs are keyed on, so the hover label
+    carries both readings ("19:10:05 · -45s").
     """
     span = max(float(span), 1.0)
     axis = options["xAxis"]
     axis["min"] = -span
     axis["max"] = 0
     axis["interval"] = span / 3.0
+    label = axis["axisLabel"]
+    label.update(show=True, color=_TXT, fontFamily="Geist Mono", fontSize=10)
+    label[":formatter"] = _RELATIVE
     if newest_epoch is None:
-        axis["axisLabel"]["show"] = False
         return
-    axis["axisLabel"]["show"] = True
     clock = (
-        "const d=new Date((%f+%%s)*1000);const q=n=>('0'+n).slice(-2);"
+        "const d=new Date((%f+p.value)*1000);const q=n=>('0'+n).slice(-2);"
         "const c=q(d.getHours())+':'+q(d.getMinutes())%s;"
         % (float(newest_epoch), "+':'+q(d.getSeconds())" if span < 600 else "")
     )
-    axis["axisLabel"][":formatter"] = "v=>{%s return c;}" % (clock % "v")
     pointer = options.get("tooltip", {}).get("axisPointer", {}).get("label")
     if pointer is not None:
         pointer[":formatter"] = (
-            "p=>{%s const s=Math.round(-p.value);"
-            "return c+(s<1?' · now':(s<120?' · '+s+' s ago':"
-            "' · '+Math.floor(s/60)+' min ago'));}" % (clock % "p.value")
+            "p=>{" + clock + "return c+' · '+" + _RELATIVE + "(p.value);}"
         )
 
 
@@ -237,7 +277,7 @@ def _value_axis(unit: str, *, zero: bool) -> Dict[str, Any]:
             "color": _TXT,
             "fontFamily": "Geist Mono",
             "fontSize": 10,
-            ":formatter": f"v=>v+'{unit}'",
+            ":formatter": unit_axis_formatter(unit),
         },
         "axisLine": {"show": False},
         "axisTick": {"show": False},
@@ -387,6 +427,10 @@ __all__ = [
     "drift_axis_bounds",
     "rank_color",
     "shared_span",
+    "pad_tick_labels",
     "sparkline_svg",
+    "unit_axis_formatter",
+    "unit_axis_label",
     "value_axis_formatter",
+    "value_axis_label",
 ]
