@@ -4,34 +4,32 @@
 # you may not use this file except in compliance with the License.
 # SPDX-License-Identifier: Apache-2.0
 
-"""What the Process card puts on screen for a given payload.
+"""What the Trainer process card puts on screen for a given payload.
 
-The card this file describes is the one this PR builds: four tiles, two
-per-rank charts and a per-rank table. The previous card's assertions are
-NOT carried over unchanged, because the card deliberately says different
-things now. The two differences worth naming:
-
-* The single ``GPU MEM`` tile becomes the ``cuda allocated`` and ``cuda
-  reserved`` pair. One tile could not say which of the two it held, and the
-  two numbers answer different questions: allocated is what the tensors
-  need, reserved is what the process is holding from the device.
-* The ``CPU`` and ``RAM`` tiles become ``cpu`` and ``rss``. CPU keeps its
-  meaning in the value: a raw 700% process reading is not comparable between
-  hosts, while 87.5% of the host is.
+The card has a header, summary tiles, two per-rank graphs and, for more
+than one rank, the rank details. The tiles are ``CPU usage`` and
+``Process memory`` ("Busiest rank CPU" and "Highest process memory" when
+there is a rank to choose), then ``cuda reserved`` and ``cuda
+allocated`` on a GPU host. A CPU-only host shows the first two alone once
+data has arrived. The two numbers a tile could once hold are separate:
+allocated is what the tensors need, reserved is what the process is
+holding from the device. CPU is a share of the host, because a raw 700%
+process reading is not comparable between hosts while 87.5% of the host
+is.
 
 ``test_the_card_renders_the_same_from_a_real_database`` closes the loop
-from database through compute to screen, and states both new meanings as
-explicit numbers so the change is visible rather than implied.
+from database through compute to screen, and states those meanings as
+explicit numbers so they are visible rather than implied.
 
-#511 rewrote the words, not the numbers. The card is titled for the
-trainer process, one rank reads as usage rather than as a comparison,
-many ranks name the rank each tile selected, a CPU-only host loses its
-CUDA tiles once data has arrived, and each graph highlights the rank its
-tile selected with the others muted. The window medians are unchanged.
+#511 rewrote the words, not the numbers. One rank reads as usage rather
+than as a comparison, many ranks name the rank each tile selected, and
+each graph highlights the rank its tile selected with the others muted.
+The window medians are unchanged.
 """
 
 from __future__ import annotations
 
+import html
 import re
 from dataclasses import replace
 
@@ -122,7 +120,7 @@ _TILES = ("cpu", "rss", "reserved", "alloc")
 
 
 def _panel() -> dict:
-    return {
+    panel = {
         "title": _Text(),
         "context": _Text(),
         "duration": _Text(),
@@ -138,6 +136,8 @@ def _panel() -> dict:
         "rss_label": _Text(),
         "cpu_sub": _Text(),
         "rss_sub": _Text(),
+        "cpu_sep": _Text(),
+        "rss_sep": _Text(),
         "cpu_tip": _Text(),
         "rss_tip": _Text(),
         "rows": _Expansion(),
@@ -147,6 +147,9 @@ def _panel() -> dict:
         "_was_open": False,
         "_signature": None,
     }
+    # Set once when the card is built, as the real header is.
+    panel["rows_hint"].text = process_section.ROWS_DESCRIPTION
+    return panel
 
 
 def _shown(panel: dict) -> str:
@@ -355,6 +358,17 @@ def test_a_stale_rank_is_not_counted_as_reporting():
     )
 
 
+def test_one_rank_that_stopped_says_so_in_the_header():
+    """One rank has no rank details, so the header carries the fact."""
+    panel = _panel()
+    process_section.update_process_section(
+        panel, _payload(ranks=(0,), stale=1)
+    )
+    assert panel["context"].text == (
+        "Rank 0 · Trainer process only · not reporting"
+    )
+
+
 def test_the_window_is_named_once_in_the_header_not_on_the_graphs():
     panel = _panel()
     process_section.update_process_section(panel, _payload())
@@ -365,10 +379,57 @@ def test_the_window_is_named_once_in_the_header_not_on_the_graphs():
 
 
 def test_a_whole_run_history_says_its_points_are_rolling_averages():
-    """The old per-graph "rolling 2 min" moves to the header, not away."""
+    """The old per-graph "rolling 2 min" moves to the header, not away.
+
+    Written as the header writes its span, so one line holds one
+    duration vocabulary.
+    """
     panel = _panel()
     process_section.update_process_section(panel, _retained(_payload()))
-    assert panel["duration"].text == "Last 4s · rolling 2 min averages"
+    assert panel["duration"].text == "Last 4s · rolling 2m 00s averages"
+    assert "rolling" not in panel["cpu_sub"].text
+    assert "rolling" not in panel["rss_sub"].text
+
+
+def test_one_whole_run_graph_names_its_own_window():
+    """Each metric picks its history on its own, so they can disagree.
+
+    The header then names no window it cannot vouch for, and the graph
+    drawing rolling averages says so itself.
+    """
+    payload = _payload()
+    mixed = replace(payload, cpu_capacity_chart=_chart(0, 1, mode="retained"))
+    panel = _panel()
+    process_section.update_process_section(panel, mixed)
+    assert panel["duration"].text == "Last 4s"
+    assert panel["cpu_sub"].text == (
+        "Rank 1 highlighted · rolling 2m 00s averages"
+    )
+    assert panel["rss_sub"].text == "Rank 0 highlighted"
+
+
+def test_two_rolling_windows_are_named_on_their_own_graphs():
+    longer = replace(_chart(0, 1, mode="retained"), window_s=300.0)
+    payload = replace(_retained(_payload()), rss_chart=longer)
+    panel = _panel()
+    process_section.update_process_section(panel, payload)
+    assert panel["duration"].text == "Last 4s"
+    assert panel["cpu_sub"].text.endswith("rolling 2m 00s averages")
+    assert panel["rss_sub"].text.endswith("rolling 5m 00s averages")
+
+
+def test_one_sample_names_no_duration():
+    """One moment spans no time; the axis's drawing floor is not one."""
+    one = RankChart(
+        traces=(RankTrace(global_rank=0, timestamps=(5.0,), values=(1.0,)),)
+    )
+    payload = replace(
+        _payload(ranks=(0,)), cpu_capacity_chart=one, rss_chart=one
+    )
+    panel = _panel()
+    process_section.update_process_section(panel, payload)
+    assert panel["duration"].text == ""
+    assert panel["cpu_chart"].options["xAxis"]["min"] == -1.0
 
 
 def test_before_any_data_the_header_waits():
@@ -597,10 +658,41 @@ def test_the_capacity_chart_is_zero_anchored_and_rss_is_not():
     is a level that drifts, and zero-anchoring it puts the drift inside one
     pixel.
     """
+    rss = RankChart(
+        traces=(
+            RankTrace(
+                global_rank=0,
+                timestamps=(1.0, 2.0, 3.0),
+                values=(1.48 * GIB, 1.49 * GIB, 1.50 * GIB),
+            ),
+        )
+    )
     panel = _panel()
-    process_section.update_process_section(panel, _payload())
-    assert "min" not in panel["cpu_chart"].options["yAxis"]
-    assert panel["rss_chart"].options["yAxis"]["min"] > 0
+    process_section.update_process_section(
+        panel, replace(_payload(ranks=(0,)), rss_chart=rss)
+    )
+    assert panel["cpu_chart"].options["yAxis"]["min"] == 0
+    assert 1.0 < panel["rss_chart"].options["yAxis"]["min"] <= 1.48
+
+
+@pytest.mark.parametrize("peak", [3.0, 8.0, 15.0, 25.0, 45.0, 64.0, 90.0])
+def test_the_cpu_axis_steps_evenly_from_zero(peak):
+    """0 / 15 / 30, never ECharts' own 0 / 20 / 30 on a 30% ceiling."""
+    chart = RankChart(
+        traces=(
+            RankTrace(
+                global_rank=0, timestamps=(1.0, 2.0), values=(1.0, peak)
+            ),
+        )
+    )
+    payload = replace(_payload(ranks=(0,)), cpu_capacity_chart=chart)
+    panel = _panel()
+    process_section.update_process_section(panel, payload)
+    axis = panel["cpu_chart"].options["yAxis"]
+    assert axis["min"] == 0
+    assert axis["max"] >= peak
+    assert axis["interval"] * 2 == axis["max"]
+    assert float(axis["interval"]).is_integer()
 
 
 def _line(panel: dict, chart: str, name: str) -> dict:
@@ -632,6 +724,55 @@ def test_each_graph_highlights_the_rank_its_tile_selected():
     for name in ("Rank 1", "Rank 2"):
         other = _line(panel, "rss_chart", name)
         assert other["lineStyle"]["color"] == theme.MUTED
+
+
+@pytest.mark.parametrize("worst", [0, 1, 2])
+def test_the_highlighted_rank_is_painted_over_the_muted_ones(worst):
+    """ECharts paints later series over earlier ones.
+
+    Emitted in rank order, rank 0 highlighted sat under three muted lines
+    wherever they crossed, and the accent read as grey.
+    """
+    base = _payload(ranks=(0, 1, 2))
+    payload = replace(
+        base,
+        cpu_capacity=replace(base.cpu_capacity, worst_rank=worst),
+        rss_worst=replace(base.rss_worst, worst_rank=worst),
+    )
+    panel = _panel()
+    process_section.update_process_section(panel, payload)
+    for key in ("cpu_chart", "rss_chart"):
+        series = panel[key].options["series"]
+        assert series[-1]["name"] == f"Rank {worst}", key
+        assert sorted(s["name"] for s in series) == [
+            "Rank 0",
+            "Rank 1",
+            "Rank 2",
+        ]
+
+
+def test_every_line_states_its_own_stacking_and_opacity():
+    """NiceGUI merges a same-length series list into the old one by index.
+
+    A key set only on the highlighted line therefore outlived the rank it
+    was set for, and a later tick painted muted ranks on top.
+    """
+    panel = _panel()
+    process_section.update_process_section(panel, _payload(ranks=(0, 1, 2)))
+    for key in ("cpu_chart", "rss_chart"):
+        for line in panel[key].options["series"]:
+            lead = line["lineStyle"]["color"] != theme.MUTED
+            assert line["z"] == (3 if lead else 2), line["name"]
+            assert line["lineStyle"]["opacity"] == (1.0 if lead else 0.55)
+
+
+def test_a_graph_title_and_its_line_are_separated_only_when_both_show():
+    many, empty = _panel(), _panel()
+    process_section.update_process_section(many, _payload(ranks=(0, 1)))
+    process_section.update_process_section(empty, ProcessDashboardPayload())
+    for key in ("cpu", "rss"):
+        assert not many[f"{key}_sep"].hidden
+        assert empty[f"{key}_sep"].hidden, "a mark beside nothing"
 
 
 def test_one_rank_draws_in_the_accent_and_says_what_it_shows():
@@ -728,7 +869,7 @@ def test_the_aggregate_total_line_is_not_drawn():
     panel = _panel()
     process_section.update_process_section(panel, payload)
     for key in ("cpu_chart", "rss_chart"):
-        names = [s["name"] for s in panel[key].options["series"]]
+        names = sorted(s["name"] for s in panel[key].options["series"])
         assert names == ["Rank 0", "Rank 1"], key
 
 
@@ -815,8 +956,6 @@ def test_the_rows_use_only_colours_the_graphs_use():
     panel = _panel()
     process_section.update_process_section(panel, _payload(ranks=(0, 1, 2)))
     html = panel["rows_html"].content
-    for colour in charting.RANK_COLORS:
-        assert colour not in html, colour
     used = set(re.findall(r"#[0-9a-fA-F]{6}", html))
     assert used <= {theme.C_CPU, theme.C_MEM, theme.MUTED}
     # The ranks the two graphs highlight are marked in the same colours.
@@ -829,7 +968,8 @@ def test_every_rank_is_a_row_with_its_identity_and_its_memory():
     html = panel["rows_html"].content
     assert "R0" in html and "R1" in html
     assert "G0" in html and "N0" in html
-    assert "cuda allocated" in html and "cuda reserved" in html
+    # Reserved before allocated, the order of the tiles above.
+    assert 0 < html.index("cuda reserved") < html.index("cuda allocated")
 
 
 def test_each_row_pairs_cuda_values_from_its_least_headroom_sample():
@@ -848,6 +988,7 @@ def test_each_row_pairs_cuda_values_from_its_least_headroom_sample():
 
     assert "22.0 / 40.0 GB" in html
     assert "30.0 / 40.0 GB" in html
+    assert html.index("30.0 / 40.0 GB") < html.index("22.0 / 40.0 GB")
 
 
 def test_a_stale_rank_is_dimmed_and_kept():
@@ -870,22 +1011,59 @@ def test_a_stale_rank_is_dimmed_and_kept():
     assert "15 min" in html
 
 
-def test_the_hint_states_coverage_without_classifying_it():
+def _facts(panel: dict) -> str:
+    """The caption above the rank table, or "" when there is none."""
+    match = re.match(
+        r'<div class="cmeta"[^>]*>(.*?)</div><table',
+        panel["rows_html"].content,
+    )
+    return html.unescape(match.group(1)) if match else ""
+
+
+def test_the_facts_state_coverage_without_classifying_it():
     panel = _panel()
     process_section.update_process_section(
         panel, _payload(ranks=(0, 1), stale=1, imbalance=22.0)
     )
-    hint = panel["rows_hint"].text
+    facts = _facts(panel)
     assert panel["rows_title"].text == "Rank details (2)"
-    assert hint.startswith("CPU, process memory, node and sample age · ")
-    assert "1 stale, excluded" in hint
-    assert "reserved imbalance 22%" in hint
+    assert facts == "1 stale, excluded · reserved imbalance 22%"
     for verdict in ("bad", "high", "warning", "critical", "unhealthy"):
-        assert verdict not in hint.lower()
+        assert verdict not in facts.lower()
 
 
-def test_the_hint_says_when_no_rank_is_reporting():
-    """Every rank stale: nothing was excluded, so the hint must not say so.
+def test_the_rank_details_header_holds_only_its_title_and_description():
+    """Facts appended to it wrapped the header onto a second line.
+
+    The chevron then sat between the two lines, so they are a caption
+    above the rank table instead.
+    """
+    panel = _panel()
+    process_section.update_process_section(
+        panel, _payload(ranks=(0, 1, 2, 3), stale=1, unknown=1, imbalance=16)
+    )
+    assert panel["rows_hint"].text == process_section.ROWS_DESCRIPTION
+    assert _facts(panel) == (
+        "1 stale, excluded · 1 without a clock · reserved imbalance 16%"
+    )
+
+
+def test_nothing_to_report_leaves_no_empty_caption():
+    panel = _panel()
+    process_section.update_process_section(panel, _payload(ranks=(0, 1)))
+    assert panel["rows_html"].content.startswith("<table")
+
+
+def test_the_built_rank_details_header_is_one_line():
+    panel = process_section.build_process_section()
+    assert panel["rows_hint"].text == process_section.ROWS_DESCRIPTION
+    style = panel["rows_hint"]._style
+    assert style.get("white-space") == "nowrap"
+    assert style.get("text-overflow") == "ellipsis"
+
+
+def test_the_facts_say_when_no_rank_is_reporting():
+    """Every rank stale: nothing was excluded, so the facts must not say so.
 
     With no live rank the aggregates are the last numbers every rank sent,
     and "excluded" would tell the reader they were computed without them.
@@ -894,24 +1072,24 @@ def test_the_hint_says_when_no_rank_is_reporting():
     process_section.update_process_section(
         panel, _payload(ranks=(0, 1), stale=2)
     )
-    hint = panel["rows_hint"].text
-    assert hint.endswith(" · none reporting")
-    assert "excluded" not in hint
+    facts = _facts(panel)
+    assert facts == "none reporting"
+    assert "excluded" not in facts
 
 
-def test_a_rank_without_a_clock_is_named_in_the_hint():
+def test_a_rank_without_a_clock_is_named_in_the_facts():
     panel = _panel()
     process_section.update_process_section(
         panel, _payload(ranks=(0, 1), unknown=1)
     )
-    assert "1 without a clock" in panel["rows_hint"].text
+    assert "1 without a clock" in _facts(panel)
 
 
 def test_a_small_spread_is_not_rounded_away_to_zero():
     """0.4% is a real reading; printing "0%" would say balanced."""
     panel = _panel()
     process_section.update_process_section(panel, _payload(imbalance=0.4))
-    assert "reserved imbalance <1%" in panel["rows_hint"].text
+    assert "reserved imbalance <1%" in _facts(panel)
 
 
 # --- the auto-open trigger ----------------------------------------------
@@ -1022,7 +1200,9 @@ def test_every_class_the_card_emits_has_a_rule_behind_it():
 
     css = theme.head_html()
     ranks = (_rank(0), _rank(1, freshness="stale", age_s=900.0))
-    html = process_section.rows_html(ranks, _chart(0, 1))
+    html = process_section.rows_html(
+        ranks, _chart(0, 1), facts="1 stale, excluded"
+    )
 
     emitted = set(re.findall(r'class="([^"]+)"', html))
     for group in emitted:
@@ -1272,9 +1452,7 @@ def test_both_graphs_give_their_tick_labels_the_same_room():
     assert widths["cpu_chart"] == widths["rss_chart"]
     assert len(widths["cpu_chart"]) == 1
     yaxis = panel["rss_chart"].options["yAxis"]
-    widest = charting.value_axis_label(
-        yaxis["max"], yaxis["max"] - yaxis["min"], " GB"
-    )
+    widest = charting.value_axis_label(yaxis["max"], yaxis["interval"], " GB")
     assert int(widths["cpu_chart"][0]) == len(widest)
 
 

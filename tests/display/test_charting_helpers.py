@@ -18,12 +18,19 @@ and fail on a behaviour change.
 
 from __future__ import annotations
 
+import json
+import shutil
+import subprocess
+
 import pytest
 
 pytest.importorskip("nicegui")
 
 from traceml_ai.aggregator.display_drivers.nicegui_sections import (  # noqa: E402
     charting,
+)
+from traceml_ai.aggregator.display_drivers.nicegui_sections.formatting import (  # noqa: E402
+    format_elapsed,
 )
 
 
@@ -209,21 +216,93 @@ def test_relative_ticks_do_not_need_the_newest_epoch():
     assert "'Now'" in options["xAxis"]["axisLabel"][":formatter"]
 
 
+def test_the_relative_ticks_land_where_the_axis_is_labelled():
+    options = charting.multi_line_options("%")
+    charting.apply_span_axis(options, 58.0)
+    label = options["xAxis"]["axisLabel"]
+    assert label["customValues"] == [-58.0, -30.0, 0.0]
+    # An ECharts without customValues falls back to the two ends.
+    assert options["xAxis"]["interval"] == 58.0
+
+
 @pytest.mark.parametrize(
-    "value,span,expected",
+    "span,expected",
     [
-        (1.1111, 0.05, "1.111 GB"),
-        (1.52, 1.0, "1.52 GB"),
+        (1.0, ["−1s", "Now"]),
+        (2.0, ["−2s", "−1s", "Now"]),
+        (3.0, ["−3s", "−2s", "−1s", "Now"]),
+        (4.0, ["−4s", "−2s", "Now"]),
+        (58.0, ["−58s", "−30s", "Now"]),
+        (61.0, ["−1m 01s", "−30s", "Now"]),
+        (317.0, ["−5m 17s", "−4m 00s", "−2m 00s", "Now"]),
+        (
+            10260.0,
+            ["−2h 51m", "−2h 00m", "−1h 00m", "Now"],
+        ),
+    ],
+)
+def test_the_relative_ticks_name_the_span_then_round_steps(span, expected):
+    """The leftmost matches the header; the ones between are round.
+
+    Ticks at thirds printed "-1s -1s Now Now" on the first second of a run
+    and "-57m 17s" between two hour ticks on a long one.
+    """
+    ticks = charting.relative_ticks(span)
+    words = [
+        "Now" if tick == 0 else "−" + format_elapsed(-tick) for tick in ticks
+    ]
+    assert words == expected
+
+
+@pytest.mark.parametrize("span", [1, 2, 3, 4, 5, 6, 7, 9, 45, 61, 3601])
+def test_no_relative_tick_label_repeats(span):
+    ticks = charting.relative_ticks(float(span))
+    words = [format_elapsed(-tick) for tick in ticks]
+    assert len(set(words)) == len(words), words
+    assert ticks == sorted(ticks) and len(ticks) <= 4
+
+
+_NODE = shutil.which("node")
+
+
+@pytest.mark.skipif(_NODE is None, reason="node is not installed")
+def test_the_js_tick_words_match_the_header_words():
+    """The leftmost tick and the header must name the span alike.
+
+    The tick formatter is JavaScript and the header is Python, so the
+    two can drift apart without either one's tests noticing.
+    """
+    seconds = [0, 1, 9, 58, 59, 60, 61, 146, 599, 3600, 3661, 10920]
+    script = (
+        f"const f={charting._RELATIVE};"
+        f"console.log(JSON.stringify({seconds}.map(s=>f(-s))));"
+    )
+    out = subprocess.run(
+        [_NODE, "-e", script],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    expected = ["Now" if s == 0 else "−" + format_elapsed(s) for s in seconds]
+    assert json.loads(out) == expected
+
+
+@pytest.mark.parametrize(
+    "value,step,expected",
+    [
+        (1.111, 0.005, "1.111 GB"),
+        (1.52, 0.01, "1.52 GB"),
+        (1.5, 0.5, "1.5 GB"),
         (45.0, 25.0, "45 GB"),
     ],
 )
 def test_a_value_axis_label_is_written_at_the_formatters_precision(
-    value, span, expected
+    value, step, expected
 ):
     """The Python twin of the JS formatter, used to size label room."""
-    assert charting.value_axis_label(value, span, " GB") == expected
+    assert charting.value_axis_label(value, step, " GB") == expected
     decimals = str(len(expected.split(" ")[0].partition(".")[2]))
-    assert f"toFixed({decimals})" in charting.value_axis_formatter(span, " GB")
+    assert f"toFixed({decimals})" in charting.value_axis_formatter(step, " GB")
 
 
 def test_a_unit_axis_label_is_the_value_then_the_unit():

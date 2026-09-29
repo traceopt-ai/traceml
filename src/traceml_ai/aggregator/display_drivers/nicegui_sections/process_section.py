@@ -27,6 +27,7 @@ judgement and the diagnosis engine owns those.
 
 from __future__ import annotations
 
+import html
 import math
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -46,11 +47,15 @@ from .formatting import (
     format_elapsed,
     format_gb_pair,
     format_percent,
-    format_window,
     num,
 )
 
 _MONO = "font-family:var(--mono);"
+
+# The smallest range the memory graph draws, in GB. A steady trainer moves
+# by kilobytes, and an axis fitted to that printed "0.586 GB" on all three
+# ticks. A hundredth of a GB is below any movement worth reading here.
+_MEMORY_MIN_SPAN_GB = 0.01
 
 WAITING = "waiting for data"
 ROWS_DESCRIPTION = "CPU, process memory, node and sample age"
@@ -106,7 +111,10 @@ def build_process_section() -> Dict[str, Any]:
         "tile_labels": {},
         "tile_tips": {},
         "_gpu_tiles": True,
+        # What ``_show`` last set; every one of these starts hidden.
         "_rows_shown": False,
+        "_cpu_sep_shown": False,
+        "_rss_sep_shown": False,
     }
     card = ui.element("div").classes("glass reveal")
     card.style(
@@ -172,12 +180,29 @@ def build_process_section() -> Dict[str, Any]:
                 with (
                     ui.row()
                     .classes("w-full items-baseline")
-                    .style("gap:8px; margin:0 0 2px;")
+                    .style("gap:6px; margin:0 0 2px;")
                 ):
-                    panel[f"{key}_label"] = ui.label(head).classes("estlabel")
+                    # The title leads: ink and weight, at the size of the
+                    # line beside it rather than smaller than it.
+                    panel[f"{key}_label"] = (
+                        ui.label(head)
+                        .classes("estlabel")
+                        .style(
+                            "font-size:10px; color:var(--ink); "
+                            "font-weight:600;"
+                        )
+                    )
                     with panel[f"{key}_label"]:
                         panel[f"{key}_tip"] = ui.tooltip("")
-                    panel[f"{key}_sub"] = ui.label("").classes("cmeta")
+                    # "BY RANK" then "Rank 2" needs a mark between them.
+                    panel[f"{key}_sep"] = (
+                        ui.label("·")
+                        .classes("cmeta")
+                        .style("font-size:10px; display:none;")
+                    )
+                    panel[f"{key}_sub"] = (
+                        ui.label("").classes("cmeta").style("font-size:10px;")
+                    )
                 panel[f"{key}_chart"] = ui.echart(
                     charting.multi_line_options(unit)
                 ).style("height:92px; width:100%;")
@@ -190,16 +215,28 @@ def build_process_section() -> Dict[str, Any]:
             .props("dense dense-toggle expand-icon-toggle")
             .style("margin-top:6px; display:none;")
         )
+        # The header is one line: the title and what the rows hold. What
+        # the rows found (stale ranks, the reserved spread) is a caption
+        # above the table, so a long run of facts cannot wrap the header
+        # onto two lines and strand the chevron between them.
         with expansion.add_slot("header"):
             with (
                 ui.row()
-                .classes("w-full items-center")
+                .classes("w-full items-center no-wrap")
                 .style("gap:10px; min-width:0;")
             ):
                 panel["rows_title"] = ui.label("Rank details").style(
-                    f"{_MONO} font-size:12px; font-weight:700;"
+                    f"{_MONO} font-size:12px; font-weight:700; "
+                    "white-space:nowrap;"
                 )
-                panel["rows_hint"] = ui.label("").classes("cmeta")
+                panel["rows_hint"] = (
+                    ui.label(ROWS_DESCRIPTION)
+                    .classes("cmeta")
+                    .style(
+                        "flex:1; min-width:0; white-space:nowrap; "
+                        "overflow:hidden; text-overflow:ellipsis;"
+                    )
+                )
         with expansion:
             panel["rows_html"] = ui.html("", sanitize=False).classes("w-full")
         panel["rows"] = expansion
@@ -223,12 +260,14 @@ def header_context(payload: ProcessDashboardPayload) -> str:
 
     A stale rank is not counted as reporting: the tiles exclude it, and a
     header that counted it would describe ranks the numbers do not cover.
+    One rank has no rank details to carry that, so its line says it.
     """
     ranks = payload.ranks
     if not ranks:
         return WAITING
     if len(ranks) == 1:
-        return f"Rank {int(ranks[0].global_rank)} · Trainer process only"
+        line = f"Rank {int(ranks[0].global_rank)} · Trainer process only"
+        return line + (" · not reporting" if payload.coverage.stale else "")
     total = len(ranks)
     reporting = max(total - payload.coverage.stale, 0)
     lead = (
@@ -239,32 +278,42 @@ def header_context(payload: ProcessDashboardPayload) -> str:
     return f"{lead} · one trainer process per rank"
 
 
+def rolling_words(chart: Optional[RankChart]) -> str:
+    """``rolling 30s averages`` for a whole-run graph, else nothing.
+
+    A point on whole-run history is not a sample, and a reader comparing
+    one with a tile needs to know that. The window is written the way the
+    header writes its span, so one line never mixes "5m 17s" with "30 s".
+    """
+    if chart is None or not chart.is_retained:
+        return ""
+    window = chart.window_s
+    if window is None or not math.isfinite(window) or window <= 0:
+        return "rolling averages"
+    return f"rolling {format_elapsed(window)} averages"
+
+
 def header_duration(span: Optional[float], rolled: Optional[RankChart]) -> str:
     """The period the graphs cover, once, and what their points are.
 
-    Whole-run history is drawn as rolling averages, and the header says so:
-    a point there is not a sample, and a reader comparing one with a tile
-    needs to know that.
+    Nothing until a span has been observed: one sample spans no time,
+    and the axis's one-second drawing floor is not an observation.
     """
-    if span is None:
+    if span is None or span <= 0:
         return ""
-    text = f"Last {format_elapsed(span)}"
-    if rolled is None:
-        return text
-    words = format_window(rolled.window_s)
-    return text + (
-        f" · rolling {words} averages" if words else " · rolling averages"
-    )
+    words = rolling_words(rolled)
+    last = f"Last {format_elapsed(span)}"
+    return f"{last} · {words}" if words else last
 
 
-def rows_hint(payload: ProcessDashboardPayload) -> str:
-    """What the rank details hold, then coverage and spread if any.
+def rows_facts(payload: ProcessDashboardPayload) -> str:
+    """What the rank details found: coverage and spread, if any.
 
     It states what was observed. Whether that is bad is the engine's call,
     so no word here classifies it.
     """
     coverage = payload.coverage
-    parts = [ROWS_DESCRIPTION]
+    parts = []
     if coverage.stale and coverage.excluding_stale:
         parts.append(f"{coverage.stale} stale, excluded")
     elif coverage.stale:
@@ -292,6 +341,7 @@ def rows_html(
     gpu: bool = True,
     cpu_rank: Optional[int] = None,
     mem_rank: Optional[int] = None,
+    facts: str = "",
 ) -> str:
     """Per-rank table: identity, CPU, memory, and how fresh it is.
 
@@ -305,6 +355,9 @@ def rows_html(
 
     Colour follows the graphs: ranks are not told apart by colour, and the
     rank each graph highlights is marked in that graph's colour.
+
+    ``facts`` (see :func:`rows_facts`) is a caption above the table, in
+    the same markup so no layout gap opens between the two.
     """
     trend = {
         trace.global_rank: trace.values
@@ -312,7 +365,8 @@ def rows_html(
     }
     columns = ["rank"] + (["gpu"] if gpu else [])
     columns += ["node", "cpu usage", "process memory", "cpu trend"]
-    columns += (["cuda allocated", "cuda reserved"] if gpu else []) + ["age"]
+    # Reserved before allocated, the order of the tiles above.
+    columns += (["cuda reserved", "cuda allocated"] if gpu else []) + ["age"]
     head = "<tr>" + "".join(f"<th>{name}</th>" for name in columns) + "</tr>"
     body = ""
     for rank in ranks:
@@ -379,12 +433,19 @@ def rows_html(
                 cuda.allocated_bytes if cuda is not None else None,
                 cuda.total_bytes if cuda is not None else None,
             )
-            cells.append(_cell(f"{alloc} {alloc_rest}"))
             cells.append(_cell(f"{reserved} {reserved_rest}"))
+            cells.append(_cell(f"{alloc} {alloc_rest}"))
         cells.append(_cell(format_age(rank.age_s)))
         row = '<tr class="tml-stale">' if rank.freshness == "stale" else "<tr>"
         body += row + "".join(cells) + "</tr>"
-    return f'<table class="tml-gpus">{head}{body}</table>'
+    table = f'<table class="tml-gpus">{head}{body}</table>'
+    if not facts:
+        return table
+    caption = (
+        '<div class="cmeta" style="padding:0 8px 4px">'
+        f"{html.escape(facts)}</div>"
+    )
+    return caption + table
 
 
 def _rank_series(
@@ -401,13 +462,22 @@ def _rank_series(
     other rank is a thin muted line. With ``highlight`` ``None`` (one rank,
     or no rank selected) every line is drawn in the graph's colour, so the
     CPU and memory graphs stay distinguishable.
+
+    The highlighted rank is the LAST series, because ECharts paints later
+    series over earlier ones. ``z`` and the opacity are set on every
+    series, never only on the ones that differ: when the series count is
+    unchanged NiceGUI merges new options into the old by index, so a key
+    set on one tick outlives the rank it was set for. A ``z`` left behind
+    by an earlier highlight painted muted ranks over the accent line.
     """
     # A line through one point draws nothing, and the first ticks of every
     # run are exactly that. Show the markers until there is a second
     # sample to join them.
     sparse = any(len(trace.timestamps) < 2 for trace in chart.traces)
     series = []
-    for trace in chart.traces:
+    for trace in sorted(
+        chart.traces, key=lambda t: int(t.global_rank) == highlight
+    ):
         rank = int(trace.global_rank)
         lead = highlight is None or rank == highlight
         line = charting.line_series(
@@ -419,10 +489,8 @@ def _rank_series(
             ],
             width=2.0 if lead else 1.0,
         )
-        if lead:
-            line["z"] = 3
-        else:
-            line["lineStyle"]["opacity"] = 0.55
+        line["z"] = 3 if lead else 2
+        line["lineStyle"]["opacity"] = 1.0 if lead else 0.55
         if sparse:
             line["showSymbol"] = True
             line["symbolSize"] = 4
@@ -468,18 +536,26 @@ def _draw_chart(
     axis = element.options["yAxis"]
     if isinstance(bounds, tuple):
         low, high, tick = bounds
-        formatter = charting.value_axis_formatter(high - low, unit)
-        widest = charting.value_axis_label(high, high - low, unit)
+        formatter = charting.value_axis_formatter(tick, unit)
+        widest = charting.value_axis_label(high, tick, unit)
         axis["min"] = low
         axis["max"] = high
         axis["interval"] = tick
     else:
         formatter = charting.unit_axis_formatter(unit)
         widest = charting.unit_axis_label(bounds, unit)
+        # Zero to the ceiling in two equal steps (0 / 15 / 30). With only
+        # the ceiling set, ECharts picked its own step and drew 0 / 20 / 30.
+        axis["min"] = 0
         axis["max"] = bounds
+        axis["interval"] = bounds / 2.0
     tooltip = element.options["tooltip"]
     tooltip[":valueFormatter"] = f"v=>(v==null?'-':({hover or formatter})(v))"
     return formatter, widest
+
+
+def _memory_bounds(values: Sequence[Any]) -> Tuple[float, float, float]:
+    return charting.drift_axis_bounds(values, min_span=_MEMORY_MIN_SPAN_GB)
 
 
 def _chart_signature(
@@ -511,12 +587,28 @@ def _worst(rollup: Optional[MetricRollup]) -> Optional[int]:
     return int(rollup.worst_rank)
 
 
+def _drawn(payload: ProcessDashboardPayload) -> List[RankChart]:
+    return [
+        chart
+        for chart in (payload.cpu_capacity_chart, payload.rss_chart)
+        if chart is not None and chart.traces
+    ]
+
+
 def _rolled(payload: ProcessDashboardPayload) -> Optional[RankChart]:
-    """The graph drawing whole-run rolling averages, if either is."""
-    for chart in (payload.cpu_capacity_chart, payload.rss_chart):
-        if chart is not None and chart.is_retained and chart.traces:
-            return chart
-    return None
+    """The rolling window every drawn graph shares, if they share one.
+
+    Each metric picks its history from its own run statistics, so for a
+    tick one graph can draw whole-run averages while the other still draws
+    samples, or the two can average over different windows. The header
+    then names no window, and each whole-run graph names its own.
+    """
+    drawn = _drawn(payload)
+    if not drawn or not all(chart.is_retained for chart in drawn):
+        return None
+    if len({chart.window_s for chart in drawn}) != 1:
+        return None
+    return drawn[0]
 
 
 def _median_tooltip(*, many: bool, retained: bool) -> str:
@@ -571,11 +663,13 @@ def _set_gpu_tiles(panel: Dict[str, Any], shown: bool) -> None:
         )
 
 
-def _set_rows_shown(panel: Dict[str, Any], shown: bool) -> None:
-    if panel.get("_rows_shown") == shown:
+def _show(panel: Dict[str, Any], key: str, shown: bool) -> None:
+    """Show or hide one element, touching it only when that changes."""
+    flag = f"_{key}_shown"
+    if panel.get(flag) == shown:
         return
-    panel["_rows_shown"] = shown
-    panel["rows"].style(f"display:{'block' if shown else 'none'};")
+    panel[flag] = shown
+    panel[key].style(f"display:{'block' if shown else 'none'};")
 
 
 def _update_tiles(
@@ -617,7 +711,7 @@ def _update_tiles(
         )
     else:
         # The denominator as ``format_gb_pair`` writes it ("/ 24.0 GB"),
-        # so the host's RAM reads the same here as in the rank details.
+        # so the host's RAM reads at the precision of every other GB here.
         panel["subs"]["rss"].text = (
             f"of {rest[2:]} host RAM" if rest.startswith("/ ") else ""
         )
@@ -630,7 +724,7 @@ def _update_tiles(
     # the empty payload answers ``gpu_available`` with False only because
     # it has no ranks to ask. Keeping the four-tile row until data arrives
     # also keeps a GPU host's card from jumping on its first sample.
-    seen = bool(data.window_len or data.ranks)
+    seen = data.has_data
     _set_gpu_tiles(panel, data.gpu_available or not seen)
     if data.gpu_available:
         reserved = data.gpu_reserved
@@ -684,7 +778,12 @@ def update_process_section(panel: Dict[str, Any], data: Any) -> None:
         aligned[1] if aligned is not None else None, rolled
     )
 
-    _update_tiles(panel, data, many=many, retained=rolled is not None)
+    _update_tiles(
+        panel,
+        data,
+        many=many,
+        retained=any(chart.is_retained for chart in _drawn(data)),
+    )
 
     if changed:
         drawn = (
@@ -709,7 +808,7 @@ def update_process_section(panel: Dict[str, Any], data: Any) -> None:
                     chart=data.rss_chart,
                     aligned=aligned,
                     scale=float(1024**3),
-                    bounds_of=charting.drift_axis_bounds,
+                    bounds_of=_memory_bounds,
                     accent=theme.C_MEM,
                     highlight=mem_rank if many else None,
                     unit=" GB",
@@ -732,10 +831,10 @@ def update_process_section(panel: Dict[str, Any], data: Any) -> None:
     if many:
         panel["cpu_label"].text = "CPU usage by rank"
         panel["rss_label"].text = "Process memory by rank"
-        panel["cpu_sub"].text = (
+        cpu_sub = (
             f"Rank {cpu_rank} highlighted" if cpu_rank is not None else ""
         )
-        panel["rss_sub"].text = (
+        rss_sub = (
             f"Rank {mem_rank} highlighted" if mem_rank is not None else ""
         )
         panel["cpu_tip"].text = _CPU_TOOLTIP_MANY
@@ -743,16 +842,28 @@ def update_process_section(panel: Dict[str, Any], data: Any) -> None:
     else:
         panel["cpu_label"].text = "CPU usage"
         panel["rss_label"].text = "Process memory"
-        panel["cpu_sub"].text = (
+        cpu_sub = (
             f"Rank {only} · share of host CPU" if only is not None else ""
         )
-        panel["rss_sub"].text = (
+        rss_sub = (
             f"Rank {only} · physical RAM used" if only is not None else ""
         )
         panel["cpu_tip"].text = _CPU_TOOLTIP_ONE
         panel["rss_tip"].text = _MEMORY_TOOLTIP_ONE
+    for key, sub, chart in (
+        ("cpu", cpu_sub, data.cpu_capacity_chart),
+        ("rss", rss_sub, data.rss_chart),
+    ):
+        # The header names a rolling window only when both graphs share
+        # it; otherwise a whole-run graph names its own here.
+        note = ""
+        if rolled is None and chart is not None and chart.traces:
+            note = rolling_words(chart)
+        text = " · ".join(part for part in (sub, note) if part)
+        panel[f"{key}_sub"].text = text
+        _show(panel, f"{key}_sep", bool(text))
 
-    _set_rows_shown(panel, many)
+    _show(panel, "rows", many)
     panel["rows_title"].text = (
         f"Rank details ({count})" if many else "Rank details"
     )
@@ -761,11 +872,11 @@ def update_process_section(panel: Dict[str, Any], data: Any) -> None:
     ):
         panel["rows"].value = True
     panel["_was_open"] = data.rows_open
-    panel["rows_hint"].text = rows_hint(data)
     panel["rows_html"].content = rows_html(
         data.ranks,
         data.cpu_capacity_chart,
         gpu=data.gpu_available,
         cpu_rank=cpu_rank if many else only,
         mem_rank=mem_rank if many else only,
+        facts=rows_facts(data),
     )
