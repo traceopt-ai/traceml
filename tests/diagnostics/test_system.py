@@ -330,3 +330,59 @@ def _diagnose(**overrides):
     if "system_samples" in overrides:
         overrides["samples"] = overrides.pop("system_samples")
     return diagnose_system(_input(**overrides))
+
+
+def _multi_node_input(
+    *nodes: SystemNodeDiagnosisInput,
+) -> SystemDiagnosisInput:
+    base = _input()
+    return SystemDiagnosisInput(
+        **{
+            **base.__dict__,
+            "nodes_seen": len(nodes),
+            "per_node": {node.node_label: node for node in nodes},
+        }
+    )
+
+
+_HIGH_POWER_GPU = dict(
+    gpu_power_avg_w=90.0,
+    gpu_power_peak_w=95.0,
+    per_gpu=_per_gpu(power_avg=90.0, power_limit=100.0),
+)
+
+
+def _summary(result, kind: str) -> str:
+    return next(issue.summary for issue in result.issues if issue.kind == kind)
+
+
+def test_system_scope_text_single_node() -> None:
+    # GPU-level issues name only the GPU, node-level issues get no scope suffix
+    result = _diagnose(cpu_avg_percent=95.0, **_HIGH_POWER_GPU)
+
+    assert _summary(result, "HIGH_GPU_POWER").endswith("of limit on gpu0.")
+    assert " on 0 " not in _summary(result, "HIGH_GPU_POWER")
+    assert (
+        _summary(result, "HIGH_CPU") == "CPU usage was high, averaging 95.0%."
+    )
+
+
+def test_system_scope_text_multi_node() -> None:
+    # with several nodes, the node is spelled out as "node <label>"
+    busy = _node_input(
+        node_label="0", node_rank=0, cpu_avg_percent=95.0, **_HIGH_POWER_GPU
+    )
+    idle = _node_input(node_label="1", node_rank=1)
+    result = diagnose_system(_multi_node_input(busy, idle))
+
+    assert _summary(result, "HIGH_GPU_POWER").endswith(
+        "of limit on node 0, gpu0."
+    )
+    assert (
+        _summary(result, "HIGH_CPU")
+        == "CPU usage was high, averaging 95.0% on node 0."
+    )
+    scope = next(
+        i for i in result.issues if i.kind == "HIGH_GPU_POWER"
+    ).evidence["scope"]
+    assert scope == {"level": "gpu", "node": "0", "node_rank": 0, "gpu_idx": 0}

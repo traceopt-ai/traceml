@@ -119,24 +119,45 @@ def _node_scope(
     return scope
 
 
-def _scope_text(text: str, scope: Dict[str, Any]) -> str:
-    """Add node context to issue text without making normal text noisy."""
+def _scope_suffix(scope: Dict[str, Any], *, multi_node: bool) -> str:
+    """Return the human-readable scope suffix (without the leading " on ").
+
+    Node context is only spelled out for multi-node runs, and always as
+    ``node <label>`` so that a bare node rank is not mistaken for a GPU index.
+    """
+    node = scope.get("node")
+    node_text = f"node {node}" if multi_node and node not in (None, "") else ""
     if scope.get("level") == "gpu":
-        gpu_idx = scope.get("gpu_idx")
-        node = scope.get("node")
-        suffix = f" on {node} gpu{gpu_idx}"
-        existing = f" on gpu{gpu_idx}"
+        gpu_text = f"gpu{scope.get('gpu_idx')}"
+        return f"{node_text}, {gpu_text}" if node_text else gpu_text
+    if scope.get("level") == "node":
+        return node_text
+    return ""
+
+
+def _scope_text(text: str, scope: Dict[str, Any], *, multi_node: bool) -> str:
+    """Add scope context to issue text without making normal text noisy.
+
+    Single-node, GPU-level: ``... on gpu1.``
+    Multi-node, GPU-level:  ``... on node 0, gpu1.``
+    Single-node, node-level: no suffix.
+    Multi-node, node-level: ``... on node 0.``
+    """
+    suffix = _scope_suffix(scope, multi_node=multi_node)
+    if scope.get("level") == "gpu":
+        existing = f" on gpu{scope.get('gpu_idx')}"
         if existing in text:
-            return text.replace(existing, suffix)
-        return f"{text.rstrip('.')}{suffix}."
-    if scope.get("level") == "node" and scope.get("node"):
-        return f"{text.rstrip('.')} on {scope['node']}."
-    return text
+            return text.replace(existing, f" on {suffix}")
+    if not suffix:
+        return text
+    return f"{text.rstrip('.')} on {suffix}."
 
 
 def _scoped_issue(
     issue: DiagnosticIssue,
     node: SystemNodeDiagnosisInput,
+    *,
+    multi_node: bool,
 ) -> DiagnosticIssue:
     """Attach node scope to a node-local System issue."""
     scope = _node_scope(node, issue)
@@ -145,7 +166,7 @@ def _scoped_issue(
     evidence["samples_used"] = int(node.samples)
     return replace(
         issue,
-        summary=_scope_text(issue.summary, scope),
+        summary=_scope_text(issue.summary, scope, multi_node=multi_node),
         evidence=evidence,
     )
 
@@ -163,11 +184,15 @@ def _issue_sort_key(issue: DiagnosticIssue) -> tuple:
 
 def _diagnose_node(
     node: SystemNodeDiagnosisInput,
+    *,
+    multi_node: bool,
 ) -> Tuple[DiagnosticIssue, ...]:
     """Run regular System rules for one node input."""
     signals = build_system_summary_signals(node)
     issues = run_system_rules(signals) if signals.samples > 0 else ()
-    return tuple(_scoped_issue(issue, node) for issue in issues)
+    return tuple(
+        _scoped_issue(issue, node, multi_node=multi_node) for issue in issues
+    )
 
 
 def _primary_from_issue(
@@ -192,9 +217,10 @@ def diagnose_system(
     """
     Diagnose cluster-level system pressure from prepared node inputs.
     """
+    multi_node = len(data.per_node) > 1 or int(data.nodes_seen or 0) > 1
     node_issues = []
     for node in data.per_node.values():
-        node_issues.extend(_diagnose_node(node))
+        node_issues.extend(_diagnose_node(node, multi_node=multi_node))
 
     issues = tuple(sorted(node_issues, key=_issue_sort_key))
     if issues:
