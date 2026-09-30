@@ -18,12 +18,19 @@ and fail on a behaviour change.
 
 from __future__ import annotations
 
+import json
+import shutil
+import subprocess
+
 import pytest
 
 pytest.importorskip("nicegui")
 
 from traceml_ai.aggregator.display_drivers.nicegui_sections import (  # noqa: E402
     charting,
+)
+from traceml_ai.aggregator.display_drivers.nicegui_sections.formatting import (  # noqa: E402
+    format_elapsed,
 )
 
 
@@ -161,3 +168,176 @@ def test_two_reference_lines_both_survive():
         ]
     )
     assert [e["yAxis"] for e in out["data"]] == [70.0, 33.0]
+
+
+# --- the relative time axis (#511) ---------------------------------------
+def test_a_span_axis_is_labelled_relative_to_the_newest_sample():
+    """``-58s ... Now``: the card names its window once, in the header.
+
+    A wall-clock tick on every axis repeated what the header says and
+    made two stacked charts read as two different periods.
+    """
+    options = charting.multi_line_options("%")
+    charting.apply_span_axis(options, 58.0, 1_700_000_000.0)
+
+    axis = options["xAxis"]
+    assert (axis["min"], axis["max"]) == (-58.0, 0)
+    label = axis["axisLabel"]
+    assert label["show"] is True
+    assert "'Now'" in label[":formatter"]
+    assert "\u2212" in label[":formatter"]
+    assert "getHours" not in label[":formatter"], "no wall clock on ticks"
+
+
+def test_relative_tick_labels_look_like_the_value_axis_labels():
+    """Same colour, font and size on both axes of one chart."""
+    options = charting.multi_line_options(" GB")
+    charting.apply_span_axis(options, 58.0, 1_700_000_000.0)
+    x_label = options["xAxis"]["axisLabel"]
+    y_label = options["yAxis"]["axisLabel"]
+    for key in ("color", "fontFamily", "fontSize"):
+        assert x_label[key] == y_label[key], key
+
+
+def test_the_hover_keeps_the_clock_beside_the_relative_reading():
+    """Logs are keyed on the clock, so the hover still carries it."""
+    options = charting.multi_line_options("%")
+    charting.apply_span_axis(options, 58.0, 1_700_000_000.0)
+    pointer = options["tooltip"]["axisPointer"]["label"][":formatter"]
+    assert "getHours" in pointer
+    assert "'Now'" in pointer
+
+
+def test_relative_ticks_do_not_need_the_newest_epoch():
+    """Without an epoch there is no clock, but the offsets still hold."""
+    options = charting.multi_line_options("%")
+    charting.apply_span_axis(options, 58.0)
+    assert options["xAxis"]["axisLabel"]["show"] is True
+    assert "'Now'" in options["xAxis"]["axisLabel"][":formatter"]
+
+
+def test_the_relative_ticks_land_where_the_axis_is_labelled():
+    options = charting.multi_line_options("%")
+    charting.apply_span_axis(options, 58.0)
+    label = options["xAxis"]["axisLabel"]
+    assert label["customValues"] == [-58.0, -30.0, 0.0]
+    # An ECharts without customValues falls back to the two ends.
+    assert options["xAxis"]["interval"] == 58.0
+
+
+@pytest.mark.parametrize(
+    "span,expected",
+    [
+        (1.0, ["−1s", "Now"]),
+        (2.0, ["−2s", "−1s", "Now"]),
+        (3.0, ["−3s", "−2s", "−1s", "Now"]),
+        (4.0, ["−4s", "−2s", "Now"]),
+        (58.0, ["−58s", "−30s", "Now"]),
+        (61.0, ["−1m 01s", "−30s", "Now"]),
+        (317.0, ["−5m 17s", "−4m 00s", "−2m 00s", "Now"]),
+        (
+            10260.0,
+            ["−2h 51m", "−2h 00m", "−1h 00m", "Now"],
+        ),
+    ],
+)
+def test_the_relative_ticks_name_the_span_then_round_steps(span, expected):
+    """The leftmost matches the header; the ones between are round.
+
+    Ticks at thirds printed "-1s -1s Now Now" on the first second of a run
+    and "-57m 17s" between two hour ticks on a long one.
+    """
+    ticks = charting.relative_ticks(span)
+    words = [
+        "Now" if tick == 0 else "−" + format_elapsed(-tick) for tick in ticks
+    ]
+    assert words == expected
+
+
+@pytest.mark.parametrize("span", [1, 2, 3, 4, 5, 6, 7, 9, 45, 61, 3601])
+def test_no_relative_tick_label_repeats(span):
+    ticks = charting.relative_ticks(float(span))
+    words = [format_elapsed(-tick) for tick in ticks]
+    assert len(set(words)) == len(words), words
+    assert ticks == sorted(ticks) and len(ticks) <= 4
+
+
+@pytest.mark.parametrize(
+    "span, expected",
+    [
+        (7.0, ["−7s", "−4s", "−2s", "Now"]),
+        (368.0, ["−6m 08s", "−4m 00s", "−2m 00s", "Now"]),
+        (450.0, ["−7m 30s", "−4m 00s", "−2m 00s", "Now"]),
+    ],
+)
+def test_a_span_just_past_a_step_still_gets_a_round_tick(span, expected):
+    """The coarser step's only tick sat too near the leftmost and dropped.
+
+    Spans of 7 s and 361-450 s read just the span and "Now".
+    """
+    ticks = charting.relative_ticks(span)
+    words = [
+        "Now" if tick == 0 else "−" + format_elapsed(-tick) for tick in ticks
+    ]
+    assert words == expected
+
+
+def test_every_span_from_two_seconds_gets_an_interior_tick():
+    for span in range(2, 200_000):
+        ticks = charting.relative_ticks(float(span))
+        assert 3 <= len(ticks) <= 4, (span, ticks)
+        words = [format_elapsed(-tick) for tick in ticks]
+        assert len(set(words)) == len(words), (span, words)
+
+
+_NODE = shutil.which("node")
+
+
+@pytest.mark.skipif(_NODE is None, reason="node is not installed")
+def test_the_js_tick_words_match_the_header_words():
+    """The leftmost tick and the header must name the span alike.
+
+    The tick formatter is JavaScript and the header is Python, so the
+    two can drift apart without either one's tests noticing.
+    """
+    seconds = [0, 1, 9, 58, 59, 60, 61, 146, 599, 3600, 3661, 10920]
+    script = (
+        f"const f={charting._RELATIVE};"
+        f"console.log(JSON.stringify({seconds}.map(s=>f(-s))));"
+    )
+    out = subprocess.run(
+        [_NODE, "-e", script],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    expected = ["Now" if s == 0 else "−" + format_elapsed(s) for s in seconds]
+    assert json.loads(out) == expected
+
+
+@pytest.mark.parametrize(
+    "value,step,expected",
+    [
+        (1.111, 0.005, "1.111 GB"),
+        (1.52, 0.01, "1.52 GB"),
+        (1.5, 0.5, "1.5 GB"),
+        (45.0, 25.0, "45 GB"),
+    ],
+)
+def test_a_value_axis_label_is_written_at_the_formatters_precision(
+    value, step, expected
+):
+    """The Python twin of the JS formatter, used to size label room."""
+    assert charting.value_axis_label(value, step, " GB") == expected
+    decimals = str(len(expected.split(" ")[0].partition(".")[2]))
+    assert f"toFixed({decimals})" in charting.value_axis_formatter(step, " GB")
+
+
+def test_a_unit_axis_label_is_the_value_then_the_unit():
+    assert charting.unit_axis_label(30.0, "%") == "30%"
+    assert charting.unit_axis_formatter("%") == "v=>v+'%'"
+
+
+def test_padded_tick_labels_share_one_width():
+    padded = charting.pad_tick_labels("v=>v+'%'", 8)
+    assert padded == "v=>(v=>v+'%')(v).padStart(8)"

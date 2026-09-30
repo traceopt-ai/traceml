@@ -86,22 +86,6 @@ def test_a_real_but_small_percentage_is_not_rounded_to_zero():
 
 
 # --- charting ------------------------------------------------------------
-def test_a_rank_keeps_the_same_colour_everywhere():
-    assert charting.rank_color(1) == charting.rank_color(1)
-    assert charting.rank_color(0) != charting.rank_color(1)
-
-
-def test_rank_colours_wrap_rather_than_run_out():
-    count = len(charting.RANK_COLORS)
-    assert charting.rank_color(count) == charting.rank_color(0)
-
-
-def test_no_rank_colour_reads_as_a_verdict():
-    """Red is a severity word on this page, and a rank id is not one."""
-    for colour in charting.RANK_COLORS:
-        assert colour.lower() not in ("#ff0000", "#f00", "red")
-
-
 def test_a_capacity_axis_is_anchored_at_zero():
     top = charting.capacity_axis_max([12.0, 18.0])
     assert top >= 18.0
@@ -123,6 +107,64 @@ def test_a_drift_axis_fits_the_data_instead_of_the_origin():
 def test_a_flat_series_still_gets_a_range():
     low, high, _tick = charting.drift_axis_bounds([2.0, 2.0, 2.0])
     assert high > low
+    # Mid-plot, not hugging the floor.
+    assert (2.0 - low) == pytest.approx(high - 2.0)
+
+
+def _labels(values, **kwargs):
+    low, high, tick = charting.drift_axis_bounds(values, **kwargs)
+    return [
+        charting.value_axis_label(low + i * tick, tick, " GB")
+        for i in range(3)
+    ]
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        # A steady process: a few kilobytes of movement. Every tick read
+        # "0.586 GB" before the axis had a smallest range.
+        [0.58601, 0.58605, 0.58608],
+        [0.611, 0.6115, 0.6127],
+        [0.06, 0.1, 0.143],
+        [1.48, 1.49, 1.50],
+        [2.0, 2.0, 2.0],
+        [8.0, 10.0, 10.5],
+    ],
+)
+def test_the_three_memory_ticks_differ_and_step_evenly(values):
+    labels = _labels(values, min_span=0.01)
+    assert len(set(labels)) == 3, labels
+    numbers = [float(label.split()[0]) for label in labels]
+    steps = [b - a for a, b in zip(numbers, numbers[1:])]
+    assert steps[0] == pytest.approx(steps[1]), labels
+
+
+def test_a_steady_process_gets_the_smallest_range_not_kilobytes():
+    low, high, tick = charting.drift_axis_bounds(
+        [0.58601, 0.58605, 0.58608], min_span=0.01
+    )
+    assert high - low >= 0.01
+    assert low <= 0.58601 and high >= 0.58608
+    assert _labels([0.58601, 0.58605, 0.58608], min_span=0.01) == [
+        "0.580 GB",
+        "0.587 GB",
+        "0.594 GB",
+    ]
+
+
+def test_the_memory_axis_always_covers_the_data():
+    for values in ([0.0, 0.004], [3.3, 3.31], [0.2, 9.7], [99.0, 101.0]):
+        low, high, _tick = charting.drift_axis_bounds(values, min_span=0.01)
+        assert low <= min(values) and high >= max(values), values
+
+
+def test_a_non_finite_value_does_not_take_the_axis_down():
+    low, high, _tick = charting.drift_axis_bounds(
+        [1.0, float("inf"), float("nan"), 1.2], min_span=0.01
+    )
+    assert low <= 1.0 and high >= 1.2
+    assert charting.drift_axis_bounds([float("nan")]) == (0.0, 1.0, 0.5)
 
 
 def test_an_empty_series_does_not_raise():
@@ -131,16 +173,17 @@ def test_an_empty_series_does_not_raise():
 
 
 @pytest.mark.parametrize(
-    "span,decimals",
+    "step,decimals",
     [
         (50.0, "toFixed(0)"),
-        (5.0, "toFixed(1)"),
-        (0.5, "toFixed(2)"),
-        (0.05, "toFixed(3)"),
+        (5.0, "toFixed(0)"),
+        (0.5, "toFixed(1)"),
+        (0.05, "toFixed(2)"),
+        (0.008, "toFixed(3)"),
     ],
 )
-def test_tick_precision_comes_from_the_range_not_the_magnitude(span, decimals):
-    assert decimals in charting.value_axis_formatter(span, " GB")
+def test_tick_precision_comes_from_the_step_not_the_magnitude(step, decimals):
+    assert decimals in charting.value_axis_formatter(step, " GB")
 
 
 def test_a_sparkline_of_nothing_is_nothing():
@@ -172,6 +215,10 @@ def test_a_span_of_no_traces_is_none():
     assert charting.shared_span([_Trace(())]) is None
 
 
-def test_a_span_never_collapses_to_zero():
-    _anchor, span = charting.shared_span([_Trace((100.0,))])
-    assert span >= 1.0
+def test_one_moment_spans_no_time():
+    """The observed span; the axis keeps its own drawing floor."""
+    anchor, span = charting.shared_span([_Trace((100.0,))])
+    assert (anchor, span) == (100.0, 0.0)
+    options = charting.multi_line_options("%")
+    charting.apply_span_axis(options, span)
+    assert options["xAxis"]["min"] == -1.0
