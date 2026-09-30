@@ -1110,14 +1110,20 @@ def test_guarded_root_consolidates_node_outcomes_before_shutdown(
         events.append("collect")
         return collect(**_kwargs)
 
-    def record_training_end(*_args, **kwargs) -> None:
+    def record_manifest_update(*_args, **kwargs) -> None:
         lifecycle = kwargs.get("extra", {}).get("lifecycle", {})
         if "training_started_at" in lifecycle:
             events.append("training_start")
         elif "training_ended_at" in lifecycle:
+            assert kwargs["status"] == (
+                "completed" if training_returncode == 0 else "failed"
+            )
             events.append("training_end")
+        guard = kwargs.get("extra", {}).get("guard", {})
+        if "training" in guard:
+            events.append("guard_training")
 
-    update_manifest = Mock(side_effect=record_training_end)
+    update_manifest = Mock(side_effect=record_manifest_update)
     replacements = {
         "setup_error_logger": Mock(),
         "install_shutdown_handlers": Mock(),
@@ -1151,6 +1157,7 @@ def test_guarded_root_consolidates_node_outcomes_before_shutdown(
         "training_start",
         "training_end",
         "collect",
+        "guard_training",
         "stop",
     ]
     collect_kwargs = collect.call_args.kwargs
@@ -1159,8 +1166,12 @@ def test_guarded_root_consolidates_node_outcomes_before_shutdown(
     assert collect_kwargs["nproc_per_node"] == 1
     assert (collect_kwargs["timeout_s"] > 0) is expects_wait
 
-    final_update = update_manifest.call_args_list[-1].kwargs
-    training_result = final_update["extra"]["guard"]["training"]
+    guard_update = next(
+        call.kwargs
+        for call in update_manifest.call_args_list
+        if "training" in call.kwargs.get("extra", {}).get("guard", {})
+    )
+    training_result = guard_update["extra"]["guard"]["training"]
     stderr = capsys.readouterr().err
     assert ("Waiting up to" in stderr) is expects_wait
     if recording_fails:
@@ -1513,6 +1524,11 @@ def test_started_training_result_is_authoritative(
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("PYTHONUNBUFFERED", "user-choice")
+
+    def record_manifest_update(*_args, **kwargs):
+        if kwargs.get("status") in {"completed", "failed"}:
+            events.append("training-state")
+
     replacements = {
         "install_shutdown_handlers": Mock(),
         "ensure_aggregator_port_free": Mock(),
@@ -1525,7 +1541,7 @@ def test_started_training_result_is_authoritative(
         "_print_training_output": Mock(side_effect=print_output),
         "write_code_manifest": Mock(return_value=None),
         "write_run_manifest": Mock(return_value=tmp_path / "manifest.json"),
-        "update_run_manifest": Mock(),
+        "update_run_manifest": Mock(side_effect=record_manifest_update),
         "_require_dashboard_dependencies": Mock(),
     }
     for name, replacement in replacements.items():
@@ -1574,6 +1590,7 @@ def test_started_training_result_is_authoritative(
     if aggregator_rc == 9:
         assert events.index("aggregator-output") < events.index("output")
     else:
+        assert events.index("training-state") < events.index("stop")
         assert events.index("stop") < events.index("aggregator-output")
     if save_output:
         assert output_manifest["stdout_pattern"] == (
@@ -1617,6 +1634,15 @@ def test_started_training_result_is_authoritative(
             == {"aggregator_stderr_log": str(aggregator_stderr_path)}
             for call in replacements["update_run_manifest"].call_args_list
         )
+    training_state_update = next(
+        call.kwargs
+        for call in replacements["update_run_manifest"].call_args_list
+        if call.kwargs.get("status") in {"completed", "failed"}
+    )
+    assert training_state_update["status"] == (
+        "completed" if train_rc == 0 else "failed"
+    )
+    assert "training_ended_at" in training_state_update["extra"]["lifecycle"]
     if (
         train_rc == 0
         and aggregator_rc == 0
@@ -1624,7 +1650,7 @@ def test_started_training_result_is_authoritative(
         and mode == "summary"
     ):
         final_update = replacements["update_run_manifest"].call_args_list[-1]
-        assert final_update.kwargs["status"] == "completed"
+        assert "status" not in final_update.kwargs
         assert final_update.kwargs["telemetry_status"] == "failed"
         assert final_update.kwargs["telemetry_reason"] == "summary_missing"
 

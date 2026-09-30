@@ -204,6 +204,20 @@ def _build_compare(lhs: dict, rhs: dict) -> dict:
     )
 
 
+def test_compare_ignores_additive_run_context() -> None:
+    lhs = _payload_with_sections()
+    rhs = _payload_with_sections()
+    expected = _build_compare(lhs, rhs)
+    lhs["run_context"] = {"run": {"status": "completed"}}
+    rhs["run_context"] = {"run": {"status": "failed"}}
+
+    actual = _build_compare(lhs, rhs)
+
+    assert actual["sections"] == expected["sections"]
+    assert actual["overview"] == expected["overview"]
+    assert actual["verdict"] == expected["verdict"]
+
+
 def test_compare_missing_both_primary_sections_on_lhs_is_unclear() -> None:
     lhs = _payload_with_sections(
         include_step_time=False,
