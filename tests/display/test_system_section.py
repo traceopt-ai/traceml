@@ -21,12 +21,14 @@ import pytest
 pytest.importorskip("nicegui")
 
 from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section import (  # noqa: E402,E501
+    CPU_DEFINITION,
     cpu_axis_max,
     disclosure_text,
     format_gb_pair,
     format_span,
     format_window,
     gpu_color,
+    gpu_layout,
     odd_ones_out,
     power_axis_bounds,
     rows_html,
@@ -377,13 +379,35 @@ def test_whole_run_charts_share_one_clock_axis() -> None:
     # The duration is the strip's fact; the labels say the view, not the
     # length.
     assert panel["cpu_label"].text == (
-        "host cpu util · avg across cores · recent history · rolling 2 min"
+        "cpu utilization · recent history · rolling 2 min"
     )
+    # The value beside the whole-run chart is still the recent window's
+    # median (32, not the newest 30), so its label names that window.
+    assert panel["cpu_value"].text == "32%"
+    assert panel["cpu_value_name"].text == "median · last 3 min"
+    assert panel["cpu_value_tip"].text.startswith(
+        "Median of the samples in the last 3 min."
+    )
+    assert panel["cpu_value_tip"].text.endswith(CPU_DEFINITION)
+    assert panel["cpu_label_tip"].text.startswith("Available history, ")
+    assert "Each point averages the previous 2 min." in (
+        panel["cpu_label_tip"].text
+    )
+    assert panel["cpu_label_tip"].text.endswith(CPU_DEFINITION)
     assert panel["power_label"].text == (
         "gpu power · per GPU vs 70 W limit · recent history · "
         "average and lowest every 2 min"
     )
     assert "min," not in panel["cpu_label"].text
+
+    # A span or window that formats empty drops its clause instead of
+    # leaving "Available history, ." or "the previous ." behind.
+    payload["series"]["cpu_run"] = dict(
+        payload["series"]["cpu_run"], span_s=0.0, window_s=0.0
+    )
+    update_system_section(panel, as_payload(payload))
+    assert panel["cpu_label"].text == "cpu utilization · recent history"
+    assert panel["cpu_label_tip"].text == CPU_DEFINITION
 
 
 def test_power_chart_draws_limit_and_floor_reference_lines() -> None:
@@ -505,16 +529,20 @@ def test_section_builds_and_updates_without_a_browser() -> None:
     assert "16.1" in panel["tiles"]["mem"].content
     assert "54" in panel["tiles"]["temp"].content
     assert "200" in panel["tiles"]["ram"].content
+    # The window median (8), labelled as one, not the newest sample (9).
     assert panel["cpu_value"].text == "8%"
+    assert panel["cpu_value_name"].text == "median"
+    assert panel["cpu_value_tip"].text == (
+        "Median of the samples in the chart window, the last 3 min. "
+        + CPU_DEFINITION
+    )
     assert panel["rows"].value is True  # spread 100 crossed the bar
     assert (
         panel["rows_hint"].text == "2 GPUs · util 0 to 100% · click to close"
     )
     # The window is named once in each chart's label, never on the axis.
-    assert (
-        panel["cpu_label"].text
-        == "host cpu util · avg across cores · last 3 min"
-    )
+    assert panel["cpu_label"].text == "cpu utilization · last 3 min"
+    assert panel["cpu_label_tip"].text == CPU_DEFINITION
     assert panel["power_label"].text.endswith("70 W limit · last 3 min")
     assert panel["cpu_chart"].options["xAxis"]["axisLabel"]["show"] is True
     assert (
@@ -597,7 +625,7 @@ def test_section_builds_and_updates_without_a_browser() -> None:
     assert panel["tiles"]["mem"].content == "n/a"
     assert panel["subs"]["temp"].text == "GPU sample unreported"
 
-    # A CPU-only box hides the GPU tiles, the power chart and the rows.
+    # A CPU-only box drops the GPU tiles, the power chart and the rows.
     update_system_section(
         panel,
         as_payload(
@@ -619,16 +647,23 @@ def test_section_builds_and_updates_without_a_browser() -> None:
             }
         ),
     )
-    assert panel["gpu_visible"] is False
-    # The four tiles stay in place; the GPU ones read a dash and say why.
+    assert panel["gpu_layout"] == "cpu_only"
     for key in ("util", "mem", "temp"):
-        assert panel["tiles"][key].content == "n/a"
-        assert panel["subs"][key].text == "no GPU"
+        assert _display(panel["tile_els"][key]) == "none"
+        assert "n/a" not in panel["tiles"][key].content
+        assert "no GPU" not in panel["subs"][key].text
     assert "16.0" in panel["tiles"]["ram"].content  # the RAM tile still works
-    # The chart and rows slots keep their place with a one-line state.
-    assert panel["power_label"].text == "gpu power"
-    assert panel["power_placeholder"].text == "no GPU reported"
-    assert panel["rows_placeholder"].text == "per-GPU rows · no GPU"
+    assert _display(panel["tile_els"]["ram"]) != "none"
+    for key in (
+        "power_head",
+        "power_chart",
+        "power_placeholder",
+        "rows",
+        "rows_placeholder",
+    ):
+        assert _display(panel[key]) == "none", key
+    assert "no GPU" not in panel["power_placeholder"].text
+    assert "no GPU" not in panel["rows_placeholder"].text
 
 
 def test_header_names_the_node_when_others_were_dropped() -> None:
@@ -833,8 +868,10 @@ def test_tiles_abstain_when_the_payload_carries_no_measurement() -> None:
         content = panel["tiles"][key].content
         assert "n/a" in content, key
         assert not re.search(r"\d", _tile_number(content)), key
-    # Not "0%", which is what a measured idle host reads.
+    # Not "0%", which is what a measured idle host reads, and no "median"
+    # label left standing beside a value that is not there.
     assert panel["cpu_value"].text == ""
+    assert panel["cpu_value_name"].text == ""
 
 
 def test_a_widened_bucket_reads_as_hours_not_a_big_minute_count() -> None:
@@ -991,10 +1028,11 @@ def test_the_first_tick_waits_and_the_gpu_slots_come_back() -> None:
     """Before any sample the card waits; it does not claim a CPU-only box.
 
     The compute layer's empty payload says ``gpu_available=False`` because
-    nothing has been read yet, so the GPU slots fold into their one-line
-    state. When the first GPU payload lands they must come back: a slot
-    that stayed folded would read "no GPU" on a GPU host for the rest of
-    the run.
+    nothing has been read yet. Folding the GPU slots on that flag would
+    collapse every GPU host's card for one tick and expand it on the
+    next, so before data the slots stay in place and wait. When the first
+    GPU payload lands the waiting slots give way to the real ones in the
+    same places.
     """
     from nicegui import ui
 
@@ -1017,6 +1055,18 @@ def test_the_first_tick_waits_and_the_gpu_slots_come_back() -> None:
     assert panel["rows_placeholder"].text == "per-GPU rows"
     assert _display(panel["power_placeholder"]) == "flex"
     assert _display(panel["rows"]) == "none"
+    assert panel["gpu_layout"] == "waiting"
+    # Every GPU slot holds its place while the card waits...
+    for key in ("util", "mem", "temp"):
+        assert _display(panel["tile_els"][key]) != "none", key
+    assert _display(panel["power_head"]) != "none"
+    assert _display(panel["rows_placeholder"]) != "none"
+    # ...and the power placeholder reserves exactly the chart's height, so
+    # the chart replacing it on a GPU host moves nothing below it.
+    assert (
+        panel["power_placeholder"]._style["height"]
+        == panel["power_chart"]._style["height"]
+    )
 
     update_system_section(
         panel,
@@ -1045,11 +1095,15 @@ def test_the_first_tick_waits_and_the_gpu_slots_come_back() -> None:
         ),
     )
 
-    assert panel["gpu_visible"] is True
+    assert panel["gpu_layout"] == "gpu"
     assert "waiting for data" not in panel["note"].text
     assert _display(panel["power_placeholder"]) == "none"
+    assert _display(panel["power_chart"]) == "block"
     assert _display(panel["rows"]) == "block"
     assert _display(panel["rows_placeholder"]) == "none"
+    for key in ("util", "mem", "temp"):
+        assert _display(panel["tile_els"][key]) != "none", key
+    assert _display(panel["power_head"]) != "none"
 
 
 def test_a_gpu_that_reports_no_power_says_so() -> None:
@@ -1119,3 +1173,343 @@ def test_a_payload_of_the_wrong_type_is_ignored() -> None:
     assert panel["note"].text == "waiting for data"
     assert panel["tiles"]["ram"].content == "n/a"
     assert panel["_sig"] is None
+
+
+def test_gpu_slots_fold_only_once_a_sample_says_there_is_no_gpu() -> None:
+    """Three layouts, and the empty payload's default is not a reading.
+
+    ``gpu_available`` is False on the payload before anything was read,
+    so it can only mean "no GPU" once a sample has arrived.
+    """
+    assert gpu_layout(has_data=False, gpu_available=False) == "waiting"
+    assert gpu_layout(has_data=True, gpu_available=False) == "cpu_only"
+    assert gpu_layout(has_data=True, gpu_available=True) == "gpu"
+    assert gpu_layout(has_data=False, gpu_available=True) == "gpu"
+    # A sample said there is no GPU, so a later payload without data
+    # keeps the fold. Any other card waits, as it did before.
+    for previous, expected in (
+        ("cpu_only", "cpu_only"),
+        ("gpu", "waiting"),
+        ("waiting", "waiting"),
+    ):
+        assert (
+            gpu_layout(has_data=False, gpu_available=False, previous=previous)
+            == expected
+        ), previous
+    # A sample always decides for itself.
+    assert (
+        gpu_layout(has_data=True, gpu_available=True, previous="cpu_only")
+        == "gpu"
+    )
+
+
+def _visible_texts(root) -> list:
+    """Every string on the card outside a subtree hidden with display:none.
+
+    Tile values are HTML, so their markup is stripped to the words a
+    reader sees.
+    """
+    texts = []
+    for element in root.descendants():
+        if any(
+            node._style.get("display") == "none"
+            for node in element.ancestors(include_self=True)
+        ):
+            continue
+        for attr in ("text", "content"):
+            value = getattr(element, attr, None)
+            if isinstance(value, str) and value:
+                texts.append(re.sub(r"<[^>]+>", "", value))
+    return texts
+
+
+def _cpu_only_payload(window_len: int = 20) -> dict:
+    return {
+        "window_len": window_len,
+        "gpu_available": False,
+        "rollups": {
+            "cpu": {"now": 38.0, "p50": 42.0, "p95": 60.0},
+            "ram": {"now": 8.4 * GB, "total": 25.8 * GB},
+            "gpu_power": {"now": None, "p50": None, "limit": None},
+            "gpus": [],
+            "ctx": {"gpu_count": 0},
+        },
+        "series": {
+            "x_time": [
+                "2026-08-21T10:00:00+00:00",
+                "2026-08-21T10:00:58+00:00",
+            ],
+            "cpu": [46.0, 38.0],
+            "gpu_avg": [],
+            "gpu_power": [],
+        },
+    }
+
+
+def test_a_cpu_only_card_shows_what_exists_and_no_absence() -> None:
+    """No GPU slot, no "n/a" or "no GPU" line, and no reserved height.
+
+    The card used to keep every GPU slot on a CPU-only host, each saying
+    the same thing: three "n/a" tiles marked "no GPU", a 150 px power
+    placeholder reading "no GPU reported", and "per-GPU rows · no GPU".
+    What remains is what was measured: RAM and the CPU chart.
+    """
+    from nicegui import ui
+
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section import (  # noqa: E501
+        build_system_section,
+        update_system_section,
+    )
+
+    with ui.element("div") as root:
+        panel = build_system_section()
+    # A real run passes through the waiting layout before its first
+    # sample arrives.
+    update_system_section(panel, as_payload({}))
+    assert panel["gpu_layout"] == "waiting"
+    update_system_section(panel, as_payload(_cpu_only_payload()))
+
+    assert panel["gpu_layout"] == "cpu_only"
+    for key in ("util", "mem", "temp"):
+        assert _display(panel["tile_els"][key]) == "none", key
+    # The placeholder that reserved 150 px leaves the layout with the
+    # chart, the heading and the rows.
+    for key in (
+        "power_head",
+        "power_chart",
+        "power_placeholder",
+        "rows",
+        "rows_placeholder",
+    ):
+        assert _display(panel[key]) == "none", key
+
+    shown = _visible_texts(root)
+    joined = " | ".join(shown).lower()
+    assert "gpu" not in joined, shown
+    assert "n/a" not in joined, shown
+    # The RAM tile is labelled for what it holds and reads compactly.
+    assert "ram usage" in shown
+    assert "8.4 / 25.8 GB" in shown
+    assert "used / total" in shown
+    # The CPU chart keeps its heading and its labelled median, the label
+    # directly before the value.
+    assert "cpu utilization · last 58 s" in shown
+    assert shown.index("median") + 1 == shown.index("42%")
+    # Both tooltips wrap, each opening from its own edge of the card.
+    for key, edge in (("cpu_label_tip", "left"), ("cpu_value_tip", "right")):
+        props = panel[key].props
+        assert props["max-width"] == "min(320px, 80vw)", key
+        assert props[":offset"] == "[0, 14]", key
+        assert props["anchor"] == f"bottom {edge}", key
+        assert props["self"] == f"top {edge}", key
+
+
+def test_a_cpu_only_card_stays_folded_when_its_reads_go_stale(
+    tmp_path, monkeypatch
+) -> None:
+    """A read failure past the stale TTL does not bring the GPU slots back.
+
+    The compute layer then sends a payload without data whose
+    ``gpu_available`` is its default False, the same shape it sends before
+    the first sample. On a card that a sample already folded, reading it
+    as "not read yet" regrew three "n/a" GPU tiles, the 150 px power
+    placeholder and the per-GPU rows. Driven through the real compute
+    layer so the payload is the one production sends.
+    """
+    from nicegui import ui
+
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section import (  # noqa: E501
+        build_system_section,
+        update_system_section,
+    )
+    from traceml_ai.renderers.system.dashboard_compute import (
+        SystemDashboardComputer,
+    )
+
+    _cpu_db(tmp_path / "run.db", [40.0, 42.0, 44.0])
+    computer = SystemDashboardComputer(
+        str(tmp_path / "run.db"), stale_ttl_s=0.0
+    )
+    with ui.element("div") as root:
+        panel = build_system_section()
+    update_system_section(panel, computer.compute())
+    assert panel["gpu_layout"] == "cpu_only"
+
+    monkeypatch.setattr(
+        computer._db,
+        "connect",
+        lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("locked")),
+    )
+    stale = computer.compute()
+    assert stale.window_len == 0
+    assert stale.rollups.status == "No fresh system data"
+    update_system_section(panel, stale)
+
+    assert panel["gpu_layout"] == "cpu_only"
+    for key in ("util", "mem", "temp"):
+        assert _display(panel["tile_els"][key]) == "none", key
+        # Hidden and cleared, so no absence marker waits inside them.
+        assert panel["tiles"][key].content == "", key
+    for key in (
+        "power_head",
+        "power_chart",
+        "power_placeholder",
+        "rows",
+        "rows_placeholder",
+    ):
+        assert _display(panel[key]) == "none", key
+    assert panel["power_placeholder"].text == ""
+    assert panel["rows_placeholder"].text == ""
+    shown = _visible_texts(root)
+    assert "gpu" not in " | ".join(shown).lower(), shown
+    # The one "n/a" left is the RAM tile, which has no fresh reading.
+    assert [text for text in shown if "n/a" in text] == ["n/a"], shown
+    assert panel["tiles"]["ram"].content == "n/a"
+    assert "No fresh system data" in panel["note"].text
+
+
+def test_a_measured_idle_host_reads_median_0_percent() -> None:
+    """A median of 0.0 is a measurement, so it is printed and labelled."""
+    from nicegui import ui
+
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section import (  # noqa: E501
+        build_system_section,
+        update_system_section,
+    )
+
+    idle = _cpu_only_payload()
+    idle["rollups"] = dict(
+        idle["rollups"], cpu={"now": 0.0, "p50": 0.0, "p95": 0.0}
+    )
+    with ui.element("div"):
+        panel = build_system_section()
+    update_system_section(panel, as_payload(idle))
+
+    assert panel["cpu_value"].text == "0%"
+    assert panel["cpu_value_name"].text == "median"
+
+
+def test_a_cpu_only_card_gets_its_gpu_slots_back_when_one_reports() -> None:
+    """The fold is a layout state, not a one-way door."""
+    from nicegui import ui
+
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section import (  # noqa: E501
+        build_system_section,
+        update_system_section,
+    )
+
+    with ui.element("div"):
+        panel = build_system_section()
+    update_system_section(panel, as_payload(_cpu_only_payload()))
+    gpu = _cpu_only_payload()
+    gpu["gpu_available"] = True
+    gpu["rollups"] = dict(
+        gpu["rollups"],
+        gpu_util={"now": 99.0, "p50": 99.0},
+        gpu_mem={"now": 6.3 * GB, "total": 16.1 * GB},
+        temp={"now": 48.0},
+        gpu_power={"now": 66.0, "p50": 66.0, "limit": 70.0},
+        gpus=_gpus(),
+    )
+    gpu["series"] = dict(
+        gpu["series"], gpu_power=[{"gpu_idx": 0, "values": [66.0, 68.0]}]
+    )
+    update_system_section(panel, as_payload(gpu))
+
+    assert panel["gpu_layout"] == "gpu"
+    for key in ("util", "mem", "temp"):
+        assert _display(panel["tile_els"][key]) != "none", key
+        assert panel["tiles"][key].content, key
+    assert _display(panel["power_head"]) != "none"
+    assert _display(panel["power_chart"]) == "block"
+    assert _display(panel["rows"]) == "block"
+    assert _display(panel["power_placeholder"]) == "none"
+    assert _display(panel["rows_placeholder"]) == "none"
+
+
+def _cpu_db(path, cpu_values) -> None:
+    """A CPU-only host, one sample every 2 s, through the real writer."""
+    from tests.sqlite_fixtures import (
+        init_summary_schema,
+        insert_system_sample,
+        sqlite_database,
+    )
+
+    with sqlite_database(path, init_summary_schema) as conn:
+        for seq, cpu in enumerate(cpu_values):
+            insert_system_sample(
+                conn,
+                row_id=seq + 1,
+                rank=0,
+                ts=1000.0 + 2.0 * seq,
+                gpu_available=False,
+                gpu_count=0,
+                seq=seq,
+                cpu_percent=cpu,
+                ram_used_bytes=8.4 * GB,
+                ram_total_bytes=25.8 * GB,
+            )
+
+
+def test_the_cpu_value_is_the_median_of_the_samples_drawn(tmp_path) -> None:
+    """The labelled median is the median of exactly the plotted window.
+
+    Read through the real compute layer, because the claim spans both
+    ends: the payload's p50 and the chart's points come from the same
+    samples, and the label names the span those samples cover. The
+    newest sample differs from the median on purpose, so a value that
+    silently became the latest reading would fail here.
+    """
+    import statistics
+
+    from nicegui import ui
+
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section import (  # noqa: E501
+        build_system_section,
+        update_system_section,
+    )
+    from traceml_ai.renderers.system.dashboard_compute import (
+        SystemDashboardComputer,
+    )
+
+    # 100 samples: exactly the dashboard window, so the chart is recent.
+    # Each level repeats, so the two middle samples are equal and the
+    # median is a whole number: rounding plays no part in the match.
+    values = [20.0 + (seq * 7) % 33 for seq in range(100)]
+    _cpu_db(tmp_path / "recent.db", values)
+    payload = SystemDashboardComputer(str(tmp_path / "recent.db")).compute(
+        window_n=100
+    )
+    assert payload.series.cpu_run_mode == "recent"
+    with ui.element("div"):
+        panel = build_system_section()
+    update_system_section(panel, payload)
+
+    drawn = [y for _x, y in panel["cpu_chart"].options["series"][0]["data"]]
+    assert len(drawn) == 100
+    median = statistics.median(drawn)
+    assert median == int(median)
+    assert panel["cpu_value"].text == f"{median:.0f}%"
+    assert panel["cpu_value"].text != f"{drawn[-1]:.0f}%"
+    assert panel["cpu_value_name"].text == "median"
+    # 99 gaps of 2 s: the heading and the tooltip name the same window.
+    assert panel["cpu_label"].text == "cpu utilization · last 3 min"
+    assert "the last 3 min." in panel["cpu_value_tip"].text
+
+    # A longer run switches the chart to whole-run history; the value
+    # stays the median of the newest 100 samples and says so.
+    longer = [20.0 + (seq * 7) % 33 for seq in range(160)]
+    _cpu_db(tmp_path / "long.db", longer)
+    payload = SystemDashboardComputer(str(tmp_path / "long.db")).compute(
+        window_n=100
+    )
+    assert payload.series.cpu_run_mode == "retained"
+    with ui.element("div"):
+        panel = build_system_section()
+    update_system_section(panel, payload)
+
+    window = longer[-100:]
+    assert statistics.median(window) == int(statistics.median(window))
+    assert panel["cpu_value"].text == f"{statistics.median(window):.0f}%"
+    assert panel["cpu_value"].text != f"{window[-1]:.0f}%"
+    assert panel["cpu_value_name"].text == "median · last 3 min"
