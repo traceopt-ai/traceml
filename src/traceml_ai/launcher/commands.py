@@ -1579,6 +1579,7 @@ def run_compare(args: argparse.Namespace) -> None:
             args.left,
             args.right,
             output=args.output,
+            max_step_time_regression_pct=args.max_step_time_regression_pct,
             print_to_stdout=True,
         )
     except RuntimeError as exc:

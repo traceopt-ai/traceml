@@ -11,7 +11,11 @@ from traceml_ai.reporting.compare import (
 )
 from traceml_ai.reporting.compare.formatters import CompareTextFormatter
 from traceml_ai.reporting.compare.io import load_summary_json
-from traceml_ai.reporting.compare.policy import _STEP_TIME_STATUS_RANK
+from traceml_ai.reporting.compare.policy import (
+    _STEP_TIME_STATUS_RANK,
+    evaluate_step_time_ci_result,
+    parse_step_time_regression_threshold,
+)
 
 BYTES_PER_GB = 1024.0**3
 
@@ -201,6 +205,44 @@ def _build_compare(lhs: dict, rhs: dict) -> dict:
         rhs_payload=rhs,
         lhs_path=Path("/tmp/run_a/final_summary.json"),
         rhs_path=Path("/tmp/run_b/final_summary.json"),
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("0", 0.0),
+        ("5", 5.0),
+        ("2.5", 2.5),
+    ],
+)
+def test_ci_policy_parses_supported_thresholds(value, expected) -> None:
+    assert parse_step_time_regression_threshold(value) == expected
+
+
+@pytest.mark.parametrize("value", [None, True, "", "-1", "nan", "inf", "x"])
+def test_ci_policy_rejects_invalid_thresholds(value) -> None:
+    with pytest.raises(ValueError, match="finite, nonnegative"):
+        parse_step_time_regression_threshold(value)
+
+
+@pytest.mark.parametrize(
+    ("delta_pct", "expected"),
+    [
+        (5.01, "SLOWER_IN_THIS_PAIR"),
+        (5.0, "WITHIN_THRESHOLD_IN_THIS_PAIR"),
+        (0.0, "WITHIN_THRESHOLD_IN_THIS_PAIR"),
+        (-5.0, "WITHIN_THRESHOLD_IN_THIS_PAIR"),
+        (-5.01, "FASTER_IN_THIS_PAIR"),
+    ],
+)
+def test_ci_policy_classifies_threshold_boundaries(
+    delta_pct, expected
+) -> None:
+    # These are the v0.1 decisions; broader statistical analysis is out of scope.
+    assert (
+        evaluate_step_time_ci_result(delta_pct=delta_pct, threshold_pct=5.0)
+        == expected
     )
 
 

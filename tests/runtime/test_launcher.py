@@ -107,6 +107,39 @@ def test_run_and_watch_accept_missing_aggregator_policy() -> None:
     assert watch_args.on_missing_aggregator is None
 
 
+def test_compare_passes_optional_step_time_regression_threshold(
+    monkeypatch,
+) -> None:
+    # Keep this as one CLI smoke test; policy edge cases belong in policy tests.
+    parser = build_parser()
+    default_args = parser.parse_args(["compare", "before.json", "after.json"])
+    policy_args = parser.parse_args(
+        [
+            "compare",
+            "before.json",
+            "after.json",
+            "--max-step-time-regression-pct",
+            "5",
+        ]
+    )
+
+    assert default_args.max_step_time_regression_pct is None
+    assert policy_args.max_step_time_regression_pct == "5"
+    compare_summaries = Mock()
+    monkeypatch.setattr(
+        "traceml_ai.reporting.compare.compare_summaries",
+        compare_summaries,
+    )
+    launcher_commands.run_compare(default_args)
+    launcher_commands.run_compare(policy_args)
+
+    thresholds = [
+        item.kwargs["max_step_time_regression_pct"]
+        for item in compare_summaries.call_args_list
+    ]
+    assert thresholds == [None, "5"]
+
+
 def test_training_output_help_describes_default_and_opt_out(capsys) -> None:
     parser = build_parser()
 

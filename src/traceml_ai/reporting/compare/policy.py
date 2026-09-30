@@ -20,8 +20,9 @@ small run-to-run noise as a material regression or improvement.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 _SIGNIFICANCE_ORDER = {
     "negligible": 0,
@@ -83,6 +84,38 @@ class CompareDecisionPolicy:
 
 
 DEFAULT_COMPARE_POLICY = CompareDecisionPolicy()
+
+
+def parse_step_time_regression_threshold(value: Any) -> float:
+    """Return one finite, nonnegative Step Time regression threshold."""
+    try:
+        threshold = float(value)
+    except (OverflowError, TypeError, ValueError):
+        threshold = math.nan
+    if (
+        isinstance(value, bool)
+        or not math.isfinite(threshold)
+        or threshold < 0
+    ):
+        raise ValueError(
+            "maximum Step Time regression percentage must be a finite, "
+            "nonnegative number"
+        )
+    return threshold
+
+
+def evaluate_step_time_ci_result(
+    *, delta_pct: float, threshold_pct: float
+) -> str:
+    """Classify one existing Step Time percentage difference for CI."""
+    if isinstance(delta_pct, bool) or not math.isfinite(delta_pct):
+        raise ValueError("Step Time percentage difference must be finite")
+    threshold = parse_step_time_regression_threshold(threshold_pct)
+    if delta_pct > threshold:
+        return "SLOWER_IN_THIS_PAIR"
+    if delta_pct < -threshold:
+        return "FASTER_IN_THIS_PAIR"
+    return "WITHIN_THRESHOLD_IN_THIS_PAIR"
 
 
 def significance_rank(name: str) -> int:

@@ -21,6 +21,7 @@ def compare_summaries(
     rhs_path: str | Path,
     *,
     output: Optional[str | Path] = None,
+    max_step_time_regression_pct: Optional[str] = None,
     print_to_stdout: bool = True,
 ) -> Dict[str, Any]:
     """
@@ -35,6 +36,10 @@ def compare_summaries(
     output:
         Optional output base path. If omitted, defaults to
         `compare/<lhs>_vs_<rhs>` in the current working directory.
+    max_step_time_regression_pct:
+        Raw optional CI policy threshold. Policy validation and evaluation
+        occur after the compare payload is built. ``None`` keeps the existing
+        exploratory comparison behavior.
     print_to_stdout:
         If True, print the rendered compare text after writing artifacts.
 
