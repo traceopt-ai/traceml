@@ -7,7 +7,7 @@ also copies that same item to `diagnosis`.
 The final summary also includes a top-level `primary_diagnosis`. That field is
 a run-level performance finding promoted from existing section diagnoses. It is
 not a replacement for section diagnoses and it is not a health-warning rollup.
-In schema `1.8`, Step Time drives the top-level primary diagnosis; System GPU
+Since schema `1.8`, Step Time drives the top-level primary diagnosis; System GPU
 utilization can appear as supporting evidence or as an unexplained-utilization
 fallback. System, Process, and Step Memory resource findings remain canonical
 inside their sections.

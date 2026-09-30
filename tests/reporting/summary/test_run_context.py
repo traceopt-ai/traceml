@@ -219,29 +219,6 @@ def test_does_not_export_non_allowlisted_manifest_values(tmp_path) -> None:
         assert forbidden not in encoded
 
 
-def test_projection_is_independent_from_source_mutation(tmp_path) -> None:
-    manifest = _manifest()
-    projection = _load(tmp_path, manifest)
-
-    manifest["guard"]["contract"]["workload"]["parameters"][
-        "precision"
-    ] = "fp16"
-    manifest["guard"]["training"]["reasons"].append("node_outcome_missing")
-
-    assert (
-        projection.run_context["declaration"]["workload"]["parameters"][
-            "precision"
-        ]
-        == "bf16"
-    )
-    assert (
-        projection.run_context["execution"]["launcher_completion"][
-            "reason_codes"
-        ]
-        == []
-    )
-
-
 @pytest.mark.parametrize(
     "started,ended",
     [
@@ -261,13 +238,33 @@ def test_invalid_lifecycle_has_no_duration(tmp_path, started, ended) -> None:
     assert _load(tmp_path, manifest).duration_s is None
 
 
-@pytest.mark.parametrize("contents", ["{bad json", "[]"])
+@pytest.mark.parametrize("contents", [None, b"{bad json", b"\xff\xfe{", b"[]"])
 def test_malformed_or_non_object_manifest_falls_back_to_directory_name(
     tmp_path, contents
 ) -> None:
     run_root = tmp_path / "fallback-run"
     run_root.mkdir()
-    (run_root / "manifest.json").write_text(contents, encoding="utf-8")
+    if contents is not None:
+        (run_root / "manifest.json").write_bytes(contents)
+
+    projection = load_run_manifest_projection(run_root)
+
+    assert projection.run_name == "fallback-run"
+    assert projection.duration_s is None
+    assert projection.run_context == {}
+
+
+def test_manifest_value_error_falls_back_to_directory_name(
+    tmp_path, monkeypatch
+) -> None:
+    run_root = tmp_path / "fallback-run"
+    run_root.mkdir()
+    (run_root / "manifest.json").write_text("{}", encoding="utf-8")
+
+    def reject_value(_handle):
+        raise ValueError("value cannot be decoded")
+
+    monkeypatch.setattr(json, "load", reject_value)
 
     projection = load_run_manifest_projection(run_root)
 

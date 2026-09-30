@@ -19,8 +19,9 @@ completed-step counter (`0` with no steps), independent of retained row count.
 `training_latest_step` is that counter, or `null` with no steps. Completed steps
 are numbered from one. Earlier releases incorrectly added one to a nonempty
 counter; regenerated summaries correct this, including for older telemetry.
-That calculation fix was introduced without changing fields or types.
-Previously written summary files are not modified.
+This calculation was corrected during schema `1.8` without changing fields or
+types, so previously written `1.8` files may contain the older count. Those
+files are not modified.
 
 For user-facing definitions and examples, see the
 [Step Time glossary](../../../docs/user_guide/reading-output.md#step-time-glossary).
@@ -135,11 +136,13 @@ no readable launcher manifest is available. Its optional blocks are:
   launcher completion.
 
 `execution.expected_*` describes launch configuration.
-`launcher_completion.nodes_observed` counts launcher nodes that reported an
-outcome; it is not telemetry-observed node coverage. Observed ranks, nodes,
-steps, and performance measurements remain in `meta` and the existing report
-sections. `declaration` is absent for ordinary runs, and `launcher_completion`
-is absent when guarded launcher outcomes were unavailable. Malformed optional
+`launcher_completion.nodes_observed` counts launcher nodes whose outcome was
+readable, valid, and matched the current run; it is not telemetry-observed node
+coverage. Observed ranks, nodes, steps, and performance measurements remain in
+`meta` and the existing report sections. `declaration` is absent for ordinary
+runs, and `launcher_completion` is absent when guarded launcher outcomes were
+unavailable. An interrupted run may omit it because the aggregator can finish
+the summary before node 0 consolidates launcher outcomes. Malformed optional
 manifest values are omitted rather than replaced with zero or a successful
 status.
 
@@ -194,7 +197,7 @@ remains in each section-local `card` field.
 ```
 
 `primary_diagnosis` is derived from already-built section payloads. It does not
-read telemetry tables or recompute diagnostics. In schema `1.8`, Step Time
+read telemetry tables or recompute diagnostics. Since schema `1.8`, Step Time
 diagnoses drive primary performance diagnosis. System GPU utilization is only
 supporting evidence, except for the fallback
 `LOW_GPU_UTILIZATION_UNEXPLAINED` when Step Time has no useful performance
@@ -227,9 +230,10 @@ Selection policy:
   unrecognized strategy metadata defaults to `ddp`. FSDP Step Time diagnosis
   severity is capped at warning.
 
-High temperature, memory pressure, memory creep, high RSS, high CPU, and other
-resource-health findings are not promoted into `primary_diagnosis` in schema
-`1.8`. They remain available under their section's `diagnosis` and `issues`.
+Since schema `1.8`, high temperature, memory pressure, memory creep, high RSS,
+high CPU, and other resource-health findings are not promoted into
+`primary_diagnosis`. They remain available under their section's `diagnosis`
+and `issues`.
 
 Primary diagnosis evidence uses a small union:
 
@@ -541,9 +545,9 @@ step_time_ms = complete selected-clock step duration
 diagnosis_clock = "cpu" | "gpu"
 ```
 
-Schema `1.8` does not publish historical timing aliases. Readers that support
-older summary files must use an explicit schema-versioned compatibility adapter
-at their input boundary; new output remains canonical.
+Since schema `1.8`, summaries do not publish historical timing aliases. Readers
+that support older summary files must use an explicit schema-versioned
+compatibility adapter at their input boundary; new output remains canonical.
 
 `duration_ms` is stored compatibility timing and is not a Step Time display or
 diagnosis fallback. `residual_ms` can include validation, checkpointing,

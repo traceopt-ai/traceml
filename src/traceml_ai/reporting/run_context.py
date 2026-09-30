@@ -117,7 +117,7 @@ def _launcher_completion(
     return {
         "status": status,
         "nodes_observed": nodes_observed,
-        "reason_codes": list(reasons),
+        "reason_codes": sorted(reasons),
     }
 
 
@@ -179,7 +179,11 @@ def load_run_manifest_projection(
             loaded = json.load(handle)
         if isinstance(loaded, dict):
             manifest = loaded
-    except (OSError, UnicodeError, json.JSONDecodeError):
+    # Loading can raise ValueError for malformed JSON and for otherwise valid
+    # JSON containing values Python cannot decode, such as oversized integers.
+    # Reporting is best effort, so an unreadable manifest must not suppress the
+    # final summary or replace the training process result.
+    except (OSError, ValueError):
         pass
 
     return RunManifestProjection(

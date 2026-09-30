@@ -217,7 +217,9 @@ Internal coordination fields and individual node outcomes remain only in the
 manifest and node artifacts. This lets later local checks consume one summary
 per run without reading SQLite or joining a second artifact. An ordinary run
 has no `declaration` or `launcher_completion`; when no readable launcher
-manifest exists, `run_context` is an empty object.
+manifest exists, `run_context` is an empty object. An interrupted run can omit
+`launcher_completion` when its summary finishes before node 0 consolidates the
+launcher outcomes; `run.status` still records the interruption.
 
 To inspect the captured declaration, format the manifest and look under
 `guard.contract`:
