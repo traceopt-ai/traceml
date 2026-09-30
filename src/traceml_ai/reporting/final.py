@@ -8,10 +8,8 @@
 
 from __future__ import annotations
 
-import json
 import sys
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
@@ -23,6 +21,7 @@ from traceml_ai.reporting.analysis_window import (
     resolve_analysis_window,
 )
 from traceml_ai.reporting.primary_diagnosis import build_primary_diagnosis
+from traceml_ai.reporting.run_context import load_run_manifest_projection
 from traceml_ai.reporting.schema import empty_section_payload
 from traceml_ai.reporting.sections.base import SummarySection
 from traceml_ai.reporting.sections.process import ProcessSummarySection
@@ -45,9 +44,8 @@ from traceml_ai.sdk.protocol import (
 from traceml_ai.telemetry.retention import DEFAULT_HISTORY_RETENTION_S
 from traceml_ai.utils.atomic_io import write_json_atomic, write_text_atomic
 
-# Version 1.8 adds one shared, time-bounded analysis window and per-section
-# observations.
-SCHEMA_VERSION = 1.8
+# Version 1.9 adds portable launcher context for local comparison and export.
+SCHEMA_VERSION = 1.9
 
 DEFAULT_PROFILE = "run"
 
@@ -103,60 +101,6 @@ def _section_group_rows(section: Dict[str, Any]) -> Dict[str, Any]:
         return {}
     rows = groups.get("rows")
     return dict(rows) if isinstance(rows, dict) else {}
-
-
-def _run_name_from_manifest(session_root: Optional[str]) -> Optional[str]:
-    """Load the public run name from the launcher manifest when available."""
-    if not session_root:
-        return None
-
-    root = Path(session_root).resolve()
-    manifest_path = root / "manifest.json"
-    manifest: Dict[str, Any] = {}
-    try:
-        with open(manifest_path, "r", encoding="utf-8") as handle:
-            loaded = json.load(handle)
-        if isinstance(loaded, dict):
-            manifest = loaded
-    except Exception:
-        manifest = {}
-
-    run = manifest.get("run")
-    run_block = run if isinstance(run, dict) else {}
-    candidates = (
-        run_block.get("run_name"),
-        manifest.get("session_id"),
-        root.name,
-    )
-    for candidate in candidates:
-        text = str(candidate or "").strip()
-        if text:
-            return text
-    return None
-
-
-def _lifecycle_duration_s(session_root: Optional[str]) -> Optional[float]:
-    """Return genuine training duration from launcher lifecycle timestamps."""
-    if not session_root:
-        return None
-    try:
-        with open(
-            Path(session_root).resolve() / "manifest.json",
-            "r",
-            encoding="utf-8",
-        ) as handle:
-            manifest = json.load(handle)
-        if not isinstance(manifest, dict):
-            return None
-        lifecycle = manifest.get("lifecycle")
-        if not isinstance(lifecycle, dict):
-            return None
-        started = datetime.fromisoformat(str(lifecycle["training_started_at"]))
-        ended = datetime.fromisoformat(str(lifecycle["training_ended_at"]))
-        duration = (ended - started).total_seconds()
-        return duration if duration >= 0.0 else None
-    except (KeyError, TypeError, ValueError, OSError, json.JSONDecodeError):
-        return None
 
 
 def _final_meta_mode(sections: Sequence[Dict[str, Any]]) -> str:
@@ -248,7 +192,7 @@ def _final_meta_gpus_observed(
 
 def _build_final_meta(
     *,
-    session_root: Optional[str],
+    run_name: Optional[str],
     system_summary: Dict[str, Any],
     process_summary: Dict[str, Any],
     step_time_summary: Dict[str, Any],
@@ -264,7 +208,7 @@ def _build_final_meta(
     mode = _final_meta_mode(sections)
     world_size = _final_meta_world_size(sections)
     return {
-        "run_name": _run_name_from_manifest(session_root),
+        "run_name": run_name,
         "mode": mode,
         "world_size": world_size,
         "nodes_observed": _final_meta_nodes_observed(
@@ -412,20 +356,22 @@ class FinalReportGenerator:
             step_time_summary=step_time_summary,
             step_memory_summary=step_memory_summary,
         )
+        manifest_projection = load_run_manifest_projection(session_root)
 
         payload: Dict[str, Any] = {
             "schema_version": SCHEMA_VERSION,
             "generated_at": utc_now_iso(),
             # Never promote a bounded telemetry interval to full-run duration.
-            "duration_s": _lifecycle_duration_s(session_root),
+            "duration_s": manifest_projection.duration_s,
             "analysis_window": analysis_window_payload,
             "meta": _build_final_meta(
-                session_root=session_root,
+                run_name=manifest_projection.run_name,
                 system_summary=system_summary,
                 process_summary=process_summary,
                 step_time_summary=step_time_summary,
                 step_memory_summary=step_memory_summary,
             ),
+            "run_context": manifest_projection.run_context,
             "primary_diagnosis": primary_diagnosis,
             "system": system_summary,
             "process": process_summary,

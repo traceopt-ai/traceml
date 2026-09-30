@@ -1,12 +1,12 @@
 # Final Summary JSON
 
-TraceML writes one end-of-run JSON file. The current schema version is `1.8`.
+TraceML writes one end-of-run JSON file. The current schema version is `1.9`.
 Each section has the same outer shape so the output is easy to store, diff, and
 consume from tooling.
 
-Schema `1.8` adds one shared time-bounded analysis window and per-section
-observations. It retains the canonical Step Time vocabulary introduced
-in schema `1.7`. Every public timing
+Schema `1.9` adds portable launcher context for local comparison and export.
+It retains the shared analysis window introduced in schema `1.8` and the
+canonical Step Time vocabulary introduced in schema `1.7`. Every public timing
 metric is nullable: `null` means the
 underlying timing signal was never measured in the analyzed window (missing
 instrumentation), while a measured zero stays `0.0`. Null metrics are
@@ -19,8 +19,8 @@ completed-step counter (`0` with no steps), independent of retained row count.
 `training_latest_step` is that counter, or `null` with no steps. Completed steps
 are numbered from one. Earlier releases incorrectly added one to a nonempty
 counter; regenerated summaries correct this, including for older telemetry.
-The schema remains `1.8`: this fixes the calculation without changing fields or
-types. Previously written summary files are not modified.
+That calculation fix was introduced without changing fields or types.
+Previously written summary files are not modified.
 
 For user-facing definitions and examples, see the
 [Step Time glossary](../../../docs/user_guide/reading-output.md#step-time-glossary).
@@ -37,7 +37,7 @@ Sections:
 
 ```json
 {
-  "schema_version": 1.8,
+  "schema_version": 1.9,
   "generated_at": "...",
   "duration_s": null,
   "analysis_window": {
@@ -62,6 +62,33 @@ Sections:
     "world_size": null,
     "nodes_observed": null,
     "gpus_observed": null
+  },
+  "run_context": {
+    "run": {
+      "status": "completed",
+      "profile": "run"
+    },
+    "declaration": {
+      "schema_version": 1,
+      "workload": {
+        "name": "resnet50-imagenet-training",
+        "parameters": {}
+      },
+      "measurement": {
+        "start_step": 10,
+        "completed_steps": 50
+      }
+    },
+    "execution": {
+      "expected_nodes": 1,
+      "processes_per_node": 2,
+      "expected_world_size": 2,
+      "launcher_completion": {
+        "status": "completed",
+        "nodes_observed": 1,
+        "reason_codes": []
+      }
+    }
   },
   "primary_diagnosis": {},
   "system": {},
@@ -97,6 +124,31 @@ or analysis-window durations are never substituted for the full run.
 The terminal card labels a GPU count as observed only when it comes from
 `system.metadata.gpus_observed`; it does not assert that every observed GPU
 was used by the workload.
+
+`run_context` contains portable, run-scoped launcher facts already captured in
+`manifest.json`. The top-level field is always an object and may be empty when
+no readable launcher manifest is available. Its optional blocks are:
+
+- `run`: available training-command status and launch profile;
+- `declaration`: the normalized workload and measurement contract;
+- `execution`: expected launch topology and, when available, aggregate
+  launcher completion.
+
+`execution.expected_*` describes launch configuration.
+`launcher_completion.nodes_observed` counts launcher nodes that reported an
+outcome; it is not telemetry-observed node coverage. Observed ranks, nodes,
+steps, and performance measurements remain in `meta` and the existing report
+sections. `declaration` is absent for ordinary runs, and `launcher_completion`
+is absent when guarded launcher outcomes were unavailable. Malformed optional
+manifest values are omitted rather than replaced with zero or a successful
+status.
+
+`run_context.run.status` describes the supervised training command. It does
+not claim that telemetry or the declared measurement window is complete.
+
+The projection excludes internal session identifiers, paths, hostnames,
+addresses, ports, environment values, command arguments, contract digests,
+coordination timestamps, and individual node outcomes.
 
 `primary_diagnosis` is a top-level performance finding promoted from existing
 section diagnoses. It answers "why was training slow?" and is intentionally

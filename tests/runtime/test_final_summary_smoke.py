@@ -286,6 +286,20 @@ guard:
         "reasons": [],
         "nodes": [{"node_rank": 0, "exit_code": 0}],
     }
+    assert payload["run_context"] == {
+        "run": {"status": "completed", "profile": "run"},
+        "declaration": manifest["guard"]["contract"],
+        "execution": {
+            "expected_nodes": 1,
+            "processes_per_node": 2,
+            "expected_world_size": 2,
+            "launcher_completion": {
+                "status": "completed",
+                "nodes_observed": 1,
+                "reason_codes": [],
+            },
+        },
+    }
 
 
 @pytest.mark.skipif(
@@ -406,4 +420,21 @@ guard:
             {"node_rank": 0, "exit_code": 0},
             {"node_rank": 1, "exit_code": 0},
         ],
+    }
+    payload = json.loads(
+        (session_root / "final_summary.json").read_text(encoding="utf-8")
+    )
+    assert payload["run_context"] == {
+        "run": {"status": "completed", "profile": "run"},
+        "declaration": manifest["guard"]["contract"],
+        "execution": {
+            "expected_nodes": 2,
+            "processes_per_node": 1,
+            "expected_world_size": 2,
+            "launcher_completion": {
+                "status": "completed",
+                "nodes_observed": 2,
+                "reason_codes": [],
+            },
+        },
     }

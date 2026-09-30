@@ -1234,11 +1234,15 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         if train_rc is not None:
             training_ended_at = utc_now_iso()
             outcome = TrainingOutcome(train_rc)
+            final_status = "completed" if train_rc == 0 else "failed"
             if manifest_path is not None:
+                # Aggregator shutdown builds the final summary, so persist the
+                # launcher-owned training result before asking it to stop.
                 _run_noncritical_launcher_step(
-                    "failed to record the training end time",
+                    "failed to record the final training state",
                     lambda: update_run_manifest(
                         manifest_path,
+                        status=final_status,
                         extra={
                             "lifecycle": {
                                 "training_ended_at": training_ended_at
@@ -1253,6 +1257,23 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                 else 0.0
             )
             collect_guard_training(timeout_s=outcome_wait_s)
+            if (
+                manifest_path is not None
+                and guard_contract is not None
+                and guard_training_result is not None
+            ):
+                _run_noncritical_launcher_step(
+                    "failed to record the guarded training result",
+                    lambda: update_run_manifest(
+                        manifest_path,
+                        extra={
+                            "guard": {
+                                "contract": guard_contract.to_dict(),
+                                "training": guard_training_result.to_dict(),
+                            }
+                        },
+                    ),
+                )
             output_result = (
                 training_output.finish()
                 if training_output is not None
@@ -1276,7 +1297,6 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                 aggregator_exit_code = agg_proc.returncode
                 finish_aggregator_output()
 
-            final_status = "completed" if train_rc == 0 else "failed"
             telemetry_status: Optional[str] = None
             telemetry_reason: Optional[str] = None
             if owns_aggregator:
@@ -1310,7 +1330,6 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                     "failed to finalize the run manifest",
                     lambda: update_run_manifest(
                         manifest_path,
-                        status=final_status,
                         artifacts=collect_existing_artifacts(
                             db_path,
                             session_root=session_root,
@@ -1331,17 +1350,6 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                         telemetry_status=telemetry_status,
                         telemetry_reason=telemetry_reason,
                         aggregator_exit_code=aggregator_exit_code,
-                        extra=(
-                            {
-                                "guard": {
-                                    "contract": guard_contract.to_dict(),
-                                    "training": guard_training_result.to_dict(),
-                                }
-                            }
-                            if guard_contract is not None
-                            and guard_training_result is not None
-                            else None
-                        ),
                     ),
                 )
             _print_training_output(
