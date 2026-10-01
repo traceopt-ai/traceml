@@ -388,3 +388,118 @@ jobs:
             (echo "::error::traceml --help is missing the documented 'view' subcommand" && exit 1)
           grep -q 'html-report' run-help.txt || \
             (echo "::error::traceml run --help is missing the documented '--html-report' flag" && exit 1)
+      - name: Prepare the regression guard smoke workspace
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          smoke_dir="$RUNNER_TEMP/traceml-install-smoke"
+          mkdir -p "$smoke_dir"
+          cat > "$smoke_dir/traceml.yaml" <<'YAML'
+          mode: summary
+          history_enabled: true
+
+          guard:
+            schema_version: 1
+            workload:
+              name: ddp-minimal-guard-smoke
+              parameters:
+                data_version: synthetic-v1
+                model: tiny-mlp
+            measurement:
+              start_step: 1
+              completed_steps: 20
+          YAML
+      - name: Run the guarded reference training
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          OMP_NUM_THREADS: "1"
+        run: |
+          set -euo pipefail
+          smoke_dir="$RUNNER_TEMP/traceml-install-smoke"
+          cd "$smoke_dir"
+          "$SMOKE_BIN/traceml" run \
+            "$GITHUB_WORKSPACE/examples/distributed/ddp_minimal.py" \
+            --run-name guard-reference \
+            --logs-dir "$smoke_dir/logs" \
+            --nproc-per-node 2 \
+            --args --steps 20
+          test -f "$smoke_dir/logs/guard-reference/final_summary.json"
+      - name: Run the guarded candidate training
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          OMP_NUM_THREADS: "1"
+        run: |
+          set -euo pipefail
+          smoke_dir="$RUNNER_TEMP/traceml-install-smoke"
+          cd "$smoke_dir"
+          "$SMOKE_BIN/traceml" run \
+            "$GITHUB_WORKSPACE/examples/distributed/ddp_minimal.py" \
+            --run-name guard-candidate \
+            --logs-dir "$smoke_dir/logs" \
+            --nproc-per-node 2 \
+            --args --steps 20
+          test -f "$smoke_dir/logs/guard-candidate/final_summary.json"
+      - name: Compare the guarded runs
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          smoke_dir="$RUNNER_TEMP/traceml-install-smoke"
+          cd "$smoke_dir"
+          # This smoke test verifies the packaged workflow, not runner speed.
+          # Deterministic threshold boundaries are covered by unit tests.
+          "$SMOKE_BIN/traceml" compare \
+            logs/guard-reference/final_summary.json \
+            logs/guard-candidate/final_summary.json \
+            --max-step-time-regression-pct 1000000 \
+            --output compare/guard-reference-vs-candidate
+      - name: Verify the regression guard artifacts
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$SMOKE_BIN/python" - <<'PY'
+          import json
+          import math
+          import os
+          from pathlib import Path
+
+          smoke_dir = Path(os.environ["RUNNER_TEMP"]) / "traceml-install-smoke"
+          reference = smoke_dir / "logs/guard-reference/final_summary.json"
+          candidate = smoke_dir / "logs/guard-candidate/final_summary.json"
+          comparison = smoke_dir / "compare/guard-reference-vs-candidate.json"
+          comparison_text = comparison.with_suffix(".txt")
+
+          for path in (reference, candidate, comparison, comparison_text):
+              if not path.is_file():
+                  raise SystemExit(f"missing regression guard artifact: {path}")
+
+          payload = json.loads(comparison.read_text(encoding="utf-8"))
+          policy = payload.get("ci_policy")
+          if not isinstance(policy, dict):
+              raise SystemExit("comparison artifact is missing ci_policy")
+          if policy.get("result") != "WITHIN_THRESHOLD_IN_THIS_PAIR":
+              raise SystemExit(f"unexpected CI policy result: {policy.get('result')}")
+          for key in ("reference_step_time_ms", "candidate_step_time_ms"):
+              value = policy.get(key)
+              if (
+                  isinstance(value, bool)
+                  or not isinstance(value, (int, float))
+                  or not math.isfinite(value)
+                  or value <= 0
+              ):
+                  raise SystemExit(f"invalid {key}: {value!r}")
+          PY
+      - name: Upload regression guard failure artifacts
+        if: failure() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: regression-guard-smoke-artifacts
+          path: |
+            ${{ runner.temp }}/traceml-install-smoke/logs/**
+            ${{ runner.temp }}/traceml-install-smoke/compare/**
+          if-no-files-found: ignore
+          retention-days: 7
