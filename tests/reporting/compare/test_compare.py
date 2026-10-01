@@ -259,7 +259,7 @@ def test_ci_policy_parses_supported_thresholds(value, expected) -> None:
 
 @pytest.mark.parametrize("value", [None, True, "", "-1", "nan", "inf", "x"])
 def test_ci_policy_rejects_invalid_thresholds(value) -> None:
-    with pytest.raises(ValueError, match="finite, nonnegative"):
+    with pytest.raises(RuntimeError, match="finite, nonnegative"):
         parse_step_time_regression_threshold(value)
 
 
@@ -281,6 +281,28 @@ def test_ci_policy_classifies_threshold_boundaries(
         evaluate_step_time_ci_result(delta_pct=delta_pct, threshold_pct=5.0)
         == expected
     )
+
+
+@pytest.mark.parametrize(
+    ("reference_ms", "candidate_ms"),
+    [(0.3, 0.315), (0.7, 0.735), (0.3, 0.285)],
+)
+def test_ci_policy_keeps_computed_threshold_boundaries_inclusive(
+    reference_ms, candidate_ms
+) -> None:
+    lhs = _ci_payload()
+    rhs = _ci_payload()
+    lhs["step_time"]["global"]["average"]["total_step_ms"] = reference_ms
+    rhs["step_time"]["global"]["average"]["total_step_ms"] = candidate_ms
+
+    policy = build_step_time_ci_policy(
+        lhs_payload=lhs,
+        rhs_payload=rhs,
+        compare_payload=_build_compare(lhs, rhs),
+        threshold="5",
+    )
+
+    assert policy["result"] == "WITHIN_THRESHOLD_IN_THIS_PAIR"
 
 
 def test_ci_policy_accepts_complete_matching_evidence() -> None:
@@ -426,7 +448,7 @@ def test_ci_regression_exits_after_writing_compare_artifacts(tmp_path) -> None:
     with pytest.raises(SystemExit) as exc_info:
         launcher_commands.run_compare(args)
 
-    assert exc_info.value.code == 2
+    assert exc_info.value.code == 4
     assert output.with_suffix(".txt").is_file()
     persisted = json.loads(output.with_suffix(".json").read_text())
     assert persisted["ci_policy"]["result"] == "SLOWER_IN_THIS_PAIR"

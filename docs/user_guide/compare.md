@@ -118,6 +118,13 @@ are reported as context. Step Memory and the remaining compare sections also
 remain descriptive context; only common-clock Step Time determines the CI
 result.
 
+The normalized guard declaration is a compatibility fingerprint: it confirms
+that both runs declared the same workload and requested measurement range. It
+does not prove or compare individual completed step IDs. The decision uses the
+aggregate Step Time from each summary's saved `step_time.global.window`, whose
+analyzed range can differ from the requested range or from the other summary.
+The analyzed-step counts remain visible so this evidence boundary is explicit.
+
 The signed percentage difference is calculated from reference to candidate:
 
 ```text
@@ -126,15 +133,17 @@ The signed percentage difference is calculated from reference to candidate:
 
 | Result | Exit code | Meaning |
 | --- | ---: | --- |
-| `SLOWER_IN_THIS_PAIR` | 2 | Candidate Step Time increased beyond the threshold. |
+| `SLOWER_IN_THIS_PAIR` | 4 | Candidate Step Time increased beyond the threshold. |
 | `FASTER_IN_THIS_PAIR` | 0 | Candidate Step Time decreased beyond the threshold. |
 | `WITHIN_THRESHOLD_IN_THIS_PAIR` | 0 | The difference is on or within either threshold boundary. |
 | `INCONCLUSIVE` | 3 | The summaries are valid but incompatible or lack required evidence. |
 
 Invalid thresholds, malformed input, and output-writing failures use exit code
-`1`. TraceML writes the compare JSON and text artifacts before returning an
-evaluated result. The decision describes this pair of runs; it does not claim
-statistical significance or repeatability.
+`1`. Invalid command-line usage, such as a missing argument or unknown option,
+uses the standard `argparse` exit code `2`. TraceML writes the compare JSON and
+text artifacts before returning an evaluated result. The decision describes
+this pair of runs; it does not claim statistical significance, repeatability,
+or exact measurement-window completion.
 
 See [Regression Guard](regression-guard.md) for configuring guarded runs.
 

@@ -121,10 +121,15 @@ measurement:
 requests steps 10 through 59. If `--trace-max-steps` is used, it must include
 the complete requested range.
 
-The complete window should remain inside `history_retention` until the run is
-finalized. The guard records the request but does not extend retention or query
-SQLite to verify individual step IDs. Pairwise comparison uses the saved final
-summary and reports its analyzed-step count.
+The complete requested window should remain inside `history_retention` until
+the run is finalized. In v0.1, this declaration is a compatibility fingerprint:
+two runs must declare the same range, but TraceML does not compare individual
+step IDs or use the declaration to re-aggregate telemetry. The CI decision uses
+the aggregate Step Time already stored for each final summary's
+`step_time.global.window`. That analyzed range can differ from the requested
+range or from the other run, and its analyzed-step count remains visible in the
+comparison. Exact-window verification can be added later if pilot use shows it
+is needed; it does not require SQLite or additional artifacts now.
 
 ## Captured artifact
 

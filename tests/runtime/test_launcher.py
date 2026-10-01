@@ -146,7 +146,7 @@ def test_compare_passes_optional_step_time_regression_threshold(
         ({}, None),
         ({"ci_policy": {"result": "FASTER_IN_THIS_PAIR"}}, None),
         ({"ci_policy": {"result": "WITHIN_THRESHOLD_IN_THIS_PAIR"}}, None),
-        ({"ci_policy": {"result": "SLOWER_IN_THIS_PAIR"}}, 2),
+        ({"ci_policy": {"result": "SLOWER_IN_THIS_PAIR"}}, 4),
         ({"ci_policy": {"result": "INCONCLUSIVE"}}, 3),
     ],
 )
@@ -181,6 +181,56 @@ def test_compare_applies_ci_exit_code_after_compare_returns(
         assert exc_info.value.code == expected_exit
 
     assert events == ["compare_complete"]
+
+
+def test_compare_usage_error_is_distinct_from_regression_exit() -> None:
+    parser = build_parser()
+
+    with pytest.raises(SystemExit) as exc_info:
+        parser.parse_args(
+            [
+                "compare",
+                "before.json",
+                "after.json",
+                "--max-step-time-regression-pct",
+            ]
+        )
+
+    assert exc_info.value.code == 2
+
+
+def test_compare_reports_invalid_threshold_as_user_error(
+    monkeypatch, capsys
+) -> None:
+    args = build_parser().parse_args(
+        [
+            "compare",
+            "before.json",
+            "after.json",
+            "--max-step-time-regression-pct",
+            "bad",
+        ]
+    )
+    log_exception = Mock()
+    monkeypatch.setattr(
+        "traceml_ai.reporting.compare.compare_summaries",
+        Mock(side_effect=RuntimeError("threshold must be finite")),
+    )
+    monkeypatch.setattr(
+        launcher_commands, "_log_launcher_exception", log_exception
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        launcher_commands.run_compare(args)
+
+    assert exc_info.value.code == 1
+    assert (
+        "[TraceML] ERROR: threshold must be finite" in capsys.readouterr().err
+    )
+    log_exception.assert_called_once()
+    assert log_exception.call_args.args[0] == (
+        "compare failed with a user-facing error"
+    )
 
 
 def test_training_output_help_describes_default_and_opt_out(capsys) -> None:

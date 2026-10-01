@@ -1573,7 +1573,9 @@ def run_inspect(args: argparse.Namespace) -> None:
 _CI_POLICY_EXIT_CODES = {
     "FASTER_IN_THIS_PAIR": 0,
     "WITHIN_THRESHOLD_IN_THIS_PAIR": 0,
-    "SLOWER_IN_THIS_PAIR": 2,
+    # argparse reserves exit code 2 for invalid command-line usage. Keep a
+    # measured regression distinct so CI can tell a failed check from a typo.
+    "SLOWER_IN_THIS_PAIR": 4,
     "INCONCLUSIVE": 3,
 }
 

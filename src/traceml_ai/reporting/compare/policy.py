@@ -103,7 +103,7 @@ def parse_step_time_regression_threshold(value: Any) -> float:
         or not math.isfinite(threshold)
         or threshold < 0
     ):
-        raise ValueError(
+        raise RuntimeError(
             "maximum Step Time regression percentage must be a finite, "
             "nonnegative number"
         )
@@ -117,6 +117,14 @@ def evaluate_step_time_ci_result(
     if isinstance(delta_pct, bool) or not math.isfinite(delta_pct):
         raise ValueError("Step Time percentage difference must be finite")
     threshold = parse_step_time_regression_threshold(threshold_pct)
+    # Percentage division can leave a representational remainder at an
+    # inclusive boundary (for example, 0.3 -> 0.315 yields slightly over 5).
+    # Keep full precision for real policy decisions and tolerate only that
+    # floating-point noise at the declared boundaries.
+    if math.isclose(delta_pct, threshold) or math.isclose(
+        delta_pct, -threshold
+    ):
+        return "WITHIN_THRESHOLD_IN_THIS_PAIR"
     if delta_pct > threshold:
         return "SLOWER_IN_THIS_PAIR"
     if delta_pct < -threshold:
