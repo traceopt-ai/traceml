@@ -140,6 +140,49 @@ def test_compare_passes_optional_step_time_regression_threshold(
     assert thresholds == [None, "5"]
 
 
+@pytest.mark.parametrize(
+    ("payload", "expected_exit"),
+    [
+        ({}, None),
+        ({"ci_policy": {"result": "FASTER_IN_THIS_PAIR"}}, None),
+        ({"ci_policy": {"result": "WITHIN_THRESHOLD_IN_THIS_PAIR"}}, None),
+        ({"ci_policy": {"result": "SLOWER_IN_THIS_PAIR"}}, 2),
+        ({"ci_policy": {"result": "INCONCLUSIVE"}}, 3),
+    ],
+)
+def test_compare_applies_ci_exit_code_after_compare_returns(
+    monkeypatch, payload, expected_exit
+) -> None:
+    args = build_parser().parse_args(
+        [
+            "compare",
+            "before.json",
+            "after.json",
+            "--max-step-time-regression-pct",
+            "5",
+        ]
+    )
+    events = []
+
+    def compare_summaries(*_args, **_kwargs):
+        events.append("compare_complete")
+        return payload
+
+    monkeypatch.setattr(
+        "traceml_ai.reporting.compare.compare_summaries",
+        compare_summaries,
+    )
+
+    if expected_exit is None:
+        launcher_commands.run_compare(args)
+    else:
+        with pytest.raises(SystemExit) as exc_info:
+            launcher_commands.run_compare(args)
+        assert exc_info.value.code == expected_exit
+
+    assert events == ["compare_complete"]
+
+
 def test_training_output_help_describes_default_and_opt_out(capsys) -> None:
     parser = build_parser()
 

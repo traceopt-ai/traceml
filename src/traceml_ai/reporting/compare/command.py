@@ -13,6 +13,7 @@ from traceml_ai.reporting.compare.io import (
     load_summary_json,
     write_compare_artifacts,
 )
+from traceml_ai.reporting.compare.policy import build_step_time_ci_policy
 from traceml_ai.reporting.compare.render import build_compare_text
 
 
@@ -62,6 +63,13 @@ def compare_summaries(
         lhs_path=lhs_path,
         rhs_path=rhs_path,
     )
+    if max_step_time_regression_pct is not None:
+        compare_payload["ci_policy"] = build_step_time_ci_policy(
+            lhs_payload=lhs_payload,
+            rhs_payload=rhs_payload,
+            compare_payload=compare_payload,
+            threshold=max_step_time_regression_pct,
+        )
     compare_payload["text"] = build_compare_text(compare_payload)
 
     output_base = default_output_base(lhs_path, rhs_path, output=output)

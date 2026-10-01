@@ -88,6 +88,58 @@ artifacts/baseline_vs_candidate.txt
 
 ---
 
+## Use compare in CI
+
+Add an explicit Step Time threshold when a comparison should produce a CI
+decision:
+
+```bash
+traceml compare \
+  logs/reference/final_summary.json \
+  logs/candidate/final_summary.json \
+  --max-step-time-regression-pct 5 \
+  --output compare/reference-vs-candidate
+```
+
+The first summary is the reference and the second is the candidate. The
+threshold must be a finite, nonnegative percentage. Without the option,
+`traceml compare` keeps its existing exploratory behavior and does not enforce
+a CI threshold.
+
+The CI policy requires both summaries to come from compatible guarded runs:
+
+- normalized guard declarations and expected topology must match
+- training and launcher completion must be recorded as completed
+- both summaries must provide positive Step Time on a common CPU or GPU clock
+
+TraceML reads these facts from the two final summaries. It does not read their
+manifests or SQLite databases. Different analyzed-step counts are allowed and
+are reported as context. Step Memory and the remaining compare sections also
+remain descriptive context; only common-clock Step Time determines the CI
+result.
+
+The signed percentage difference is calculated from reference to candidate:
+
+```text
+100 * (candidate - reference) / reference
+```
+
+| Result | Exit code | Meaning |
+| --- | ---: | --- |
+| `SLOWER_IN_THIS_PAIR` | 2 | Candidate Step Time increased beyond the threshold. |
+| `FASTER_IN_THIS_PAIR` | 0 | Candidate Step Time decreased beyond the threshold. |
+| `WITHIN_THRESHOLD_IN_THIS_PAIR` | 0 | The difference is on or within either threshold boundary. |
+| `INCONCLUSIVE` | 3 | The summaries are valid but incompatible or lack required evidence. |
+
+Invalid thresholds, malformed input, and output-writing failures use exit code
+`1`. TraceML writes the compare JSON and text artifacts before returning an
+evaluated result. The decision describes this pair of runs; it does not claim
+statistical significance or repeatability.
+
+See [Regression Guard](regression-guard.md) for configuring guarded runs.
+
+---
+
 ## What the compare output shows
 
 The compare report is designed to stay compact and useful.
