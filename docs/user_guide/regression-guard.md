@@ -2,8 +2,9 @@
 
 TraceML's local regression guard is an experimental **v0.1 pilot**. A guarded
 run captures a small workload declaration and records whether the training
-command completed on every launcher node. A later guard check will compare two
-completed run artifacts.
+command completed on every launcher node. The existing `traceml compare`
+command can use two completed guarded-run summaries for an optional local CI
+decision.
 
 The contract format uses `schema_version: 1`. This identifies the first file
 format; it does not indicate that the pilot is a stable 1.0 feature.
@@ -91,8 +92,8 @@ workloads.
 
 Parameter values may be strings, integers, finite floating-point values, or
 Booleans. Lists, nested mappings, and null values are not supported in schema
-1. Two runs will later be comparable only when their normalized workload
-declarations match exactly.
+1. Two guarded runs are eligible for a CI decision only when their normalized
+workload declarations match exactly.
 
 YAML scalar spelling affects the stored type. PyYAML reads `1e-3` as a string,
 while `0.001` and `1.0e-3` are floating-point values; `yes`, `no`, `on`, and
@@ -120,10 +121,15 @@ measurement:
 requests steps 10 through 59. If `--trace-max-steps` is used, it must include
 the complete requested range.
 
-The complete window should remain inside `history_retention` until the run is
-finalized. The guard records the request but does not extend retention or query
-SQLite to verify individual step IDs. The later pairwise check uses the saved
-final summary and reports its analyzed-step count.
+The complete requested window should remain inside `history_retention` until
+the run is finalized. In v0.1, this declaration is a compatibility fingerprint:
+two runs must declare the same range, but TraceML does not compare individual
+step IDs or use the declaration to re-aggregate telemetry. The CI decision uses
+the aggregate Step Time already stored for each final summary's
+`step_time.global.window`. That analyzed range can differ from the requested
+range or from the other run, and its analyzed-step count remains visible in the
+comparison. Exact-window verification can be added later if pilot use shows it
+is needed; it does not require SQLite or additional artifacts now.
 
 ## Captured artifact
 
@@ -214,7 +220,7 @@ statuses. Read all three fields when diagnosing an incomplete run.
 The final report copies the portable declaration, expected topology, and
 aggregate launcher result into `final_summary.json` under `run_context`.
 Internal coordination fields and individual node outcomes remain only in the
-manifest and node artifacts. This lets later local checks consume one summary
+manifest and node artifacts. This lets local CI comparison consume one summary
 per run without reading SQLite or joining a second artifact. An ordinary run
 has no `declaration` or `launcher_completion`; when no readable launcher
 manifest exists, `run_context` is an empty object. An interrupted run can omit
@@ -228,6 +234,23 @@ To inspect the captured declaration, format the manifest and look under
 python -m json.tool logs/reference/manifest.json
 ```
 
-This stage does not compare runs or return a CI regression decision. Those
-capabilities will consume the contract, consolidated training result, and
-existing final summary in later pilot releases.
+## Compare two guarded runs
+
+Pass the two portable summaries and an explicit Step Time threshold to the
+existing compare command:
+
+```bash
+traceml compare \
+  logs/reference/final_summary.json \
+  logs/candidate/final_summary.json \
+  --max-step-time-regression-pct 5 \
+  --output compare/reference-vs-candidate
+```
+
+The reference comes first and the candidate second. Their normalized
+declarations and expected topology must match, and both training and launcher
+completion states must be completed. TraceML makes the decision from their
+common-clock Step Time; it does not reopen the manifests or SQLite databases.
+
+See [Compare Runs](compare.md#use-compare-in-ci) for result values, exit codes,
+and compatibility behavior.

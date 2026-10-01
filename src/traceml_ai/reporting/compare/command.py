@@ -13,6 +13,7 @@ from traceml_ai.reporting.compare.io import (
     load_summary_json,
     write_compare_artifacts,
 )
+from traceml_ai.reporting.compare.policy import build_step_time_ci_policy
 from traceml_ai.reporting.compare.render import build_compare_text
 
 
@@ -21,6 +22,7 @@ def compare_summaries(
     rhs_path: str | Path,
     *,
     output: Optional[str | Path] = None,
+    max_step_time_regression_pct: Optional[str] = None,
     print_to_stdout: bool = True,
 ) -> Dict[str, Any]:
     """
@@ -35,6 +37,10 @@ def compare_summaries(
     output:
         Optional output base path. If omitted, defaults to
         `compare/<lhs>_vs_<rhs>` in the current working directory.
+    max_step_time_regression_pct:
+        Raw optional CI policy threshold. Policy validation and evaluation
+        occur after the compare payload is built. ``None`` keeps the existing
+        exploratory comparison behavior.
     print_to_stdout:
         If True, print the rendered compare text after writing artifacts.
 
@@ -57,6 +63,13 @@ def compare_summaries(
         lhs_path=lhs_path,
         rhs_path=rhs_path,
     )
+    if max_step_time_regression_pct is not None:
+        compare_payload["ci_policy"] = build_step_time_ci_policy(
+            lhs_payload=lhs_payload,
+            rhs_payload=rhs_payload,
+            compare_payload=compare_payload,
+            threshold=max_step_time_regression_pct,
+        )
     compare_payload["text"] = build_compare_text(compare_payload)
 
     output_base = default_output_base(lhs_path, rhs_path, output=output)

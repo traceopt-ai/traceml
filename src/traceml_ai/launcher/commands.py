@@ -1570,17 +1570,49 @@ def run_inspect(args: argparse.Namespace) -> None:
             raise SystemExit(1)
 
 
+_CI_POLICY_EXIT_CODES = {
+    "FASTER_IN_THIS_PAIR": 0,
+    "WITHIN_THRESHOLD_IN_THIS_PAIR": 0,
+    # argparse reserves exit code 2 for invalid command-line usage. Keep a
+    # measured regression distinct so CI can tell a failed check from a typo.
+    "SLOWER_IN_THIS_PAIR": 4,
+    "INCONCLUSIVE": 3,
+}
+
+
+def _compare_exit_code(payload: object) -> int:
+    """Map an optional evaluated CI result to the public process exit code."""
+    if not isinstance(payload, dict):
+        return 0
+    policy = payload.get("ci_policy")
+    if not isinstance(policy, dict):
+        return 0
+    result = policy.get("result")
+    try:
+        return _CI_POLICY_EXIT_CODES[result]
+    except (KeyError, TypeError):
+        raise RuntimeError(
+            "compare produced an unsupported CI policy result"
+        ) from None
+
+
 def run_compare(args: argparse.Namespace) -> None:
     """Compare two TraceML final summary JSON files."""
     try:
         from traceml_ai.reporting.compare import compare_summaries
 
-        compare_summaries(
+        payload = compare_summaries(
             args.left,
             args.right,
             output=args.output,
+            max_step_time_regression_pct=args.max_step_time_regression_pct,
             print_to_stdout=True,
         )
+        exit_code = _compare_exit_code(payload)
+        if exit_code:
+            # compare_summaries writes JSON and text before returning, so CI
+            # retains the evidence even when the evaluated command fails.
+            raise SystemExit(exit_code)
     except RuntimeError as exc:
         _log_launcher_exception("compare failed with a user-facing error", exc)
         print(f"[TraceML] ERROR: {exc}", file=sys.stderr)

@@ -386,6 +386,15 @@ def build_parser() -> argparse.ArgumentParser:
             "Default: compare/<left>_vs_<right> in the current directory."
         ),
     )
+    compare_parser.add_argument(
+        "--max-step-time-regression-pct",
+        default=None,
+        metavar="PERCENT",
+        help=(
+            "Optional maximum Step Time regression percentage for CI policy "
+            "evaluation."
+        ),
+    )
 
     view_parser = sub.add_parser(
         "view",
