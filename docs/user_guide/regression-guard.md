@@ -1,6 +1,6 @@
 # Regression guard measurement contract
 
-TraceML's local regression guard is an experimental **v0.1 pilot**. A guarded
+TraceML's local regression guard is an **experimental pilot**. A guarded
 run captures a small workload declaration and records whether the training
 command completed on every launcher node. The existing `traceml compare`
 command can use two completed guarded-run summaries for an optional local CI
@@ -122,14 +122,15 @@ requests steps 10 through 59. If `--trace-max-steps` is used, it must include
 the complete requested range.
 
 The complete requested window should remain inside `history_retention` until
-the run is finalized. In v0.1, this declaration is a compatibility fingerprint:
-two runs must declare the same range, but TraceML does not compare individual
-step IDs or use the declaration to re-aggregate telemetry. The CI decision uses
-the aggregate Step Time already stored for each final summary's
-`step_time.global.window`. That analyzed range can differ from the requested
-range or from the other run, and its analyzed-step count remains visible in the
-comparison. Exact-window verification can be added later if pilot use shows it
-is needed; it does not require SQLite or additional artifacts now.
+the run is finalized. In the experimental pilot, this declaration is a
+compatibility fingerprint: two runs must declare the same range, but TraceML
+does not compare individual step IDs or use the declaration to re-aggregate
+telemetry. The CI decision uses the aggregate Step Time already stored for each
+final summary's `step_time.global.window`. That analyzed range can differ from
+the requested range or from the other run, and its analyzed-step count remains
+visible in the comparison. Exact-window verification can be added later if
+pilot use shows it is needed; it does not require SQLite or additional
+artifacts now.
 
 ## Captured artifact
 
@@ -254,3 +255,118 @@ common-clock Step Time; it does not reopen the manifests or SQLite databases.
 
 See [Compare Runs](compare.md#use-compare-in-ci) for result values, exit codes,
 and compatibility behavior.
+
+## Try the complete CPU DDP workflow
+
+The checked-in minimal DDP example provides a small end-to-end trial on a
+CPU-only machine. From the repository root, create this `traceml.yaml`:
+
+```yaml
+mode: summary
+history_enabled: true
+
+guard:
+  schema_version: 1
+  workload:
+    name: ddp-minimal-guard-trial
+    parameters:
+      model: tiny-mlp
+      data_version: synthetic-v1
+  measurement:
+    start_step: 1
+    completed_steps: 20
+```
+
+Run the same declared workload twice with fresh run names:
+
+```bash
+OMP_NUM_THREADS=1 traceml run examples/distributed/ddp_minimal.py \
+  --run-name guard-reference \
+  --nproc-per-node 2 \
+  --args --steps 20
+
+OMP_NUM_THREADS=1 traceml run examples/distributed/ddp_minimal.py \
+  --run-name guard-candidate \
+  --nproc-per-node 2 \
+  --args --steps 20
+```
+
+Then evaluate the pair:
+
+```bash
+traceml compare \
+  logs/guard-reference/final_summary.json \
+  logs/guard-candidate/final_summary.json \
+  --max-step-time-regression-pct 1000 \
+  --output compare/guard-reference-vs-candidate
+```
+
+The first summary is always the reference and the second is the candidate.
+TraceML writes both JSON and text comparison artifacts before returning the
+CI exit code. This tiny CPU workload can vary by tens of percent between
+identical runs, so the wide threshold demonstrates the complete workflow rather
+than a meaningful performance verdict.
+
+## Use the result in CI
+
+The experimental pilot deliberately leaves reference selection to the user.
+Make the chosen reference `final_summary.json` available to the job, run the
+candidate, and pass both explicit paths to `traceml compare`. For example:
+
+```yaml
+- name: Check Step Time
+  run: |
+    traceml compare \
+      artifacts/reference/final_summary.json \
+      logs/candidate/final_summary.json \
+      --max-step-time-regression-pct 5 \
+      --output compare/reference-vs-candidate
+
+- name: Preserve comparison evidence
+  if: always()
+  uses: actions/upload-artifact@v4
+  with:
+    name: traceml-performance-comparison
+    path: compare/
+```
+
+The comparison step succeeds for a faster candidate or a result within the
+threshold. It fails for a slower candidate, invalid input, or inconclusive
+evidence. See the [exit-code table](compare.md#use-compare-in-ci) when a CI
+system needs to distinguish those outcomes.
+
+Before choosing a threshold, run the reference workload at least twice on the
+same CI runner and use its normal variation to set a suitable value.
+
+## Qualified scope
+
+The pilot keeps implementation support separate from environments exercised
+end to end in automated tests.
+
+| Environment | Current qualification |
+| --- | --- |
+| Linux, CPU, two-rank Gloo DDP | A built wheel runs two guarded jobs and compares their summaries in CI. |
+| Single-process and ordinary single-node DDP | Covered by launcher, reporting, and comparison tests. |
+| Multi-node outcome coordination | Covered on one machine with two launchers and a shared run directory. A real multi-machine environment is not yet qualified. |
+| CUDA | Supported by ordinary TraceML paths, but the complete guarded comparison workflow has no dedicated GPU CI qualification yet. |
+| Windows | The wheel and CLI surface are smoke tested; the complete guarded DDP workflow is not qualified there yet. |
+
+The comparison is one observation about one explicit pair. It does not claim
+repeatability, statistical significance, model-quality equivalence, complete
+telemetry delivery, or support for changing process membership.
+
+## Troubleshooting
+
+| Symptom | What to check |
+| --- | --- |
+| A run refuses to start because its manifest exists | Choose a fresh `--run-name`; guarded runs never overwrite an earlier run. |
+| `final_summary.json` is missing | Inspect the training and aggregator output. Comparison requires a finalized summary from each run. |
+| The result is `INCONCLUSIVE` because run context is missing | Produce both summaries with guarded `traceml run` executions rather than an ordinary or direct-SDK run. |
+| The declarations do not match | Use the same normalized `guard` section for both runs, including parameter types and values. |
+| The topology does not match | Use the same node count and processes per node for the reference and candidate. |
+| Launcher completion is incomplete | Inspect the per-node launcher output and the root manifest to find the missing, invalid, conflicting, or failed node outcome. |
+| Step Time is unavailable on a common clock | Confirm that both finalized summaries contain measured positive CPU Step Time, or measured positive GPU Step Time. |
+
+Preserve both `final_summary.json` files and the generated comparison JSON and
+text report when investigating a CI failure. Manifests and SQLite databases
+are not inputs to the comparison.
