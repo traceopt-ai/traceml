@@ -362,13 +362,23 @@ jobs:
           # venv writes console scripts to Scripts/ on Windows, bin/ elsewhere.
           bindir=smoke-env/Scripts
           [ -d "$bindir" ] || bindir=smoke-env/bin
+          bindir=$(cd "$bindir" && pwd)
           echo "SMOKE_BIN=$bindir" >> "$GITHUB_ENV"
           "$bindir/python" -m pip install --upgrade pip
-          "$bindir/python" -m pip install dist/*.whl
+          wheel_path=$(printf '%s\n' dist/*.whl)
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            # The Linux leg qualifies the packaged PyTorch launcher path.
+            "$bindir/python" -m pip install "${wheel_path}[torch]"
+          else
+            "$bindir/python" -m pip install "$wheel_path"
+          fi
       - name: Assert documented CLI surface is installed
         shell: bash
         run: |
           set -euo pipefail
+          smoke_dir="$RUNNER_TEMP/traceml-install-smoke"
+          mkdir -p "$smoke_dir"
+          cd "$smoke_dir"
           # Redirect instead of piping into grep: grep -q closes the pipe on
           # first match, which makes the launcher exit non-zero and would hide
           # its real status. set -e then catches a launcher that cannot start.
