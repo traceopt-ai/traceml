@@ -1,6 +1,6 @@
 # Regression guard measurement contract
 
-TraceML's local regression guard is an experimental **v0.1 pilot**. A guarded
+TraceML's local regression guard is an **experimental pilot**. A guarded
 run captures a small workload declaration and records whether the training
 command completed on every launcher node. The existing `traceml compare`
 command can use two completed guarded-run summaries for an optional local CI
@@ -122,14 +122,15 @@ requests steps 10 through 59. If `--trace-max-steps` is used, it must include
 the complete requested range.
 
 The complete requested window should remain inside `history_retention` until
-the run is finalized. In v0.1, this declaration is a compatibility fingerprint:
-two runs must declare the same range, but TraceML does not compare individual
-step IDs or use the declaration to re-aggregate telemetry. The CI decision uses
-the aggregate Step Time already stored for each final summary's
-`step_time.global.window`. That analyzed range can differ from the requested
-range or from the other run, and its analyzed-step count remains visible in the
-comparison. Exact-window verification can be added later if pilot use shows it
-is needed; it does not require SQLite or additional artifacts now.
+the run is finalized. In the experimental pilot, this declaration is a
+compatibility fingerprint: two runs must declare the same range, but TraceML
+does not compare individual step IDs or use the declaration to re-aggregate
+telemetry. The CI decision uses the aggregate Step Time already stored for each
+final summary's `step_time.global.window`. That analyzed range can differ from
+the requested range or from the other run, and its analyzed-step count remains
+visible in the comparison. Exact-window verification can be added later if
+pilot use shows it is needed; it does not require SQLite or additional
+artifacts now.
 
 ## Captured artifact
 
@@ -296,21 +297,21 @@ Then evaluate the pair:
 traceml compare \
   logs/guard-reference/final_summary.json \
   logs/guard-candidate/final_summary.json \
-  --max-step-time-regression-pct 5 \
+  --max-step-time-regression-pct 1000 \
   --output compare/guard-reference-vs-candidate
 ```
 
 The first summary is always the reference and the second is the candidate.
 TraceML writes both JSON and text comparison artifacts before returning the
-CI exit code. Shared development machines can produce timing noise, so choose
-a threshold that reflects the stability of the environment where the runs
-execute.
+CI exit code. This tiny CPU workload can vary by tens of percent between
+identical runs, so the wide threshold demonstrates the complete workflow rather
+than a meaningful performance verdict.
 
 ## Use the result in CI
 
-The v0.1 pilot deliberately leaves reference selection to the user. Make the
-chosen reference `final_summary.json` available to the job, run the candidate,
-and pass both explicit paths to `traceml compare`. For example:
+The experimental pilot deliberately leaves reference selection to the user.
+Make the chosen reference `final_summary.json` available to the job, run the
+candidate, and pass both explicit paths to `traceml compare`. For example:
 
 ```yaml
 - name: Check Step Time
@@ -333,6 +334,9 @@ The comparison step succeeds for a faster candidate or a result within the
 threshold. It fails for a slower candidate, invalid input, or inconclusive
 evidence. See the [exit-code table](compare.md#use-compare-in-ci) when a CI
 system needs to distinguish those outcomes.
+
+Before choosing a threshold, run the reference workload at least twice on the
+same CI runner and use its normal variation to set a suitable value.
 
 ## Qualified scope
 

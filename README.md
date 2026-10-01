@@ -310,9 +310,9 @@ for the complete workflow and artifact format.
 
 ## Performance Regression Checks
 
-Compatible guarded runs can use the same comparison command as a local CI
-gate. Pass the reference first and the candidate second, then set the maximum
-allowed Step Time increase:
+The regression guard is an experimental pilot. Compatible guarded runs can use
+the same comparison command as a local CI gate. Pass the reference first and
+the candidate second, then set the maximum allowed Step Time increase:
 
 ```bash
 traceml compare \
