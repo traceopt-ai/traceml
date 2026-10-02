@@ -556,21 +556,18 @@ class SQLiteWriterSimple:
     @staticmethod
     def _expected_step_ranks(conn: sqlite3.Connection) -> Optional[int]:
         """Return the stable world size carried by step telemetry."""
-        row = conn.execute(
-            """
+        row = conn.execute("""
             SELECT MAX(value)
             FROM (
                 SELECT MAX(world_size) AS value FROM step_time_samples
                 UNION ALL
                 SELECT MAX(world_size) AS value FROM step_memory_samples
             );
-            """
-        ).fetchone()
+            """).fetchone()
         if row and row[0] is not None and int(row[0]) > 0:
             return int(row[0])
 
-        row = conn.execute(
-            """
+        row = conn.execute("""
             SELECT COUNT(DISTINCT rank_id)
             FROM (
                 SELECT COALESCE(global_rank, rank) AS rank_id
@@ -580,8 +577,7 @@ class SQLiteWriterSimple:
                 FROM step_memory_samples
             )
             WHERE rank_id IS NOT NULL;
-            """
-        ).fetchone()
+            """).fetchone()
         observed = int(row[0] or 0) if row else 0
         return observed or None
 

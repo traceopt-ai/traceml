@@ -3440,9 +3440,7 @@ def test_single_rank_process_warning_block_matches_exact_layout() -> None:
         world_size=1,
     )
 
-    assert (
-        _process_block(text)
-        == """\
+    assert _process_block(text) == """\
 PROCESS METRICS: HIGH PROCESS RSS  (WARNING)
 Evidence: RSS peak 91.2% · R0/N0
                      avg
@@ -3450,7 +3448,6 @@ CPU capacity         14%
 RSS used             3.1 GB (10%)
 CUDA allocated       2.9 GB
 CUDA reserved        3.2 GB (20%)"""
-    )
 
 
 def test_multi_rank_process_warning_block_matches_exact_layout() -> None:
@@ -3472,9 +3469,7 @@ def test_multi_rank_process_warning_block_matches_exact_layout() -> None:
         world_size=4,
     )
 
-    assert (
-        _process_block(text)
-        == """\
+    assert _process_block(text) == """\
 PROCESS METRICS: RANK GPU MEMORY IMBALANCE  (WARNING) · 4/4 ranks
 Evidence: CUDA reserved imbalance 54.4% · R3/N0
                      median rank avg   worst rank avg
@@ -3482,7 +3477,6 @@ CPU capacity         12%               81%, R2/N0
 RSS used             3.1 GB (10%)      5.4 GB (17%), R1/N0
 CUDA allocated       2.9 GB            4.6 GB, R3/N0
 CUDA reserved        3.2 GB (20%)      6.8 GB (43%), R3/N0"""
-    )
 
 
 @pytest.mark.parametrize(
@@ -3673,12 +3667,9 @@ def test_process_normal_omits_evidence_and_no_data_omits_empty_table() -> None:
     )
 
     assert "Evidence:" not in _process_block(normal)
-    assert (
-        _process_block(no_data)
-        == """\
+    assert _process_block(no_data) == """\
 PROCESS METRICS: NO DATA · 0/1 rank
 Evidence: Process telemetry was not measured."""
-    )
 
 
 def test_process_table_uses_observed_rank_count_and_reports_coverage() -> None:

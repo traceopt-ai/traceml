@@ -66,7 +66,7 @@ def accuracy_from_logits(
 
 
 def slow_input_collate(
-    batch: list[tuple[torch.Tensor, torch.Tensor]]
+    batch: list[tuple[torch.Tensor, torch.Tensor]],
 ) -> tuple[torch.Tensor, torch.Tensor]:
     time.sleep(INPUT_DELAY_S)
     features, labels = zip(*batch)

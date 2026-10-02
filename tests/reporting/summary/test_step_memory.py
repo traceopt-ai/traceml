@@ -19,8 +19,7 @@ from traceml_ai.reporting.summaries.step_memory import (
 def _create_step_memory_db(path: str) -> None:
     conn = sqlite3.connect(path)
     try:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE step_memory_samples (
                 id                   INTEGER PRIMARY KEY AUTOINCREMENT,
                 recv_ts_ns           INTEGER NOT NULL,
@@ -38,8 +37,7 @@ def _create_step_memory_db(path: str) -> None:
                 peak_alloc_bytes     REAL,
                 peak_reserved_bytes  REAL
             );
-            """
-        )
+            """)
         rows = [
             (
                 1,

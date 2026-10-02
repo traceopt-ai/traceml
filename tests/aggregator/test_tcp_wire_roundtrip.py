@@ -71,6 +71,7 @@ def _make_aggregator(
     agg._started = True
     agg._expected_world_size = 1
     agg._finished_ranks = {}
+    agg._foreign_senders = {}
     agg._drain_lock = threading.Lock()
     agg._tcp_server = tcp_server
     agg._sqlite_writer = writer

@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "tools/integration_support_matrix.py"
 MANIFEST = ROOT / "docs/data/integration_support.json"

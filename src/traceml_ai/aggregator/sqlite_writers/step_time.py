@@ -141,8 +141,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
         in `events_json`; runtime identity and step metadata stay queryable in
         dedicated columns.
     """
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS step_time_samples (
             id                 INTEGER PRIMARY KEY AUTOINCREMENT,
             recv_ts_ns         INTEGER NOT NULL,
@@ -158,8 +157,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
             step               INTEGER,
             events_json        TEXT NOT NULL
         );
-        """
-    )
+        """)
     _ensure_column(
         conn,
         table="step_time_samples",
@@ -196,30 +194,22 @@ def init_schema(conn: sqlite3.Connection) -> None:
         column="hostname",
         definition="TEXT",
     )
-    conn.execute(
-        """
+    conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_step_time_samples_rank_step_ts
         ON step_time_samples(rank, step, sample_ts_s, id);
-        """
-    )
-    conn.execute(
-        """
+        """)
+    conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_step_time_samples_global_rank_step_ts
         ON step_time_samples(global_rank, step, sample_ts_s, id);
-        """
-    )
-    conn.execute(
-        """
+        """)
+    conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_step_time_samples_global_rank_step_id
         ON step_time_samples(global_rank, step DESC, id DESC);
-        """
-    )
-    conn.execute(
-        """
+        """)
+    conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_step_time_samples_step_rank
         ON step_time_samples(step, rank, id);
-        """
-    )
+        """)
 
 
 def _normalize_events(events_raw: Any) -> Dict[str, Dict[str, Dict[str, Any]]]:

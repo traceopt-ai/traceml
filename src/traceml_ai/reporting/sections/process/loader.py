@@ -68,8 +68,7 @@ def load_process_summary_aggregate(
 
     # Read window size, time bounds, and how many ranks are represented.
     count_row = conn.execute(
-        sample_cte
-        + """
+        sample_cte + """
         SELECT
             COUNT(*),
             MIN(sample_ts_s),
@@ -88,8 +87,7 @@ def load_process_summary_aggregate(
 
     # Compute aggregate CPU, RAM, and GPU process metrics over the same window.
     row = conn.execute(
-        sample_cte
-        + """
+        sample_cte + """
         SELECT
             AVG(cpu_percent),
             MAX(cpu_percent),
@@ -147,9 +145,7 @@ def load_per_global_rank_process_summary(
 ) -> Dict[int, PerRankProcessSummary]:
     """Load per-global-rank process metrics from `process_samples`."""
     sample_cte, params = _process_samples_cte(analysis_window)
-    sql = (
-        sample_cte
-        + """
+    sql = sample_cte + """
         SELECT
             global_rank,
             MAX(local_rank),
@@ -188,7 +184,6 @@ def load_per_global_rank_process_summary(
         GROUP BY global_rank
         ORDER BY global_rank ASC;
     """
-    )
 
     # Build one typed process summary row for each observed global rank.
     rows = conn.execute(sql, params).fetchall()

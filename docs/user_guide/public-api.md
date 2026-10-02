@@ -192,7 +192,7 @@ non-aggregator node needs the reachable node-0 address above.
 | `--nnodes` / `--nproc-per-node` | Expected world size; the aggregator waits for all ranks before finalizing. |
 | `--mode` | `summary` (default), `cli`, or `dashboard`. |
 | `--logs-dir` | Directory for session logs. |
-| `--run-name` / `--session-id` | Shared run identity for worker artifacts. |
+| `--run-name` / `--session-id` | Shared run identity for worker artifacts. Must be new for each launch: TraceML refuses to start if `<logs-dir>/<run-name>` already exists. Telemetry from a worker explicitly given a different id is ignored. A worker that generates its own id, such as a plain `python train.py`, is still traced. |
 | `--history-retention` | Aligned raw-history duration; default `30m`. |
 
 ### Missing-aggregator behavior
@@ -211,6 +211,12 @@ The CLI policy resolves as the explicit flag,
 training starts, a later telemetry or finalization failure is reported
 separately and does not replace the training exit code. In multi-node runs,
 only the node 0 launcher reports final aggregator health.
+
+The aggregator-owning launcher also refuses to start beside an earlier process
+that still owns the configured endpoint. Stop that process or choose another
+`--aggregator-port`. With `--on-missing-aggregator=warn`, TraceML is disabled
+and training starts, but aggregator-dependent calls, including
+`traceml.summary()`, still fail.
 
 After training starts, the aggregator-owning launcher prints one telemetry
 health line to stderr immediately before the final training result, including

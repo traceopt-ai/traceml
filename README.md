@@ -2,7 +2,7 @@
 
 # TraceML
 
-**Find out if your GPU is waiting for data during PyTorch training.**
+**Diagnose slow PyTorch training. Catch regressions in CI.**
 
 **Works with:** [PyTorch](https://traceopt-ai.github.io/traceml/user_guide/quickstart/) ·
 [Hugging Face Trainer](https://traceopt-ai.github.io/traceml/user_guide/integrations/huggingface/) ·
@@ -19,6 +19,7 @@
 [![GitHub stars](https://badgen.net/github/stars/traceopt-ai/traceml?icon=github)](https://github.com/traceopt-ai/traceml)
 
 [**Quickstart**](#quickstart) •
+[**Performance checks**](#performance-regression-checks) •
 [**Try in Colab**](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/notebooks/data_loading_bottleneck.ipynb) •
 [**Integrations**](https://traceopt-ai.github.io/traceml/user_guide/integrations/) •
 [**Documentation**](https://traceopt-ai.github.io/traceml/) •
@@ -29,7 +30,9 @@
 **TraceML is an open-source tool designed for lightweight, always-on diagnostics
 during PyTorch training.**
 See how much time is spent waiting for the next batch, where step time goes,
-and whether a slow worker is holding up a distributed run.
+and whether a slow worker is holding up a distributed run. Compare completed
+runs to see what changed, and apply a Step Time threshold to the same
+comparison in CI.
 
 At the end of a run, it gives you:
 
@@ -304,6 +307,26 @@ diagnosis and cuts step time:
 
 See [Compare Runs](https://traceopt-ai.github.io/traceml/user_guide/compare/)
 for the complete workflow and artifact format.
+
+## Performance Regression Checks
+
+The regression guard is an experimental pilot. Compatible guarded runs can use
+the same comparison command as a local CI gate. Pass the reference first and
+the candidate second, then set the maximum allowed Step Time increase:
+
+```bash
+traceml compare \
+  logs/reference/final_summary.json \
+  logs/candidate/final_summary.json \
+  --max-step-time-regression-pct 5 \
+  --output compare/reference-vs-candidate
+```
+
+TraceML writes JSON and text evidence before returning the CI exit code. See
+the [Regression Guard](https://traceopt-ai.github.io/traceml/user_guide/regression-guard/)
+for run configuration and supported environments, and
+[Compare Runs](https://traceopt-ai.github.io/traceml/user_guide/compare/#use-compare-in-ci)
+for result meanings and exit codes.
 
 ## Save the Result
 

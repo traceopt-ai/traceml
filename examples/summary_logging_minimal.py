@@ -10,12 +10,17 @@ Run with:
 
     traceml run examples/summary_logging_minimal.py
 
+Use ``--steps`` to change the number of optimizer steps::
+
+    traceml run examples/summary_logging_minimal.py --args --steps 20
+
 At the end of the run, ``traceml.summary()`` returns a flat dict designed for
 W&B, MLflow, and other experiment trackers.
 """
 
 from __future__ import annotations
 
+import argparse
 import time
 
 import torch
@@ -23,9 +28,33 @@ from torch import nn
 
 import traceml_ai as traceml
 
+NUM_STEPS = 128
+
+
+def positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--steps",
+        type=positive_int,
+        default=NUM_STEPS,
+        help="Number of optimizer steps to run.",
+    )
+    return parser.parse_args()
+
 
 def main() -> None:
     """Run a tiny traced loop and print the compact TraceML summary."""
+    args = parse_args()
     traceml.init()
 
     torch.manual_seed(0)
@@ -36,7 +65,7 @@ def main() -> None:
     x = torch.randn(32, 8)
     y = torch.randint(0, 2, (32,))
 
-    for _ in range(128):
+    for _ in range(args.steps):
         with traceml.trace_step(model):
             optimizer.zero_grad(set_to_none=True)
             logits = model(x)

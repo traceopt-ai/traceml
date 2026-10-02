@@ -132,6 +132,46 @@ class FreshnessPolicy:
 
 
 @dataclass(frozen=True)
+class RankReporting:
+    """One rank's Process reporting status: last arrival and verdict.
+
+    Lets a live surface name a rank that stopped sending Process data
+    instead of drawing its last value as current. It says nothing about
+    the health of the rank's training. The verdict is always
+    :meth:`FreshnessPolicy.state_of`; this type only carries it.
+    """
+
+    global_rank: int
+    last_seen_s: Optional[float] = None
+    age_s: Optional[float] = None
+    freshness: FreshnessState = "unknown"
+
+    @property
+    def is_stale(self) -> bool:
+        return self.freshness == "stale"
+
+
+def _whole_seconds(age_s: Optional[float]) -> Optional[int]:
+    """An age as the nearest whole second, or ``None`` when unknown.
+
+    Rounded half up, not truncated: 5.99 s reads as six seconds.
+    Ages are clamped at zero by :meth:`FreshnessPolicy.age_of`.
+    """
+    age = finite(age_s)
+    return int(age + 0.5) if age is not None else None
+
+
+def stale_rank_label(rank: RankReporting) -> str:
+    """The terminal line for a quiet rank.
+
+    For example ``No Process data from rank 1 for 6s.``
+    """
+    seconds = _whole_seconds(rank.age_s)
+    since = f" for {seconds}s" if seconds is not None else ""
+    return f"No Process data from rank {rank.global_rank}{since}."
+
+
+@dataclass(frozen=True)
 class CachedPayloadTTL:
     """How long a last-good payload may answer for a failed read.
 
@@ -160,4 +200,6 @@ __all__ = [
     "FreshnessPolicy",
     "FreshnessState",
     "MIN_STALE_AFTER_S",
+    "RankReporting",
+    "stale_rank_label",
 ]

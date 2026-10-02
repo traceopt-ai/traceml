@@ -124,7 +124,8 @@ Add `--html-report` to `traceml run` (or `traceml watch`) to also write
 `final_summary.html` next to the JSON/TXT. It is a single self-contained file
 (inline styling and charts, no JavaScript, no network requests) that opens in
 any browser and is easy to drop into Slack, an email, or an issue. It shows a
-run header, a top-level verdict from `primary_diagnosis` in schema 1.5 reports,
+run header, a top-level verdict from `primary_diagnosis` in schema 1.5 and later
+reports,
 and per-domain diagnosis cards, metric tables, and bars over the same data as
 the JSON. Older saved reports without `primary_diagnosis` fall back to the
 strongest section diagnosis for the top banner.
@@ -178,6 +179,21 @@ process tree. They include bytes that reach that tree's OS pipes, including
 Python output, native file-descriptor writes, torchrun diagnostics, and output
 from local workers that inherit the descriptors. They are intentionally not
 per-rank files.
+
+A guarded `traceml run` also writes one node-scoped execution record after the
+local torchrun process exits:
+
+```text
+logs/<run-name>/nodes/node_<node-rank>/guard_outcome.json
+```
+
+This atomic JSON file records the bounded launcher outcome used by the guard
+pilot. It is a filesystem coordination artifact, not a telemetry stream or a
+copy of training output. Guarded multi-node runs place `--logs-dir` on shared
+storage so node 0 can read every node's record. Node 0 waits within the
+configured finalization timeout and stores the consolidated result under
+`guard.training` in `manifest.json`. A completed result means every expected
+launcher reported exit code `0`; it does not verify telemetry or step IDs.
 
 Summary and dashboard modes mirror the saved streams live. CLI mode suppresses
 live mirroring so training output cannot corrupt the Rich display; if training

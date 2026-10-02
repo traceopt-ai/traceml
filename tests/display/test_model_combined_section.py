@@ -659,8 +659,7 @@ def test_sqlite_window_has_one_share_across_live_and_summary_consumers(
     db_path = tmp_path / "step-time-pipeline.db"
     conn = sqlite3.connect(db_path)
     try:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE step_time_samples (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 recv_ts_ns INTEGER NOT NULL,
@@ -676,16 +675,13 @@ def test_sqlite_window_has_one_share_across_live_and_summary_consumers(
                 step INTEGER,
                 events_json TEXT NOT NULL
             );
-            """
-        )
-        conn.execute(
-            """
+            """)
+        conn.execute("""
             CREATE TABLE runtime_environment (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 training_strategy TEXT
             );
-            """
-        )
+            """)
         conn.execute(
             "INSERT INTO runtime_environment(training_strategy) "
             "VALUES ('ddp');"
@@ -939,6 +935,81 @@ def test_empty_diagnostics_payload_clears_stale_ui_state() -> None:
     assert panel["body"].content == ""
     assert panel["hint"].text == "Waiting for diagnostics"
     assert theme.SEV["neutral"] in panel["overall"].styles[-1]
+
+
+@pytest.mark.parametrize(
+    ("severity", "bucket"),
+    (("crit", "crit"), ("warn", "warn"), ("info", "neutral")),
+)
+def test_diagnostics_payload_fills_the_rail_in_the_engine_colour(
+    severity: str, bucket: str
+) -> None:
+    """The pill reads the engine's overall severity and nothing else."""
+    from traceml_ai.aggregator.display_drivers.nicegui_sections import (
+        model_diagnostics_section as mds,
+    )
+
+    panel = {
+        "overall": _FakeText(),
+        "body": _FakeHtml(),
+        "hint": _FakeText(),
+    }
+    mds.update_model_diagnostics_section(panel, {"items": []})
+    mds.update_model_diagnostics_section(
+        panel,
+        {
+            "overall_severity": severity,
+            "items": [
+                {
+                    "source": "step_time",
+                    "status": "INPUT-BOUND",
+                    "severity": severity,
+                    "reason": "Input wait dominates the step.",
+                }
+            ],
+        },
+    )
+
+    assert panel["overall"].text == severity.upper()
+    assert theme.SEV[bucket] in panel["overall"].styles[-1]
+    assert panel["hint"].text == ""
+    assert "INPUT-BOUND" in panel["body"].content
+
+
+def test_diagnostics_pill_follows_overall_not_the_first_item() -> None:
+    """Items keep registry order, so the first one need not be the worst."""
+    from traceml_ai.aggregator.display_drivers.nicegui_sections import (
+        model_diagnostics_section as mds,
+    )
+
+    panel = {
+        "overall": _FakeText(),
+        "body": _FakeHtml(),
+        "hint": _FakeText(),
+    }
+    mds.update_model_diagnostics_section(
+        panel,
+        {
+            "overall_severity": "warn",
+            "items": [
+                {
+                    "source": "step_memory",
+                    "status": "BALANCED",
+                    "severity": "info",
+                    "reason": "Memory is steady.",
+                },
+                {
+                    "source": "step_time",
+                    "status": "INPUT-BOUND",
+                    "severity": "warn",
+                    "reason": "Input wait dominates the step.",
+                },
+            ],
+        },
+    )
+
+    assert panel["overall"].text == "WARN"
+    assert theme.SEV["warn"] in panel["overall"].styles[-1]
 
 
 def test_empty_diagnostics_payload_clears_stale_hero_verdict() -> None:

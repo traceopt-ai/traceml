@@ -67,6 +67,8 @@ SEV = {
 # CPU/GPU traces: GPU = brand orange (hero metric), CPU = clean blue.
 C_CPU = "#2563eb"
 C_GPU = ORANGE
+# Trainer-process memory: purple, so its chart never reads as the CPU one.
+C_MEM = "#7c3aed"
 
 _FONT_DIR = os.path.join(os.path.dirname(__file__), "..", "assets", "fonts")
 _FONT_ROUTE = "/_traceml_fonts"
@@ -142,8 +144,10 @@ body{{
    become two equal columns when the card is narrow, so a tile can never
    wrap alone and stretch to its max width. */
 .tilerow{{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:9px; width:100%;}}
+/* Two tiles to a row, for tile labels too long for a quarter of a card. */
+.tilerow.tml-tiles-2{{grid-template-columns:repeat(2,minmax(0,1fr));}}
 @media (max-width:1180px){{.tilerow{{grid-template-columns:repeat(2,minmax(0,1fr));}}}}
-@media (max-width:560px){{.tilerow{{grid-template-columns:minmax(0,1fr);}}}}
+@media (max-width:560px){{.tilerow,.tilerow.tml-tiles-2{{grid-template-columns:minmax(0,1fr);}}}}
 .kpi{{position:relative; background:rgba(255,255,255,0.4); border:1px solid rgba(17,24,39,0.08); border-radius:13px; padding:11px 13px 10px; min-width:118px; transition:background .2s, transform .2s, box-shadow .2s;}}
 .kpi:hover{{background:rgba(255,255,255,0.72); transform:translateY(-2px); box-shadow:0 8px 20px rgba(17,24,39,0.07);}}
 .kpi::before{{content:''; position:absolute; left:0; top:0; height:100%; width:3px; background:var(--acc,var(--orange)); opacity:.85;}}

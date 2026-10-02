@@ -218,6 +218,55 @@ def _format_primary_diagnosis(overview: Dict[str, Any]) -> Optional[str]:
     return f"Primary diagnosis: {lhs} -> {rhs} ({delta})"
 
 
+def _format_ci_policy(policy: Any) -> list[str]:
+    """Render the optional CI decision from its structured compare block."""
+    if not isinstance(policy, dict):
+        return []
+
+    threshold = _as_float(policy.get("threshold_pct"))
+    pct_change = _as_float(policy.get("pct_change"))
+    clock = policy.get("selected_clock")
+    clock_label = (
+        f"{str(clock).upper()} Step Time"
+        if clock in {"cpu", "gpu"}
+        else "Step Time"
+    )
+    reference_steps = policy.get("reference_steps_analyzed")
+    candidate_steps = policy.get("candidate_steps_analyzed")
+    change = "n/a" if pct_change is None else f"{pct_change:+.1f}%"
+    reference_steps_text = (
+        str(reference_steps)
+        if isinstance(reference_steps, int)
+        and not isinstance(reference_steps, bool)
+        else "n/a"
+    )
+    candidate_steps_text = (
+        str(candidate_steps)
+        if isinstance(candidate_steps, int)
+        and not isinstance(candidate_steps, bool)
+        else "n/a"
+    )
+    lines = [
+        f"Result: {policy.get('result') or 'INCONCLUSIVE'}",
+        (
+            "Threshold: n/a"
+            if threshold is None
+            else f"Threshold: {threshold:.1f}% maximum Step Time regression"
+        ),
+        (
+            f"Evidence: {clock_label} "
+            f"{_format_value(policy.get('reference_step_time_ms'), 'ms')} -> "
+            f"{_format_value(policy.get('candidate_step_time_ms'), 'ms')} "
+            f"({change})"
+        ),
+        f"Analyzed steps: {reference_steps_text} -> {candidate_steps_text}",
+    ]
+    reason = policy.get("reason")
+    if isinstance(reason, str) and reason.strip():
+        lines.append(f"Reason: {reason.strip()}")
+    return lines
+
+
 class CompareTextFormatter(Formatter[Dict[str, Any], str]):
     """Render compare JSON as a compact table."""
 
@@ -251,6 +300,13 @@ class CompareTextFormatter(Formatter[Dict[str, Any], str]):
             f"Verdict: {verdict.get('status', 'INCONCLUSIVE')}",
         )
         _append_wrapped_card_line(lines, f"Why: {verdict.get('why', 'n/a')}")
+
+        ci_policy_lines = _format_ci_policy(payload.get("ci_policy"))
+        if ci_policy_lines:
+            _append_card_line(lines)
+            _append_card_line(lines, "CI Policy")
+            for text in ci_policy_lines:
+                _append_wrapped_card_line(lines, text)
 
         for section_name in (
             "step_time",

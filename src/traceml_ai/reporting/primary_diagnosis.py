@@ -34,8 +34,8 @@ Primary diagnosis policy
    GPU utilization is treated as a symptom or fallback, not root-cause proof.
 4. If Step Time is ``BALANCED`` and GPU utilization is not low/moderate, the
    primary becomes ``NO_CLEAR_PERFORMANCE_BOTTLENECK``.
-5. If Step Time is ``NO_DATA`` or ``WARMUP``, the primary becomes
-   ``INSUFFICIENT_STEP_TIME_DATA``.
+5. If Step Time is ``NO_DATA``, ``WARMUP``, or ``INCOMPLETE_DATA``, the
+   primary becomes ``INSUFFICIENT_STEP_TIME_DATA``.
 
 The v1 policy deliberately does not promote System, Process, or Step Memory
 health/resource findings such as high GPU temperature, memory pressure, memory

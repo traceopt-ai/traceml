@@ -128,8 +128,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
         views derive GPU rollups from this table instead of storing duplicate
         per-snapshot aggregates in `system_samples`.
     """
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS system_samples (
             id                     INTEGER PRIMARY KEY AUTOINCREMENT,
             recv_ts_ns             INTEGER NOT NULL,
@@ -147,10 +146,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
             gpu_available          INTEGER,
             gpu_count              INTEGER
         );
-        """
-    )
-    conn.execute(
-        """
+        """)
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS system_gpu_samples (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
             recv_ts_ns       INTEGER NOT NULL,
@@ -170,8 +167,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
             power_usage_w    REAL,
             power_limit_w    REAL
         );
-        """
-    )
+        """)
     _ensure_column(
         conn,
         table="system_samples",
@@ -244,18 +240,14 @@ def init_schema(conn: sqlite3.Connection) -> None:
         column="hostname",
         definition="TEXT",
     )
-    conn.execute(
-        """
+    conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_system_samples_node_ts
         ON system_samples(node_rank, sample_ts_s, id);
-        """
-    )
-    conn.execute(
-        """
+        """)
+    conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_system_gpu_samples_global_gpu_ts
         ON system_gpu_samples(global_rank, gpu_idx, sample_ts_s, id);
-        """
-    )
+        """)
 
 
 def build_rows(

@@ -195,6 +195,10 @@ yet supported.
 `--session-id` remains accepted as a backward-compatible alias for
 `--run-name`.
 
+Pick a new `--run-name` for each launch. TraceML refuses to start if
+`<logs-dir>/<run-name>` already exists, and leaves that folder untouched. For
+multi-node runs, `--logs-dir` must be on storage that every node can see.
+
 ---
 
 ## Does TraceML support FSDP?
@@ -370,6 +374,9 @@ launcher's descriptors. CLI mode keeps the streams out of the live Rich
 display and shows a bounded stderr excerpt after a failure. Use
 `--no-save-training-output` when another system already captures the streams
 or when the workload requires a real terminal.
+
+See [What Happens When My Training Crashes](training-crashes.md) for what
+these files contain after a Python exception or a native crash.
 
 ---
 

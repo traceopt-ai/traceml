@@ -19,6 +19,10 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
+from traceml_ai.renderers.process.reporting import read_rank_clock
+from traceml_ai.renderers.process.repository import ProcessRepository
+from traceml_ai.renderers.shared.freshness import RankReporting
+
 from .schema import (
     StepMemoryCombinedCoverage,
     StepMemoryCombinedMetric,
@@ -38,6 +42,7 @@ class StepMemoryMetricsDB:
 
     def __init__(self, db_path: str) -> None:
         self._db_path = str(db_path)
+        self._process = ProcessRepository(db_path=self._db_path)
 
     def connect(self) -> sqlite3.Connection:
         """Open a short-lived SQLite connection configured for named rows."""
@@ -56,16 +61,14 @@ class StepMemoryMetricsDB:
         dict[int, int]
             Mapping global rank -> max(step), excluding NULL rows.
         """
-        rows = conn.execute(
-            """
+        rows = conn.execute("""
             SELECT global_rank, MAX(step) AS max_step
             FROM step_memory_samples
             WHERE global_rank IS NOT NULL
               AND step IS NOT NULL
             GROUP BY global_rank
             ORDER BY global_rank ASC;
-            """
-        ).fetchall()
+            """).fetchall()
 
         out: Dict[int, int] = {}
         for row in rows:
@@ -75,6 +78,33 @@ class StepMemoryMetricsDB:
                 continue
             out[int(rank)] = int(max_step)
         return out
+
+    def fetch_rank_reporting(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        configured_interval_s: Optional[float] = None,
+    ) -> Optional[Tuple[RankReporting, ...]]:
+        """
+        Every rank's Process reporting status, for the terminal panel.
+
+        Read through the Process domain's own read so the Step Memory and
+        Process panels show the same status. Step-memory rows cannot give
+        it: they stop on every rank once a survivor blocks in a collective
+        waiting for a dead peer, and a long legitimate step would read as
+        a quiet rank. Best-effort: ``None`` when the status cannot be read
+        (unavailable, and never a lost panel); ``()`` when it was read and
+        no rank has reported.
+        """
+        try:
+            return read_rank_clock(
+                self._process,
+                conn,
+                newest_ts=self._process.newest_sample_ts(conn),
+                configured_interval_s=configured_interval_s,
+            ).reporting()
+        except Exception:
+            return None
 
     def detect_gpu_available(self, conn: sqlite3.Connection) -> Optional[bool]:
         """
@@ -425,7 +455,7 @@ def _common_suffix_steps_fast(
 
 
 def _majority_device(
-    per_rank_device: Dict[int, Optional[str]]
+    per_rank_device: Dict[int, Optional[str]],
 ) -> Optional[str]:
     """Return majority device string from per-rank device map."""
     devices = [d for d in per_rank_device.values() if d]

@@ -15,6 +15,8 @@ from traceml_ai.renderers.shared.freshness import (
     MIN_STALE_AFTER_S,
     CachedPayloadTTL,
     FreshnessPolicy,
+    RankReporting,
+    stale_rank_label,
 )
 
 
@@ -166,3 +168,22 @@ def test_a_corrupt_observed_cadence_falls_back_to_the_configured_one():
 def test_a_corrupt_age_may_not_reuse_a_cached_payload():
     """Unknown age means the cache cannot be shown to be inside its TTL."""
     assert CachedPayloadTTL(ttl_s=30.0).may_reuse(NAN) is False
+
+
+def test_the_quiet_rank_line_states_how_long_no_process_data_came():
+    """An unknown age is said as unknown, never as a fabricated zero."""
+    quiet = RankReporting(global_rank=1, age_s=12.4, freshness="stale")
+    assert stale_rank_label(quiet) == "No Process data from rank 1 for 12s."
+    unknown = RankReporting(global_rank=3, age_s=None, freshness="stale")
+    assert stale_rank_label(unknown) == "No Process data from rank 3."
+
+
+@pytest.mark.parametrize(
+    ("age_s", "shown"), [(5.99, "6s"), (12.5, "13s"), (80.0, "80s")]
+)
+def test_the_quiet_age_is_rounded_to_the_nearest_second(age_s, shown):
+    """5.99 s is six seconds, not five: truncation undersells the age."""
+    quiet = RankReporting(global_rank=1, age_s=age_s, freshness="stale")
+    assert stale_rank_label(quiet) == (
+        f"No Process data from rank 1 for {shown}."
+    )

@@ -144,7 +144,7 @@ def _average_metrics_from_rows(
 
 
 def _closest_row_to_median(
-    pairs: list[tuple[str, float]]
+    pairs: list[tuple[str, float]],
 ) -> tuple[str, float]:
     """Return the row whose value best represents the median."""
     sorted_values = sorted(value for _row_id, value in pairs)

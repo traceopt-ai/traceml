@@ -269,8 +269,7 @@ def _sample_rows(
         analysis_window=analysis_window,
     )
     rows = conn.execute(
-        sample_cte
-        + """
+        sample_cte + """
         SELECT global_rank, local_rank, world_size, local_world_size,
                node_rank, hostname, sample_ts_s, seq, cpu_percent,
                ram_used_bytes, ram_total_bytes, gpu_available, gpu_count
@@ -315,8 +314,7 @@ def _gpu_rows(
         analysis_window=analysis_window,
     )
     rows = conn.execute(
-        sample_cte
-        + f"""
+        sample_cte + f"""
         SELECT g.global_rank, g.node_rank, g.seq, g.gpu_idx, g.util,
                g.mem_used_bytes, g.mem_total_bytes, g.temperature_c,
                g.power_usage_w, {power_limit_expr}

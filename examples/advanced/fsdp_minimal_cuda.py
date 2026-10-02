@@ -1,3 +1,16 @@
+"""Minimal FSDP training example for CUDA GPUs.
+
+Requires CUDA. Run with:
+
+    traceml run examples/advanced/fsdp_minimal_cuda.py --nproc-per-node=2
+
+Use ``--epochs`` or ``--steps`` to change the run length::
+
+    traceml run examples/advanced/fsdp_minimal_cuda.py \
+        --nproc-per-node=2 --args --steps 20
+"""
+
+import argparse
 import os
 
 import torch
@@ -17,6 +30,37 @@ NUM_CLASSES = 10
 NUM_SAMPLES = 100000
 BATCH_SIZE = 256
 EPOCHS = 6
+
+
+def positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    length = parser.add_mutually_exclusive_group()
+    length.add_argument(
+        "--epochs",
+        type=positive_int,
+        default=EPOCHS,
+        help="Number of full epochs to run.",
+    )
+    length.add_argument(
+        "--steps",
+        type=positive_int,
+        default=None,
+        help=(
+            "Number of optimizer steps per rank. Replaces --epochs; by "
+            "default, run --epochs full epochs."
+        ),
+    )
+    return parser.parse_args()
 
 
 class TinyMLP(nn.Module):
@@ -70,6 +114,7 @@ def load_batch_to_device(batch, device):
 
 
 def main():
+    args = parse_args()
     rank = int(os.environ.get("RANK", 0))
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     world_size = int(os.environ.get("WORLD_SIZE", 1))
@@ -106,8 +151,11 @@ def main():
     model.train()
     global_step = 0
     running_loss = 0.0
+    epochs = args.epochs
+    if args.steps is not None:
+        epochs = (args.steps + len(train_loader) - 1) // len(train_loader)
 
-    for epoch in range(EPOCHS):
+    for epoch in range(epochs):
         train_sampler.set_epoch(epoch)
 
         for batch in train_loader:
@@ -131,6 +179,9 @@ def main():
                         f"| loss {(running_loss / 50).item():.4f}"
                     )
                     running_loss.zero_()
+
+            if args.steps is not None and global_step >= args.steps:
+                break
 
     if rank == 0:
         print("Done.")

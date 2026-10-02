@@ -71,7 +71,7 @@ def make_input_collate(rank: int):
     delay_s = STRAGGLER_INPUT_DELAY_S if rank == STRAGGLER_RANK else 0.0
 
     def collate(
-        batch: list[tuple[torch.Tensor, torch.Tensor]]
+        batch: list[tuple[torch.Tensor, torch.Tensor]],
     ) -> tuple[torch.Tensor, torch.Tensor]:
         if delay_s > 0.0:
             time.sleep(delay_s)

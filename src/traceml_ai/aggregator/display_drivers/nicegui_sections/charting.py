@@ -24,30 +24,12 @@ return option fragments.
 
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 # The palette stays in theme; a chart builder borrows from it
 # rather than keeping a second copy of the brand colours.
 from .theme import BORDER, INK
-
-# One colour per rank, shared by the charts and the rows' chips so a line
-# and a row are recognisably the same rank. Red is not among them: on this
-# page red reads as a verdict, and a rank identifier is not a verdict.
-RANK_COLORS: Tuple[str, ...] = (
-    "#f97316",
-    "#3b82f6",
-    "#0d9488",
-    "#a855f7",
-    "#0ea5e9",
-    "#eab308",
-    "#ec4899",
-    "#10b981",
-)
-
-
-def rank_color(rank: int) -> str:
-    """The colour that identifies one rank, stable across every surface."""
-    return RANK_COLORS[int(rank) % len(RANK_COLORS)]
 
 
 def capacity_axis_max(values: Sequence[Any]) -> float:
@@ -66,6 +48,8 @@ def capacity_axis_max(values: Sequence[Any]) -> float:
 
 def drift_axis_bounds(
     values: Sequence[Any],
+    *,
+    min_span: float = 0.0,
 ) -> Tuple[float, float, float]:
     """A y range fitted to the data, for a series whose signal is DRIFT.
 
@@ -74,33 +58,167 @@ def drift_axis_bounds(
     whole movement inside one pixel: on the three-hour capture the ranks
     sit at 1.48 to 1.50 GB on an axis that would run to 5. The leak this
     chart exists to show would be invisible.
+
+    Returns ``(low, high, tick)``: two equal steps whose ends sit on one
+    decimal grid, so the three labels step evenly and no two print alike.
+    A range fitted to a steady process otherwise spanned a few kilobytes,
+    and its three ticks all read "0.586 GB". ``min_span`` is the smallest
+    range drawn, in the caller's unit, so a flat line sits mid-plot on
+    ticks that still say something.
     """
     numbers = [float(value) for value in values if value is not None]
+    numbers = [value for value in numbers if math.isfinite(value)]
     if not numbers:
         return (0.0, 1.0, 0.5)
     low, high = min(numbers), max(numbers)
-    if high <= low:
-        high = low + max(abs(low) * 0.01, 0.01)
-    pad = (high - low) * 0.25
+    need = max(min_span, max(abs(low) * 0.01, 0.01) if high <= low else 0.0)
+    if high - low < need:
+        middle = (low + high) / 2.0
+        low, high = middle - need / 2.0, middle + need / 2.0
+    # A tenth of the range each side keeps the line off the plot's edges.
+    # Snapping to the grid below widens it further, so no more is needed.
+    pad = (high - low) * 0.1
     low, high = max(0.0, low - pad), high + pad
-    return (low, high, (high - low) / 2.0)
+
+    # The step is a whole number of the half-range's leading digit, the
+    # smallest that covers the data once the floor is snapped down to the
+    # step's own precision. Labels printed at that precision are then
+    # exact: they step evenly and no two of them are alike.
+    half = (high - low) / 2.0
+    grid = 10.0 ** math.floor(math.log10(half))
+    count = math.ceil(round(half / grid, 9))
+    while True:
+        tick = round(count * grid, 12)
+        digits = _decimals(tick)
+        unit = 10.0**-digits
+        base = round(math.floor(round(low / unit, 9)) * unit, digits)
+        if base + 2 * tick >= high:
+            break
+        count += 1
+    return (base, round(base + 2 * tick, digits), tick)
 
 
-def value_axis_formatter(span: float, unit: str) -> str:
-    """Tick formatter whose precision comes from the axis RANGE.
+def _decimals(step: float) -> int:
+    """The decimals that print ``step`` exactly (0.05 -> 2, 1.1 -> 1)."""
+    if not step > 0 or not math.isfinite(step):
+        return 0
+    for digits in range(10):
+        if abs(round(step, digits) - step) <= 1e-9 * max(1.0, step):
+            return digits
+    return 10
+
+
+def value_axis_formatter(step: float, unit: str) -> str:
+    """Tick formatter whose precision comes from the tick STEP.
 
     Magnitude alone is not enough: an axis fitted to a 20 MB drift around
-    1.4 GB would label every tick "1.4 GB" and say nothing.
+    1.4 GB would label every tick "1.4 GB" and say nothing. The range is
+    not enough either, because rounding it can still print two ticks
+    alike. At the step's own precision neighbouring ticks always differ.
     """
-    if span >= 20:
-        decimals = 0
-    elif span >= 2:
-        decimals = 1
-    elif span >= 0.2:
-        decimals = 2
-    else:
-        decimals = 3
-    return f"v=>v.toFixed({decimals})+'{unit}'"
+    return f"v=>v.toFixed({_decimals(step)})+'{unit}'"
+
+
+def value_axis_label(value: float, step: float, unit: str) -> str:
+    """The label :func:`value_axis_formatter` writes for ``value``."""
+    return f"{float(value):.{_decimals(step)}f}{unit}"
+
+
+def unit_axis_formatter(unit: str) -> str:
+    """Tick formatter that prints the value as it is, then the unit."""
+    return f"v=>v+'{unit}'"
+
+
+def unit_axis_label(value: float, unit: str) -> str:
+    """The label :func:`unit_axis_formatter` writes for a round ``value``."""
+    return f"{float(value):g}{unit}"
+
+
+def pad_tick_labels(formatter: str, width: int) -> str:
+    """Wrap a tick formatter so every label is ``width`` characters wide.
+
+    Two charts stacked in one card fit their y labels separately, so a
+    "30%" axis and a "1.111 GB" axis start their plots at different x and
+    the same moment sits at two positions. Tick labels are monospace and
+    right-aligned against the axis, so leading spaces move no visible
+    text; they make both charts reserve the same room for their labels.
+    """
+    return f"v=>({formatter})(v).padStart({int(width)})"
+
+
+# Seconds before the newest sample, written the way
+# ``formatting.format_elapsed`` writes a duration ("58s", "2m 26s",
+# "3h 12m") behind a minus sign, and "Now" at the newest sample. The card
+# header prints its window with that same helper, so the leftmost tick and
+# the header name the same span in the same words.
+_RELATIVE = (
+    "(v=>{const t=Math.round(-v);if(t<1)return 'Now';"
+    "const q=n=>('0'+n).slice(-2);const h=Math.floor(t/3600),"
+    "m=Math.floor((t%3600)/60),s=t%60;"
+    "return '\u2212'+(h?h+'h '+q(m)+'m':(m?m+'m '+q(s)+'s':s+'s'));})"
+)
+
+
+# Round steps of the clock, in seconds, for the ticks between the ends.
+_TICK_STEPS = (
+    1,
+    2,
+    5,
+    10,
+    15,
+    30,
+    60,
+    120,
+    300,
+    600,
+    900,
+    1800,
+    3600,
+    7200,
+    10800,
+    21600,
+    43200,
+    86400,
+)
+
+
+def relative_ticks(span: float) -> List[float]:
+    """Where the relative time axis is labelled, oldest first.
+
+    The first is the span itself, so the leftmost label names the period
+    the card header names. The last is the newest sample, "Now". Between
+    them sit at most two round steps of the clock ("-30s", "-1h 00m"):
+    ticks at thirds of the span read "-57m 17s" on an hour axis, and on
+    the first seconds of a run two thirds rounded to the same second. A
+    round tick nearer the leftmost than half a step is dropped rather
+    than crowding it.
+    """
+    span = max(float(span), 1.0)
+    index = next(
+        (i for i, s in enumerate(_TICK_STEPS) if span / s <= 3.0), None
+    )
+    if index is None:
+        return [-span, *_inner_ticks(span, _day_step(span)), 0.0]
+    inner = _inner_ticks(span, _TICK_STEPS[index])
+    if not inner and index > 0:
+        # The step fits, but its one tick sat within half a step of the
+        # leftmost and was dropped, so a 6m 08s axis read only its two
+        # ends. The next finer step always leaves a tick; keep the two
+        # nearest "Now" so the axis stays at four labels.
+        inner = _inner_ticks(span, _TICK_STEPS[index - 1])[-2:]
+    return [-span, *inner, 0.0]
+
+
+def _day_step(span: float) -> float:
+    return math.ceil(span / 3.0 / 86400.0) * 86400.0
+
+
+def _inner_ticks(span: float, step: float) -> List[float]:
+    return [
+        -float(k * step)
+        for k in range(int(span // step), 0, -1)
+        if span - k * step > step / 2.0
+    ]
 
 
 def apply_span_axis(
@@ -108,36 +226,39 @@ def apply_span_axis(
     span: float,
     newest_epoch: Optional[float] = None,
 ) -> None:
-    """Pin a chart to its span and label it in wall-clock time.
+    """Pin a chart to its span and label it relative to the newest sample.
 
-    The x values are seconds before the newest sample, which keeps the
-    series arithmetic simple, but a reader debugging a slowdown needs the
-    clock: it is what their logs are keyed on. The formatters convert on
-    the fly from the newest sample's epoch, and the hover label carries
-    both readings ("19:10 · 45 min ago") so the axis and the tooltip never
-    speak two different vocabularies.
+    The x values are seconds before the newest sample, and the ticks say
+    so ("-58s, -30s, Now"): the card names its window once, in its header,
+    and two stacked charts labelled in wall-clock time read as two
+    different periods. A reader debugging a slowdown still needs the
+    clock, because it is what their logs are keyed on, so the hover label
+    carries both readings ("19:10:05 · -45s").
+
+    The labels sit where :func:`relative_ticks` puts them. The interval is
+    the whole span, so an ECharts too old to honour ``customValues``
+    labels the two ends and nothing that could collide.
     """
     span = max(float(span), 1.0)
     axis = options["xAxis"]
     axis["min"] = -span
     axis["max"] = 0
-    axis["interval"] = span / 3.0
+    axis["interval"] = span
+    label = axis["axisLabel"]
+    label.update(show=True, color=_TXT, fontFamily="Geist Mono", fontSize=10)
+    label["customValues"] = relative_ticks(span)
+    label[":formatter"] = _RELATIVE
     if newest_epoch is None:
-        axis["axisLabel"]["show"] = False
         return
-    axis["axisLabel"]["show"] = True
     clock = (
-        "const d=new Date((%f+%%s)*1000);const q=n=>('0'+n).slice(-2);"
+        "const d=new Date((%f+p.value)*1000);const q=n=>('0'+n).slice(-2);"
         "const c=q(d.getHours())+':'+q(d.getMinutes())%s;"
         % (float(newest_epoch), "+':'+q(d.getSeconds())" if span < 600 else "")
     )
-    axis["axisLabel"][":formatter"] = "v=>{%s return c;}" % (clock % "v")
     pointer = options.get("tooltip", {}).get("axisPointer", {}).get("label")
     if pointer is not None:
         pointer[":formatter"] = (
-            "p=>{%s const s=Math.round(-p.value);"
-            "return c+(s<1?' · now':(s<120?' · '+s+' s ago':"
-            "' · '+Math.floor(s/60)+' min ago'));}" % (clock % "p.value")
+            "p=>{" + clock + "return c+' · '+" + _RELATIVE + "(p.value);}"
         )
 
 
@@ -175,6 +296,10 @@ def shared_span(*traces: Sequence[Any]) -> Optional[Tuple[float, float]]:
     Both Process charts are pinned to it so a vertical read across the pair
     lands on the same moment. Each trace is expected to expose a
     ``timestamps`` sequence.
+
+    The span is what was observed: zero until a second moment arrives.
+    :func:`apply_span_axis` gives the axis its own width floor, so a
+    header printing this span never reports the drawing floor as time.
     """
     starts: List[float] = []
     ends: List[float] = []
@@ -191,7 +316,7 @@ def shared_span(*traces: Sequence[Any]) -> Optional[Tuple[float, float]]:
     if not ends:
         return None
     newest = max(ends)
-    return (newest, max(newest - min(starts), 1.0))
+    return (newest, newest - min(starts))
 
 
 _GRID = "rgba(17,24,39,0.05)"
@@ -221,7 +346,8 @@ def _span_axis() -> Dict[str, Any]:
         "min": -1,
         "max": 0,
         "interval": 1,
-        # No tick labels: the window is named once in the chart's label row.
+        # Hidden until the card pins the span: each card's span helper
+        # turns the labels on with the formatter it wants.
         "axisLabel": {"show": False},
         "axisLine": {"lineStyle": {"color": _AXIS, "opacity": 0.5}},
         "axisTick": {"show": False},
@@ -237,7 +363,7 @@ def _value_axis(unit: str, *, zero: bool) -> Dict[str, Any]:
             "color": _TXT,
             "fontFamily": "Geist Mono",
             "fontSize": 10,
-            ":formatter": f"v=>v+'{unit}'",
+            ":formatter": unit_axis_formatter(unit),
         },
         "axisLine": {"show": False},
         "axisTick": {"show": False},
@@ -381,12 +507,15 @@ __all__ = [
     "span_line_options",
     "mark_lines",
     "line_series",
-    "RANK_COLORS",
     "apply_span_axis",
     "capacity_axis_max",
     "drift_axis_bounds",
-    "rank_color",
+    "relative_ticks",
     "shared_span",
+    "pad_tick_labels",
     "sparkline_svg",
+    "unit_axis_formatter",
+    "unit_axis_label",
     "value_axis_formatter",
+    "value_axis_label",
 ]

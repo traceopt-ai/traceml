@@ -1,3 +1,16 @@
+"""Minimal Hugging Face Accelerate loop wrapped with traceml.trace_step.
+
+Run with:
+
+    traceml run examples/integrations/accelerate_minimal.py
+
+Use ``--epochs`` or ``--steps`` to change the run length::
+
+    traceml run examples/integrations/accelerate_minimal.py --args --steps 20
+"""
+
+import argparse
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -15,6 +28,37 @@ BATCH_SIZE = 64
 EPOCHS = 4
 
 
+def positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    length = parser.add_mutually_exclusive_group()
+    length.add_argument(
+        "--epochs",
+        type=positive_int,
+        default=EPOCHS,
+        help="Number of full epochs to run.",
+    )
+    length.add_argument(
+        "--steps",
+        type=positive_int,
+        default=None,
+        help=(
+            "Number of optimizer steps per rank. Replaces --epochs; by "
+            "default, run --epochs full epochs."
+        ),
+    )
+    return parser.parse_args()
+
+
 class TinyMLP(nn.Module):
     def __init__(self):
         super().__init__()
@@ -29,6 +73,7 @@ class TinyMLP(nn.Module):
 
 
 def main():
+    args = parse_args()
     torch.manual_seed(SEED)
 
     x = torch.randn(NUM_SAMPLES, INPUT_DIM)
@@ -61,8 +106,11 @@ def main():
 
     model.train()
     global_step = 0
+    epochs = args.epochs
+    if args.steps is not None:
+        epochs = (args.steps + len(dataloader) - 1) // len(dataloader)
 
-    for epoch in range(EPOCHS):
+    for epoch in range(epochs):
         running_loss = torch.zeros((), device=accelerator.device)
 
         for batch_x, batch_y in dataloader:
@@ -87,6 +135,9 @@ def main():
                     f"loss: {float(running_loss) / 25:.4f}"
                 )
                 running_loss.zero_()
+
+            if args.steps is not None and global_step >= args.steps:
+                break
 
     accelerator.print("Done.")
 

@@ -147,6 +147,12 @@ def _apply_settings_env(
     os.environ["TRACEML_INTERVAL"] = str(settings.sampler_interval_sec)
     os.environ["TRACEML_LOGS_DIR"] = str(settings.logs_dir)
     os.environ["TRACEML_SESSION_ID"] = str(settings.session_id or "default")
+    # A child's traceml.init() reads the id back from env. Without the source
+    # it would stamp an id this process made up as explicit.
+    if settings.session_source:
+        os.environ["TRACEML_SESSION_SOURCE"] = str(settings.session_source)
+    else:
+        os.environ.pop("TRACEML_SESSION_SOURCE", None)
     os.environ["TRACEML_AGGREGATOR_HOST"] = str(
         settings.aggregator.connect_host
     )

@@ -38,7 +38,11 @@ def _optional_str(value: Any) -> Optional[str]:
 
 @dataclass(frozen=True)
 class TelemetryMeta:
-    """Stable metadata carried once per sampler payload."""
+    """Stable metadata carried once per sampler payload.
+
+    ``session_id``, ``run_nonce`` and ``session_source`` are the optional run
+    stamp. Payloads from ranks that predate it carry ``None``.
+    """
 
     rank: Optional[int]
     global_rank: Optional[int]
@@ -50,6 +54,9 @@ class TelemetryMeta:
     pid: Optional[int]
     sampler: Optional[str]
     timestamp: Optional[float]
+    session_id: Optional[str] = None
+    run_nonce: Optional[str] = None
+    session_source: Optional[str] = None
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> "TelemetryMeta":
@@ -70,6 +77,9 @@ class TelemetryMeta:
             pid=_optional_int(data.get("pid")),
             sampler=_optional_str(data.get("sampler")),
             timestamp=_optional_float(data.get("timestamp")),
+            session_id=_optional_str(data.get("session_id")),
+            run_nonce=_optional_str(data.get("run_nonce")),
+            session_source=_optional_str(data.get("session_source")),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -85,6 +95,9 @@ class TelemetryMeta:
             "pid": self.pid,
             "sampler": self.sampler,
             "timestamp": self.timestamp,
+            "session_id": self.session_id,
+            "run_nonce": self.run_nonce,
+            "session_source": self.session_source,
         }
 
 

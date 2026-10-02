@@ -1,5 +1,4 @@
-"""Public result types for AST-based training-script analysis.
-"""
+"""Public result types for AST-based training-script analysis."""
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set

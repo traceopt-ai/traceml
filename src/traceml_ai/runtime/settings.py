@@ -94,6 +94,15 @@ class TraceMLSettings:
       end-of-run summary.
     - Aggregator transport is used for telemetry, including rank0 -> rank0
       loopback on local runs.
+    - `run_nonce` is a random per-launch value. Ranks stamp it on every
+      payload; an aggregator with a non-empty value drops payloads stamped
+      with a different one. Empty means no nonce for this launch path.
+    - `enforce_session_id` makes the aggregator drop payloads stamped with a
+      `session_id` other than its own. Payloads without a stamp are admitted.
+    - `admit_generated_session_id` narrows that check to explicit ids: a
+      payload whose `session_source` is "generated" is admitted.
+    - `session_source` is what a rank stamps: "explicit" when its session id
+      was given to it, "generated" when it made one up.
     """
 
     profile: str = "run"
@@ -113,3 +122,7 @@ class TraceMLSettings:
     html_report: bool = False
     finalize_timeout_sec: float = DEFAULT_FINALIZE_TIMEOUT_SEC
     expected_world_size: int = 1
+    run_nonce: str = ""
+    enforce_session_id: bool = False
+    admit_generated_session_id: bool = False
+    session_source: str = ""

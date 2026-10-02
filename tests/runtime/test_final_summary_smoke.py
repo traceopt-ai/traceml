@@ -18,8 +18,12 @@ import pytest
 
 pytest.importorskip("torch")
 
-SRC_DIR = Path(__file__).resolve().parents[2] / "src"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SRC_DIR = REPO_ROOT / "src"
+DDP_SCRIPT = REPO_ROOT / "examples" / "distributed" / "ddp_minimal.py"
 RUN_NAME = "smoke-test"
+DDP_RUN_NAME = "ddp-smoke-test"
+MULTI_NODE_DDP_RUN_NAME = "multi-node-ddp-smoke-test"
 FINALIZE_TIMEOUT_SEC = 60.0
 SUBPROCESS_TIMEOUT_SEC = 240
 
@@ -73,7 +77,7 @@ def _free_tcp_port():
 
 @pytest.mark.skipif(
     sys.platform == "win32",
-    reason="Aggregator uses socket.SO_REUSEPORT, unavailable on Windows.",
+    reason="End-to-end torchrun smoke run not yet verified on Windows.",
 )
 def test_final_summary_json_smoke(tmp_path):
     script_path = tmp_path / "smoke_train.py"
@@ -165,3 +169,272 @@ def test_final_summary_json_smoke(tmp_path):
     assert datetime.fromisoformat(payload["generated_at"]) >= (
         datetime.fromisoformat(training_ended_at)
     )
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="End-to-end torchrun smoke run not yet verified on Windows.",
+)
+def test_two_rank_ddp_final_summary_smoke(tmp_path):
+    from traceml_ai.reporting.final import SCHEMA_VERSION
+
+    logs_dir = tmp_path / "logs"
+    (tmp_path / "traceml.yaml").write_text(
+        """\
+mode: summary
+history_enabled: true
+guard:
+  schema_version: 1
+  workload:
+    name: ddp-minimal-smoke
+    parameters:
+      model: linear-classifier
+      data_version: synthetic-v1
+  measurement:
+    start_step: 1
+    completed_steps: 20
+""",
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env["OMP_NUM_THREADS"] = "1"
+    env["PYTHONPATH"] = os.pathsep.join(
+        part for part in (str(SRC_DIR), env.get("PYTHONPATH", "")) if part
+    )
+
+    aggregator_port = _free_tcp_port()
+    master_port = _free_tcp_port()
+    while master_port == aggregator_port:
+        master_port = _free_tcp_port()
+
+    cmd = [
+        sys.executable,
+        "-c",
+        "from traceml_ai.launcher.cli import main; main()",
+        "run",
+        str(DDP_SCRIPT),
+        "--mode",
+        "summary",
+        "--run-name",
+        DDP_RUN_NAME,
+        "--logs-dir",
+        str(logs_dir),
+        "--nproc-per-node",
+        "2",
+        "--master-port",
+        str(master_port),
+        "--aggregator-port",
+        str(aggregator_port),
+        "--finalize-timeout-sec",
+        str(FINALIZE_TIMEOUT_SEC),
+        "--args",
+        "--steps",
+        "20",
+    ]
+
+    result = subprocess.run(
+        cmd,
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=SUBPROCESS_TIMEOUT_SEC,
+    )
+
+    session_root = logs_dir / DDP_RUN_NAME
+    assert result.returncode == 0, (
+        f"two-rank traceml run exited with {result.returncode}\n"
+        f"Artifacts: {session_root}\n"
+        f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+    )
+
+    summary_path = session_root / "final_summary.json"
+    manifest_path = session_root / "manifest.json"
+    assert summary_path.is_file()
+    assert manifest_path.is_file()
+
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == SCHEMA_VERSION
+
+    # Shared CPU runners are timing-variable. Pin the all-rank artifact
+    # contract here; diagnosis and performance thresholds have separate tests.
+    step_time = payload["step_time"]
+    assert step_time["metadata"]["global_ranks_seen"] == 2
+    assert step_time["metadata"]["global_ranks_used"] == 2
+    assert set(step_time["groups"]["rows"]) == {"0", "1"}
+    assert step_time["global"]["window"]["steps_analyzed"] == 20
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["status"] == "completed"
+    assert manifest["telemetry_status"] == "complete"
+    assert manifest["launch"]["nproc_per_node"] == 2
+    assert manifest["guard"]["contract"] == {
+        "schema_version": 1,
+        "workload": {
+            "name": "ddp-minimal-smoke",
+            "parameters": {
+                "data_version": "synthetic-v1",
+                "model": "linear-classifier",
+            },
+        },
+        "measurement": {"start_step": 1, "completed_steps": 20},
+    }
+    assert manifest["guard"]["training"] == {
+        "status": "completed",
+        "nodes_expected": 1,
+        "nodes_observed": 1,
+        "reasons": [],
+        "nodes": [{"node_rank": 0, "exit_code": 0}],
+    }
+    assert payload["run_context"] == {
+        "run": {"status": "completed", "profile": "run"},
+        "declaration": manifest["guard"]["contract"],
+        "execution": {
+            "expected_nodes": 1,
+            "processes_per_node": 2,
+            "expected_world_size": 2,
+            "launcher_completion": {
+                "status": "completed",
+                "nodes_observed": 1,
+                "reason_codes": [],
+            },
+        },
+    }
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="End-to-end torchrun smoke run not yet verified on Windows.",
+)
+def test_two_node_ddp_guard_outcomes_smoke(tmp_path):
+    logs_dir = tmp_path / "logs"
+    (tmp_path / "traceml.yaml").write_text(
+        """\
+mode: summary
+history_enabled: true
+guard:
+  schema_version: 1
+  workload:
+    name: multi-node-ddp-smoke
+    parameters:
+      model: linear-classifier
+      data_version: synthetic-v1
+  measurement:
+    start_step: 1
+    completed_steps: 20
+""",
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env["OMP_NUM_THREADS"] = "1"
+    env["PYTHONPATH"] = os.pathsep.join(
+        part for part in (str(SRC_DIR), env.get("PYTHONPATH", "")) if part
+    )
+    aggregator_port = _free_tcp_port()
+    master_port = _free_tcp_port()
+    while master_port == aggregator_port:
+        master_port = _free_tcp_port()
+
+    base_cmd = [
+        sys.executable,
+        "-c",
+        "from traceml_ai.launcher.cli import main; main()",
+        "run",
+        str(DDP_SCRIPT),
+        "--mode",
+        "summary",
+        "--run-name",
+        MULTI_NODE_DDP_RUN_NAME,
+        "--logs-dir",
+        str(logs_dir),
+        "--nnodes",
+        "2",
+        "--nproc-per-node",
+        "1",
+        "--master-addr",
+        "127.0.0.1",
+        "--master-port",
+        str(master_port),
+        "--aggregator-host",
+        "127.0.0.1",
+        "--aggregator-port",
+        str(aggregator_port),
+        "--finalize-timeout-sec",
+        str(FINALIZE_TIMEOUT_SEC),
+        "--args",
+        "--steps",
+        "20",
+    ]
+    script_args_index = base_cmd.index("--args")
+    processes = [
+        subprocess.Popen(
+            [
+                *base_cmd[:script_args_index],
+                "--node-rank",
+                str(node_rank),
+                *base_cmd[script_args_index:],
+            ],
+            cwd=str(tmp_path),
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        for node_rank in range(2)
+    ]
+
+    outputs: list[tuple[str, str]] = []
+    try:
+        for process in processes:
+            outputs.append(process.communicate(timeout=SUBPROCESS_TIMEOUT_SEC))
+    except subprocess.TimeoutExpired:
+        for process in processes:
+            process.kill()
+        for process in processes:
+            process.communicate()
+        pytest.fail("two-node TraceML smoke run timed out")
+
+    session_root = logs_dir / MULTI_NODE_DDP_RUN_NAME
+    for node_rank, (process, output) in enumerate(zip(processes, outputs)):
+        stdout, stderr = output
+        assert process.returncode == 0, (
+            f"node {node_rank} exited with {process.returncode}\n"
+            f"Artifacts: {session_root}\n"
+            f"STDOUT:\n{stdout}\nSTDERR:\n{stderr}"
+        )
+        assert (
+            session_root / "nodes" / f"node_{node_rank}" / "guard_outcome.json"
+        ).is_file()
+
+    manifest = json.loads(
+        (session_root / "manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["status"] == "completed"
+    assert manifest["telemetry_status"] == "complete"
+    assert manifest["guard"]["training"] == {
+        "status": "completed",
+        "nodes_expected": 2,
+        "nodes_observed": 2,
+        "reasons": [],
+        "nodes": [
+            {"node_rank": 0, "exit_code": 0},
+            {"node_rank": 1, "exit_code": 0},
+        ],
+    }
+    payload = json.loads(
+        (session_root / "final_summary.json").read_text(encoding="utf-8")
+    )
+    assert payload["run_context"] == {
+        "run": {"status": "completed", "profile": "run"},
+        "declaration": manifest["guard"]["contract"],
+        "execution": {
+            "expected_nodes": 2,
+            "processes_per_node": 1,
+            "expected_world_size": 2,
+            "launcher_completion": {
+                "status": "completed",
+                "nodes_observed": 2,
+                "reason_codes": [],
+            },
+        },
+    }

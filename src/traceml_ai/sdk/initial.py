@@ -311,9 +311,21 @@ def _resolve_runtime_settings(
         defaults=BUILT_IN_DEFAULTS,
     )
 
-    resolved_session = str(
-        session_id or _env_str("TRACEML_SESSION_ID", "") or get_session_id()
-    )
+    env_session = _env_str("TRACEML_SESSION_ID", "")
+    if session_id:
+        session_source = "explicit"
+    elif env_session:
+        # A launcher or a user export sets only the id, which is explicit.
+        # start_runtime() also mirrors the source, so a child of a process
+        # that made up its id keeps stamping it as generated.
+        session_source = (
+            "generated"
+            if _env_str("TRACEML_SESSION_SOURCE", "") == "generated"
+            else "explicit"
+        )
+    else:
+        session_source = "generated"
+    resolved_session = str(session_id or env_session or get_session_id())
     host = str(
         aggregator_host
         if aggregator_host is not None
@@ -336,6 +348,11 @@ def _resolve_runtime_settings(
         history_enabled=bool(cfg["history_enabled"]),
         history_retention_s=float(cfg["history_retention"]),
         session_id=resolved_session,
+        # Lets an aggregator started with an explicit id still admit a rank
+        # that had to make up its own (plain `python train.py` under serve).
+        session_source=session_source,
+        # Set by a single-node `traceml run`, as executor.py reads it.
+        run_nonce=_env_str("TRACEML_RUN_NONCE", ""),
         trace_max_steps=trace_max_steps,
         aggregator=AggregatorTransportSettings(
             connect_host=host, bind_host=host, port=port

@@ -25,6 +25,12 @@ class SenderIdentity:
     ``global_rank`` is the stable cross-job worker identity used by storage and
     aggregation. ``local_rank`` and ``local_world_size`` describe node-local
     placement, which is useful for device mapping and multi-node debugging.
+
+    ``session_id`` and ``run_nonce`` stamp the run and the launch that own
+    this sender, so an aggregator can drop telemetry from a rank that
+    outlived another run. ``session_source`` is ``"generated"`` when the
+    rank made up its own session id and ``"explicit"`` when it was given one.
+    Empty values are sent as unstamped (``None``).
     """
 
     global_rank: int
@@ -34,6 +40,9 @@ class SenderIdentity:
     node_rank: int = 0
     hostname: str = ""
     pid: int = 0
+    session_id: str = ""
+    run_nonce: str = ""
+    session_source: str = ""
 
     @property
     def rank(self) -> int:
@@ -51,6 +60,9 @@ class SenderIdentity:
             "node_rank": self.node_rank,
             "hostname": self.hostname,
             "pid": self.pid,
+            "session_id": self.session_id or None,
+            "run_nonce": self.run_nonce or None,
+            "session_source": self.session_source or None,
         }
 
 

@@ -6,12 +6,14 @@
 
 """System dashboard block: four resource tiles, two charts and GPU rows.
 
-The tiles summarize GPU utilisation, memory and temperature plus host RAM.
+The tiles summarize GPU utilisation, memory and temperature plus RAM.
 The CPU and GPU-power charts initially show recent raw samples. After the run
 outgrows that window, they use bounded whole-run series: rolling CPU values
 and fixed-duration GPU-power buckets. Both charts share a wall-clock axis.
 
 Per-GPU rows open when the computer says the spread has earned it.
+On a host that reports no GPU, the GPU tiles, the power chart and the rows
+leave the card, which keeps the RAM tile and the CPU chart.
 This section presents measurements and leaves verdicts to diagnostics.
 """
 
@@ -51,6 +53,12 @@ _LIMIT_RED = "#dc2626"
 # The floor reference is deliberately not red: red belongs to the limit.
 _FLOOR_GREY = "#94a3b8"
 _MONO = "font-family:var(--mono);"
+# The CPU heading's and value's tooltips wrap at this width. Each opens
+# from its own edge of the card (heading left, value right), flush with its
+# text, so that the wrapped text stays over the System card.
+_TIP_WRAP = 'max-width="min(320px, 80vw)" :offset="[0, 14]"'
+_TIP_FROM_LEFT = f'{_TIP_WRAP} anchor="bottom left" self="top left"'
+_TIP_FROM_RIGHT = f'{_TIP_WRAP} anchor="bottom right" self="top right"'
 
 
 # --- pure display rules ----------------------------------------------------
@@ -137,6 +145,30 @@ def should_auto_open(*, prev_over: bool, over: bool) -> bool:
     return bool(over and not prev_over)
 
 
+def gpu_layout(
+    *, has_data: bool, gpu_available: bool, previous: str = ""
+) -> str:
+    """Which GPU slots the card shows: 'gpu', 'cpu_only' or 'waiting'.
+
+    'cpu_only' needs a sample that says so. A payload without data
+    carries ``gpu_available`` at its default False rather than as a
+    reading. Before the first sample, folding on it would collapse every
+    GPU host's card for one tick and expand it on the next, so the GPU
+    slots keep their places and wait.
+
+    Once a sample has said there is no GPU, the fold holds through later
+    payloads without data. The compute layer sends one when its reads
+    have failed past the stale TTL. A host does not gain a GPU mid-run,
+    so going back to waiting would only regrow the GPU slots the fold
+    removed, each one showing an absence.
+    """
+    if gpu_available:
+        return "gpu"
+    if has_data or previous == "cpu_only":
+        return "cpu_only"
+    return "waiting"
+
+
 def power_axis_bounds(
     values: List[Optional[float]], limit: Optional[float]
 ) -> Tuple[float, float, float]:
@@ -215,7 +247,11 @@ def odd_ones_out(roll: SystemRollups) -> set:
 
 # Host CPU is psutil.cpu_percent(): the mean across logical cores, where 100%
 # means all cores are fully used. Process CPU uses per-rank semantics.
-CPU_LABEL = "host cpu util · avg across cores"
+CPU_LABEL = "cpu utilization"
+CPU_DEFINITION = (
+    "Average utilization across logical CPU cores. 100% means all cores "
+    "are fully utilized."
+)
 
 # Absent value marker. "n/a" rather than a dash: the Process card on the
 # same page already reads "N/A", and one page should not spell absence two
@@ -368,7 +404,9 @@ def build_system_section() -> Dict[str, Any]:
         "tiles": {},
         "subs": {},
         "tile_els": {},
-        "gpu_visible": True,
+        # The built card is the GPU layout: every slot shown, no
+        # placeholder.
+        "gpu_layout": "gpu",
         "_over": False,
         "_sig": None,
     }
@@ -392,7 +430,7 @@ def build_system_section() -> Dict[str, Any]:
                 ("util", "gpu util", theme.C_GPU),
                 ("mem", "gpu mem", theme.C_GPU),
                 ("temp", "gpu temp", theme.C_GPU),
-                ("ram", "host ram", theme.C_CPU),
+                ("ram", "ram usage", theme.C_CPU),
             ):
                 tile = (
                     ui.element("div")
@@ -413,10 +451,27 @@ def build_system_section() -> Dict[str, Any]:
             .style("gap:8px; margin:2px 0 2px;")
         ):
             panel["cpu_label"] = ui.label(CPU_LABEL).classes("estlabel")
+            # One tooltip element per label, retitled on update: calling
+            # .tooltip() on every tick would add a new element each time.
+            with panel["cpu_label"]:
+                panel["cpu_label_tip"] = ui.tooltip(CPU_DEFINITION).props(
+                    _TIP_FROM_LEFT
+                )
             ui.element("div").style("flex:1;")
-            panel["cpu_value"] = ui.label("").style(
-                f"{_MONO} font-size:13px; font-weight:600; color:var(--ink);"
-            )
+            # The value says which statistic it is: a window median sits
+            # beside a line whose last point is the newest sample. On a
+            # narrow card the row wraps; margin-left:auto keeps the value
+            # at the right edge on its own line.
+            with ui.element("div").style(
+                "display:flex; align-items:baseline; gap:6px; "
+                "margin-left:auto;"
+            ):
+                panel["cpu_value_name"] = ui.label("").classes("estlabel")
+                panel["cpu_value"] = ui.label("").style(
+                    f"{_MONO} font-size:13px; font-weight:600; "
+                    "color:var(--ink);"
+                )
+                panel["cpu_value_tip"] = ui.tooltip("").props(_TIP_FROM_RIGHT)
         panel["cpu_chart"] = ui.echart(
             charting.span_line_options(theme.C_CPU, "%")
         ).style("height:92px; width:100%;")
@@ -433,9 +488,9 @@ def build_system_section() -> Dict[str, Any]:
         panel["power_chart"] = ui.echart(
             charting.multi_line_options(" W")
         ).style("height:150px; width:100%;")
-        # Same slot, same height, when there is no GPU: the card keeps its
-        # shape on every host instead of shrinking around a missing chart.
-        panel["power_placeholder"] = ui.label("no GPU reported").style(
+        # Shown only in the waiting layout, at the chart's height, so a GPU
+        # host's chart replaces it without moving anything below.
+        panel["power_placeholder"] = ui.label("waiting for data").style(
             f"{_MONO} font-size:11px; color:var(--muted); height:150px; "
             "width:100%; display:none; align-items:center; "
             "justify-content:center;"
@@ -461,27 +516,40 @@ def build_system_section() -> Dict[str, Any]:
         with exp:
             panel["rows_html"] = ui.html("", sanitize=False).classes("w-full")
         panel["rows"] = exp
-        panel["rows_placeholder"] = ui.label("per-GPU rows · no GPU").style(
+        panel["rows_placeholder"] = ui.label("per-GPU rows").style(
             f"{_MONO} font-size:11px; color:var(--muted); margin-top:6px; "
             "padding:4px 2px; display:none;"
         )
     return panel
 
 
-def _set_gpu_visible(panel: Dict[str, Any], visible: bool) -> None:
-    if panel.get("gpu_visible") == visible:
+def _set_gpu_layout(panel: Dict[str, Any], layout: str) -> None:
+    """Show the GPU slots that the layout from ``gpu_layout`` calls for.
+
+    A CPU-only host has no GPU slots at all. The three GPU tiles, the
+    power heading, chart and placeholder, and the per-GPU rows all leave
+    the layout, so the card shrinks to what was measured instead of
+    repeating the same absence in every slot. In the waiting layout,
+    every slot keeps its place and the placeholders stand in for the
+    chart and the rows. A card waits before its first sample. A GPU
+    host's card also waits once its reads have failed past the stale TTL.
+    """
+    if panel.get("gpu_layout") == layout:
         return
-    panel["gpu_visible"] = visible
-    # Every slot keeps its place and height on every host (one shape to
-    # learn); the GPU slots show their one-line state instead of vanishing.
-    disp = "block" if visible else "none"
-    panel["power_chart"].style(f"display:{disp};")
+    panel["gpu_layout"] = layout
+    gpu = layout == "gpu"
+    waiting = layout == "waiting"
+    kept = layout != "cpu_only"
+    for key in ("util", "mem", "temp"):
+        panel["tile_els"][key].style(f"display:{'block' if kept else 'none'};")
+    panel["power_head"].style(f"display:{'flex' if kept else 'none'};")
+    panel["power_chart"].style(f"display:{'block' if gpu else 'none'};")
     panel["power_placeholder"].style(
-        f"display:{'none' if visible else 'flex'};"
+        f"display:{'flex' if waiting else 'none'};"
     )
-    panel["rows"].style(f"display:{disp};")
+    panel["rows"].style(f"display:{'block' if gpu else 'none'};")
     panel["rows_placeholder"].style(
-        f"display:{'none' if visible else 'block'};"
+        f"display:{'block' if waiting else 'none'};"
     )
 
 
@@ -527,31 +595,55 @@ def _update_cpu_chart(
         chart.options["yAxis"]["interval"] = ymax / 2.0
         chart.update()
 
+    # The window median, over the same samples the recent chart draws and
+    # the span its heading names. It stays the recent median when the chart
+    # shows whole-run history, so there the label names its window.
     cpu_p50 = roll.cpu.p50 if roll.cpu else None
-    panel["cpu_value"].text = f"{cpu_p50:.0f}%" if cpu_p50 is not None else ""
     span_words = format_span(span)
+    if cpu_p50 is None:
+        panel["cpu_value"].text = ""
+        panel["cpu_value_name"].text = ""
+        panel["cpu_value_tip"].text = ""
+    else:
+        panel["cpu_value"].text = f"{cpu_p50:.0f}%"
+        if not whole_run:
+            panel["cpu_value_name"].text = "median"
+            scope = "in the chart window" + (
+                f", the {span_words}" if span_words else ""
+            )
+        elif span_words:
+            panel["cpu_value_name"].text = f"median · {span_words}"
+            scope = f"in the {span_words}"
+        else:
+            panel["cpu_value_name"].text = "median"
+            scope = "in the recent window"
+        panel["cpu_value_tip"].text = (
+            f"Median of the samples {scope}. {CPU_DEFINITION}"
+        )
     if whole_run:
         window = format_window(run.window_s)
         panel["cpu_label"].text = f"{CPU_LABEL} · recent history" + (
             f" · rolling {window}" if window else ""
         )
-        panel["cpu_label"].tooltip(
-            f"Available history, {format_span(run_span)[5:]}. "
-            "Each point shows "
-            f"average host CPU use over the previous {window}. 100% means "
-            "all logical CPU cores are fully used."
-        )
+        # A clause whose span or window formats empty is left out rather
+        # than printed as a dangling "previous ." phrase.
+        history = format_span(run_span)[5:]
+        tip = [f"Available history, {history}."] if history else []
+        if window:
+            tip.append(f"Each point averages the previous {window}.")
+        panel["cpu_label_tip"].text = " ".join(tip + [CPU_DEFINITION])
     else:
         panel["cpu_label"].text = (
             f"{CPU_LABEL} · {span_words}" if span_words else CPU_LABEL
         )
+        panel["cpu_label_tip"].text = CPU_DEFINITION
 
 
 def _update_system_tiles(
     panel: Dict[str, Any],
     roll: SystemRollups,
     *,
-    gpu_on: bool,
+    layout: str,
     has_data: bool,
 ) -> None:
     """Update the System header and four resource tiles.
@@ -589,10 +681,13 @@ def _update_system_tiles(
         notes.append("waiting for data")
     panel["note"].text = " · ".join(notes)
 
-    if not gpu_on:
+    if layout != "gpu":
+        # Waiting, the tiles hold their place without a reading. CPU-only,
+        # they are hidden and cleared, so no absence marker is left in them.
+        waiting = layout == "waiting"
         for key in ("util", "mem", "temp"):
-            panel["tiles"][key].content = NA
-            panel["subs"][key].text = "no GPU" if has_data else ""
+            panel["tiles"][key].content = NA if waiting else ""
+            panel["subs"][key].text = ""
         return
 
     n_gpus = len(roll.gpus) or (roll.ctx.gpu_count if roll.ctx else 0)
@@ -645,8 +740,7 @@ def _update_power_chart(
     roll: SystemRollups,
     series: SystemSeries,
     *,
-    gpu_on: bool,
-    has_data: bool,
+    layout: str,
     changed: bool,
     secs: List[Optional[float]],
     span: float,
@@ -654,11 +748,12 @@ def _update_power_chart(
     whole_run: bool,
     aligned: Optional[Tuple[float, float]],
 ) -> None:
-    """Update the per-GPU power chart or its no-data presentation."""
-    if not gpu_on:
+    """Update the per-GPU power chart or its waiting placeholder."""
+    if layout != "gpu":
+        # Only a waiting card shows this slot; a CPU-only card hides it.
         panel["power_label"].text = "gpu power"
         panel["power_placeholder"].text = (
-            "no GPU reported" if has_data else "waiting for data"
+            "waiting for data" if layout == "waiting" else ""
         )
         return
 
@@ -803,13 +898,13 @@ def _update_gpu_rows(
     roll: SystemRollups,
     series: SystemSeries,
     *,
-    gpu_on: bool,
-    has_data: bool,
+    layout: str,
 ) -> None:
     """Update per-GPU disclosure state, summary text and row contents."""
-    if not gpu_on:
+    if layout != "gpu":
+        # Only a waiting card shows this slot; a CPU-only card hides it.
         panel["rows_placeholder"].text = (
-            "per-GPU rows · no GPU" if has_data else "per-GPU rows"
+            "per-GPU rows" if layout == "waiting" else ""
         )
         return
 
@@ -833,7 +928,12 @@ def update_system_section(panel: Dict[str, Any], data: Any) -> None:
     series = data.series
     gpu_on = data.gpu_available
     has_data = bool(data.window_len)
-    _set_gpu_visible(panel, gpu_on)
+    layout = gpu_layout(
+        has_data=has_data,
+        gpu_available=gpu_on,
+        previous=panel.get("gpu_layout", ""),
+    )
+    _set_gpu_layout(panel, layout)
 
     x_time = list(series.x_time)
     secs = _relative_seconds(x_time)
@@ -881,15 +981,14 @@ def update_system_section(panel: Dict[str, Any], data: Any) -> None:
     _update_system_tiles(
         panel,
         roll,
-        gpu_on=gpu_on,
+        layout=layout,
         has_data=has_data,
     )
     _update_power_chart(
         panel,
         roll,
         series,
-        gpu_on=gpu_on,
-        has_data=has_data,
+        layout=layout,
         changed=changed,
         secs=secs,
         span=span,
@@ -901,6 +1000,5 @@ def update_system_section(panel: Dict[str, Any], data: Any) -> None:
         panel,
         roll,
         series,
-        gpu_on=gpu_on,
-        has_data=has_data,
+        layout=layout,
     )

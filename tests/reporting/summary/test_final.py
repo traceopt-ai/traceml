@@ -4,6 +4,7 @@
 # you may not use this file except in compliance with the License.
 # SPDX-License-Identifier: Apache-2.0
 
+import json
 from dataclasses import dataclass
 
 from tests.sqlite_fixtures import (
@@ -151,13 +152,14 @@ def test_final_summary_fixture_schema_contains_all_sections(tmp_path) -> None:
 
     payload = build_summary_payload(str(db_path))
 
-    assert payload["schema_version"] == 1.8
+    assert payload["schema_version"] == 1.9
     assert set(payload) == {
         "schema_version",
         "generated_at",
         "duration_s",
         "analysis_window",
         "meta",
+        "run_context",
         "primary_diagnosis",
         "system",
         "process",
@@ -182,6 +184,7 @@ def test_final_summary_fixture_schema_contains_all_sections(tmp_path) -> None:
         "nodes_observed": 1,
         "gpus_observed": 0,
     }
+    assert payload["run_context"] == {}
     for key in ("system", "process", "step_time", "step_memory"):
         assert "metadata" in payload[key]
         assert "card" in payload[key]
@@ -294,7 +297,7 @@ def test_final_report_generator_preserves_summary_schema_and_order():
         ),
     )
 
-    assert payload["schema_version"] == 1.8
+    assert payload["schema_version"] == 1.9
     assert payload["duration_s"] is None
     assert list(payload.keys()) == [
         "schema_version",
@@ -302,6 +305,7 @@ def test_final_report_generator_preserves_summary_schema_and_order():
         "duration_s",
         "analysis_window",
         "meta",
+        "run_context",
         "primary_diagnosis",
         "system",
         "process",
@@ -316,6 +320,7 @@ def test_final_report_generator_preserves_summary_schema_and_order():
         "nodes_observed": None,
         "gpus_observed": None,
     }
+    assert payload["run_context"] == {}
     assert payload["primary_diagnosis"]["kind"] == (
         "INSUFFICIENT_STEP_TIME_DATA"
     )
@@ -327,6 +332,47 @@ def test_final_report_generator_preserves_summary_schema_and_order():
     assert "Section Status" not in text
     assert "System Evidence" not in text
     assert "Step Time Evidence" not in text
+
+
+def test_final_report_projects_manifest_context(tmp_path) -> None:
+    manifest = {
+        "status": "completed",
+        "run": {"run_name": "candidate-run"},
+        "lifecycle": {
+            "training_started_at": "2026-09-29T10:00:00+00:00",
+            "training_ended_at": "2026-09-29T10:01:30+00:00",
+        },
+        "launch": {
+            "profile": "run",
+            "nnodes": 1,
+            "nproc_per_node": 2,
+        },
+    }
+    (tmp_path / "manifest.json").write_text(
+        json.dumps(manifest), encoding="utf-8"
+    )
+
+    payload = build_summary_payload(
+        "fake.db",
+        generator=_generator(
+            _StaticSection("system"),
+            _StaticSection("process"),
+            _StaticSection("step_time"),
+            _StaticSection("step_memory"),
+        ),
+        session_root=str(tmp_path),
+    )
+
+    assert payload["duration_s"] == 90.0
+    assert payload["meta"]["run_name"] == "candidate-run"
+    assert payload["run_context"] == {
+        "run": {"status": "completed", "profile": "run"},
+        "execution": {
+            "expected_nodes": 1,
+            "processes_per_node": 2,
+            "expected_world_size": 2,
+        },
+    }
 
 
 def test_final_report_generator_fails_open_for_one_section():

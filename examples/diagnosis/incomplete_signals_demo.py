@@ -1,23 +1,28 @@
-"""
-Incomplete-signals scenario for the Step Time INCOMPLETE_DATA diagnosis.
+"""Incomplete-signals demo for the Step Time INCOMPLETE_DATA diagnosis.
 
-This keeps the healthy single-process MLP loop shape but calls
+This keeps a healthy single-process MLP loop shape but calls
 ``model.forward(features)`` directly instead of ``model(features)``. The
 forward auto-timer hooks ``nn.Module.__call__`` only, so forward timing is
 never recorded: compute and residual become underivable and TraceML must
-report ``INCOMPLETE DATA`` naming ``forward`` - not a confident BALANCED or
+report ``INCOMPLETE DATA`` naming ``forward``, not a confident BALANCED or
 RESIDUAL-HEAVY verdict built on a fake zero.
 
-Control twin: ``mlp_ddp_healthy_baseline.py`` (fully instrumented; must not
-report INCOMPLETE DATA).
+Control twin: ``examples/quickstart.py`` calls ``model(x)``, so it is fully
+instrumented and does not report INCOMPLETE DATA.
 
 Run on any machine (CPU is fine):
 
-    traceml run python -m dev.demo.mlp_incomplete_signals
+    traceml run examples/diagnosis/incomplete_signals_demo.py
+
+Use ``--epochs`` or ``--steps`` to change the run length::
+
+    traceml run examples/diagnosis/incomplete_signals_demo.py \
+        --args --steps 20
 """
 
 from __future__ import annotations
 
+import argparse
 import random
 
 import torch
@@ -38,6 +43,37 @@ EPOCHS = 2
 LR = 1e-4
 
 
+def positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    length = parser.add_mutually_exclusive_group()
+    length.add_argument(
+        "--epochs",
+        type=positive_int,
+        default=EPOCHS,
+        help="Number of full epochs to run.",
+    )
+    length.add_argument(
+        "--steps",
+        type=positive_int,
+        default=None,
+        help=(
+            "Number of optimizer steps. Replaces --epochs; by "
+            "default, run --epochs full epochs."
+        ),
+    )
+    return parser.parse_args()
+
+
 class BaselineMLP(nn.Module):
     def __init__(self) -> None:
         super().__init__()
@@ -52,6 +88,7 @@ class BaselineMLP(nn.Module):
 
 
 def main() -> None:
+    args = parse_args()
     random.seed(SEED)
     torch.manual_seed(SEED)
 
@@ -72,8 +109,14 @@ def main() -> None:
     criterion = nn.CrossEntropyLoss()
 
     model.train()
-    for _ in range(EPOCHS):
+    epochs = args.epochs
+    if args.steps is not None:
+        epochs = (args.steps + len(loader) - 1) // len(loader)
+
+    step = 0
+    for _ in range(epochs):
         for batch_features, batch_labels in loader:
+            step += 1
             with traceml.trace_step(model):
                 batch_features = batch_features.to(device)
                 batch_labels = batch_labels.to(device)
@@ -85,6 +128,9 @@ def main() -> None:
                 loss = criterion(logits, batch_labels)
                 loss.backward()
                 optimizer.step()
+
+            if args.steps is not None and step >= args.steps:
+                break
 
 
 if __name__ == "__main__":

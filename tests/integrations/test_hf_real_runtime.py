@@ -58,13 +58,11 @@ def _persisted_step_events(db_path: Path) -> tuple[list[int], set[str]]:
     steps: list[int] = []
     names: set[str] = set()
     with sqlite3.connect(str(db_path)) as conn:
-        rows = conn.execute(
-            """
+        rows = conn.execute("""
             SELECT step, events_json
             FROM step_time_samples
             ORDER BY step, id
-            """
-        ).fetchall()
+            """).fetchall()
 
     for step, events_json in rows:
         steps.append(int(step))

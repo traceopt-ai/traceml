@@ -540,7 +540,7 @@ def _summary_fallback_primary(
 
 
 def _pick_summary_balanced_signal(
-    signals: Sequence[Dict[str, Any]]
+    signals: Sequence[Dict[str, Any]],
 ) -> Dict[str, Any]:
     """Prefer reserved memory for neutral summary wording."""
     by_metric = {str(item.get("metric")): item for item in signals}

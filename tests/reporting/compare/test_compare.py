@@ -4,14 +4,24 @@ from typing import Optional
 
 import pytest
 
+import traceml_ai.launcher.commands as launcher_commands
 from traceml_ai.diagnostics.step_time.api import _STATUS_BY_KIND
+from traceml_ai.launcher.cli import build_parser
 from traceml_ai.reporting.compare import (
     build_compare_payload,
     build_compare_text,
+    compare_summaries,
 )
 from traceml_ai.reporting.compare.formatters import CompareTextFormatter
 from traceml_ai.reporting.compare.io import load_summary_json
-from traceml_ai.reporting.compare.policy import _STEP_TIME_STATUS_RANK
+from traceml_ai.reporting.compare.policy import (
+    _STEP_TIME_STATUS_RANK,
+    build_step_time_ci_policy,
+    ci_policy_ineligibility_reason,
+    evaluate_step_time_ci_result,
+    extract_step_time_ci_evidence,
+    parse_step_time_regression_threshold,
+)
 
 BYTES_PER_GB = 1024.0**3
 
@@ -202,6 +212,351 @@ def _build_compare(lhs: dict, rhs: dict) -> dict:
         lhs_path=Path("/tmp/run_a/final_summary.json"),
         rhs_path=Path("/tmp/run_b/final_summary.json"),
     )
+
+
+def _ci_payload() -> dict:
+    payload = _payload_with_sections()
+    payload["run_context"] = {
+        "run": {"status": "completed", "profile": "run"},
+        "declaration": {
+            "schema_version": 1,
+            "workload": {"name": "image-training", "parameters": {}},
+            "measurement": {"start_step": 1, "completed_steps": 20},
+        },
+        "execution": {
+            "expected_nodes": 1,
+            "processes_per_node": 2,
+            "expected_world_size": 2,
+            "launcher_completion": {
+                "status": "completed",
+                "nodes_observed": 1,
+                "reason_codes": [],
+            },
+        },
+    }
+    return payload
+
+
+def _ci_ineligibility_reason(lhs: dict, rhs: dict) -> Optional[str]:
+    return ci_policy_ineligibility_reason(
+        lhs_payload=lhs,
+        rhs_payload=rhs,
+        compare_payload=_build_compare(lhs, rhs),
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("0", 0.0),
+        ("5", 5.0),
+        ("2.5", 2.5),
+    ],
+)
+def test_ci_policy_parses_supported_thresholds(value, expected) -> None:
+    assert parse_step_time_regression_threshold(value) == expected
+
+
+@pytest.mark.parametrize("value", [None, True, "", "-1", "nan", "inf", "x"])
+def test_ci_policy_rejects_invalid_thresholds(value) -> None:
+    with pytest.raises(RuntimeError, match="finite, nonnegative"):
+        parse_step_time_regression_threshold(value)
+
+
+@pytest.mark.parametrize(
+    ("delta_pct", "expected"),
+    [
+        (5.01, "SLOWER_IN_THIS_PAIR"),
+        (5.0, "WITHIN_THRESHOLD_IN_THIS_PAIR"),
+        (0.0, "WITHIN_THRESHOLD_IN_THIS_PAIR"),
+        (-5.0, "WITHIN_THRESHOLD_IN_THIS_PAIR"),
+        (-5.01, "FASTER_IN_THIS_PAIR"),
+    ],
+)
+def test_ci_policy_classifies_threshold_boundaries(
+    delta_pct, expected
+) -> None:
+    # These are the v0.1 decisions; broader statistical analysis is out of scope.
+    assert (
+        evaluate_step_time_ci_result(delta_pct=delta_pct, threshold_pct=5.0)
+        == expected
+    )
+
+
+@pytest.mark.parametrize(
+    ("reference_ms", "candidate_ms"),
+    [(0.3, 0.315), (0.7, 0.735), (0.3, 0.285)],
+)
+def test_ci_policy_keeps_computed_threshold_boundaries_inclusive(
+    reference_ms, candidate_ms
+) -> None:
+    lhs = _ci_payload()
+    rhs = _ci_payload()
+    lhs["step_time"]["global"]["average"]["total_step_ms"] = reference_ms
+    rhs["step_time"]["global"]["average"]["total_step_ms"] = candidate_ms
+
+    policy = build_step_time_ci_policy(
+        lhs_payload=lhs,
+        rhs_payload=rhs,
+        compare_payload=_build_compare(lhs, rhs),
+        threshold="5",
+    )
+
+    assert policy["result"] == "WITHIN_THRESHOLD_IN_THIS_PAIR"
+
+
+def test_ci_policy_accepts_complete_matching_evidence() -> None:
+    assert _ci_ineligibility_reason(_ci_payload(), _ci_payload()) is None
+
+
+def test_ci_policy_reuses_existing_step_time_evidence() -> None:
+    lhs = _ci_payload()
+    rhs = _ci_payload()
+    lhs["step_time"]["global"]["window"]["steps_analyzed"] = 20
+    rhs["step_time"]["global"]["window"]["steps_analyzed"] = 17
+    rhs["step_time"]["global"]["average"]["total_step_ms"] = 330.0
+
+    evidence = extract_step_time_ci_evidence(
+        lhs_payload=lhs,
+        rhs_payload=rhs,
+        compare_payload=_build_compare(lhs, rhs),
+    )
+
+    assert evidence == {
+        "selected_clock": "cpu",
+        "reference_step_time_ms": 300.0,
+        "candidate_step_time_ms": 330.0,
+        "pct_change": pytest.approx(10.0),
+        "reference_steps_analyzed": 20,
+        "candidate_steps_analyzed": 17,
+    }
+
+
+def test_ci_policy_builds_one_block_from_existing_evidence() -> None:
+    lhs = _ci_payload()
+    rhs = _ci_payload()
+    lhs["step_time"]["global"]["window"]["steps_analyzed"] = 20
+    rhs["step_time"]["global"]["window"]["steps_analyzed"] = 17
+    rhs["step_time"]["global"]["average"]["total_step_ms"] = 330.0
+    compare_payload = _build_compare(lhs, rhs)
+
+    policy = build_step_time_ci_policy(
+        lhs_payload=lhs,
+        rhs_payload=rhs,
+        compare_payload=compare_payload,
+        threshold="5",
+    )
+
+    assert policy == {
+        "threshold_pct": 5.0,
+        "selected_clock": "cpu",
+        "reference_step_time_ms": 300.0,
+        "candidate_step_time_ms": 330.0,
+        "pct_change": pytest.approx(10.0),
+        "reference_steps_analyzed": 20,
+        "candidate_steps_analyzed": 17,
+        "result": "SLOWER_IN_THIS_PAIR",
+    }
+
+
+def test_ci_policy_records_inconclusive_reason() -> None:
+    lhs = _ci_payload()
+    rhs = _ci_payload()
+    rhs["run_context"].pop("declaration")
+
+    policy = build_step_time_ci_policy(
+        lhs_payload=lhs,
+        rhs_payload=rhs,
+        compare_payload=_build_compare(lhs, rhs),
+        threshold="5",
+    )
+
+    assert policy["result"] == "INCONCLUSIVE"
+    assert policy["reason"] == (
+        "Both summaries must contain a valid guard declaration."
+    )
+
+
+def test_compare_writes_ci_policy_only_when_requested(
+    tmp_path, capsys
+) -> None:
+    lhs = _ci_payload()
+    rhs = _ci_payload()
+    lhs["step_time"]["global"]["window"]["steps_analyzed"] = 20
+    rhs["step_time"]["global"]["window"]["steps_analyzed"] = 17
+    rhs["step_time"]["global"]["average"]["total_step_ms"] = 330.0
+    lhs_path = tmp_path / "reference.json"
+    rhs_path = tmp_path / "candidate.json"
+    lhs_path.write_text(json.dumps(lhs), encoding="utf-8")
+    rhs_path.write_text(json.dumps(rhs), encoding="utf-8")
+
+    exploratory = compare_summaries(
+        lhs_path,
+        rhs_path,
+        output=tmp_path / "exploratory",
+        print_to_stdout=False,
+    )
+    evaluated = compare_summaries(
+        lhs_path,
+        rhs_path,
+        output=tmp_path / "evaluated",
+        max_step_time_regression_pct="5",
+        print_to_stdout=True,
+    )
+    stdout = capsys.readouterr().out
+
+    assert "ci_policy" not in exploratory
+    assert "CI Policy" not in exploratory["text"]
+    assert evaluated["ci_policy"]["result"] == "SLOWER_IN_THIS_PAIR"
+    assert "CI Policy" in evaluated["text"]
+    assert "Result: SLOWER_IN_THIS_PAIR" in evaluated["text"]
+    assert "Threshold: 5.0% maximum Step Time regression" in evaluated["text"]
+    assert "Evidence: CPU Step Time 300.0 ms -> 330.0 ms (+10.0%)" in (
+        evaluated["text"]
+    )
+    assert "Analyzed steps: 20 -> 17" in evaluated["text"]
+    assert evaluated["text"] in stdout
+    persisted = json.loads((tmp_path / "evaluated.json").read_text())
+    assert persisted["ci_policy"] == evaluated["ci_policy"]
+    assert (tmp_path / "evaluated.txt").read_text().rstrip() == evaluated[
+        "text"
+    ]
+
+
+def test_ci_regression_exits_after_writing_compare_artifacts(tmp_path) -> None:
+    lhs = _ci_payload()
+    rhs = _ci_payload()
+    rhs["step_time"]["global"]["average"]["total_step_ms"] = 330.0
+    lhs_path = tmp_path / "reference.json"
+    rhs_path = tmp_path / "candidate.json"
+    output = tmp_path / "ci-result"
+    lhs_path.write_text(json.dumps(lhs), encoding="utf-8")
+    rhs_path.write_text(json.dumps(rhs), encoding="utf-8")
+    args = build_parser().parse_args(
+        [
+            "compare",
+            str(lhs_path),
+            str(rhs_path),
+            "--max-step-time-regression-pct",
+            "5",
+            "--output",
+            str(output),
+        ]
+    )
+
+    # The command must preserve its evidence before returning the CI failure.
+    with pytest.raises(SystemExit) as exc_info:
+        launcher_commands.run_compare(args)
+
+    assert exc_info.value.code == 4
+    assert output.with_suffix(".txt").is_file()
+    persisted = json.loads(output.with_suffix(".json").read_text())
+    assert persisted["ci_policy"]["result"] == "SLOWER_IN_THIS_PAIR"
+
+
+def test_compare_text_renders_ci_policy_inconclusive_reason() -> None:
+    lhs = _ci_payload()
+    rhs = _ci_payload()
+    rhs["run_context"].pop("declaration")
+    compare_payload = _build_compare(lhs, rhs)
+    compare_payload["ci_policy"] = build_step_time_ci_policy(
+        lhs_payload=lhs,
+        rhs_payload=rhs,
+        compare_payload=compare_payload,
+        threshold="5",
+    )
+
+    text = build_compare_text(compare_payload)
+
+    assert "Result: INCONCLUSIVE" in text
+    assert (
+        "Reason: Both summaries must contain a valid guard declaration."
+        in text
+    )
+
+
+def test_ci_policy_requires_matching_declarations() -> None:
+    lhs = _ci_payload()
+    rhs = _ci_payload()
+    rhs["run_context"].pop("declaration")
+    assert _ci_ineligibility_reason(lhs, rhs) == (
+        "Both summaries must contain a valid guard declaration."
+    )
+
+    rhs = _ci_payload()
+    rhs["run_context"]["declaration"]["workload"]["name"] = "other-training"
+    assert _ci_ineligibility_reason(lhs, rhs) == (
+        "The guard declarations do not match."
+    )
+
+
+def test_ci_policy_requires_matching_topology() -> None:
+    lhs = _ci_payload()
+    rhs = _ci_payload()
+    rhs["run_context"]["execution"].pop("expected_world_size")
+    assert _ci_ineligibility_reason(lhs, rhs) == (
+        "Both summaries must contain a valid expected topology."
+    )
+
+    rhs = _ci_payload()
+    rhs["run_context"]["execution"].update(
+        expected_nodes=2,
+        processes_per_node=2,
+        expected_world_size=4,
+    )
+    assert _ci_ineligibility_reason(lhs, rhs) == (
+        "The expected topologies do not match."
+    )
+
+
+@pytest.mark.parametrize("status", ["failed", "interrupted"])
+def test_ci_policy_requires_completed_training(status) -> None:
+    lhs = _ci_payload()
+    rhs = _ci_payload()
+    rhs["run_context"]["run"]["status"] = status
+
+    assert _ci_ineligibility_reason(lhs, rhs) == (
+        "Training must be completed in both summaries."
+    )
+
+
+def test_ci_policy_requires_completed_launcher_outcome() -> None:
+    lhs = _ci_payload()
+    rhs = _ci_payload()
+    rhs["run_context"]["execution"]["launcher_completion"][
+        "status"
+    ] = "incomplete"
+
+    assert _ci_ineligibility_reason(lhs, rhs) == (
+        "Launcher completion must be recorded for both summaries."
+    )
+
+
+@pytest.mark.parametrize("step_time_ms", [None, 0.0, float("inf")])
+def test_ci_policy_requires_positive_finite_common_clock_step_time(
+    step_time_ms,
+) -> None:
+    lhs = _ci_payload()
+    rhs = _ci_payload()
+    rhs["step_time"]["global"]["average"]["total_step_ms"] = step_time_ms
+
+    assert _ci_ineligibility_reason(lhs, rhs) == (
+        "Positive Step Time is required on a common CPU or GPU clock."
+    )
+
+
+def test_compare_ignores_additive_run_context() -> None:
+    lhs = _payload_with_sections()
+    rhs = _payload_with_sections()
+    expected = _build_compare(lhs, rhs)
+    lhs["run_context"] = {"run": {"status": "completed"}}
+    rhs["run_context"] = {"run": {"status": "failed"}}
+
+    actual = _build_compare(lhs, rhs)
+
+    assert actual["sections"] == expected["sections"]
+    assert actual["overview"] == expected["overview"]
+    assert actual["verdict"] == expected["verdict"]
 
 
 def test_compare_missing_both_primary_sections_on_lhs_is_unclear() -> None:

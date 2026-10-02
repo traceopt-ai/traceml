@@ -82,14 +82,12 @@ def _load_gpu_available(conn: sqlite3.Connection) -> Optional[bool]:
 
 def _load_global_ranks_seen(conn: sqlite3.Connection) -> int:
     """Return number of global ranks with step-memory rows."""
-    row = conn.execute(
-        """
+    row = conn.execute("""
         SELECT COUNT(DISTINCT global_rank)
         FROM step_memory_samples
         WHERE global_rank IS NOT NULL
           AND step IS NOT NULL;
-        """
-    ).fetchone()
+        """).fetchone()
     return int(row[0] or 0) if row else 0
 
 

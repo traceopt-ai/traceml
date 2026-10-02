@@ -64,9 +64,12 @@ torch = [
     "torchvision>=0.20.0",
 ]
 dev = [
-    "black>=26.1.0",
-    "ruff>=0.14.14",
-    "isort>=7.0.0",
+    # Keep these three equal to the revs in .pre-commit-config.yaml, which
+    # is what CI's lint job runs. A newer local formatter reformats files
+    # that CI considers clean.
+    "black==26.5.1",
+    "ruff==0.15.22",
+    "isort==9.0.1",
     "pre-commit",
     "codespell>=2.4.1",
     "nbstripout",

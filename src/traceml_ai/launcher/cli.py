@@ -72,8 +72,8 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         default="",
         help=(
             "Human-readable TraceML run name. Determines the output folder "
-            "under --logs-dir. Required for multi-node runs unless "
-            "--session-id is used."
+            "under --logs-dir, which must not already exist. Required for "
+            "multi-node runs unless --session-id is used."
         ),
     )
     parser.add_argument(
@@ -384,6 +384,15 @@ def build_parser() -> argparse.ArgumentParser:
             "Optional output base path. "
             "Writes both <base>.json and <base>.txt. "
             "Default: compare/<left>_vs_<right> in the current directory."
+        ),
+    )
+    compare_parser.add_argument(
+        "--max-step-time-regression-pct",
+        default=None,
+        metavar="PERCENT",
+        help=(
+            "Optional maximum Step Time regression percentage for CI policy "
+            "evaluation."
         ),
     )
 
