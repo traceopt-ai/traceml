@@ -20,10 +20,12 @@
 
 [**Quickstart**](#quickstart) •
 [**Performance checks**](#performance-regression-checks) •
+[**Interactive demo**](https://huggingface.co/spaces/abhinavsriva/traceml-training-diagnosis) •
 [**Try in Colab**](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/notebooks/data_loading_bottleneck.ipynb) •
 [**Integrations**](https://traceopt-ai.github.io/traceml/user_guide/integrations/) •
-[**Documentation**](https://traceopt-ai.github.io/traceml/) •
-[**GitHub Issues**](https://github.com/traceopt-ai/traceml/issues)
+[**Documentation**](https://traceopt-ai.github.io/traceml/)
+
+⭐ **If TraceML helps you, please [star this repo](https://github.com/traceopt-ai/traceml). It helps others find the project.**
 
 </div>
 
