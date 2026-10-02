@@ -24,6 +24,21 @@ def load(name):
 
 dataset = load("generate_dataset")
 analysis = load("analyze")
+training = load("train")
+
+
+@pytest.mark.parametrize(
+    ("model_fields", "expected"),
+    [
+        (
+            {"do_random_resize_via_padding": object()},
+            {"do_random_resize_via_padding": False},
+        ),
+        ({"multi_scale": object()}, {}),
+    ],
+)
+def test_version_specific_train_options(model_fields, expected):
+    assert training.version_specific_train_options(model_fields) == expected
 
 
 def test_dataset_is_deterministic_coco_and_refuses_replacement(tmp_path):

@@ -111,6 +111,13 @@ def dependency_fingerprint(frozen: str) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
+def version_specific_train_options(model_fields) -> dict:
+    """Disable legacy resize behavior only on releases that expose it."""
+    if "do_random_resize_via_padding" in model_fields:
+        return {"do_random_resize_via_padding": False}
+    return {}
+
+
 def cpu_description() -> str:
     try:
         rows = json.loads(command("lscpu", "--json"))["lscpu"]
@@ -321,7 +328,6 @@ def main(argv: list[str] | None = None) -> None:
         amp_dtype=precision,
         multi_scale=False,
         expanded_scales=False,
-        do_random_resize_via_padding=False,
         augmentation_backend="torchvision",
         devices=1,
         num_nodes=1,
@@ -333,6 +339,7 @@ def main(argv: list[str] | None = None) -> None:
         progress_bar=None,
         run_test=False,
         save_dataset_grids=False,
+        **version_specific_train_options(TrainConfig.model_fields),
     )
     trainer_overrides = {
         "max_steps": args.steps,
