@@ -1,4 +1,4 @@
-"""Validate RF-DETR release runs and produce a publication-oriented report."""
+"""Validate RF-DETR release runs and produce a reproducibility report."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from pathlib import Path
 VERSIONS = ("1.10.1", "1.11.0", "1.11.1")
 MODES = ("native", "traced")
 REPEATS = (1, 2, 3)
+EVALUATION_PROTOCOL_VERSION = 2
 
 
 def percent_delta(candidate: float, reference: float) -> float:
@@ -255,6 +256,15 @@ def evaluate(
         "fixed_input_wait_pct": percent_delta(
             fixed["input_wait_ms"], baseline["input_wait_ms"]
         ),
+        "fixed_vs_regressed_native_pct": percent_delta(
+            fixed["native_ms"], regressed["native_ms"]
+        ),
+        "fixed_vs_regressed_input_wait_pct": percent_delta(
+            fixed["input_wait_ms"], regressed["input_wait_ms"]
+        ),
+        "fixed_vs_regressed_compute_pct": percent_delta(
+            fixed["compute_ms"], regressed["compute_ms"]
+        ),
     }
     by_repeat = {(row["repeat"], row["version"]): row for row in rows}
     checks = [
@@ -284,9 +294,8 @@ def evaluate(
             >= regression_threshold,
         },
         {
-            "name": f"median compute change is within {stability_threshold:.1f}%",
-            "passed": abs(deltas["regressed_compute_pct"])
-            <= stability_threshold,
+            "name": f"1.11.0 median compute regression is at most {stability_threshold:.1f}%",
+            "passed": deltas["regressed_compute_pct"] <= stability_threshold,
         },
         {
             "name": f"1.11.1 native wall time is within {recovery_threshold:.1f}% of baseline",
@@ -297,11 +306,33 @@ def evaluate(
             "passed": abs(deltas["fixed_input_wait_pct"])
             <= recovery_threshold,
         },
+        {
+            "name": "1.11.1 native wall time improves over 1.11.0 in every repeat",
+            "passed": all(
+                by_repeat[(repeat, "1.11.1")]["native_ms"]
+                < by_repeat[(repeat, "1.11.0")]["native_ms"]
+                for repeat in REPEATS
+            ),
+        },
+        {
+            "name": "1.11.1 input wait improves over 1.11.0 in every repeat",
+            "passed": all(
+                by_repeat[(repeat, "1.11.1")]["phases"]["input_wait_ms"]
+                < by_repeat[(repeat, "1.11.0")]["phases"]["input_wait_ms"]
+                for repeat in REPEATS
+            ),
+        },
+        {
+            "name": f"1.11.1 compute change versus 1.11.0 is within {stability_threshold:.1f}%",
+            "passed": abs(deltas["fixed_vs_regressed_compute_pct"])
+            <= stability_threshold,
+        },
     ]
     checks.extend(
         {
-            "name": f"{version} median TraceML overhead is at most {overhead_threshold:.1f}%",
-            "passed": medians[version]["overhead_pct"] <= overhead_threshold,
+            "name": f"{version} absolute median traced/native delta is at most {overhead_threshold:.1f}%",
+            "passed": abs(medians[version]["overhead_pct"])
+            <= overhead_threshold,
         }
         for version in VERSIONS
     )
@@ -316,10 +347,33 @@ def make_report(
 ) -> str:
     supported = all(check["passed"] for check in checks)
     status = "SUPPORTED" if supported else "INCONCLUSIVE"
+    passed = sum(check["passed"] for check in checks)
+    maximum_pair_delta = max(
+        abs(metric["overhead_pct"]) for metric in medians.values()
+    )
     lines = [
         "# RF-DETR non-JPEG input-pipeline regression",
         "",
-        f"**Publication status: {status}.**",
+        f"**Evaluation status: {status} ({passed}/{len(checks)} checks passed).**",
+        "",
+        f"Evaluation protocol: {EVALUATION_PROTOCOL_VERSION}.",
+        "",
+        "## Outcome",
+        "",
+        f"- RF-DETR 1.11.0 native wall time versus 1.10.1: "
+        f"{deltas['regressed_native_pct']:+.2f}%.",
+        f"- RF-DETR 1.11.0 input wait versus 1.10.1: "
+        f"{deltas['regressed_input_wait_pct']:+.2f}%.",
+        f"- RF-DETR 1.11.0 compute regions versus 1.10.1: "
+        f"{deltas['regressed_compute_pct']:+.2f}%.",
+        f"- RF-DETR 1.11.1 native wall time versus 1.11.0: "
+        f"{deltas['fixed_vs_regressed_native_pct']:+.2f}%.",
+        f"- RF-DETR 1.11.1 input wait versus 1.11.0: "
+        f"{deltas['fixed_vs_regressed_input_wait_pct']:+.2f}%.",
+        f"- RF-DETR 1.11.1 compute regions versus 1.11.0: "
+        f"{deltas['fixed_vs_regressed_compute_pct']:+.2f}%.",
+        f"- Largest absolute median traced/native timing delta: "
+        f"{maximum_pair_delta:.2f}%.",
         "",
     ]
     if supported:
@@ -327,19 +381,27 @@ def make_report(
             "The measurements support the following statement:",
             "",
             "> TraceML reproduced a released RF-DETR training regression, localized "
-            "the change to input wait rather than GPU computation, and verified that "
-            "the following release restored the baseline behavior.",
+            "the slowdown to input wait rather than a GPU-compute regression, and "
+            "verified that the following release restored the baseline behavior while "
+            "retaining comparable GPU-compute time.",
         ]
     else:
         lines += [
-            "These measurements do not satisfy every predeclared publication check. "
-            "They should not be presented as proof of the regression on this host.",
+            "The measurements do not satisfy every evaluation check. The observed "
+            "values remain available below, but the complete automated claim is not "
+            "supported on this host.",
+            "",
+            "Failed checks:",
+            "",
         ]
+        lines.extend(
+            f"- {check['name']}" for check in checks if not check["passed"]
+        )
     lines += [
         "",
         "## Individual measurements",
         "",
-        "| Repeat | RF-DETR | Native ms/step | Traced ms/step | TraceML overhead | Input wait ms | Compute ms |",
+        "| Repeat | RF-DETR | Native ms/step | Traced ms/step | Traced/native delta | Input wait ms | Compute ms |",
         "|---:|---|---:|---:|---:|---:|---:|",
     ]
     for row in rows:
@@ -354,10 +416,12 @@ def make_report(
         "Compute is the sum of TraceML forward, backward and optimizer regions. "
         "Input wait is exposed waiting at the training-process boundary; it is not "
         "the total CPU preprocessing cost across worker processes.",
+        "Negative traced/native deltas represent run-to-run timing variation, not "
+        "acceleration from instrumentation.",
         "",
         "## Median comparison",
         "",
-        "| RF-DETR | Native ms/step | Input wait ms | Compute ms | TraceML overhead |",
+        "| RF-DETR | Native ms/step | Input wait ms | Compute ms | Traced/native delta |",
         "|---|---:|---:|---:|---:|",
     ]
     for version in VERSIONS:
@@ -377,7 +441,16 @@ def make_report(
         f"- RF-DETR 1.11.1 native wall time: {deltas['fixed_native_pct']:+.2f}%",
         f"- RF-DETR 1.11.1 input wait: {deltas['fixed_input_wait_pct']:+.2f}%",
         "",
-        "## Publication checks",
+        "Relative to RF-DETR 1.11.0:",
+        "",
+        f"- RF-DETR 1.11.1 native wall time: "
+        f"{deltas['fixed_vs_regressed_native_pct']:+.2f}%",
+        f"- RF-DETR 1.11.1 input wait: "
+        f"{deltas['fixed_vs_regressed_input_wait_pct']:+.2f}%",
+        f"- RF-DETR 1.11.1 compute regions: "
+        f"{deltas['fixed_vs_regressed_compute_pct']:+.2f}%",
+        "",
+        "## Evaluation checks",
         "",
         "| Check | Result |",
         "|---|---|",
@@ -418,7 +491,8 @@ def analyze(
         overhead_threshold=overhead_threshold,
     )
     return {
-        "schema_version": 1,
+        "schema_version": 2,
+        "evaluation_protocol_version": EVALUATION_PROTOCOL_VERSION,
         "status": (
             "supported"
             if all(row["passed"] for row in checks)
@@ -426,9 +500,10 @@ def analyze(
         ),
         "thresholds_pct": {
             "minimum_regression": regression_threshold,
-            "maximum_compute_change": stability_threshold,
+            "maximum_compute_regression": stability_threshold,
+            "maximum_fixed_compute_change": stability_threshold,
             "maximum_recovery_delta": recovery_threshold,
-            "maximum_traceml_overhead": overhead_threshold,
+            "maximum_absolute_traced_native_delta": overhead_threshold,
         },
         "runs": rows,
         "medians": medians,

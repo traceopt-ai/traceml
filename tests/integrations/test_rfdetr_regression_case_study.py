@@ -195,6 +195,8 @@ def test_complete_release_sequence_supports_only_declared_claim(tmp_path):
     result = analysis.analyze(tmp_path)
 
     assert result["status"] == "supported"
+    assert result["schema_version"] == 2
+    assert result["evaluation_protocol_version"] == 2
     assert result["deltas_pct"]["regressed_native_pct"] == pytest.approx(20.0)
     assert result["deltas_pct"]["regressed_input_wait_pct"] == pytest.approx(
         40.0
@@ -206,11 +208,12 @@ def test_complete_release_sequence_supports_only_declared_claim(tmp_path):
         result["checks"],
         result["deltas_pct"],
     )
-    assert "Publication status: SUPPORTED" in report
+    assert "Evaluation status: SUPPORTED" in report
+    assert "Evaluation protocol: 2" in report
     assert "not a claim of original discovery" in report
 
 
-def test_publication_status_is_inconclusive_when_compute_changes():
+def test_status_is_inconclusive_when_compute_regresses():
     rows = []
     for repeat in analysis.REPEATS:
         for version, native, wait, compute in (
@@ -229,7 +232,7 @@ def test_publication_status_is_inconclusive_when_compute_changes():
                 }
             )
     medians = analysis.median_metrics(rows)
-    checks, _ = analysis.evaluate(
+    checks, deltas = analysis.evaluate(
         rows,
         medians,
         regression_threshold=10.0,
@@ -238,6 +241,47 @@ def test_publication_status_is_inconclusive_when_compute_changes():
         overhead_threshold=5.0,
     )
     compute_check = next(
-        check for check in checks if "compute change" in check["name"]
+        check
+        for check in checks
+        if "1.11.0 median compute regression" in check["name"]
     )
     assert not compute_check["passed"]
+    report = analysis.make_report(rows, medians, checks, deltas)
+    assert "Evaluation status: INCONCLUSIVE" in report
+    assert "Failed checks:" in report
+    assert compute_check["name"] in report
+
+
+def test_compute_improvement_does_not_invalidate_localization():
+    rows = []
+    for repeat in analysis.REPEATS:
+        for version, native, wait, compute in (
+            ("1.10.1", 20.0, 10.0, 10.0),
+            ("1.11.0", 24.0, 14.0, 8.9),
+            ("1.11.1", 20.5, 10.5, 8.8),
+        ):
+            rows.append(
+                {
+                    "repeat": repeat,
+                    "version": version,
+                    "native_ms": native,
+                    "traced_ms": native * 1.02,
+                    "overhead_pct": 2.0,
+                    "phases": {"input_wait_ms": wait, "compute_ms": compute},
+                }
+            )
+    medians = analysis.median_metrics(rows)
+    checks, deltas = analysis.evaluate(
+        rows,
+        medians,
+        regression_threshold=10.0,
+        stability_threshold=10.0,
+        recovery_threshold=10.0,
+        overhead_threshold=5.0,
+    )
+
+    assert deltas["regressed_compute_pct"] == pytest.approx(-11.0)
+    assert deltas["fixed_vs_regressed_compute_pct"] == pytest.approx(
+        -1.1235955
+    )
+    assert all(check["passed"] for check in checks)

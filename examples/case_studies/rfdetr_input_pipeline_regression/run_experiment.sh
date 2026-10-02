@@ -250,7 +250,8 @@ def sha256(path):
     return digest.hexdigest()
 
 payload = {
-    "schema_version": 1,
+    "schema_version": 2,
+    "evaluation_protocol_version": 2,
     "started_at": datetime.now(timezone.utc).isoformat(),
     "versions": ["1.10.1", "1.11.0", "1.11.1"],
     "version_orders": [
@@ -259,6 +260,22 @@ payload = {
         ["1.11.0", "1.10.1", "1.11.1"],
     ],
     "mode_orders": [["native", "traced"], ["traced", "native"], ["native", "traced"]],
+    "workload": {
+        "model": "RF-DETR Nano",
+        "resolution": 384,
+        "batch_size": 4,
+        "num_workers": 0,
+        "steps": 50,
+        "warmup_steps": 10,
+        "seed": 1544,
+    },
+    "thresholds_pct": {
+        "minimum_regression": 10.0,
+        "maximum_compute_regression": 10.0,
+        "maximum_fixed_compute_change": 10.0,
+        "maximum_recovery_delta": 10.0,
+        "maximum_absolute_traced_native_delta": 5.0,
+    },
     "dataset": {
         "path": str(dataset),
         "image_format": image_format,
