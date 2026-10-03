@@ -2,11 +2,11 @@
 
 Requires CUDA. Run with:
 
-    traceml run examples/advanced/fsdp_minimal_cuda.py --nproc-per-node=2
+    traceml run examples/distributed/fsdp_minimal_cuda.py --nproc-per-node=2
 
 Use ``--epochs`` or ``--steps`` to change the run length::
 
-    traceml run examples/advanced/fsdp_minimal_cuda.py \
+    traceml run examples/distributed/fsdp_minimal_cuda.py \
         --nproc-per-node=2 --args --steps 20
 """
 

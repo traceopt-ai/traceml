@@ -20,14 +20,14 @@ On Ubuntu or Debian, install venv support first with
 From the TraceML repository root:
 
 ```bash
-bash examples/advanced/lerobot_v3_image_regression/run_reproduction.sh
+bash examples/case_studies/lerobot_v3_image_regression/run_reproduction.sh
 ```
 
 That runs one broken/fixed pair. For publication evidence, run two pairs so the
 second pair reverses the order and exposes startup or cache effects:
 
 ```bash
-bash examples/advanced/lerobot_v3_image_regression/run_reproduction.sh --pairs 2
+bash examples/case_studies/lerobot_v3_image_regression/run_reproduction.sh --pairs 2
 ```
 
 The first run installs the pinned environment and downloads the public dataset.
@@ -49,8 +49,8 @@ Analysis does not need a GPU or a TraceML installation:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r examples/advanced/lerobot_v3_image_regression/analysis-requirements.txt
-jupyter lab examples/advanced/lerobot_v3_image_regression/analyze_results.ipynb
+pip install -r examples/case_studies/lerobot_v3_image_regression/analysis-requirements.txt
+jupyter lab examples/case_studies/lerobot_v3_image_regression/analyze_results.ipynb
 ```
 
 Choose **Run All**. The notebook finds the newest complete result under

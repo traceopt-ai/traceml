@@ -40,7 +40,7 @@ Prefer Colab? Browse the [runnable notebooks](../notebooks/README.md).
 | Example | What it shows | Requirements |
 |---|---|---|
 | [Hugging Face Trainer](integrations/huggingface_trainer_minimal.py) | Standard Trainer with `TraceMLTrainerCallback` | CPU / CUDA; no model download |
-| [Hugging Face ViT](advanced/huggingface_vision_vit.py) | Trainer image classification on CIFAR-10 | CPU / CUDA; downloads model and data |
+| [Hugging Face ViT](integrations/huggingface_vision_vit.py) | Trainer image classification on CIFAR-10 | CPU / CUDA; downloads model and data |
 | [Accelerate](integrations/accelerate_minimal.py) | Accelerator loop with `trace_step` | CPU / CUDA; no model download |
 | [Lightning](integrations/lightning_minimal.py) | Initialize tracing and add `TraceMLCallback` | CPU / CUDA; no dataset download |
 | [Lightning loader comparison](integrations/lightning_dataloading_bottleneck.py) | Compare DataLoader profiles on ResNet-18 and 320px Imagenette | CUDA; 326 MB download; CPU `--smoke`; companion Colab notebook |
@@ -48,16 +48,16 @@ Prefer Colab? Browse the [runnable notebooks](../notebooks/README.md).
 | [MONAI pipeline comparison](integrations/monai_dataloading_bottleneck.py) | Compare loading, caching and compute settings on a 3D UNet | CUDA; 1.6 GB spleen dataset (CC BY-SA 4.0), `nibabel`; CPU `--smoke`; companion Colab notebook |
 | [RF-DETR](integrations/rfdetr_minimal.py) | Trace Nano training and compare worker counts | CPU / CUDA recipe; `rfdetr[train]==1.10.1`, local COCO export, pretrained weights download; [guide](../docs/user_guide/integrations/rfdetr.md) |
 | [DeepSpeed](integrations/deepspeed_minimal.py) | Engine loop with `trace_step` | CUDA; requires `deepspeed`, exits cleanly without it |
-| [Ray Train](ray/torchtrainer_minimal.py) | `TraceMLTorchTrainer` with Ray Data input timing | CPU / CUDA |
-| [Ray + Lightning](ray/lightning_text_classifier.py) | Text classifier with Ray Data, `TraceMLCallback`, and input/H2D controls | CPU / CUDA |
+| [Ray Train](integrations/ray/torchtrainer_minimal.py) | `TraceMLTorchTrainer` with Ray Data input timing | CPU / CUDA |
+| [Ray + Lightning](integrations/ray/lightning_text_classifier.py) | Text classifier with Ray Data, `TraceMLCallback`, and input/H2D controls | CPU / CUDA |
 
 ## Distributed training
 
 | Example | What it shows | Works on |
 |---|---|---|
 | [DDP](distributed/ddp_minimal.py) | Minimal single-node distributed loop | CPU / CUDA |
-| [FSDP](advanced/fsdp_minimal_cuda.py) | Sharded training with `trace_step` | CUDA |
-| [Slurm](slurm/README.md) | Multi-node launch templates | Slurm cluster |
+| [FSDP](distributed/fsdp_minimal_cuda.py) | Sharded training with `trace_step` | CUDA |
+| [Slurm](distributed/slurm/README.md) | Multi-node launch templates | Slurm cluster |
 
 ---
 
@@ -123,14 +123,14 @@ Run controlled workloads to investigate hardware or batch configuration.
 
 | Example | What it demonstrates | Works on | Notes |
 |---|---|---|---|
-| [advanced/bert_single_gpu_compare.py](advanced/bert_single_gpu_compare.py) | Run the same fixed BERT workload on different single-GPU machines, then compare TraceML summaries | CUDA | Use the same batch size, sequence length, precision, and step count on each machine |
-| [`advanced/qwen3_8b_lora_ga`](advanced/qwen3_8b_lora_ga/) | Measure physical batch size and gradient accumulation with Qwen3-8B TRL LoRA while holding effective batch and packed-token capacity constant | CUDA | Production-shaped single-L40S workload; includes a 500-step matrix runner |
-| [BERT gradient accumulation](advanced/bert_gradient_accum.py) | Group microbatches into optimizer updates in a plain PyTorch BERT loop | CPU / CUDA | Downloads BERT and AG News; batch and accumulation settings are in the script |
+| [workloads/bert_single_gpu_compare.py](workloads/bert_single_gpu_compare.py) | Run the same fixed BERT workload on different single-GPU machines, then compare TraceML summaries | CUDA | Use the same batch size, sequence length, precision, and step count on each machine |
+| [`workloads/qwen3_8b_lora_ga`](workloads/qwen3_8b_lora_ga/) | Measure physical batch size and gradient accumulation with Qwen3-8B TRL LoRA while holding effective batch and packed-token capacity constant | CUDA | Production-shaped single-L40S workload; includes a 500-step matrix runner |
+| [BERT gradient accumulation](workloads/bert_gradient_accum.py) | Group microbatches into optimizer updates in a plain PyTorch BERT loop | CPU / CUDA | Downloads BERT and AG News; batch and accumulation settings are in the script |
 
 Example hardware comparison run:
 
 ```bash
-traceml run examples/advanced/bert_single_gpu_compare.py --mode=summary --run-name bert_l40s_bs32_seq256 --args --model-name bert-large-uncased --batch-size 32 --max-length 256 --max-steps 350 --warmup-steps 50 --num-workers 4 --precision fp16
+traceml run examples/workloads/bert_single_gpu_compare.py --mode=summary --run-name bert_l40s_bs32_seq256 --args --model-name bert-large-uncased --batch-size 32 --max-length 256 --max-steps 350 --warmup-steps 50 --num-workers 4 --precision fp16
 ```
 
 ---
@@ -204,7 +204,7 @@ The same `--steps` option sets the run length of `quickstart.py`,
 `summary_logging_minimal.py`, `manual_custom_minimal.py`,
 `integrations/huggingface_trainer_minimal.py`,
 `integrations/accelerate_minimal.py`, `integrations/deepspeed_minimal.py`,
-`advanced/fsdp_minimal_cuda.py`, `diagnosis/h2d_timing_demo.py`,
+`distributed/fsdp_minimal_cuda.py`, `diagnosis/h2d_timing_demo.py`,
 `diagnosis/step_memory_creep_demo.py`, and
 `diagnosis/incomplete_signals_demo.py`. `accelerate_minimal.py`,
 `deepspeed_minimal.py`, `fsdp_minimal_cuda.py`, `step_memory_creep_demo.py`
@@ -221,10 +221,10 @@ traceml run examples/integrations/deepspeed_minimal.py --nproc-per-node=2 --mode
 Multi-node on Slurm:
 
 ```bash
-sbatch examples/slurm/traceml_ddp.sbatch
+sbatch examples/distributed/slurm/traceml_ddp.sbatch
 ```
 
-See [`examples/slurm/`](slurm/README.md) and the
+See [`examples/distributed/slurm/`](distributed/slurm/README.md) and the
 [Slurm guide](../docs/user_guide/slurm.md) for the template and the
 network/aggregator model.
 

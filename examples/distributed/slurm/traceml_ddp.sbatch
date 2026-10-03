@@ -4,7 +4,7 @@
 #
 # Submit from the TraceML repository root:
 #
-#     sbatch examples/slurm/traceml_ddp.sbatch
+#     sbatch examples/distributed/slurm/traceml_ddp.sbatch
 #
 # It launches one `traceml run` per node (TraceML spawns the per-GPU workers
 # itself, like torchrun). Node 0 owns the TraceML aggregator; the other nodes
@@ -52,4 +52,4 @@ cd "$SLURM_SUBMIT_DIR"
 
 # srun launches launch.sh once per node. The wrapper expands the per-node Slurm
 # variables ($SLURM_NODEID, $SLURM_NNODES, $SLURM_GPUS_ON_NODE) on each node.
-srun examples/slurm/launch.sh
+srun examples/distributed/slurm/launch.sh

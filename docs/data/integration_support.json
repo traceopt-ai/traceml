@@ -210,7 +210,7 @@
         "multi_node": { "status": "Experimental", "detail": "no reproducible job" }
       },
       "emitted_signals": "Guide documents step, forward, backward, optimizer, and wrapped Ray Data fetch timing; no real-Ray CI signal assertion exists.",
-      "example": "examples/ray/torchtrainer_minimal.py",
+      "example": "examples/integrations/ray/torchtrainer_minimal.py",
       "validation_level": "documented recipe",
       "limitations": {
         "guide_label": "Ray guide",

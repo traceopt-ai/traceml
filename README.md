@@ -134,7 +134,7 @@ No training script ready? [Try the Colab example](https://colab.research.google.
 | Investigation | What you can learn |
 |---|---|
 | [Hugging Face Trainer](notebooks/huggingface_dataloading_bottleneck.ipynb) | Diagnose an input bottleneck and compare the same training job after adjusting its DataLoader settings. |
-| [LeRobot dataset regression](examples/advanced/lerobot_v3_image_regression/README.md) | Reproduce an upstream image-loading regression and compare the ACT training workload before and after its fix. |
+| [LeRobot dataset regression](examples/case_studies/lerobot_v3_image_regression/README.md) | Reproduce an upstream image-loading regression and compare the ACT training workload before and after its fix. |
 | [RF-DETR release regression](examples/case_studies/rfdetr_input_pipeline_regression/README.md) | Trace a release-to-release training slowdown to input waiting and verify recovery in the fixed release. |
 
 [All case studies →](examples/case_studies/README.md)

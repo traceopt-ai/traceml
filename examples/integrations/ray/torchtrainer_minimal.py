@@ -6,10 +6,10 @@ their input fetches through the PyTorch DataLoader patch. Wrap Ray
 you want Ray input timing in the Step Time summary.
 
 Run locally:
-    python examples/ray/torchtrainer_minimal.py
+    python examples/integrations/ray/torchtrainer_minimal.py
 
 Run with GPUs:
-    python examples/ray/torchtrainer_minimal.py --use-gpu --num-workers 4
+    python examples/integrations/ray/torchtrainer_minimal.py --use-gpu --num-workers 4
 """
 
 from __future__ import annotations

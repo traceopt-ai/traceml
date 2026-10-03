@@ -8,7 +8,7 @@ If you are new to multi-node TraceML, read
 Slurm-specific glue.
 
 A ready-to-use template lives in
-[`examples/slurm/`](https://github.com/traceopt-ai/traceml/tree/main/examples/slurm):
+[`examples/distributed/slurm/`](https://github.com/traceopt-ai/traceml/tree/main/examples/distributed/slurm):
 `traceml_ddp.sbatch` (the job) and `launch.sh` (the per-node wrapper).
 
 ## Mental model
@@ -79,7 +79,7 @@ node, so the variable is expanded per node:
 
 ```bash
 # traceml_ddp.sbatch
-srun examples/slurm/launch.sh
+srun examples/distributed/slurm/launch.sh
 ```
 
 ```bash
@@ -158,7 +158,7 @@ traceml run examples/distributed/ddp_minimal.py \
 
 ## Full template
 
-```bash title="examples/slurm/traceml_ddp.sbatch"
+```bash title="examples/distributed/slurm/traceml_ddp.sbatch"
 #!/bin/bash
 #SBATCH --job-name=traceml-ddp
 #SBATCH --nodes=2                 # number of nodes -> --nnodes
@@ -180,13 +180,13 @@ export MASTER_ADDR="$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 export RUN_NAME="ddp-${SLURM_JOB_ID}-${SLURM_RESTART_COUNT:-0}"
 
 cd "$SLURM_SUBMIT_DIR"
-srun examples/slurm/launch.sh
+srun examples/distributed/slurm/launch.sh
 ```
 
 Submit it from the repository root:
 
 ```bash
-sbatch examples/slurm/traceml_ddp.sbatch
+sbatch examples/distributed/slurm/traceml_ddp.sbatch
 ```
 
 ## Where to find results

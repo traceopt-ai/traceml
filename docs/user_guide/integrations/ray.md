@@ -99,7 +99,7 @@ it for a local Ray run.
 Minimal Ray Train example:
 
 ```bash
-python examples/ray/torchtrainer_minimal.py \
+python examples/integrations/ray/torchtrainer_minimal.py \
   --ray-address=auto \
   --num-workers=2 \
   --steps=100 \
@@ -109,7 +109,7 @@ python examples/ray/torchtrainer_minimal.py \
 To make input timing visible in the minimal example:
 
 ```bash
-python examples/ray/torchtrainer_minimal.py \
+python examples/integrations/ray/torchtrainer_minimal.py \
   --ray-address=auto \
   --num-workers=2 \
   --steps=100 \
@@ -133,7 +133,7 @@ TraceMLRayConfig(
 )
 ```
 
-The ``examples/ray/lightning_text_classifier.py`` demo also includes
+The ``examples/integrations/ray/lightning_text_classifier.py`` demo also includes
 ``--input-delay-ms`` / ``--input-delay-rank`` for input-straggler demos,
 ``--delay-ms`` / ``--delay-rank`` for compute-straggler demos, and
 ``--transfer-dim`` to make Lightning H2D timing visible.
@@ -143,7 +143,7 @@ full dataset-sized tensor.
 Baseline Ray + Lightning run:
 
 ```bash
-python examples/ray/lightning_text_classifier.py \
+python examples/integrations/ray/lightning_text_classifier.py \
   --ray-address=auto \
   --num-workers=2 \
   --max-steps=100 \
@@ -153,7 +153,7 @@ python examples/ray/lightning_text_classifier.py \
 Input-straggler demo:
 
 ```bash
-python examples/ray/lightning_text_classifier.py \
+python examples/integrations/ray/lightning_text_classifier.py \
   --ray-address=auto \
   --num-workers=2 \
   --max-steps=100 \
@@ -165,7 +165,7 @@ python examples/ray/lightning_text_classifier.py \
 Compute-straggler demo:
 
 ```bash
-python examples/ray/lightning_text_classifier.py \
+python examples/integrations/ray/lightning_text_classifier.py \
   --ray-address=auto \
   --num-workers=2 \
   --max-steps=100 \

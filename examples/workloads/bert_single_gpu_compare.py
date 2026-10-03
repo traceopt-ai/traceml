@@ -8,7 +8,7 @@ This example is for the first hardware-comparison blog post:
 
 Example:
 
-    traceml run examples/advanced/bert_single_gpu_compare.py \\
+    traceml run examples/workloads/bert_single_gpu_compare.py \\
         --mode=summary \\
         --run-name bert_l40s_bs32_seq256 \\
         --args --model-name bert-large-uncased --batch-size 32 \\
