@@ -129,15 +129,15 @@ Summary mode is the default. TraceML prints the final diagnosis and writes
 
 No training script ready? [Try the Colab example](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/notebooks/data_loading_bottleneck.ipynb).
 
-## Case studies
+## Featured case studies
 
 | Investigation | What you can learn |
 |---|---|
-| [Hugging Face Trainer](notebooks/huggingface_dataloading_bottleneck.ipynb) | Diagnose an input bottleneck and compare the same training job after adjusting its DataLoader settings. |
-| [LeRobot dataset regression](examples/case_studies/lerobot_v3_image_regression/README.md) | Reproduce an upstream image-loading regression and compare the ACT training workload before and after its fix. |
+| [ResNet-18 input pipeline](examples/case_studies/resnet18_input_bound/README.md) | See an input-bound run become compute-bound after changing only its DataLoader settings. |
+| [RF-DETR Nano training](examples/case_studies/rfdetr_nano_training/README.md) | Examine single-GPU phase timing and four-GPU DDP scaling on real COCO batches. |
 | [RF-DETR release regression](examples/case_studies/rfdetr_input_pipeline_regression/README.md) | Trace a release-to-release training slowdown to input waiting and verify recovery in the fixed release. |
 
-[All case studies →](examples/case_studies/README.md)
+[All case studies and reproduction packages →](https://traceopt-ai.github.io/traceml/case-studies/)
 
 ## Example Reports
 

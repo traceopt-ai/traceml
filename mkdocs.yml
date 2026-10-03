@@ -88,6 +88,7 @@ nav:
       - Low GPU Utilization: guides/low-gpu-utilization-pytorch.md
       - DDP Rank Stragglers: guides/ddp-slow-training-rank-straggler.md
       - Memory Creep: guides/pytorch-memory-creep.md
+      - Case Studies: case-studies.md
   - User Guide:
       - Quickstart: user_guide/quickstart.md
       - Distributed Training: user_guide/distributed-training.md
