@@ -1,0 +1,7 @@
+--extra-index-url https://download.pytorch.org/whl/cu128
+
+# The three RF-DETR wheels share this environment. Every run also records the
+# complete resolved package list and a fingerprint excluding RF-DETR itself.
+torch==2.9.1+cu128
+torchvision==0.24.1+cu128
+pytorch-lightning==2.6.1
