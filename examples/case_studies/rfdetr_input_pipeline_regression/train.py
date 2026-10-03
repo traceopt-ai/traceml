@@ -160,7 +160,11 @@ def validate_dataset(dataset: Path) -> tuple[dict, str]:
         raise ValueError("case study requires a PNG or BMP dataset")
     for row in manifest.get("files", []):
         path = dataset / row["path"]
-        if not path.is_file() or path.stat().st_size != row["bytes"]:
+        if (
+            not path.is_file()
+            or path.stat().st_size != row["bytes"]
+            or sha256(path) != row["sha256"]
+        ):
             raise ValueError(f"dataset file differs from manifest: {path}")
     for split in ("train2017", "val2017"):
         if (
@@ -314,6 +318,8 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     model_kwargs = {"device": "cuda:0", "compile": False, "resolution": 384}
+    # RF-DETR 1.10.1 has no CUDA-graphs option, which means CUDA-graph
+    # capture is effectively disabled there as it is explicitly below.
     if "cuda_graphs" in RFDETRNanoConfig.model_fields:
         model_kwargs["cuda_graphs"] = False
     model_config = RFDETRNanoConfig(**model_kwargs)

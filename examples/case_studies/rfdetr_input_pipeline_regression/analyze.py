@@ -222,8 +222,13 @@ def median_metrics(rows: list[dict]) -> dict[str, dict[str, float]]:
             ),
         }
         for key in selected[0]["phases"]:
-            result[version][key] = statistics.median(
-                row["phases"][key] for row in selected
+            values = [
+                row["phases"][key]
+                for row in selected
+                if row["phases"][key] is not None
+            ]
+            result[version][key] = (
+                statistics.median(values) if values else None
             )
     return result
 
@@ -380,8 +385,8 @@ def make_report(
         lines += [
             "The measurements support the following statement:",
             "",
-            "> TraceML reproduced a released RF-DETR training regression, localized "
-            "the slowdown to input wait rather than a GPU-compute regression, and "
+            "> TraceML reproduced a released RF-DETR training regression, observed "
+            "increased input wait while GPU compute did not regress, and "
             "verified that the following release restored the baseline behavior while "
             "retaining comparable GPU-compute time.",
         ]

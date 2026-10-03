@@ -70,13 +70,14 @@ The current analyzer uses evaluation protocol 2. A result is marked
   and by at least 10% at the median;
 - 1.11.0 GPU compute does not regress by more than 10% relative to 1.10.1;
 - 1.11.1 native step time and input wait return to within 10% of 1.10.1;
+- 1.11.1 native step time and input wait improve over 1.11.0 in every repeat;
 - GPU compute remains within 10% between 1.11.0 and 1.11.1; and
 - the absolute median native-versus-instrumented timing delta is at most 5% for
   every release.
 
-The analyzer always prints the measurements, deltas, passed checks and failed
-checks. An unsupported result remains useful diagnostic evidence, but it does
-not satisfy the complete automated claim.
+When all 18 runs validate, the analyzer prints the measurements, deltas, passed
+checks and failed checks. An unsupported result remains useful diagnostic
+evidence, but it does not satisfy the complete automated claim.
 
 ### Methodology note
 

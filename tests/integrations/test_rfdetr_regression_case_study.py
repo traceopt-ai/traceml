@@ -252,6 +252,32 @@ def test_status_is_inconclusive_when_compute_regresses():
     assert compute_check["name"] in report
 
 
+def test_missing_h2d_does_not_break_median_analysis():
+    rows = []
+    for repeat in analysis.REPEATS:
+        for version in analysis.VERSIONS:
+            rows.append(
+                {
+                    "repeat": repeat,
+                    "version": version,
+                    "native_ms": 20.0,
+                    "traced_ms": 20.4,
+                    "overhead_pct": 2.0,
+                    "phases": {
+                        "input_wait_ms": 10.0,
+                        "compute_ms": 6.0,
+                        "h2d_ms": None,
+                    },
+                }
+            )
+
+    medians = analysis.median_metrics(rows)
+
+    assert all(
+        medians[version]["h2d_ms"] is None for version in analysis.VERSIONS
+    )
+
+
 def test_compute_improvement_does_not_invalidate_localization():
     rows = []
     for repeat in analysis.REPEATS:
