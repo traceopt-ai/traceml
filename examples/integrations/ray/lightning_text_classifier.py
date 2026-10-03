@@ -3,11 +3,11 @@
 This follows Ray's Lightning TorchTrainer pattern while adding TraceML's Ray
 runtime wrapper and Lightning callback:
 
-    python examples/ray/lightning_text_classifier.py --ray-address=auto
+    python examples/integrations/ray/lightning_text_classifier.py --ray-address=auto
 
 On a two-node Ray cluster with one GPU per node:
 
-    python examples/ray/lightning_text_classifier.py \\
+    python examples/integrations/ray/lightning_text_classifier.py \\
       --ray-address=auto \\
       --use-gpu \\
       --num-workers=2 \\

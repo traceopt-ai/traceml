@@ -9,7 +9,7 @@ Slurm-managed GPU cluster.
 | `launch.sh` | The per-node wrapper `srun` runs on each node. It expands the per-node Slurm variables and calls `traceml run`. |
 
 The full walkthrough, including the network/aggregator model, lives in the
-[Slurm guide](../../docs/user_guide/slurm.md).
+[Slurm guide](../../../docs/user_guide/slurm.md).
 
 ## Submit
 
@@ -17,7 +17,7 @@ From the TraceML repository root (the scripts use paths relative to the submit
 directory):
 
 ```bash
-sbatch examples/slurm/traceml_ddp.sbatch
+sbatch examples/distributed/slurm/traceml_ddp.sbatch
 ```
 
 ## What it does
@@ -56,4 +56,4 @@ Node 0 writes the run report to:
 
 `--logs-dir` defaults to `./logs` relative to the submit directory. Put it on a
 shared filesystem so the summary is reachable from anywhere. See the
-[Slurm guide](../../docs/user_guide/slurm.md) for details.
+[Slurm guide](../../../docs/user_guide/slurm.md) for details.

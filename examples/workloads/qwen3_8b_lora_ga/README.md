@@ -19,7 +19,7 @@ repository root, install TraceML from the checkout and the workload packages:
 
 ```bash
 python -m pip install -e .
-python -m pip install -r examples/advanced/qwen3_8b_lora_ga/requirements.txt
+python -m pip install -r examples/workloads/qwen3_8b_lora_ga/requirements.txt
 ```
 
 This workload does not use `torchao`. If the AMI contains `torchao<0.16` and
@@ -39,7 +39,7 @@ The default command performs a five-step fit check with physical batch 8,
 followed by four 500-update runs:
 
 ```bash
-bash examples/advanced/qwen3_8b_lora_ga/run_matrix.sh --steps 500
+bash examples/workloads/qwen3_8b_lora_ga/run_matrix.sh --steps 500
 ```
 
 The matrix keeps the effective batch at 8:
@@ -55,7 +55,7 @@ If the physical batch 8 preflight runs out of memory, rerun with batch 4 as
 the largest configuration:
 
 ```bash
-bash examples/advanced/qwen3_8b_lora_ga/run_matrix.sh \
+bash examples/workloads/qwen3_8b_lora_ga/run_matrix.sh \
   --steps 500 \
   --max-batch 4
 ```
@@ -63,7 +63,7 @@ bash examples/advanced/qwen3_8b_lora_ga/run_matrix.sh \
 For an order-reversed second measurement:
 
 ```bash
-bash examples/advanced/qwen3_8b_lora_ga/run_matrix.sh \
+bash examples/workloads/qwen3_8b_lora_ga/run_matrix.sh \
   --steps 500 \
   --order reverse \
   --repeat 2 \
@@ -90,7 +90,7 @@ optimizer update:
 traceml run \
   --mode summary \
   --run-name qwen3_8b_bs2_ga4 \
-  examples/advanced/qwen3_8b_lora_ga/train.py \
+  examples/workloads/qwen3_8b_lora_ga/train.py \
   --args \
   --batch-size 2 \
   --max-steps 500 \
@@ -112,7 +112,7 @@ only at the boundaries of the complete training loop.
 Run the two endpoint configurations in reverse order from the TraceML matrix:
 
 ```bash
-bash examples/advanced/qwen3_8b_lora_ga/run_no_traceml_endpoints.sh \
+bash examples/workloads/qwen3_8b_lora_ga/run_no_traceml_endpoints.sh \
   --steps 500
 ```
 
