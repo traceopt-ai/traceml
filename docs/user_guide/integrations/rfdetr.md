@@ -127,6 +127,9 @@ coverage. The [RF-DETR Nano case study](https://github.com/traceopt-ai/traceml/t
 also exercises eager CUDA training on one and four T4 GPUs against development
 commit
 [`0ed5be8`](https://github.com/roboflow/rf-detr/commit/0ed5be8e8d6762c4978a11671cbf34cfc0595e25).
+The [RF-DETR release-regression case study](https://github.com/traceopt-ai/traceml/tree/main/examples/case_studies/rfdetr_input_pipeline_regression)
+compares releases 1.10.1, 1.11.0 and 1.11.1 on a controlled non-JPEG workload
+and attributes the observed slowdown to increased input waiting.
 This evidence is not a broad compatibility matrix. CUDA CI and physical
 multi-node execution have not yet been validated. See the
 [support matrix](../integrations.md#integration-support-matrix) for the current
