@@ -85,8 +85,8 @@ At the end of a run, it gives you:
 
 TraceML produces this diagnosis at the end of the instrumented training run.
 
-Want the complete evidence? Jump to the
-[single-run and distributed example reports](#example-reports).
+Running distributed training? See the
+[rank-straggler example report](#example-reports).
 
 ## Quickstart
 
@@ -129,49 +129,17 @@ Summary mode is the default. TraceML prints the final diagnosis and writes
 
 No training script ready? [Try the Colab example](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/notebooks/data_loading_bottleneck.ipynb).
 
+## Case studies
+
+| Investigation | What you can learn |
+|---|---|
+| [Hugging Face Trainer](notebooks/huggingface_dataloading_bottleneck.ipynb) | Diagnose an input bottleneck and compare the same training job after adjusting its DataLoader settings. |
+| [LeRobot dataset regression](examples/advanced/lerobot_v3_image_regression/README.md) | Reproduce an upstream image-loading regression and compare the ACT training workload before and after its fix. |
+| [RF-DETR release regression](examples/case_studies/rfdetr_input_pipeline_regression/README.md) | Trace a release-to-release training slowdown to input waiting and verify recovery in the fixed release. |
+
+[All case studies →](examples/case_studies/README.md)
+
 ## Example Reports
-
-<details>
-<summary><strong>See the complete single-run report</strong></summary>
-
-```text
-+----------------------------------------------------------------------------------------------------------------------------------------------------------+
-|  TraceML Run Summary                                                                                                                                     |
-|  bert_finetune · 1 rank · 1 GPU observed · 256 common steps · 52.4s                                                                                      |
-+----------------------------------------------------------------------------------------------------------------------------------------------------------+
-|                                                                                                                                                          |
-|  Verdict: INPUT-BOUND  (CRITICAL)                                                                                                                        |
-|  Why: Input Wait took 64% of Step Time.                                                                                                                  |
-|  Next: Increase workers, prefetch, or storage throughput.                                                                                                |
-|                                                                                                                                                          |
-|  STEP TIMING (Window Average), GPU Clock                      ||  STEP MEMORY: BALANCED                                                                  |
-|  Step Time           200.4 ms  100%                           ||                                                                                         |
-|  ├─ Input Wait       128.0 ms   64%  ◀  cause                 ||                                                                                         |
-|  ├─ Compute           68.0 ms   34%                           ||  avg per-step peak           avg                                                        |
-|  │  ├─ Forward        24.0 ms   12%                           ||  Allocated                   2.9 GB                                                     |
-|  │  ├─ Backward       38.0 ms   19%                           ||  Reserved                    3.2 GB                                                     |
-|  │  └─ Optimizer       6.0 ms    3%                           ||                                                                                         |
-|  ├─ H2D                0.4 ms   <1%                           ||                                                                                         |
-|  └─ Residual           3.6 ms    2%                           ||                                                                                         |
-|  DataLoader fetch: 120.0 ms (CPU, supplemental)               ||                                                                                         |
-|                                                                                                                                                          |
-|  SYSTEM METRICS: LOW GPU UTIL                                 ||  PROCESS METRICS: NORMAL                                                                |
-|  Evidence: GPU utilization averaged 24%.                      ||                                                                                         |
-|                                                               ||                                                                                         |
-|                         avg                                   ||                       avg                                                               |
-|  CPU                    18%                                   ||  CPU capacity         14%                                                               |
-|  RAM used               6.2 GB (19%)                          ||  RSS used             3.1 GB (10%)                                                      |
-|  GPU util               24%                                   ||  CUDA allocated       2.9 GB                                                            |
-|  GPU memory/device      3.3 GB (21%)                          ||  CUDA reserved        3.2 GB (20%)                                                      |
-|  GPU temperature        42C                                   ||                                                                                         |
-|  GPU power              58W                                   ||                                                                                         |
-|                                                                                                                                                          |
-|                                                                                                                                                          |
-|  Full evidence: logs/bert_finetune/final_summary.json  (--html-report)                                                                                   |
-+----------------------------------------------------------------------------------------------------------------------------------------------------------+
-```
-
-</details>
 
 <details>
 <summary><strong>Running distributed training? See a rank-straggler diagnosis</strong></summary>
@@ -393,7 +361,6 @@ analysis and diagnoses.
 ## Learn More
 
 - [Complete quickstart](https://traceopt-ai.github.io/traceml/user_guide/quickstart/)
-- [Measured case studies](https://github.com/traceopt-ai/traceml/blob/main/examples/case_studies/README.md)
 - [Examples](https://github.com/traceopt-ai/traceml/blob/main/examples/README.md)
 - [Troubleshoot slow training](https://traceopt-ai.github.io/traceml/guides/slow-pytorch-training/)
 - [Public API](https://traceopt-ai.github.io/traceml/user_guide/public-api/)

@@ -18,47 +18,60 @@ All commands below assume that checkout directory.
 
 ## Start here
 
-These are the main user-facing examples.
-
-| Example | What it shows | Works on | Notes |
-|---|---|---|---|
-| `quickstart.py` | Minimal plain PyTorch loop with `traceml.init(mode="auto")`, `traceml.trace_step(...)`, and `traceml.summary(...)` | CPU / CUDA | Best first example |
-| `summary_logging_minimal.py` | Minimal tracker-friendly `traceml.summary()` output for W&B or MLflow logging | CPU / CUDA | Best summary API example |
-| `manual_custom_minimal.py` | Manual TraceML instrumentation with a custom batch source and explicit wrappers | CPU / CUDA | Best starting point for `mode="manual"` |
-| `distributed/ddp_minimal.py` | Minimal single-node DDP example | CPU / CUDA | Best distributed starter |
-| `ray/torchtrainer_minimal.py` | Minimal Ray Train example with Ray Data input timing | CPU / CUDA | Uses `TraceMLTorchTrainer` |
-| `ray/lightning_text_classifier.py` | Ray Train + Lightning text classifier | CPU / CUDA | Uses Ray Data, `TraceMLCallback`, and optional input/H2D demo knobs |
-| `integrations/huggingface_trainer_minimal.py` | Minimal Hugging Face `TraceMLTrainerCallback` example | CPU / CUDA | No model download required |
-| `integrations/accelerate_minimal.py` | Minimal Hugging Face `Accelerate` loop wrapped with `traceml.trace_step(...)` | CPU / CUDA | No model download required |
-| `integrations/lightning_minimal.py` | Minimal Lightning integration init + `TraceMLCallback` example | CPU / CUDA | No dataset download required |
-| `integrations/rfdetr_minimal.py` | RF-DETR Nano with automatic tracing; compare two DataLoader worker counts | CPU / CUDA recipe | Requires `rfdetr[train]==1.10.1` and a local COCO export; downloads pretrained weights on first use; see the [guide](../docs/user_guide/integrations/rfdetr.md) |
-| `integrations/lightning_dataloading_bottleneck.py` | ResNet-18 on 320px Imagenette under Lightning; `--profile` flips the DataLoader settings and nothing else, so two runs plus `traceml compare` isolate the loader change | CPU (`--smoke`) / CUDA | Downloads 326 MB on first use; `--smoke` runs a synthetic CPU check; companion Colab notebook in `notebooks/` |
-| `integrations/monai_minimal.py` | Minimal MONAI `SupervisedTrainer` with `TraceMLHandler` in `train_handlers` | CPU / CUDA | Synthetic volumes and a small UNet, so nothing is downloaded; see the [guide](../docs/user_guide/integrations/monai.md) |
-| `integrations/monai_dataloading_bottleneck.py` | 3D UNet on MONAI's spleen segmentation task under `SupervisedTrainer`; each flag changes one data-loading or compute setting, so consecutive runs plus `traceml compare` isolate that setting | CPU (`--smoke`) / CUDA | Downloads the 1.6 GB Medical Segmentation Decathlon spleen archive (CC BY-SA 4.0) on first use and reads it with `nibabel`; `--smoke` runs a synthetic CPU check; companion Colab notebook in `notebooks/` |
-| `integrations/deepspeed_minimal.py` | Minimal DeepSpeed loop wrapped with `traceml.trace_step(...)` | CUDA | Requires `deepspeed`; exits cleanly without it |
-
-If you only try one example first, use:
-
 ```bash
 traceml run examples/quickstart.py
 ```
 
-Summary mode is the default, so this prints the final diagnosis and writes the
-JSON/TXT artifacts without opening a live UI. Keep the final summary JSON if
-you want to compare runs later with `traceml compare`.
+Summary mode prints the final diagnosis and writes JSON/TXT artifacts. Keep
+the final summary JSON to compare runs later with `traceml compare`.
+
+Prefer Colab? Browse the [runnable notebooks](../notebooks/README.md).
+
+## Basic examples
+
+| Example | What it shows | Works on |
+|---|---|---|
+| [Quickstart](quickstart.py) | Plain PyTorch loop with automatic instrumentation and a final summary | CPU / CUDA |
+| [Summary logging](summary_logging_minimal.py) | Export `traceml.summary()` for W&B or MLflow | CPU / CUDA |
+| [Custom instrumentation](manual_custom_minimal.py) | Custom batch source and explicit wrappers in manual mode | CPU / CUDA |
+
+## Framework integrations
+
+| Example | What it shows | Requirements |
+|---|---|---|
+| [Hugging Face Trainer](integrations/huggingface_trainer_minimal.py) | Standard Trainer with `TraceMLTrainerCallback` | CPU / CUDA; no model download |
+| [Hugging Face ViT](advanced/huggingface_vision_vit.py) | Trainer image classification on CIFAR-10 | CPU / CUDA; downloads model and data |
+| [Accelerate](integrations/accelerate_minimal.py) | Accelerator loop with `trace_step` | CPU / CUDA; no model download |
+| [Lightning](integrations/lightning_minimal.py) | Initialize tracing and add `TraceMLCallback` | CPU / CUDA; no dataset download |
+| [Lightning loader comparison](integrations/lightning_dataloading_bottleneck.py) | Compare DataLoader profiles on ResNet-18 and 320px Imagenette | CUDA; 326 MB download; CPU `--smoke`; companion Colab notebook |
+| [MONAI](integrations/monai_minimal.py) | `SupervisedTrainer` with `TraceMLHandler` | CPU / CUDA; synthetic volumes, no download; [guide](../docs/user_guide/integrations/monai.md) |
+| [MONAI pipeline comparison](integrations/monai_dataloading_bottleneck.py) | Compare loading, caching and compute settings on a 3D UNet | CUDA; 1.6 GB spleen dataset (CC BY-SA 4.0), `nibabel`; CPU `--smoke`; companion Colab notebook |
+| [RF-DETR](integrations/rfdetr_minimal.py) | Trace Nano training and compare worker counts | CPU / CUDA recipe; `rfdetr[train]==1.10.1`, local COCO export, pretrained weights download; [guide](../docs/user_guide/integrations/rfdetr.md) |
+| [DeepSpeed](integrations/deepspeed_minimal.py) | Engine loop with `trace_step` | CUDA; requires `deepspeed`, exits cleanly without it |
+| [Ray Train](ray/torchtrainer_minimal.py) | `TraceMLTorchTrainer` with Ray Data input timing | CPU / CUDA |
+| [Ray + Lightning](ray/lightning_text_classifier.py) | Text classifier with Ray Data, `TraceMLCallback`, and input/H2D controls | CPU / CUDA |
+
+## Distributed training
+
+| Example | What it shows | Works on |
+|---|---|---|
+| [DDP](distributed/ddp_minimal.py) | Minimal single-node distributed loop | CPU / CUDA |
+| [FSDP](advanced/fsdp_minimal_cuda.py) | Sharded training with `trace_step` | CUDA |
+| [Slurm](slurm/README.md) | Multi-node launch templates | Slurm cluster |
 
 ---
 
 ## Diagnosis demos
 
-These examples are still user-facing, but they are more about showing specific TraceML diagnoses than showing the smallest integration.
+Controlled examples for understanding TraceML's timing signals and diagnoses.
 
 | Example | What it demonstrates | Works on | Notes |
 |---|---|---|---|
-| `diagnosis/dataloader_bottleneck_demo.py` | Slow input pipeline or input-bound training | CPU / CUDA | Simulates dataloader delay |
-| `distributed/ddp_rank_straggler_demo.py` | Rank stragglers in DDP | CPU / CUDA | Simulates balanced, input-straggler, and compute-straggler runs |
-| `diagnosis/step_memory_creep_demo.py` | Step memory creep (`MEMORY CREEP`) | CUDA for the verdict; runs on CPU | Retains 8 MiB of CUDA memory per step on every rank; on CPU it runs without leaking and Step Memory reports `NO GPU` |
-| `diagnosis/incomplete_signals_demo.py` | Missing signals reported as absent, not zero (`INCOMPLETE DATA`) | CPU / CUDA | Calls `model.forward(...)` directly, so forward timing is never recorded |
+| [diagnosis/dataloader_bottleneck_demo.py](diagnosis/dataloader_bottleneck_demo.py) | Slow input pipeline or input-bound training | CPU / CUDA | Simulates dataloader delay |
+| [distributed/ddp_rank_straggler_demo.py](distributed/ddp_rank_straggler_demo.py) | Rank stragglers in DDP | CPU / CUDA | Simulates balanced, input-straggler, and compute-straggler runs |
+| [diagnosis/step_memory_creep_demo.py](diagnosis/step_memory_creep_demo.py) | Step memory creep (`MEMORY CREEP`) | CUDA for the verdict; runs on CPU | Retains 8 MiB of CUDA memory per step on every rank; on CPU it runs without leaking and Step Memory reports `NO GPU` |
+| [H2D timing](diagnosis/h2d_timing_demo.py) | Inspect host-to-device transfer timings per step | CUDA for timing; runs on CPU | CPU-only moves are reported as absent |
+| [diagnosis/incomplete_signals_demo.py](diagnosis/incomplete_signals_demo.py) | Missing signals reported as absent, not zero (`INCOMPLETE DATA`) | CPU / CUDA | Calls `model.forward(...)` directly, so forward timing is never recorded |
 
 These are useful when you want to see how TraceML behaves on a known bottleneck.
 
@@ -104,16 +117,15 @@ traceml run examples/diagnosis/incomplete_signals_demo.py
 
 ---
 
-## Advanced workloads
+## Workload comparisons
 
-These are real or heavier workloads intended for focused investigations, not
-first-run examples.
+Run controlled workloads to investigate hardware or batch configuration.
 
 | Example | What it demonstrates | Works on | Notes |
 |---|---|---|---|
-| `advanced/bert_single_gpu_compare.py` | Run the same fixed BERT workload on different single-GPU machines, then compare TraceML summaries | CUDA | Use the same batch size, sequence length, precision, and step count on each machine |
+| [advanced/bert_single_gpu_compare.py](advanced/bert_single_gpu_compare.py) | Run the same fixed BERT workload on different single-GPU machines, then compare TraceML summaries | CUDA | Use the same batch size, sequence length, precision, and step count on each machine |
 | [`advanced/qwen3_8b_lora_ga`](advanced/qwen3_8b_lora_ga/) | Measure physical batch size and gradient accumulation with Qwen3-8B TRL LoRA while holding effective batch and packed-token capacity constant | CUDA | Production-shaped single-L40S workload; includes a 500-step matrix runner |
-| [`advanced/lerobot_v3_image_regression`](advanced/lerobot_v3_image_regression/) | Reproduce LeRobot's v3 image-dataset input regression before and after its upstream fix | CUDA | Pinned ACT workload with isolated LeRobot revisions and TraceML A/B comparison |
+| [BERT gradient accumulation](advanced/bert_gradient_accum.py) | Group microbatches into optimizer updates in a plain PyTorch BERT loop | CPU / CUDA | Downloads BERT and AG News; batch and accumulation settings are in the script |
 
 Example hardware comparison run:
 
@@ -125,16 +137,8 @@ traceml run examples/advanced/bert_single_gpu_compare.py --mode=summary --run-na
 
 ## Case studies
 
-Measured before/after write-ups where TraceML diagnosed a bottleneck in a
-training run, a targeted intervention was applied, and the result was evaluated
-using wall-clock measurements. These are write-ups rather than runnable scripts.
-
-| Case study | Model | Bottleneck | Result |
-|---|---|---|---|
-| [`case_studies/resnet18_input_bound`](case_studies/resnet18_input_bound/) | ResNet-18, single T4 | Input-bound data loading | 43.8% lower step time; median GPU utilization 51% to 100% |
-
-See [`case_studies/README.md`](case_studies/README.md) for the index and for how
-to add a new one.
+[Browse case studies](case_studies/README.md) for measured investigations and
+reproduction packages, including ResNet, LeRobot, and RF-DETR.
 
 ---
 
@@ -272,42 +276,6 @@ Examples use the top-level `traceml.*` API from
 `import traceml_ai as traceml`. The old `import traceml` path remains available
 for compatibility, but emits a deprecation warning. Do not import from
 decorator compatibility paths.
-
----
-
-## Which example should I use?
-
-Use:
-
-- `quickstart.py` if you have a normal PyTorch loop
-- `manual_custom_minimal.py` if you use a custom input pipeline or want full explicit control
-- `distributed/ddp_minimal.py` if you want single-node distributed training
-- `integrations/huggingface_trainer_minimal.py` if you use Hugging Face `Trainer`
-- `integrations/accelerate_minimal.py` if you use Hugging Face `Accelerate`
-- `integrations/lightning_minimal.py` if you use PyTorch Lightning
-- `ray/torchtrainer_minimal.py` if you use Ray Train
-- `integrations/deepspeed_minimal.py` if you use DeepSpeed
-- `integrations/monai_minimal.py` if you use MONAI `SupervisedTrainer`
-
-Use the diagnosis demos when you want to see:
-
-- an input bottleneck
-- an input straggler in DDP
-- step memory creep
-- a missing signal reported as incomplete data
-
----
-
-## What is not in this folder
-
-Heavier development and stress scenarios are kept separately from these starter examples so this folder stays easy to understand.
-
-That includes things like:
-
-- large BERT DDP runs
-- large memory-creep stress scripts
-- FSDP experiments
-- heavy vision or LLM demos
 
 ---
 
