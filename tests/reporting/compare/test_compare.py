@@ -879,6 +879,23 @@ def test_compare_payload_has_section_based_json_and_table_text() -> None:
     assert "+2.70 GB (+43.5%)" in text
 
 
+def test_compare_text_scales_a_memory_decrease_like_an_increase() -> None:
+    lhs = _payload_with_sections(
+        step_memory=_step_memory_section(
+            worst_peak_bytes=8.9 * 1024.0 * 1024.0 * 1024.0,
+        ),
+    )
+    rhs = _payload_with_sections(
+        step_memory=_step_memory_section(
+            worst_peak_bytes=6.2 * 1024.0 * 1024.0 * 1024.0,
+        ),
+    )
+
+    text = build_compare_text(_build_compare(lhs, rhs))
+
+    assert "-2.70 GB (-30.3%)" in text
+
+
 def test_compare_warns_when_summary_schema_versions_differ() -> None:
     lhs = _payload_with_sections()
     rhs = _payload_with_sections()
