@@ -1,336 +1,129 @@
 # PyTorch Lightning
 
-Use TraceML with PyTorch Lightning to find training bottlenecks without changing your training loop.
+Trace an existing Lightning `Trainer.fit()` script without adding TraceML code.
+Both `lightning.pytorch` and legacy `pytorch_lightning` are supported. Keep your
+Trainer and LightningModule imports in the same namespace.
 
-`TraceMLCallback` adds step-aware diagnosis so you can quickly see whether a
-run is input-bound, compute-bound, straggler-heavy, residual-heavy, or showing
-memory drift.
+## Install
 
-## 1. Install
-
-If your environment already has either `lightning` or `pytorch-lightning`,
-installing TraceML is enough:
+If Lightning is already installed:
 
 ```bash
 pip install traceml-ai
 ```
 
-If you want TraceML to install the modern Lightning package for you:
+To install the modern Lightning package with TraceML:
 
 ```bash
 pip install "traceml-ai[lightning]"
 ```
 
-## 2. Add `TraceMLCallback`
-
-Initialize the Lightning integration once, then add `TraceMLCallback` to your Lightning `Trainer`. Everything else stays the same.
-
-Use one Lightning namespace consistently in your script. TraceML supports both
-`lightning.pytorch` and legacy `pytorch_lightning`, but your `Trainer` and
-`LightningModule` should come from the same namespace.
-
-```python
-import lightning as L
-from traceml_ai.integrations import lightning as traceml_lightning
-
-traceml_lightning.init()
-
-model = MyLightningModule()
-
-trainer = L.Trainer(
-    max_steps=500,
-    accelerator="auto",
-    devices=1,
-    enable_progress_bar=False,
-    callbacks=[traceml_lightning.TraceMLCallback()],
-)
-
-trainer.fit(model, train_dataloaders=loader)
-```
-
-Legacy `pytorch_lightning` projects can keep their existing imports:
-
-```python
-import pytorch_lightning as pl
-from traceml_ai.integrations import lightning as traceml_lightning
-
-traceml_lightning.init()
-
-trainer = pl.Trainer(
-    callbacks=[traceml_lightning.TraceMLCallback()],
-)
-```
-
-You do not need to add `traceml.trace_step(...)` manually. Lightning still owns
-the training loop.
-
-## 3. Launch The Run
-
-Single GPU:
+## Run
 
 ```bash
 traceml run train.py
 ```
 
-Single-node multi-GPU DDP:
+TraceML initializes timing and attaches its callback after Lightning combines
+Trainer callbacks with `LightningModule.configure_callbacks()`. Compatible
+existing initialization and callbacks, including callback subclasses, are
+reused. No TraceML code is needed in a standard training script.
+
+For direct Python launches or custom loops, see
+[Advanced: manual setup](#advanced-manual-setup).
+
+## Read the result
+
+TraceML prints a training summary and saves run artifacts. The step view shows
+Input Wait, forward, backward, and optimizer time when those signals are
+available. CUDA runs can also show host-to-device time and step memory. See
+[How to Read Output](../reading-output.md) for each value's meaning.
+
+Input Wait measures fetching a batch in the training process, not worker-side
+decoding time or GPU idle time. Small transfers can display `H2D 0.0ms` because
+the measured value is below display precision.
+
+## What one step includes
+
+Under automatic optimization, one TraceML step covers one Lightning optimizer
+update attempt. With `accumulate_grad_batches=4`, four microbatches contribute
+to one capture and share one step number. Forward, backward, H2D, input wait,
+and traced-region times are added across that group. A final group can contain
+fewer microbatches.
+
+The sampler aggregates events inside the completed group; it does not merge
+separately published microbatch records. CUDA memory is reset once at the
+start of the group's memory window and read once at its end, so it reports a
+peak rather than a sum. Temporary allocation peaks during batch transfer before
+the memory reset are outside that window. CPU memory is unavailable for this
+metric.
+
+**Forward** measures calls to the selected training module or one of its direct
+children during `training_step()`. This covers common `self(x)` and
+`self.model(x)` patterns without placing hooks on every layer. Nested calls are
+not counted again. Losses or metrics called as direct child modules can be
+included; functional losses and ordinary Python logging outside observed module
+calls are excluded. Backward recomputation is excluded from Forward.
+
+H2D observes CPU-to-CUDA `Tensor.to()` calls during Lightning's batch transfer.
+Backward follows Lightning's backward hooks, including `manual_backward()`.
+Optimizer timing runs from `on_before_optimizer_step` to the end-of-batch
+callback, including intervening work such as the step learning-rate scheduler.
+
+Validation, sanity-check, test, and prediction input work is excluded. For a
+DataLoader of unknown length, Lightning performs look-ahead and exhaustion
+fetches; Input Wait reports those actual calls, so counts can differ from one
+fetch per microbatch and individual fetches can appear one training step early.
+If validation interrupts an accumulation group, its allocator activity can
+contribute to that group's memory peak because the memory window remains open
+until the optimizer-update boundary.
+
+Manual optimization remains batch-scoped: a batch can contain several backward
+and optimizer events in one TraceML step. Arbitrary manual accumulation is not
+inferred. Failed or unfinished accumulation groups are discarded, and timing
+hooks are removed after training or failure.
+
+Checkpoint resume through `trainer.fit(..., ckpt_path=...)` keeps Lightning's
+training state. TraceML step IDs remain local to the process and are not
+restored from the checkpoint, so they may differ from `trainer.global_step`.
+See the [step-time contract](../../developer_guide/step-time-pipeline-contract.md#lightning-steps).
+
+## Advanced launch options
+
+For single-node multi-GPU DDP:
 
 ```bash
 traceml run train.py --nproc-per-node=4
 ```
 
-For multi-node DDP launch commands, see
-[Distributed Training](../distributed-training.md).
+Pass the same device count to Lightning (`Trainer(devices=4)`). TraceML launches
+ranks with `torchrun`; Lightning picks up that environment. Without the matching
+process count, Lightning reports a world-size mismatch before training starts.
+For multi-node launch commands, see [Distributed Training](../distributed-training.md).
+Distributed recipes are documented; they are not a broad tested strategy matrix.
 
-Always launch through `traceml run`. It starts the aggregator and spawns the
-ranks with `torchrun`, and Lightning picks that environment up. Two things
-follow:
-
-- Pass the process count to `traceml run` (`--nproc-per-node=N`) and the same
-  device count to the `Trainer` (`devices=N`). Lightning's own subprocess
-  launcher is not used under `torchrun`; a `Trainer(devices=2)` under
-  `traceml run` without `--nproc-per-node=2` stops with Lightning's
-  world-size mismatch error before training starts.
-- A bare `python train.py` finds no aggregator, prints a warning, and trains
-  without telemetry.
-
-For browser dashboard mode on single-node runs:
+For a browser dashboard on a single node:
 
 ```bash
 traceml run train.py --mode=dashboard
 ```
 
-## What TraceML will show
+TraceML can run alongside W&B, TensorBoard, and CSVLogger. These optional settings
+make local terminal output easier to read:
 
-In Lightning runs, TraceML helps you spot:
+| Setting | Purpose |
+|---|---|
+| `enable_progress_bar=False` | Avoid overlapping progress displays |
+| `enable_model_summary=False` | Reduce startup output |
+| `logger=False` | Disable Lightning loggers for a local diagnostic run |
 
-- input-bound training
-- compute-bound steps
-- residual-heavy behavior
-- rank imbalance and stragglers
-- memory creep over time
+The automatic example is `examples/integrations/lightning_minimal.py`. It also
+accepts `--devices`, `--num-nodes`, `--max-steps`, `--delay-rank`, and `--delay-ms`.
+The delay flags create a deliberate straggler.
 
-You keep the normal Lightning workflow. TraceML adds diagnosis around the training step.
-
----
-
-## How it works
-
-`traceml_lightning.init()` enables PyTorch `DataLoader` fetch timing and
-installs the H2D `.to(...)` patch. `TraceMLCallback` records step, forward,
-backward, optimizer, and memory timing.
-
-With automatic optimization, one TraceML step is one Lightning optimizer
-update attempt. Without gradient accumulation this is one training batch. With
-accumulation, each micro-batch contributes its own fetch, H2D, forward,
-backward, and traced-region events to one open step capture. The capture is
-published at the update boundary, and repeated timing events are summed by the
-sampler. The DataLoader fetches are reported separately as Input Wait, and
-Step Time includes Input Wait plus Traced Step Time.
-
-Only training batches are measured. The callback keeps a framework-level
-DataLoader timing policy active for the whole Trainer run and checks
-Lightning's current stage on every fetch. This is intentionally broader than
-the validation start/end hooks because Lightning can prefetch an unknown-length
-evaluation loader before `on_validation_start`. Fetches and transfers of the
-validation, sanity-check, test, and predict loaders therefore do not count
-toward Input Wait or H2D, and no step is published for them.
-
-Normal PyTorch `DataLoader` input timing is automatic after
-`traceml_lightning.init()`. If you pass Lightning a custom iterator or
-non-PyTorch loader, call `traceml_lightning.init()` first, then wrap the custom
-source with `traceml.wrap_dataloader_fetch(...)` before passing it to
-`trainer.fit(...)`. Wrapping a normal PyTorch `DataLoader` raises because the
-integration already owns that timing. For Ray Data with Lightning, see [Ray
-Train](ray.md).
-
-For a DataLoader whose length is unknown, Lightning performs a one-batch
-look-ahead and probes the iterator for exhaustion. Input Wait reports those
-actual `DataLoader.__next__()` calls, so their distribution across steps can
-differ from the one-fetch-per-step shape of a sized DataLoader.
-
-Small batches may show `H2D 0.0ms` because the transfer is below display
-precision. The full example below uses a wider CPU tensor so H2D timing is
-visible.
-
-On Lightning the optimizer phase runs from `on_before_optimizer_step` to the
-end of the batch, so it also covers the step-interval learning-rate scheduler
-update. Under manual optimization each `optimizer.step()` call is one
-optimizer event, and one training batch remains one TraceML step. Under
-automatic optimization, the accumulation group contains one optimizer event
-at its update boundary. Strategies such as DeepSpeed can route every
-micro-batch through an internal `engine.step()` call; TraceML omits those
-accumulating calls from the optimizer occurrence count.
-
-If training raises, the callback discards the incomplete accumulation group
-rather than publishing a partial step, restores the module and strategy it
-wrapped, and lets the exception propagate unchanged. If
-`traceml_lightning.init()` was not called, or TraceML was initialized in a
-mode that does not install the DataLoader-fetch or H2D patch, the callback
-logs a warning at the start of training naming the streams that will stay
-dark.
-
----
-
-## Use with Lightning loggers
-
-TraceML works alongside Lightning loggers such as:
-
-- W&B
-- TensorBoard
-- CSVLogger
-
-For the cleanest terminal experience during diagnosis runs, it helps to use:
-
-```python
-enable_progress_bar=False
-```
-
-You do not need to replace your existing logger stack to use TraceML.
-
----
-
-## Optional: local UI
-
-If you want a richer browser-based view, run:
-
-```bash
-traceml run train.py --mode=dashboard
-```
-
-Dashboard mode is intended for single-node runs.
-
-The local UI is useful when you want:
-
-- a richer run review experience
-- easier local comparison
-- less terminal clutter
-
----
-
-## Trainer tips
-
-These settings usually give the cleanest experience with TraceML:
-
-| Setting | Recommended value | Why |
-|---|---|---|
-| `enable_progress_bar=False` | Yes | Prevents Lightning progress output from fighting with the TraceML CLI |
-| `enable_model_summary=False` | Optional | Keeps terminal output cleaner |
-| `logger=False` | Optional | Useful for local diagnosis runs if you want minimal output |
-
----
-
-## Full example
-
-Save as `train_lightning.py`:
-
-```python
-import lightning as L
-import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader, Dataset
-
-from traceml_ai.integrations import lightning as traceml_lightning
-
-SEED = 42
-MODEL_INPUT_DIM = 128
-TRANSFER_INPUT_DIM = 131072
-HIDDEN_DIM = 256
-NUM_CLASSES = 10
-NUM_SAMPLES = 512
-BATCH_SIZE = 64
-MAX_STEPS = 200
-
-
-class SyntheticClassificationDataset(Dataset):
-    def __init__(self, num_samples: int):
-        # Transfer a wider CPU batch so Lightning H2D timing is visible, while
-        # the model below only consumes MODEL_INPUT_DIM features for compute.
-        self.x = torch.randn(num_samples, TRANSFER_INPUT_DIM)
-        self.y = torch.randint(0, NUM_CLASSES, (num_samples,))
-
-    def __len__(self) -> int:
-        return len(self.y)
-
-    def __getitem__(self, idx):
-        return self.x[idx], self.y[idx]
-
-
-class TinyLightningModel(L.LightningModule):
-    def __init__(self):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(MODEL_INPUT_DIM, HIDDEN_DIM),
-            nn.ReLU(),
-            nn.Linear(HIDDEN_DIM, NUM_CLASSES),
-        )
-        self.loss_fn = nn.CrossEntropyLoss()
-
-    def forward(self, x):
-        x = x[..., :MODEL_INPUT_DIM].contiguous()
-        return self.net(x)
-
-    def training_step(self, batch, batch_idx):
-        x, y = batch
-        logits = self(x)
-        loss = self.loss_fn(logits, y)
-
-        if self.global_step % 50 == 0:
-            print(f"Step {self.global_step} | loss={loss.item():.4f}")
-
-        return loss
-
-    def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=1e-3)
-
-
-def main() -> None:
-    torch.manual_seed(SEED)
-    traceml_lightning.init()
-
-    dataset = SyntheticClassificationDataset(NUM_SAMPLES)
-    loader = DataLoader(
-        dataset,
-        batch_size=BATCH_SIZE,
-        shuffle=True,
-        num_workers=0,
-        pin_memory=torch.cuda.is_available(),
-    )
-
-    model = TinyLightningModel()
-
-    trainer = L.Trainer(
-        max_steps=MAX_STEPS,
-        accelerator="auto",
-        devices=1,
-        enable_progress_bar=False,
-        callbacks=[traceml_lightning.TraceMLCallback()],
-        logger=False,
-    )
-
-    trainer.fit(model, train_dataloaders=loader)
-
-
-if __name__ == "__main__":
-    main()
-```
-
-Run with:
-
-```bash
-traceml run train_lightning.py
-```
-
-The checked-in `examples/integrations/lightning_minimal.py` also accepts small demo flags:
-`--devices`, `--num-nodes`, `--max-steps`, `--delay-rank`, and `--delay-ms`.
-Use the delay flags only when you want to create a deliberate straggler.
-
----
-
-## Try it on a real workload
-
-`examples/integrations/lightning_dataloading_bottleneck.py` trains ResNet-18
-on the 320px Imagenette train split; its `--profile` flag changes the
-DataLoader settings and nothing else. Run it twice and compare:
+For a real input-pipeline comparison, the existing manual example
+`examples/integrations/lightning_dataloading_bottleneck.py` trains ResNet-18 on
+Imagenette. Its `--profile` changes DataLoader settings:
 
 ```bash
 traceml run --mode summary --logs-dir logs --run-name lightning_baseline \
@@ -343,71 +136,69 @@ traceml compare logs/lightning_baseline/final_summary.json \
     logs/lightning_optimized/final_summary.json
 ```
 
-The same experiment runs top to bottom on a free Colab T4, with a last
-section that reads the per-step DataLoader fetch wait (CPU) to show the cold
-first batch of every epoch:
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/notebooks/lightning_dataloading_bottleneck.ipynb)
+Its manual initialization and callback continue to work under automatic launch.
+The same experiment is available in the
+[Colab notebook](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/notebooks/lightning_dataloading_bottleneck.ipynb).
 
-## Gradient accumulation
+## Limitations
 
-`TraceMLCallback` supports gradient accumulation.
+- **Automatic attachment.** Requires Lightning's standard callback connector and
+  fitting lifecycle. CPU/CUDA single-device and ordinary DDP strategies are
+  supported. DeepSpeed, other strategies, and spawn/fork launch modes are not
+  attached automatically. Existing manual callbacks remain unchanged.
+- **Specialized integrations.** RF-DETR keeps its dedicated, mode-aware adapter;
+  call `traceml_ai.integrations.rfdetr.init()` as documented in the
+  [RF-DETR guide](rfdetr.md). Generic Lightning attachment is skipped.
+- **Forward coverage.** Observes module calls during standard `training_step()`;
+  deeper modules called without their direct parent, arbitrary functional-only
+  computation, or direct `.forward()` calls can bypass module hooks. A completed
+  group with no observed calls produces a warning and leaves Forward unavailable.
+- **Transfers and backward.** Custom streams, `.cuda()` calls, transfers inside
+  `training_step()`, and direct `loss.backward()` calls can bypass the measured
+  boundaries. CUDA graphs are outside this MVP's coverage. Automatic attachment
+  skips `torch.compile` models; advanced manual setup remains user-controlled.
+- **Custom input.** Non-PyTorch loaders require manual input wrapping; see below.
+- **Existing configuration.** An incompatible TraceML initialization is left
+  intact with a warning. Automatic attachment does not replace the user's
+  configuration or callbacks.
+- **Hardware validation.** CPU integration tests cover both namespaces. CUDA and
+  distributed recipes retain their documented validation status; see the
+  [support matrix](../integrations.md#integration-support-matrix).
 
-With `accumulate_grad_batches=N`, the micro-batches used for one optimizer
-update attempt share one TraceML step number. Their fetch, H2D, forward,
-backward, and traced-region times are added within that step. CUDA memory is
-reset once at the start of the group and read once at the end, so the reported
-value is the peak across the group rather than a sum. A shorter final group is
-completed when Lightning performs an update for it; strategies that own
-accumulation internally may leave an incomplete final group unpublished.
+For a baseline, run the same script with tracing disabled:
 
-For single-optimizer automatic optimization, TraceML advances at the same
-update boundaries as `trainer.global_step`. Manual optimization remains
-batch-scoped and can differ. Step IDs remain local to the TraceML process and
-are not restored from Lightning checkpoints. If training fails partway through
-a group, the incomplete group is discarded rather than published as a partial
-step.
+```bash
+traceml run train.py --disable-traceml
+```
 
----
+Disabled launch installs no automatic import observer or timing hooks. Disabling
+tracing later makes installed timing hooks stop recording.
 
-## Troubleshooting
+`traceml watch train.py` remains resource-only and does not install Lightning
+or Hugging Face training instrumentation.
 
-### Terminal output overlaps with TraceML
+## Advanced: manual setup
 
-Set:
+The current manual API remains available. Initialize the integration and supply
+its callback before fitting:
 
 ```python
-enable_progress_bar=False
+import lightning as L
+from traceml_ai.integrations import lightning as traceml_lightning
+
+traceml_lightning.init()
+trainer = L.Trainer(callbacks=[traceml_lightning.TraceMLCallback()])
+trainer.fit(model, train_dataloaders=loader)
 ```
 
-This gives the TraceML CLI cleaner terminal control.
+Legacy projects can keep `import pytorch_lightning as L`. Both manual calls are
+needed for the complete supported timing path. Compatible repeated `init()` is
+a no-op; an explicit incompatible initialization keeps its existing error
+behavior. Launching this script through `traceml run` reuses the callback.
+Direct Python launches need a configured TraceML runtime/aggregator; without it,
+initialization warns and training continues without telemetry.
 
-### I still want W&B or TensorBoard
-
-That is fine. TraceML is designed to work alongside them.
-
-If terminal output gets noisy, use:
-
-```bash
-traceml run train.py --mode=dashboard
-```
-
-Dashboard mode is intended for single-node runs. For multi-node runs, use the
-default final summary path.
-
-### I want a baseline without TraceML
-
-Run:
-
-```bash
-traceml run train_lightning.py --disable-traceml
-```
-
-This launches your script natively through `torchrun` without TraceML telemetry.
-
----
-
-## Next steps
-
-- Read the [Quickstart](../quickstart.md) for plain PyTorch loops
-- Read [huggingface.md](huggingface.md) for Hugging Face Trainer integration
-- Open an issue if you hit a problem: https://github.com/traceopt-ai/traceml/issues
+For a custom iterator or non-PyTorch loader, initialize first and wrap the source
+with `traceml.wrap_dataloader_fetch(...)` before passing it to `fit()`. Do not wrap
+a normal PyTorch DataLoader: the integration already owns its timing. For Ray
+Data with Lightning, see [Ray Train](ray.md).

@@ -7,8 +7,6 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 
-from traceml_ai.integrations import lightning as traceml_lightning
-
 SEED = 42
 MODEL_INPUT_DIM = 128
 TRANSFER_INPUT_DIM = 131072
@@ -134,7 +132,6 @@ def main() -> None:
     )
 
     torch.manual_seed(SEED)
-    traceml_lightning.init()
 
     dataset = SyntheticClassificationDataset(NUM_SAMPLES)
     loader = DataLoader(
@@ -168,7 +165,6 @@ def main() -> None:
         num_nodes=num_nodes,
         strategy=strategy,
         enable_progress_bar=False,
-        callbacks=[traceml_lightning.TraceMLCallback()],
         logger=False,
     )
 

@@ -274,6 +274,12 @@ for setup and limitations.
 
 ### PyTorch Lightning
 
+Run a standard Lightning script with `traceml run train.py` for automatic
+initialization and callback attachment. Both Lightning namespaces are supported.
+For direct launches, the manual path uses both `init()` and `TraceMLCallback()`.
+Compatible existing setup is reused under automatic launch. See the
+[Lightning guide](integrations/lightning.md) for step semantics and limits.
+
 ::: traceml_ai.integrations.lightning.init
     options:
       show_root_heading: true

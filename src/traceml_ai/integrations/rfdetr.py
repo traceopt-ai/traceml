@@ -117,6 +117,13 @@ def _install_factory(training, original):
                 enabled = False
         # Native factory errors must propagate, even when tracing is skipped.
         trainer = original(*args, **kwargs)
+        # The RF-DETR adapter deliberately owns this Trainer. In particular,
+        # an unsupported RF-DETR mode must not fall through to the generic
+        # automatic Lightning integration later during ``fit``.
+        try:
+            trainer._traceml_auto_skip = True
+        except Exception:
+            pass
         if not enabled:
             return trainer
 

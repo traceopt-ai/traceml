@@ -46,7 +46,7 @@ instrumentation.
 | [Hugging Face Trainer](integrations/huggingface_trainer_minimal.py) | Standard Trainer script with no TraceML code | CPU / CUDA; no model download |
 | [Hugging Face ViT](integrations/huggingface_vision_vit.py) | Standard Trainer image classification on CIFAR-10 | CPU / CUDA; downloads model and data |
 | [Accelerate](integrations/accelerate_minimal.py) | Accelerator loop with `trace_step` | CPU / CUDA; no model download |
-| [Lightning](integrations/lightning_minimal.py) | Initialize tracing and add `TraceMLCallback` | CPU / CUDA; no dataset download |
+| [Lightning](integrations/lightning_minimal.py) | Standard Trainer script with no TraceML code | CPU / CUDA; no dataset download |
 | [Lightning loader comparison](integrations/lightning_dataloading_bottleneck.py) | Compare DataLoader profiles on ResNet-18 and 320px Imagenette | CUDA; 326 MB download; CPU `--smoke`; companion Colab notebook |
 | [MONAI](integrations/monai_minimal.py) | `SupervisedTrainer` with `TraceMLHandler` | CPU / CUDA; synthetic volumes, no download; [guide](../docs/user_guide/integrations/monai.md) |
 | [MONAI pipeline comparison](integrations/monai_dataloading_bottleneck.py) | Compare loading, caching and compute settings on a 3D UNet | CUDA; 1.6 GB spleen dataset (CC BY-SA 4.0), `nibabel`; CPU `--smoke`; companion Colab notebook |
@@ -251,11 +251,10 @@ Starter examples now prefer the top-level public API:
 - `traceml.summary()`
 - `traceml.final_summary()`
 
-Lightning examples use `traceml_ai.integrations.lightning.init()` with
-`TraceMLCallback()` so Lightning can keep owning the training loop while
-TraceML records input fetch, transfer, step, phase, and memory timing.
-`integrations/lightning_dataloading_bottleneck.py` is the real-workload
-version: run it twice through `traceml run` with `--profile baseline` and
+The minimal Lightning example is an unchanged Trainer script: `traceml run`
+initializes timing and attaches the callback. The existing
+`integrations/lightning_dataloading_bottleneck.py` uses the advanced manual API
+and remains valid. Run it twice with `--profile baseline` and
 `--profile optimized`, then `traceml compare` the two summaries (the module
 docstring carries the exact commands).
 

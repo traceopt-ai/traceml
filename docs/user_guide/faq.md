@@ -69,7 +69,9 @@ For supported integrations:
   automatic attachment. Direct launches can still call
   `traceml_ai.integrations.huggingface.init()` and add
   `TraceMLTrainerCallback()` manually.
-- Lightning: call `traceml_ai.integrations.lightning.init()` and add `TraceMLCallback()`
+- Lightning: run a standard script with `traceml run train.py` for automatic
+  attachment. Direct launches can still call
+  `traceml_ai.integrations.lightning.init()` and add `TraceMLCallback()` manually.
 
 The preferred public API is the top-level `traceml.*` API from
 `import traceml_ai as traceml`.

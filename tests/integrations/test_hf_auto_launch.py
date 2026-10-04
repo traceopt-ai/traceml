@@ -3,11 +3,7 @@
 from __future__ import annotations
 
 import json
-import os
-import socket
 import sqlite3
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -16,60 +12,7 @@ pytest.importorskip("torch")
 pytest.importorskip("transformers")
 pytest.importorskip("accelerate")
 
-ROOT = Path(__file__).resolve().parents[2]
-SRC = ROOT / "src"
-
-
-def _port() -> str:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return str(sock.getsockname()[1])
-
-
-def _run(
-    tmp_path: Path,
-    script: Path,
-    *,
-    disabled: bool = False,
-    profile: str = "run",
-):
-    env = dict(os.environ)
-    env["CUDA_VISIBLE_DEVICES"] = ""
-    env["OMP_NUM_THREADS"] = "1"
-    env["PYTHONPATH"] = os.pathsep.join(
-        part for part in (str(SRC), env.get("PYTHONPATH", "")) if part
-    )
-    command = [
-        sys.executable,
-        "-m",
-        "traceml_ai.launcher.cli",
-        profile,
-        "--mode",
-        "summary",
-        "--logs-dir",
-        str(tmp_path / "logs"),
-        "--run-name",
-        "hf-auto",
-        "--aggregator-port",
-        _port(),
-        "--master-port",
-        _port(),
-        "--finalize-timeout-sec",
-        "60",
-    ]
-    if disabled:
-        command.append("--disable-traceml")
-    command.append(str(script))
-    return subprocess.run(
-        command,
-        cwd=ROOT,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=180,
-        check=False,
-    )
-
+from tests.integrations.launcher_utils import _run
 
 _WORKLOAD = """
 import json
@@ -117,7 +60,8 @@ Path(__file__).with_suffix(".json").write_text(json.dumps({
     "transformers_loaded": "transformers.trainer" in sys.modules,
     "patched": bool(getattr(Trainer._inner_training_loop,
                             "_traceml_lifecycle_guard", False)),
-    "hook": any(type(f).__name__ == "_TrainerFinder" for f in sys.meta_path),
+    "hook": any("transformers.trainer" in getattr(f, "targets", ())
+                for f in sys.meta_path),
 }))
 """
 
@@ -202,12 +146,12 @@ def test_watch_does_not_install_hf_hook(tmp_path: Path) -> None:
         'Path(__file__).with_suffix(".json").write_text(json.dumps({'
         '"patched": bool(getattr(Trainer._inner_training_loop, '
         '"_traceml_lifecycle_guard", False)), '
-        '"hook": any(type(f).__name__ == "_TrainerFinder" '
+        '"hook": any(type(f).__name__ == "_ImportFinder" '
         "for f in sys.meta_path)}))\n",
         encoding="utf-8",
     )
 
-    result = _run(tmp_path, script, profile="watch")
+    result = _run(tmp_path, script, command="watch")
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(script.with_suffix(".json").read_text()) == {
@@ -248,7 +192,7 @@ def test_disabled_launcher_does_not_patch_trainer(tmp_path: Path) -> None:
         '"disabled": config.disabled, '
         '"patched": bool(getattr(Trainer._inner_training_loop, '
         '"_traceml_lifecycle_guard", False)), '
-        '"hook": any(type(f).__name__ == "_TrainerFinder" '
+        '"hook": any(type(f).__name__ == "_ImportFinder" '
         "for f in sys.meta_path)}))\n",
         encoding="utf-8",
     )

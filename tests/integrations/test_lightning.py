@@ -109,6 +109,9 @@ def test_lightning_forward_wrapper_times_only_forward(monkeypatch):
     )
 
     class FakeModule(nn.Module):
+        def training_step(self, value):
+            return self(value)
+
         def forward(self, value):
             return value + 1
 
@@ -116,28 +119,70 @@ def test_lightning_forward_wrapper_times_only_forward(monkeypatch):
     module = FakeModule()
     callback = lightning_integration.TraceMLCallback()
 
-    assert "forward" not in module.__dict__
+    assert "training_step" not in module.__dict__
+    assert not module._forward_hooks
+    assert not module._forward_pre_hooks
 
     callback.setup(trainer, module, stage="fit")
-    assert "forward" not in module.__dict__
+    assert "training_step" not in module.__dict__
+    assert not module._forward_hooks
+    assert not module._forward_pre_hooks
     callback.on_train_start(trainer, module)
-    assert "forward" in module.__dict__
+    assert "training_step" in module.__dict__
 
     # Even a training-stage forward outside a batch must not become a step.
     assert module(0) == 1
     assert calls == []
     callback._step_capture = step_events.begin_step_capture()
-    assert module(1) == 2
+    assert module.training_step(1) == 2
+    # Recomputed module calls during backward are not forward measurements.
+    callback._backward_ctx = object()
+    assert module.training_step(1) == 2
+    callback._backward_ctx = None
     trainer.training = False
-    assert module(2) == 3
+    assert module.training_step(2) == 3
 
     assert calls == [("_traceml_internal:forward_time", TimeScope.STEP, True)]
 
     callback.teardown(trainer, module)
-    assert "forward" not in module.__dict__
+    assert "training_step" not in module.__dict__
+    assert not module._forward_hooks
+    assert not module._forward_pre_hooks
 
     assert module(3) == 4
     assert calls == [("_traceml_internal:forward_time", TimeScope.STEP, True)]
+
+
+def test_lightning_forward_hooks_stop_at_direct_children(monkeypatch):
+    _enable_callback_without_lightning(monkeypatch)
+
+    class Branch(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.leaf = nn.Linear(2, 2)
+
+        def forward(self, value):
+            return self.leaf(value)
+
+    class Model(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.branch = Branch()
+
+        def training_step(self, value):
+            return self.branch(value)
+
+    trainer = SimpleNamespace(training=True, strategy=None)
+    module = Model()
+    callback = lightning_integration.TraceMLCallback()
+    callback.on_train_start(trainer, module)
+
+    assert module._forward_hooks and module._forward_pre_hooks
+    assert module.branch._forward_hooks and module.branch._forward_pre_hooks
+    assert not module.branch.leaf._forward_hooks
+    assert not module.branch.leaf._forward_pre_hooks
+
+    callback.teardown(trainer, module)
 
 
 def test_lightning_disabled_after_import_does_not_wrap_or_record(monkeypatch):
@@ -182,7 +227,9 @@ def test_lightning_disabled_after_import_does_not_wrap_or_record(monkeypatch):
     callback = lightning_integration.TraceMLCallback()
 
     callback.setup(trainer, module, stage="fit")
-    assert "forward" not in module.__dict__
+    assert "training_step" not in module.__dict__
+    assert not module._forward_hooks
+    assert not module._forward_pre_hooks
     assert (
         strategy.batch_to_device.__func__ is original_batch_to_device.__func__
     )
@@ -551,6 +598,9 @@ def test_lightning_next_forward_closes_an_open_optimizer_region(monkeypatch):
     )
 
     class FakeModule(nn.Module):
+        def training_step(self, value):
+            return self(value)
+
         def forward(self, value):
             return value
 
@@ -562,7 +612,9 @@ def test_lightning_next_forward_closes_an_open_optimizer_region(monkeypatch):
     callback.on_train_start(trainer, module)
     callback._step_capture = step_events.begin_step_capture()
     callback.on_before_optimizer_step(trainer, module, optimizer=None)
-    module(1)  # the next forward (manual optimization, second step)
+    module.training_step(
+        1
+    )  # the next forward (manual optimization, second step)
 
     assert calls == [
         "enter:_traceml_internal:optimizer_step",
@@ -602,6 +654,9 @@ def test_lightning_on_exception_discards_and_restores(monkeypatch):
     trainer = SimpleNamespace(training=True, strategy=strategy)
 
     class FakeModule(nn.Module):
+        def training_step(self, value):
+            return self(value)
+
         def forward(self, value):
             return value
 
@@ -626,7 +681,9 @@ def test_lightning_on_exception_discards_and_restores(monkeypatch):
     assert callback._traceml_step_ctx is None
     assert callback._backward_ctx is None
     assert callback._optimizer_ctx is None
-    assert "forward" not in module.__dict__
+    assert "training_step" not in module.__dict__
+    assert not module._forward_hooks
+    assert not module._forward_pre_hooks
     assert strategy.batch_to_device.__func__ is original_transfer.__func__
 
     # A repeated call or a later teardown raises nothing and leaves the
@@ -635,7 +692,9 @@ def test_lightning_on_exception_discards_and_restores(monkeypatch):
     callback.teardown(trainer, module)
     assert len(discarded) == 3
     assert callback._traceml_step_ctx is None
-    assert "forward" not in module.__dict__
+    assert "training_step" not in module.__dict__
+    assert not module._forward_hooks
+    assert not module._forward_pre_hooks
 
 
 def test_lightning_dataloader_scope_tracks_the_trainer_stage(monkeypatch):
@@ -784,7 +843,9 @@ def test_lightning_teardown_discards_whatever_is_still_pending(monkeypatch):
     callback.teardown(trainer, module)
 
     assert discarded == ["discard", "discard"]  # setup and teardown
-    assert "forward" not in module.__dict__
+    assert "training_step" not in module.__dict__
+    assert not module._forward_hooks
+    assert not module._forward_pre_hooks
 
 
 def test_lightning_warns_when_the_transfer_wrapper_is_missing(

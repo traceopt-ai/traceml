@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import importlib.abc
-import importlib.machinery
 import sys
+
+from traceml_ai.runtime import _import_hook
 
 
 def _activate(module) -> None:
@@ -23,47 +23,9 @@ def _activate(module) -> None:
             pass
 
 
-class _TrainerLoader(importlib.abc.Loader):
-    def __init__(self, original, finder):
-        self.original = original
-        self.finder = finder
-
-    def __getattr__(self, name):
-        return getattr(self.original, name)
-
-    def create_module(self, spec):
-        create = getattr(self.original, "create_module", None)
-        return create(spec) if create is not None else None
-
-    def exec_module(self, module) -> None:
-        self.original.exec_module(module)
-        _activate(module)
-        uninstall(self.finder)
-
-
-class _TrainerFinder(importlib.abc.MetaPathFinder):
-    def find_spec(self, fullname, path=None, target=None):
-        if fullname != "transformers.trainer":
-            return None
-        spec = importlib.machinery.PathFinder.find_spec(fullname, path)
-        if spec is None or spec.loader is None:
-            return None
-        spec.loader = _TrainerLoader(spec.loader, self)
-        # The loader owns activation now. Other imports use their normal path.
-        return spec
-
-
 def install():
     """Observe Trainer loading without importing Transformers ourselves."""
-    module = sys.modules.get("transformers.trainer")
-    if module is not None and hasattr(module, "Trainer"):
-        _activate(module)
-        return None
-    finder = _TrainerFinder()
-    sys.meta_path.insert(0, finder)
-    return finder
+    return _import_hook.install(("transformers.trainer",), _activate)
 
 
-def uninstall(finder) -> None:
-    if finder is not None and finder in sys.meta_path:
-        sys.meta_path.remove(finder)
+uninstall = _import_hook.uninstall

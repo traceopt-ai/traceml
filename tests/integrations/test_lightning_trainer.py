@@ -73,9 +73,14 @@ def _reset_traceml():
 
 def _module_class(L):
     class Tiny(L.LightningModule):
-        def __init__(self, *, fail_at_batch=None, manual_steps=0):
+        def __init__(
+            self, *, fail_at_batch=None, manual_steps=0, direct=False
+        ):
             super().__init__()
-            self.net = nn.Linear(8, 4)
+            self.net = nn.Sequential(
+                nn.Linear(8, 8), nn.ReLU(), nn.Linear(8, 4)
+            )
+            self.direct = direct
             self.fail_at_batch = fail_at_batch
             self.manual_steps = int(manual_steps)
             if self.manual_steps:
@@ -87,7 +92,9 @@ def _module_class(L):
 
         def _loss(self, batch):
             x, y = batch
-            return nn.functional.cross_entropy(self(x), y)
+            return nn.functional.cross_entropy(
+                self.net(x) if self.direct else self(x), y
+            )
 
         def training_step(self, batch, batch_idx):
             if (
@@ -163,18 +170,90 @@ def _counts(batches, name):
 
 
 @pytest.mark.parametrize(
+    "scenario", ["model-callback", "conflict", "attachment-failure"]
+)
+def test_lightning_auto_attachment_preserves_user_setup(
+    L, monkeypatch, capsys, scenario
+):
+    from traceml_ai.runtime import _import_hook, lightning_auto
+    from traceml_ai.sdk import initial
+
+    module = importlib.import_module(f"{L.Trainer.__module__}")
+    connector = module._CallbackConnector
+    # Restore the original method after this test's automatic activation.
+    monkeypatch.setattr(
+        connector, "_attach_model_callbacks", connector._attach_model_callbacks
+    )
+    monkeypatch.setattr(lightning_auto, "_WARNINGS", set())
+    assert (
+        _import_hook.install([module.__name__], lightning_auto._activate)
+        is None
+    )
+    assert (
+        _import_hook.install([module.__name__], lightning_auto._activate)
+        is None
+    )
+    model = _module_class(L)(direct=True)
+
+    class InnerModelCallback(traceml_lightning.TraceMLCallback):
+        def _forward_target(self, pl_module):
+            return pl_module.net
+
+    callback = InnerModelCallback()
+    if scenario == "model-callback":
+        traceml_lightning.init()
+        model.configure_callbacks = lambda: [callback]
+    elif scenario == "conflict":
+        import traceml_ai
+
+        traceml_ai.init(mode="manual")
+        config = initial.get_init_config()
+    else:
+
+        def fail(trainer):
+            raise RuntimeError("injected attachment failure")
+
+        monkeypatch.setattr(lightning_auto, "_prepare_callback", fail)
+    train, _ = _loaders()
+    trainer = _trainer(L, [], max_steps=2)
+    trainer.fit(model, train_dataloaders=train)
+    assert trainer.global_step == 2
+    if scenario == "model-callback":
+        assert [
+            cb
+            for cb in trainer.callbacks
+            if isinstance(cb, traceml_lightning.TraceMLCallback)
+        ] == [callback]
+        records = drain_step_time_batches()
+        assert len(records) == 2
+        assert _counts(records, FORWARD) == [1, 1]
+    else:
+        assert not any(
+            isinstance(cb, traceml_lightning.TraceMLCallback)
+            for cb in trainer.callbacks
+        )
+        assert drain_step_time_batches() == []
+        if scenario == "conflict":
+            assert initial.get_init_config() is config
+            assert capsys.readouterr().err.count("incompatible TraceML") == 1
+        else:
+            assert "injected attachment failure" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
     ("rows", "microbatches_per_step"),
     [
         pytest.param(ROWS, [2, 2], id="full-groups"),
         pytest.param(12, [2, 1], id="partial-final-group"),
     ],
 )
+@pytest.mark.parametrize("direct", [False, True])
 def test_lightning_trainer_accumulation_groups_microbatches(
-    L, rows, microbatches_per_step
+    L, rows, microbatches_per_step, direct
 ):
     traceml_lightning.init()
     train, _ = _loaders(rows=rows)
-    model = _module_class(L)()
+    model = _module_class(L)(direct=direct)
     trainer = _trainer(
         L, [traceml_lightning.TraceMLCallback()], accumulate_grad_batches=2
     )
@@ -339,13 +418,13 @@ def test_lightning_forward_setup_failure_preserves_training(L, capsys):
 
     train, _ = _loaders()
     model = _module_class(L)()
-    initial_weight = model.net.weight.detach().clone()
+    initial_weight = model.net[0].weight.detach().clone()
     trainer = _trainer(L, [UnavailableTarget()], max_steps=2)
     trainer.fit(model, train_dataloaders=train)
 
     assert trainer.global_step == 2
     assert len(model.losses) == 2
-    assert not torch.equal(model.net.weight, initial_weight)
+    assert not torch.equal(model.net[0].weight, initial_weight)
     assert "forward timing unavailable" in capsys.readouterr().err
     batches = drain_step_time_batches()
     # Failed instrumentation leaves forward absent, not a fabricated zero.

@@ -1,4 +1,3 @@
-import functools
 import os
 import sys
 from types import SimpleNamespace
@@ -16,6 +15,7 @@ from traceml_ai.instrumentation.step_events import (
     begin_step_capture,
     complete_step_capture,
 )
+from traceml_ai.integrations._lightning_forward import ForwardObserver
 from traceml_ai.runtime.state import (
     get_trace_session_state,
     mark_trace_step_flushed,
@@ -101,7 +101,8 @@ else:
     IS_LIGHTNING_AVAILABLE = True
 
 
-_MISSING = object()
+_WARNINGS = set()
+_AUTO_MESSAGE_PRINTED = False
 
 
 def _traceml_disabled() -> bool:
@@ -117,8 +118,8 @@ def init():
     capture completion, and framework hook integration. The integration init
     enables DataLoader fetch timing plus the H2D Tensor.to patch. The callback
     opens the traced step around Lightning's batch transfer (so H2D is inside
-    it), turns H2D timing on only there, and wraps LightningModule.forward
-    directly for model-forward timing. Fetches of non-training loaders are
+    it), turns H2D timing on only there, and observes outermost module calls
+    during training_step for forward timing. Fetches of non-training loaders are
     excluded.
     """
     import traceml_ai as traceml
@@ -128,6 +129,29 @@ def init():
         patch_dataloader=True,
         patch_h2d=True,
     )
+
+
+def _warn_once(key, message):
+    if key not in _WARNINGS:
+        _WARNINGS.add(key)
+        try:
+            print(f"[TraceML] {message}", file=sys.stderr)
+        except Exception:
+            pass
+
+
+def _announce_auto(trainer):
+    global _AUTO_MESSAGE_PRINTED
+    message = getattr(trainer, "_traceml_auto_status", None)
+    try:
+        if message and not _AUTO_MESSAGE_PRINTED and trainer.is_global_zero:
+            print(
+                f"[TraceML] PyTorch Lightning Trainer detected; {message}",
+                flush=True,
+            )
+            _AUTO_MESSAGE_PRINTED = True
+    except Exception:
+        pass
 
 
 def _log_lightning_error(message: str, exc: Exception) -> None:
@@ -221,10 +245,13 @@ class TraceMLCallback(_CallbackBase):
         self._optimizer_ctx = None
         self._batch_to_device_strategy = None
         self._original_batch_to_device = None
-        self._forward_module = None
-        self._original_forward = None
-        self._original_forward_attr = _MISSING
-        self._wrapped_forward = None
+        self._forward = ForwardObserver(
+            self,
+            disabled=_traceml_disabled,
+            on_error=_log_lightning_error,
+            region=timed_region,
+        )
+        self._warned_missing_forward = False
         self._step_capture = None
         self._dataloader_timing_scope = None
 
@@ -313,11 +340,12 @@ class TraceMLCallback(_CallbackBase):
     def on_train_start(self, trainer, pl_module):
         if _traceml_disabled():
             return
-        # EMA callbacks deepcopy the model during setup/on_fit_start. A copied
-        # function closure would still call the live model's bound forward.
-        # Attach only after those copies and checkpoint restoration are done.
+        _announce_auto(trainer)
+        # Attach after EMA copies and checkpoint restoration are complete.
         try:
-            self._wrap_forward(trainer, self._forward_target(pl_module))
+            self._forward.install(
+                trainer, pl_module, self._forward_target(pl_module)
+            )
         except Exception as e:
             _log_lightning_error("forward timing unavailable", e)
         # Fail loud (never raise) when the init config will not capture the
@@ -331,6 +359,7 @@ class TraceMLCallback(_CallbackBase):
             warn_if_missing_streams(
                 "Lightning TraceMLCallback",
                 requires={"dataloader_fetch", "h2d"},
+                advice="Call traceml_ai.integrations.lightning.init() before training to enable them.",
             )
         except Exception as e:
             _log_lightning_error("capability check failed", e)
@@ -347,48 +376,6 @@ class TraceMLCallback(_CallbackBase):
     def _forward_target(self, pl_module):
         """Return the module called by the framework's training step."""
         return pl_module
-
-    def _wrap_forward(self, trainer, pl_module) -> None:
-        if self._original_forward is not None:
-            return
-
-        original_forward = getattr(pl_module, "forward", None)
-        if not callable(original_forward):
-            return
-        original_forward_attr = getattr(pl_module, "__dict__", {}).get(
-            "forward", _MISSING
-        )
-
-        @functools.wraps(original_forward)
-        def wrapped_forward(*args, **kwargs):
-            if (
-                _traceml_disabled()
-                or not getattr(trainer, "training", False)
-                or self._step_capture is None
-            ):
-                return original_forward(*args, **kwargs)
-
-            # A forward after an optimizer step (manual optimization with
-            # several steps per batch) ends that step's region; it must not
-            # absorb the next forward.
-            self._close_context("_optimizer_ctx")
-            with timed_region(
-                "_traceml_internal:forward_time",
-                scope=TimeScope.STEP,
-                record_gpu_events=True,
-            ):
-                return original_forward(*args, **kwargs)
-
-        try:
-            pl_module.forward = wrapped_forward
-        except Exception as e:
-            _log_lightning_error("forward wrap failed", e)
-            return
-
-        self._forward_module = pl_module
-        self._original_forward = original_forward
-        self._original_forward_attr = original_forward_attr
-        self._wrapped_forward = wrapped_forward
 
     def _wrap_batch_to_device(self, trainer, pl_module) -> None:
         if self._original_batch_to_device is not None:
@@ -425,7 +412,7 @@ class TraceMLCallback(_CallbackBase):
         # group interrupted before its end, a tuner trial stopped mid-fit)
         # must not leak into the next fit in this process.
         self._abandon_pending(pl_module)
-        self._restore_forward()
+        self._forward.restore()
         self._restore_batch_to_device()
         self._exit_dataloader_timing_scope()
 
@@ -443,6 +430,7 @@ class TraceMLCallback(_CallbackBase):
             self._step_capture = None
             self._mem_tracker = None
             self._memory_window_attempted = False
+            self._forward.reset_calls()
             abort_step_capture(
                 capture if capture is not None else begin_step_capture()
             )
@@ -460,32 +448,9 @@ class TraceMLCallback(_CallbackBase):
         the user's exception propagates untouched.
         """
         self._abandon_pending(pl_module)
-        self._restore_forward()
+        self._forward.restore()
         self._restore_batch_to_device()
         self._exit_dataloader_timing_scope()
-
-    def _restore_forward(self) -> None:
-        module = self._forward_module
-        original = self._original_forward
-        if module is None or original is None:
-            return
-
-        try:
-            current_forward_attr = getattr(module, "__dict__", {}).get(
-                "forward", _MISSING
-            )
-            if current_forward_attr is self._wrapped_forward:
-                if self._original_forward_attr is _MISSING:
-                    delattr(module, "forward")
-                else:
-                    module.forward = self._original_forward_attr
-        except Exception as e:
-            _log_lightning_error("forward restore failed", e)
-        finally:
-            self._forward_module = None
-            self._original_forward = None
-            self._original_forward_attr = _MISSING
-            self._wrapped_forward = None
 
     def _restore_batch_to_device(self) -> None:
         strategy = self._batch_to_device_strategy
@@ -582,6 +547,16 @@ class TraceMLCallback(_CallbackBase):
         if _lightning_is_accumulating(trainer, pl_module):
             return
 
+        if (
+            not self._forward.reset_calls()
+            and not self._warned_missing_forward
+        ):
+            self._warned_missing_forward = True
+            _warn_once(
+                "missing-forward",
+                "Lightning completed a traced group without observed module calls; "
+                "Forward timing is unavailable for this training_step.",
+            )
         # Record one memory peak for the complete optimizer-update group.
         mem_tracker, self._mem_tracker = self._mem_tracker, None
         self._memory_window_attempted = False

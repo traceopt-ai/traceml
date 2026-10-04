@@ -9,6 +9,16 @@ which carry the full historical notes for versions predating this file.
 
 - **Breaking:** The `traceml` Python import path is no longer supported and
   raises `ImportError`. Use `import traceml_ai as traceml` instead.
+- `traceml run train.py` now attaches the existing Lightning callback
+  automatically when the standard training loop is used. Existing compatible
+  manual setup is reused, and disabled runs install no framework hooks.
+- Lightning automatic attachment supports common eager CPU/CUDA single-device
+  and ordinary DDP training. It keeps RF-DETR on its dedicated adapter and
+  skips DeepSpeed, compiled models, and unsupported launch strategies. Forward
+  timing observes the selected module and its direct children without placing
+  hooks on every layer.
+- `traceml watch` remains resource-only and does not install Lightning training
+  instrumentation.
 
 ## [0.4.1] - 2026-09-24
 

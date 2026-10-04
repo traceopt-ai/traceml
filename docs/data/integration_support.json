@@ -94,7 +94,7 @@
     {
       "id": "lightning",
       "stack": "PyTorch Lightning",
-      "recommended_api": "traceml_ai.integrations.lightning.init() + TraceMLCallback",
+      "recommended_api": "traceml run train.py (standard Trainer.fit); init() + TraceMLCallback for manual setup",
       "guide": "user_guide/integrations/lightning.md",
       "tested_dependency_range": "CI resolves lightning>=2.6.0 (not pinned; this is not a broad version matrix). The cited tests run under both the lightning and the legacy pytorch_lightning namespace.",
       "coverage": {
@@ -110,8 +110,8 @@
       "ci_evidence": {
         "job": "test-integration",
         "extras": ["torch", "lightning"],
-        "test": "tests/integrations/test_lightning_trainer.py",
-        "label": "real Lightning Trainer.fit() tests"
+        "test": "tests/integrations/test_lightning_auto_launch.py",
+        "label": "real Lightning Trainer.fit() tests; automatic/manual launcher tests in test_lightning_auto_launch.py"
       },
       "limitations": {
         "guide_label": "Lightning guide",

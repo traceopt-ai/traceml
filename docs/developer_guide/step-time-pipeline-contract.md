@@ -239,6 +239,16 @@ not a public metric name or presentation label.
 
 ## Lightning steps
 
+`traceml run` attaches the existing callback after Lightning finalizes model
+callbacks and before setup/checkpoint restoration. Compatible manual setup is
+reused. Disabled launch installs no observer or automatic hooks.
+
+Forward consists of calls to the selected training module or one of its direct
+children during `training_step`. Nested calls and backward recomputation are not
+counted again. Hooks and the arming wrapper are installed after checkpoint/EMA
+setup and removed on teardown or exception. H2D and backward keep their existing
+Lightning boundaries. Step IDs remain process-local after checkpoint resume.
+
 Under automatic optimization, one completed TraceML step corresponds to one
 Lightning accumulation/update group. Each micro-batch opens and closes its own
 traced region, while the owning `StepCapture` and CUDA peak-memory window stay
