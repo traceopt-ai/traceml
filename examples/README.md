@@ -273,9 +273,7 @@ For explicit manual instrumentation, see:
 - `traceml.wrap_optimizer(...)`
 
 Examples use the top-level `traceml.*` API from
-`import traceml_ai as traceml`. The old `import traceml` path remains available
-for compatibility, but emits a deprecation warning. Do not import from
-decorator compatibility paths.
+`import traceml_ai as traceml`.
 
 ---
 

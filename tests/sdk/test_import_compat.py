@@ -1,13 +1,6 @@
 import importlib
-import sys
 
 import pytest
-
-
-def _drop_short_import_modules() -> None:
-    for name in list(sys.modules):
-        if name == "traceml" or name.startswith("traceml."):
-            sys.modules.pop(name, None)
 
 
 def test_new_import_path_is_primary():
@@ -17,21 +10,12 @@ def test_new_import_path_is_primary():
     assert hasattr(module, "init")
 
 
-def test_short_import_path_aliases_implementation_package():
-    _drop_short_import_modules()
+@pytest.mark.parametrize("module_name", ["traceml", "traceml.launcher.cli"])
+def test_unsupported_import_path_raises_migration_error(module_name):
+    with pytest.raises(ImportError) as error:
+        importlib.import_module(module_name)
 
-    with pytest.warns(FutureWarning, match="deprecated"):
-        short = importlib.import_module("traceml")
-
-    primary = importlib.import_module("traceml_ai")
-    assert short is primary
-
-
-def test_short_submodule_import_still_works():
-    _drop_short_import_modules()
-
-    with pytest.warns(FutureWarning, match="deprecated"):
-        short_cli = importlib.import_module("traceml.launcher.cli")
-
-    primary_cli = importlib.import_module("traceml_ai.launcher.cli")
-    assert short_cli.build_parser is primary_cli.build_parser
+    assert str(error.value) == (
+        "The 'traceml' import path is not supported. "
+        "Use 'import traceml_ai as traceml' instead."
+    )
