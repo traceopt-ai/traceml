@@ -258,9 +258,11 @@ matching integration guide for installation and runtime requirements.
 
 ### Hugging Face
 
-Call the integration `init()` once and register `TraceMLTrainerCallback` with
-your existing `transformers.Trainer`. See the
-[Hugging Face guide](integrations/huggingface.md) for setup and limitations.
+For a standard `transformers.Trainer`, use `traceml run train.py`; the launcher
+attaches `TraceMLTrainerCallback` when training starts. Direct launches and
+custom training loops can still call the integration `init()` and register the
+callback manually. See the [Hugging Face guide](integrations/huggingface.md)
+for setup and limitations.
 
 ::: traceml_ai.integrations.huggingface.init
     options:

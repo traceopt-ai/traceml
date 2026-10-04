@@ -1,8 +1,4 @@
-"""TraceML callbacks for the standard Hugging Face Trainer.
-
-The TraceMLTrainer wrapper was intentionally removed. Use init() and register
-TraceMLTrainerCallback with transformers.Trainer.
-"""
+"""TraceML callbacks and optional launcher attachment for Hugging Face Trainer."""
 
 import logging
 import os
@@ -20,6 +16,8 @@ from traceml_ai.sdk.instrumentation import trace_step
 
 logger = logging.getLogger(__name__)
 _WARNED_CAPABILITIES: set[str] = set()
+_AUTO_ATTACH_ENABLED = False
+_AUTO_MESSAGE_PRINTED = False
 
 
 class _TrainingAttemptState(threading.local):
@@ -57,17 +55,18 @@ def init():
     """
     Initialize TraceML for Hugging Face ``Trainer`` runs.
 
-    Call once before constructing the ``Trainer``, then register
-    ``TraceMLTrainerCallback``. ``init()`` makes TraceML's process-wide
+    For a direct launch, call once before constructing the ``Trainer``, then
+    register ``TraceMLTrainerCallback``. ``init()`` makes TraceML's process-wide
     instrumentation explicit: PyTorch ``DataLoader`` fetch timing, the H2D
     ``Tensor.to`` patch, and the forward/backward/optimizer auto-timers that
     ``trace_step`` arms inside each bracketed step.
 
     The callback is a per-step bracket and cannot install these process-wide
     patches on its own; the auto-timers it arms are no-ops unless the matching
-    patch is installed. ``init()`` is the recommended entry point so the
+    patch is installed. For manual setup, ``init()`` ensures that the
     DataLoader fetch patch in particular is installed deterministically rather
-    than relying on import order. It also installs the narrow Trainer lifecycle
+    than relying on import order. ``traceml run`` calls this path automatically
+    for a standard Trainer. It also installs the narrow Trainer lifecycle
     guard that aborts unfinished steps before an automatic batch-size retry,
     plus the collection hook needed to isolate training Input Wait and observe
     Accelerate's pre-callback H2D transfers. This mirrors the PyTorch Lightning
@@ -78,6 +77,14 @@ def init():
     import traceml_ai as traceml
 
     config = traceml.init(mode="auto")
+    if config.disabled:
+        return config
+    _install_hf_hooks()
+    return config
+
+
+def _install_hf_hooks() -> None:
+    """Install the same narrow Trainer hooks for manual and launcher use."""
     try:
         _install_trainer_lifecycle_guard()
     except Exception as exc:
@@ -94,7 +101,71 @@ def init():
         _install_non_training_input_scopes()
     except Exception as exc:
         _log_hf_error("Non-training input scope installation failed", exc)
-    return config
+
+
+def _enable_auto_attach(trainer_class) -> None:
+    """Called once after the launcher observes transformers.trainer loading."""
+    global _AUTO_ATTACH_ENABLED
+    _AUTO_ATTACH_ENABLED = True
+    _install_trainer_lifecycle_guard(trainer_class)
+
+
+def _prepare_auto_callback(trainer) -> None:
+    """Attach before HF's first training callback, preserving explicit setup."""
+    global _AUTO_MESSAGE_PRINTED
+    if not _AUTO_ATTACH_ENABLED or _traceml_disabled():
+        return
+
+    from traceml_ai.sdk.initial import get_init_config
+
+    config = get_init_config()
+    if config is not None and (
+        config.disabled
+        or config.mode != "auto"
+        or not all(
+            (
+                config.patch_dataloader,
+                config.patch_forward,
+                config.patch_backward,
+                config.patch_h2d,
+            )
+        )
+    ):
+        _warn_hf_once(
+            "auto-config-conflict",
+            "Hugging Face Trainer auto-instrumentation found an incompatible "
+            "existing TraceML init configuration (mode=%s); keeping the "
+            "user configuration and callbacks unchanged. Add "
+            "TraceMLTrainerCallback() to the Trainer for step records, "
+            "or use mode='auto' for full automatic timing.",
+            config.mode,
+            stderr=True,
+        )
+        return
+
+    # init() reuses a compatible configuration and installs only missing hooks.
+    config = init()
+    if config.disabled:
+        return
+
+    callbacks = _traceml_callbacks(trainer)
+    added = not callbacks
+    if added:
+        trainer.add_callback(TraceMLTrainerCallback())
+
+    if not _AUTO_MESSAGE_PRINTED:
+        _AUTO_MESSAGE_PRINTED = True
+        try:
+            is_zero = trainer.is_world_process_zero()
+        except Exception:
+            is_zero = os.environ.get("RANK", "0") == "0"
+        if is_zero:
+            message = (
+                "Hugging Face Trainer detected; TraceML callback added automatically"
+                if added
+                else "Hugging Face Trainer detected; using existing TraceML callback"
+            )
+            print(f"[TraceML] {message}", flush=True)
 
 
 def _log_hf_error(message: str, exc: Exception) -> None:
@@ -114,19 +185,29 @@ def _log_hf_error(message: str, exc: Exception) -> None:
     except Exception:
         pass
 
-    print(f"[TraceML] {message}: {exc}", file=sys.stderr)
+    try:
+        print(f"[TraceML] {message}: {exc}", file=sys.stderr)
+    except Exception:
+        pass
 
 
-def _warn_hf_once(key: str, message: str, *args) -> None:
+def _warn_hf_once(key: str, message: str, *args, stderr: bool = False) -> None:
     """Emit one integration warning without affecting Trainer control flow.
 
-    Logging handlers are application-owned and may raise from ``emit``. Treat
-    warning delivery as best-effort: use the normal logger first, fall back to
-    stderr if it fails, and never let either output path interrupt training.
+    Logging handlers are application-owned and may raise from ``emit``. Use
+    stderr for configuration conflicts that must be visible at launch; use the
+    normal logger for capability warnings. Neither path may interrupt training.
     """
     if key in _WARNED_CAPABILITIES:
         return
     _WARNED_CAPABILITIES.add(key)
+    if stderr:
+        try:
+            rendered = message % args if args else message
+            print(f"[TraceML] {rendered}", file=sys.stderr)
+        except Exception:
+            pass
+        return
     try:
         logger.warning("[TraceML] " + message, *args)
         return
@@ -507,19 +588,27 @@ def _warn_if_training_batch_timing_is_bypassed(trainer) -> None:
     )
 
 
-def _install_trainer_lifecycle_guard() -> None:
+def _install_trainer_lifecycle_guard(trainer_class=None) -> None:
     """Install failure cleanup inside HF's per-attempt retry boundary."""
     if not HAS_TRANSFORMERS:
         return
 
-    from transformers import Trainer
+    if trainer_class is None:
+        from transformers import Trainer as trainer_class
 
-    original = Trainer._inner_training_loop
+    original = trainer_class._inner_training_loop
     if getattr(original, "_traceml_lifecycle_guard", False):
         return
 
     @wraps(original)
     def guarded_inner_training_loop(trainer, *args, **kwargs):
+        if _AUTO_ATTACH_ENABLED and not _traceml_disabled():
+            try:
+                _prepare_auto_callback(trainer)
+            except Exception as exc:
+                _log_hf_error(
+                    "Trainer automatic callback attachment failed", exc
+                )
         callbacks = _traceml_callbacks(trainer)
         if not callbacks:
             return original(trainer, *args, **kwargs)
@@ -562,7 +651,7 @@ def _install_trainer_lifecycle_guard() -> None:
             ) = previous_attempt_state
 
     guarded_inner_training_loop._traceml_lifecycle_guard = True
-    Trainer._inner_training_loop = guarded_inner_training_loop
+    trainer_class._inner_training_loop = guarded_inner_training_loop
 
 
 __all__ = ["TraceMLTrainerCallback", "init"]

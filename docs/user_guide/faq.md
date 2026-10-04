@@ -65,8 +65,10 @@ with traceml.trace_step(model):
 
 For supported integrations:
 
-- Hugging Face: call `traceml_ai.integrations.huggingface.init()` and add
-  `TraceMLTrainerCallback()` to the standard `Trainer` callbacks.
+- Hugging Face Trainer: run a standard script with `traceml run train.py` for
+  automatic attachment. Direct launches can still call
+  `traceml_ai.integrations.huggingface.init()` and add
+  `TraceMLTrainerCallback()` manually.
 - Lightning: call `traceml_ai.integrations.lightning.init()` and add `TraceMLCallback()`
 
 The preferred public API is the top-level `traceml.*` API from
