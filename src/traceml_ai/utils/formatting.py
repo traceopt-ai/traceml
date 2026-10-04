@@ -27,13 +27,13 @@ def fmt_mem_new(num_bytes: Any) -> str:
 
     units = ["B", "KB", "MB", "GB", "TB"]
     idx = 0
-    while v >= 1024 and idx < len(units) - 1:
+    while abs(v) >= 1024 and idx < len(units) - 1:
         v /= 1024.0
         idx += 1
 
-    if v >= 100 or idx == 0:  # e.g. 123 MB → "123 MB"
+    if abs(v) >= 100 or idx == 0:  # e.g. 123 MB → "123 MB"
         return f"{v:.0f} {units[idx]}"
-    elif v >= 10:
+    elif abs(v) >= 10:
         return f"{v:.1f} {units[idx]}"
     else:
         return f"{v:.2f} {units[idx]}"
