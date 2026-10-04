@@ -191,8 +191,8 @@ def write_compare_artifacts(
         `(json_path, txt_path)`
     """
     output_base = Path(output_base).expanduser().resolve()
-    json_path = output_base.with_suffix(".json")
-    txt_path = output_base.with_suffix(".txt")
+    json_path = output_base.with_name(f"{output_base.name}.json")
+    txt_path = output_base.with_name(f"{output_base.name}.txt")
 
     write_json_atomic(json_path, payload)
     write_text_atomic(txt_path, str(payload.get("text", "")) + "\n")

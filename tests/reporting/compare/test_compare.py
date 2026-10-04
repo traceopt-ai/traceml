@@ -454,6 +454,33 @@ def test_ci_regression_exits_after_writing_compare_artifacts(tmp_path) -> None:
     assert persisted["ci_policy"]["result"] == "SLOWER_IN_THIS_PAIR"
 
 
+def test_compare_artifacts_keep_dotted_run_labels(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    paths = []
+    for run_name in ("lr_0.1", "lr_0.01"):
+        run_dir = tmp_path / "logs" / run_name
+        run_dir.mkdir(parents=True)
+        path = run_dir / "final_summary.json"
+        path.write_text(json.dumps(_ci_payload()), encoding="utf-8")
+        paths.append(path)
+
+    result = compare_summaries(*paths, print_to_stdout=False)
+
+    compare_dir = (tmp_path / "compare").resolve()
+    assert result["artifacts"]["json"] == str(
+        compare_dir / "lr_0.1_vs_lr_0.01.json"
+    )
+    assert result["artifacts"]["txt"] == str(
+        compare_dir / "lr_0.1_vs_lr_0.01.txt"
+    )
+    assert sorted(p.name for p in compare_dir.iterdir()) == [
+        "lr_0.1_vs_lr_0.01.json",
+        "lr_0.1_vs_lr_0.01.txt",
+    ]
+
+
 def test_compare_text_renders_ci_policy_inconclusive_reason() -> None:
     lhs = _ci_payload()
     rhs = _ci_payload()
@@ -877,6 +904,23 @@ def test_compare_payload_has_section_based_json_and_table_text() -> None:
     assert "+114.1 ms (+18.4%)" in text
     assert "Peak reserved" in text
     assert "+2.70 GB (+43.5%)" in text
+
+
+def test_compare_text_scales_a_memory_decrease_like_an_increase() -> None:
+    lhs = _payload_with_sections(
+        step_memory=_step_memory_section(
+            worst_peak_bytes=8.9 * 1024.0 * 1024.0 * 1024.0,
+        ),
+    )
+    rhs = _payload_with_sections(
+        step_memory=_step_memory_section(
+            worst_peak_bytes=6.2 * 1024.0 * 1024.0 * 1024.0,
+        ),
+    )
+
+    text = build_compare_text(_build_compare(lhs, rhs))
+
+    assert "-2.70 GB (-30.3%)" in text
 
 
 def test_compare_warns_when_summary_schema_versions_differ() -> None:
