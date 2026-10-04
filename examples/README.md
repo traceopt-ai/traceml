@@ -37,10 +37,14 @@ Prefer Colab? Browse the [runnable notebooks](../notebooks/README.md).
 
 ## Framework integrations
 
+For the Hugging Face examples, install `pip install ".[torch,hf]"`; the ViT
+example also needs `datasets`. Launch them with `traceml run` for automatic
+instrumentation.
+
 | Example | What it shows | Requirements |
 |---|---|---|
-| [Hugging Face Trainer](integrations/huggingface_trainer_minimal.py) | Standard Trainer with `TraceMLTrainerCallback` | CPU / CUDA; no model download |
-| [Hugging Face ViT](integrations/huggingface_vision_vit.py) | Trainer image classification on CIFAR-10 | CPU / CUDA; downloads model and data |
+| [Hugging Face Trainer](integrations/huggingface_trainer_minimal.py) | Standard Trainer script with no TraceML code | CPU / CUDA; no model download |
+| [Hugging Face ViT](integrations/huggingface_vision_vit.py) | Standard Trainer image classification on CIFAR-10 | CPU / CUDA; downloads model and data |
 | [Accelerate](integrations/accelerate_minimal.py) | Accelerator loop with `trace_step` | CPU / CUDA; no model download |
 | [Lightning](integrations/lightning_minimal.py) | Initialize tracing and add `TraceMLCallback` | CPU / CUDA; no dataset download |
 | [Lightning loader comparison](integrations/lightning_dataloading_bottleneck.py) | Compare DataLoader profiles on ResNet-18 and 320px Imagenette | CUDA; 326 MB download; CPU `--smoke`; companion Colab notebook |

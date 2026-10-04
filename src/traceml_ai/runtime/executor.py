@@ -273,10 +273,35 @@ def _execute_with_runtime() -> None:
     """
     cfg = read_traceml_env()
     runtime = start_runtime(cfg)
+    hf_finder = None
+
+    if (
+        isinstance(runtime, TraceMLRuntime)
+        and str(cfg.get("profile", DEFAULT_PROFILE)) == "run"
+        and not bool(cfg.get("disable_traceml"))
+        and os.environ.get("TRACEML_DISABLED") != "1"
+    ):
+        try:
+            from traceml_ai.runtime import hf_auto
+
+            hf_finder = hf_auto.install()
+        except Exception as error:
+            _log_runtime_exception(
+                "Failed to register Hugging Face Trainer import hook", error
+            )
 
     try:
         run_user_script(str(cfg["script_path"]), extract_script_args())
     finally:
+        try:
+            if hf_finder is not None:
+                from traceml_ai.runtime.hf_auto import uninstall
+
+                uninstall(hf_finder)
+        except Exception as error:
+            _log_runtime_exception(
+                "Failed to remove Hugging Face Trainer import hook", error
+            )
         stop_runtime(runtime)
 
 

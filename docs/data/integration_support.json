@@ -38,7 +38,7 @@
     {
       "id": "huggingface-trainer",
       "stack": "Hugging Face Trainer",
-      "recommended_api": "traceml_ai.integrations.huggingface.init() + TraceMLTrainerCallback",
+      "recommended_api": "traceml run train.py (standard Trainer); init() + TraceMLTrainerCallback for manual setup",
       "guide": "user_guide/integrations/huggingface.md",
       "tested_dependency_range": "CI resolves torch>=2.5.0, transformers>=4.46.1, and accelerate>=0.26.0; not a pinned compatibility matrix.",
       "coverage": {
@@ -48,14 +48,14 @@
         "multi_process": { "status": "Documented recipe", "detail": "no real distributed job" },
         "multi_node": { "status": "Experimental", "detail": "no reproducible job" }
       },
-      "emitted_signals": "dataloader fetch with the recommended callback; step, forward, backward, and optimizer through a real Trainer conformance run.",
+      "emitted_signals": "CPU launcher tests assert one record per completed Trainer step and step, forward, backward, optimizer, and DataLoader fetch events for both automatic and explicit-callback setup. GPU H2D and memory signals are not asserted in CI.",
       "example": "examples/integrations/huggingface_trainer_minimal.py",
       "validation_level": "CI tested",
       "ci_evidence": {
         "job": "test-integration",
         "extras": ["torch", "hf"],
-        "test": "tests/integrations/test_hf_trainer.py",
-        "label": "real Transformers Trainer test"
+        "test": "tests/integrations/test_hf_auto_launch.py",
+        "label": "automatic and manual real Trainer launcher tests"
       },
       "limitations": {
         "guide_label": "Hugging Face limitations",

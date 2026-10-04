@@ -1,3 +1,5 @@
+"""ViT Trainer example: run with ``traceml run`` for automatic tracing."""
+
 import os
 
 import torch
@@ -16,12 +18,9 @@ from transformers import (
     TrainingArguments,
 )
 
-from traceml_ai.integrations import huggingface as traceml_hf
-
 
 def main():
-    print("=== Hugging Face ViT training with TraceML ===")
-    traceml_hf.init()
+    print("=== Hugging Face ViT training ===")
 
     # Configuration
     model_name = "google/vit-base-patch16-224-in21k"
@@ -84,14 +83,12 @@ def main():
         remove_unused_columns=False,  # Required for vision datasets sometimes
     )
 
-    # Register TraceML on the standard Hugging Face Trainer.
     print("Initializing Trainer...")
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=dataset,
         data_collator=DefaultDataCollator(),
-        callbacks=[traceml_hf.TraceMLTrainerCallback()],
     )
 
     # Train

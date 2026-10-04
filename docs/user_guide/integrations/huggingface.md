@@ -1,89 +1,35 @@
 # Hugging Face Trainer Integration
 
-Use TraceML with Hugging Face `Trainer` without rewriting your training loop.
+Trace an existing Hugging Face `Trainer` script without changing its code.
 
-The integration is two steps: call
-`traceml_ai.integrations.huggingface.init()` once, then pass
-`TraceMLTrainerCallback` (a standard `transformers.TrainerCallback`) to your
-existing `Trainer`.
-
-## 1. Install
+## Install
 
 ```bash
 pip install "traceml-ai[hf]"
 ```
 
 The `hf` extra installs `transformers>=4.46.1`, the minimum supported
-Transformers version for automatic Trainer timing.
+Transformers version for training input timing.
 
-If you are running the full examples below, install their optional dependencies:
-
-```bash
-pip install datasets torchvision
-```
-
-## 2. Initialize TraceML And Add `TraceMLTrainerCallback`
-
-Call `init()` once before constructing the `Trainer`, then register the
-callback alongside `transformers.Trainer`:
-
-```python
-from traceml_ai.integrations import huggingface as traceml_hf
-from transformers import Trainer, TrainingArguments
-
-traceml_hf.init()
-
-training_args = TrainingArguments(
-    output_dir="./output",
-    report_to="none",
-    disable_tqdm=True,
-)
-
-trainer = Trainer(
-    model=model,
-    args=training_args,
-    train_dataset=train_dataset,
-    eval_dataset=eval_dataset,
-    callbacks=[traceml_hf.TraceMLTrainerCallback()],
-)
-
-trainer.train()
-```
-
-`traceml_hf.init()` enables automatic timing. The callback groups timing and
-memory measurements into training steps. Use both; you do not need to add
-`traceml.trace_step(...)` to your training code.
-
-## 3. Launch The Run
-
-Single GPU:
+## Run
 
 ```bash
-traceml run fine_tune.py
+traceml run train.py
 ```
 
-Single-node multi-GPU DDP:
+TraceML initializes timing and attaches its callback when training starts. No
+TraceML code is needed in the script. Compatible existing initialization and
+callbacks are reused. This works for `Trainer` subclasses that use Hugging
+Face's standard inner training loop. For a custom loop or a direct
+`python`/`torchrun` launch, see
+[Advanced: manual setup](#advanced-manual-setup).
 
-```bash
-traceml run fine_tune.py --nproc-per-node=4
-```
+## Read the result
 
-For multi-node DDP launch commands, see
-[Distributed Training](../distributed-training.md).
-
-## Recommended `TrainingArguments`
-
-These settings are optional, but they make local TraceML diagnostic runs easier
-to read:
-
-| Setting | Why it helps |
-|---|---|
-| `disable_tqdm=True` | Prevents the Hugging Face progress bar from fighting with the TraceML live CLI. |
-| `report_to="none"` | Keeps tracker output out of the terminal during local diagnosis. |
-| `save_strategy="no"` | Avoids checkpoint files during short diagnostic runs. |
-
-TraceML can still run alongside W&B, MLflow, and TensorBoard. For tracker
-logging patterns, see [W&B / MLflow](wandb-mlflow.md).
+TraceML prints a training summary and saves the run artifacts. The step view
+shows Input Wait, forward, backward, and optimizer time when those signals are
+available. GPU runs can also show host-to-device time and step memory. See
+[How to Read Output](../reading-output.md) for the meaning of each value.
 
 ## What one step includes
 
@@ -124,17 +70,40 @@ If training stops before an accumulation group completes, TraceML discards
 that group. Cleanup happens before an automatic batch-size retry, and the same
 callback can be reused by a later Trainer run.
 
+## Advanced launch options
+
+For single-node multi-GPU DDP, specify the number of processes:
+
+```bash
+traceml run train.py --nproc-per-node=4
+```
+
+For multi-node DDP launch commands, see
+[Distributed Training](../distributed-training.md).
+
+The command works without changing `TrainingArguments`. For a short diagnostic
+run, these optional settings can make the output easier to read:
+
+| Setting | Why it helps |
+|---|---|
+| `disable_tqdm=True` | Prevents the Hugging Face progress bar from fighting with the TraceML live CLI. |
+| `report_to="none"` | Keeps tracker output out of the terminal during local diagnosis. |
+| `save_strategy="no"` | Avoids checkpoint files during short diagnostic runs. |
+
+TraceML can still run alongside W&B, MLflow, and TensorBoard. For tracker
+logging patterns, see [W&B / MLflow](wandb-mlflow.md).
+
 ## Limitations
 
-- **Transformers version.** Automatic Trainer timing requires
+- **Training input timing.** The input collection hook requires
   `transformers>=4.46.1`, where `Trainer.get_batch_samples` is available. If an
   older version is installed manually, TraceML warns once and lets training
   continue, but omits training Input Wait and pre-step H2D measurements.
 - **Lifecycle guard.** Failure/retry cleanup and duplicate-callback handling
-  require `traceml_hf.init()` to install the Trainer lifecycle guard. If guard
-  installation fails, TraceML reports the error and training continues without
-  those guarantees. Custom `_inner_training_loop` overrides must call the
-  guarded parent implementation to receive this handling.
+  require automatic launch or `traceml_hf.init()` to install the Trainer
+  lifecycle guard. If installation fails, TraceML reports the error and
+  training continues without those guarantees. Custom `_inner_training_loop`
+  overrides must call the guarded parent implementation to receive this handling.
 - **Custom batch collection.** A Trainer subclass that overrides
   `get_batch_samples` bypasses the standard training-input hook. TraceML warns
   once for the affected Trainer class and continues without training Input
@@ -144,8 +113,9 @@ callback can be reused by a later Trainer run.
   telemetry. It still trains normally; subsequent groups are recorded.
 - **Memory window.** Temporary allocation peaks before the callback starts
   a step are outside its memory measurement.
-- **Callback registration.** Register the callback before `trainer.train()`
-  so it receives the training events from the start.
+- **Custom loops.** Automatic attachment requires the standard
+  `_inner_training_loop`. Register the callback before `trainer.train()` for
+  custom loops that drive Hugging Face callbacks themselves.
 
 ## Troubleshooting
 
@@ -156,7 +126,7 @@ Set `disable_tqdm=True` in `TrainingArguments`.
 If output is still noisy, use browser dashboard mode on single-node runs:
 
 ```bash
-traceml run fine_tune.py --mode=dashboard
+traceml run train.py --mode=dashboard
 ```
 
 ### Multi-GPU run only shows one rank
@@ -165,7 +135,7 @@ Make sure you launched through TraceML with `--nproc-per-node`, not plain
 `python`:
 
 ```bash
-traceml run fine_tune.py --nproc-per-node=4
+traceml run train.py --nproc-per-node=4
 ```
 
 ### I want a baseline without TraceML
@@ -173,16 +143,60 @@ traceml run fine_tune.py --nproc-per-node=4
 Run the same script with TraceML disabled:
 
 ```bash
-traceml run fine_tune.py --disable-traceml
+traceml run train.py --disable-traceml
 ```
 
 This launches your script natively through `torchrun` without TraceML telemetry.
 
-## Full Examples
+## Advanced: manual setup
 
-Use these examples when you want a complete runnable script. If you already
-have a Hugging Face training script, start with the smaller replacement pattern
-above.
+Use this path for a direct `python`/`torchrun` launch or a custom Trainer loop
+that still dispatches Hugging Face callbacks. A direct launch needs a running
+aggregator; start one with `traceml serve` first (see
+[Direct Launch](../public-api.md#direct-launch-with-traceml-serve)). Call
+`init()` once before constructing the `Trainer`, then register
+`TraceMLTrainerCallback`:
+
+```python
+from traceml_ai.integrations import huggingface as traceml_hf
+from transformers import Trainer, TrainingArguments
+
+traceml_hf.init()
+
+training_args = TrainingArguments(
+    output_dir="./output",
+    report_to="none",
+    disable_tqdm=True,
+)
+
+trainer = Trainer(
+    model=model,
+    args=training_args,
+    train_dataset=train_dataset,
+    eval_dataset=eval_dataset,
+    callbacks=[traceml_hf.TraceMLTrainerCallback()],
+)
+
+trainer.train()
+```
+
+Use both: the callback groups measurements into completed steps, and `init()`
+installs the process-wide timing patches. Custom loops may still bypass input
+timing, as described in [Limitations](#limitations). You do not need to add
+`traceml.trace_step(...)` to your code.
+If a custom loop does not dispatch Hugging Face callbacks, instrument that
+loop with the [core API](../public-api.md) instead.
+
+### Full manual examples
+
+Use these examples when you want a complete runnable manual setup. If you
+already have a standard Hugging Face training script, start with `traceml run`.
+
+Install the examples' optional dependencies first:
+
+```bash
+pip install datasets torchvision
+```
 
 <details>
 <summary>NLP classification example</summary>
@@ -355,17 +369,17 @@ traceml run fine_tune_vision.py
 
 </details>
 
-## Reference
+### API reference
 
-`init()` takes no arguments. Call it once before constructing the `Trainer` to
-install TraceML's process-wide patches (`DataLoader` fetch timing, H2D
-`Tensor.to`, and the forward/backward/optimizer auto-timers). It is idempotent
-and returns the effective `TraceMLInitConfig`.
+For manual setup, `init()` takes no arguments. Call it once before
+constructing the `Trainer` to install TraceML's process-wide patches
+(`DataLoader` fetch timing, H2D `Tensor.to`, and the forward/backward/optimizer
+auto-timers). It is idempotent and returns the effective `TraceMLInitConfig`.
 
 `TraceMLTrainerCallback()` takes no TraceML-specific arguments and records
 standard step-level timing and memory.
 
-## Migration
+### Migration from `TraceMLTrainer`
 
 `TraceMLTrainer` was intentionally removed because it only installed
 `TraceMLTrainerCallback`. Replace it with `transformers.Trainer`, call
