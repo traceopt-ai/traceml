@@ -24,8 +24,9 @@ def _activate(module) -> None:
 
 
 class _TrainerLoader(importlib.abc.Loader):
-    def __init__(self, original):
+    def __init__(self, original, finder):
         self.original = original
+        self.finder = finder
 
     def __getattr__(self, name):
         return getattr(self.original, name)
@@ -37,6 +38,7 @@ class _TrainerLoader(importlib.abc.Loader):
     def exec_module(self, module) -> None:
         self.original.exec_module(module)
         _activate(module)
+        uninstall(self.finder)
 
 
 class _TrainerFinder(importlib.abc.MetaPathFinder):
@@ -46,9 +48,8 @@ class _TrainerFinder(importlib.abc.MetaPathFinder):
         spec = importlib.machinery.PathFinder.find_spec(fullname, path)
         if spec is None or spec.loader is None:
             return None
-        spec.loader = _TrainerLoader(spec.loader)
+        spec.loader = _TrainerLoader(spec.loader, self)
         # The loader owns activation now. Other imports use their normal path.
-        uninstall(self)
         return spec
 
 

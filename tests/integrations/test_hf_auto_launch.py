@@ -26,7 +26,13 @@ def _port() -> str:
         return str(sock.getsockname()[1])
 
 
-def _run(tmp_path: Path, script: Path, *, disabled: bool = False):
+def _run(
+    tmp_path: Path,
+    script: Path,
+    *,
+    disabled: bool = False,
+    profile: str = "run",
+):
     env = dict(os.environ)
     env["CUDA_VISIBLE_DEVICES"] = ""
     env["OMP_NUM_THREADS"] = "1"
@@ -37,7 +43,7 @@ def _run(tmp_path: Path, script: Path, *, disabled: bool = False):
         sys.executable,
         "-m",
         "traceml_ai.launcher.cli",
-        "run",
+        profile,
         "--mode",
         "summary",
         "--logs-dir",
@@ -111,6 +117,7 @@ Path(__file__).with_suffix(".json").write_text(json.dumps({
     "transformers_loaded": "transformers.trainer" in sys.modules,
     "patched": bool(getattr(Trainer._inner_training_loop,
                             "_traceml_lifecycle_guard", False)),
+    "hook": any(type(f).__name__ == "_TrainerFinder" for f in sys.meta_path),
 }))
 """
 
@@ -130,6 +137,7 @@ def test_hf_launcher_attaches_once_and_publishes_steps(
     assert state["callbacks"] == 1
     assert state["transformers_loaded"]
     assert state["patched"]
+    assert not state["hook"]
     expected = (
         "using existing TraceML callback"
         if manual
@@ -165,6 +173,47 @@ def test_non_hf_script_does_not_import_transformers(tmp_path: Path) -> None:
     result = _run(tmp_path, script)
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(script.with_suffix(".json").read_text()) is False
+
+
+def test_find_spec_probe_does_not_consume_hf_hook(tmp_path: Path) -> None:
+    script = tmp_path / "probed_train.py"
+    workload = _WORKLOAD.replace("MANUAL", "False").replace(
+        "from transformers import Trainer, TrainingArguments",
+        "import importlib.util\n"
+        'assert importlib.util.find_spec("transformers.trainer") is not None\n'
+        "from transformers import Trainer, TrainingArguments",
+    )
+    script.write_text(workload, encoding="utf-8")
+
+    result = _run(tmp_path, script)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    state = json.loads(script.with_suffix(".json").read_text())
+    assert state["callbacks"] == 1
+    assert state["patched"]
+    assert not state["hook"]
+
+
+def test_watch_does_not_install_hf_hook(tmp_path: Path) -> None:
+    script = tmp_path / "watch.py"
+    script.write_text(
+        "import json, sys\nfrom pathlib import Path\n"
+        "from transformers import Trainer\n"
+        'Path(__file__).with_suffix(".json").write_text(json.dumps({'
+        '"patched": bool(getattr(Trainer._inner_training_loop, '
+        '"_traceml_lifecycle_guard", False)), '
+        '"hook": any(type(f).__name__ == "_TrainerFinder" '
+        "for f in sys.meta_path)}))\n",
+        encoding="utf-8",
+    )
+
+    result = _run(tmp_path, script, profile="watch")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(script.with_suffix(".json").read_text()) == {
+        "patched": False,
+        "hook": False,
+    }
 
 
 def test_incompatible_explicit_config_is_kept_and_warned_once(

@@ -277,6 +277,7 @@ def _execute_with_runtime() -> None:
 
     if (
         isinstance(runtime, TraceMLRuntime)
+        and str(cfg.get("profile", DEFAULT_PROFILE)) == "run"
         and not bool(cfg.get("disable_traceml"))
         and os.environ.get("TRACEML_DISABLED") != "1"
     ):
