@@ -5,6 +5,11 @@ All notable changes to TraceML are documented here. This file follows
 should match the tags on [GitHub Releases](https://github.com/traceopt-ai/traceml/releases),
 which carry the full historical notes for versions predating this file.
 
+## [Unreleased]
+
+- **Breaking:** The `traceml` Python import path is no longer supported and
+  raises `ImportError`. Use `import traceml_ai as traceml` instead.
+
 ## [0.4.1] - 2026-09-24
 
 - Added `traceml_ai.integrations.monai` for MONAI's `SupervisedTrainer`

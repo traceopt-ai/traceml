@@ -10,8 +10,6 @@ Public path
 - `import traceml_ai as traceml`
 - `traceml.init(...)`
 - `traceml.trace_step(...)`
-
-The old `import traceml` path remains as a deprecated compatibility alias.
 """
 
 from __future__ import annotations

@@ -70,8 +70,7 @@ For supported integrations:
 - Lightning: call `traceml_ai.integrations.lightning.init()` and add `TraceMLCallback()`
 
 The preferred public API is the top-level `traceml.*` API from
-`import traceml_ai as traceml`. The old `import traceml` path remains available
-for compatibility, but emits a deprecation warning.
+`import traceml_ai as traceml`.
 
 ---
 

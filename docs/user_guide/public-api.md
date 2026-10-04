@@ -6,9 +6,7 @@ Import the stable core API from `traceml_ai`:
 import traceml_ai as traceml
 ```
 
-The reference below documents every symbol in `traceml_ai.__all__`. The old
-`import traceml` path remains a compatibility import and emits a
-`FutureWarning`; new code should use `traceml_ai`.
+The reference below documents every symbol in `traceml_ai.__all__`.
 
 ## Stable Core API
 

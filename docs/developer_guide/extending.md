@@ -101,7 +101,7 @@ training work, and make stop paths safe to call more than once.
 
 Ray support lives in `traceml_ai.integrations.ray` and should stay separate from
 the core runtime. Do not import Ray from `traceml_ai.runtime`, `traceml_ai.aggregator`,
-or the public package surfaces (`traceml_ai` or `traceml`).
+or the public `traceml_ai` package surface.
 
 The integration has two owners:
 
@@ -113,9 +113,6 @@ TraceML only starts telemetry components inside the processes Ray already
 created. Keep future Ray changes in that shape: no second launcher, no Ray Train
 internals, and no duplicated aggregator/runtime lifecycle code.
 
-
-The live implementation tree is `src/traceml_ai/`. The `src/traceml/` package is
-a deprecated compatibility alias and should not receive implementation code.
 
 ## Add a Diagnostic Rule
 
