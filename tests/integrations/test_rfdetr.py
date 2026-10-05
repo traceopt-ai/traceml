@@ -110,6 +110,7 @@ def test_init_preserves_defaults_factory_signature_and_arguments(rf_factory):
         limit_train_batches=3,
     )
     assert returned is rf_factory.trainer
+    assert returned._traceml_auto_skip is True
     assert returned.callbacks[:-1] == rf_factory.defaults
     assert isinstance(returned.callbacks[-1], rfdetr._callback_class())
     assert rf_factory.calls == [
@@ -208,6 +209,7 @@ def test_unsupported_modes_warn_and_preserve_native_trainer(
         rf_factory.train_config, rf_factory.model_config
     )
     assert returned is rf_factory.trainer
+    assert returned._traceml_auto_skip is True
     assert len(rf_factory.calls) == 1
     assert rf_factory.trainer.callbacks == rf_factory.defaults
     error = capsys.readouterr().err
