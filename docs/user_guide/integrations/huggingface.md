@@ -1,15 +1,13 @@
 # Hugging Face Trainer Integration
 
-Trace an existing Hugging Face `Trainer` script without changing its code.
-
 ## Install
 
-```bash
-pip install "traceml-ai[hf]"
-```
+This guide assumes PyTorch and Hugging Face Transformers are already installed.
+Use Transformers 4.46.1 or newer for training input timing.
 
-The `hf` extra installs `transformers>=4.46.1`, the minimum supported
-Transformers version for training input timing.
+```bash
+pip install traceml-ai
+```
 
 ## Run
 
@@ -17,60 +15,60 @@ Transformers version for training input timing.
 traceml run train.py
 ```
 
-TraceML initializes timing and attaches its callback when training starts. No
-TraceML code is needed in the script. Compatible existing initialization and
-callbacks are reused. This works for `Trainer` subclasses that use Hugging
-Face's standard inner training loop. For a custom loop or a direct
-`python`/`torchrun` launch, see
+Run your existing script with TraceML. Standard `Trainer` training is
+instrumented automatically, with no code changes required. For custom training loops or direct
+`python`/`torchrun` launches, see
 [Advanced: manual setup](#advanced-manual-setup).
 
 ## Read the result
 
-TraceML prints a training summary and saves the run artifacts. The step view
-shows Input Wait, forward, backward, and optimizer time when those signals are
-available. GPU runs can also show host-to-device time and step memory. See
-[How to Read Output](../reading-output.md) for the meaning of each value.
+When training finishes, TraceML prints a diagnosis of the likely bottleneck
+and saves the report for comparison or CI.
 
-## What one step includes
+The timing breakdown shows input waiting, forward, backward, and optimizer
+work. CUDA runs also show available host-to-device and memory measurements.
 
-One TraceML step covers the microbatches used for one HF optimizer update
-attempt. With `gradient_accumulation_steps=4`, four microbatches share one step
-number. A final group can contain fewer microbatches.
+See [How to Read Output](../reading-output.md) for an example report and
+explanations.
 
-Forward and backward times are added across the group. CUDA memory reports
-the peak PyTorch allocated/reserved memory on the tracked device during that
-group, rather than adding memory values. CPU runs report this memory metric
-as unavailable.
+## How TraceML measures Hugging Face training
 
-Accelerate prepares each training batch before the Trainer's step callback.
-TraceML measures those host-to-device transfers as short parts of Traced Step
-Time and combines them with the later forward, backward, and optimizer work.
-DataLoader waiting remains separate Input Wait, including blocking look-ahead
-fetches, and is not included in the transfer regions. The timing scope opens
-only while the standard Trainer requests training batches; evaluation and
-prediction input work is excluded, including direct `trainer.evaluate()` and
-`trainer.predict(...)` calls made outside training.
+TraceML automatically attaches its Trainer callback and timing hooks.
+Hugging Face continues to manage batch collection, gradient accumulation,
+and optimizer updates.
 
-TraceML follows HF's completed-step count even when mixed-precision overflow
-skips a parameter update. Step numbers are local to the process, so they may
-differ from HF's `global_step` after checkpoint resume. See the
+```text
+Hugging Face Trainer                 TraceML measurement
+─────────────────────────────────────────────────────────
+get_batch_samples()                  Input Wait + GPU transfer
+          ↓
+on_step_begin()                       Open the step capture
+          ↓
+Forward → Backward                    Record compute timings
+(repeated for each microbatch)
+          ↓
+Optimizer                            Record optimizer timing
+          ↓
+on_step_end()                         Complete one reported step
+```
+
+One reported step covers one optimizer update attempt. With
+`gradient_accumulation_steps=4`, four microbatches contribute to that step.
+TraceML adds their timings and records peak CUDA memory across the group.
+The final group can contain fewer microbatches.
+
+Batch fetching appears separately as **Input Wait**; GPU transfer and compute
+contribute to traced training time. Evaluation and prediction are excluded.
+
+**Checkpoint resume:** Continue using Hugging Face's normal
+`trainer.train(resume_from_checkpoint=...)`. TraceML records resumed training
+with step numbering local to the new run, which may differ from Hugging
+Face's `global_step`. See [Limitations](#limitations) for iterable-dataset
+resume handling, or the
 [developer guide](../../developer_guide/step-time-pipeline-contract.md#hugging-face-steps)
-for the exact timing boundaries and optimizer behavior.
+for exact timing boundaries.
 
-When resuming an iterable dataset, Accelerate may consume checkpoint-skipped
-batches and the first real batch inside one iterator call. TraceML does not
-attribute that mixed work to the real training step: the entire first resumed
-optimizer group is omitted from step timing and memory telemetry, including
-all its accumulation microbatches. Training executes normally; recording starts
-with the next group's input collection. No partial step or zero-valued
-placeholder is published. Fresh runs, map-style sampler skipping, and
-`ignore_data_skip=True` record their first group normally.
-
-If training stops before an accumulation group completes, TraceML discards
-that group. Cleanup happens before an automatic batch-size retry, and the same
-callback can be reused by a later Trainer run.
-
-## Advanced launch options
+## Multi-GPU training
 
 For single-node multi-GPU DDP, specify the number of processes:
 
@@ -81,74 +79,10 @@ traceml run train.py --nproc-per-node=4
 For multi-node DDP launch commands, see
 [Distributed Training](../distributed-training.md).
 
-The command works without changing `TrainingArguments`. For a short diagnostic
-run, these optional settings can make the output easier to read:
-
-| Setting | Why it helps |
-|---|---|
-| `disable_tqdm=True` | Prevents the Hugging Face progress bar from fighting with the TraceML live CLI. |
-| `report_to="none"` | Keeps tracker output out of the terminal during local diagnosis. |
-| `save_strategy="no"` | Avoids checkpoint files during short diagnostic runs. |
-
-TraceML can still run alongside W&B, MLflow, and TensorBoard. For tracker
-logging patterns, see [W&B / MLflow](wandb-mlflow.md).
-
-## Limitations
-
-- **Training input timing.** The input collection hook requires
-  `transformers>=4.46.1`, where `Trainer.get_batch_samples` is available. If an
-  older version is installed manually, TraceML warns once and lets training
-  continue, but omits training Input Wait and pre-step H2D measurements.
-- **Lifecycle guard.** Failure/retry cleanup and duplicate-callback handling
-  require automatic launch or `traceml_hf.init()` to install the Trainer
-  lifecycle guard. If installation fails, TraceML reports the error and
-  training continues without those guarantees. Custom `_inner_training_loop`
-  overrides must call the guarded parent implementation to receive this handling.
-- **Custom batch collection.** A Trainer subclass that overrides
-  `get_batch_samples` bypasses the standard training-input hook. TraceML warns
-  once for the affected Trainer class and continues without training Input
-  Wait or pre-step H2D signals rather than reporting partial measurements.
-- **Iterable checkpoint resume.** When Accelerate lazily consumes skipped
-  batches, the entire first resumed optimizer group is omitted from step
-  telemetry. It still trains normally; subsequent groups are recorded.
-- **Memory window.** Temporary allocation peaks before the callback starts
-  a step are outside its memory measurement.
-- **Custom loops.** Automatic attachment requires the standard
-  `_inner_training_loop`. Register the callback before `trainer.train()` for
-  custom loops that drive Hugging Face callbacks themselves.
-
-## Troubleshooting
-
-### Terminal output overlaps with TraceML
-
-Set `disable_tqdm=True` in `TrainingArguments`.
-
-If output is still noisy, use browser dashboard mode on single-node runs:
-
-```bash
-traceml run train.py --mode=dashboard
-```
-
-### Multi-GPU run only shows one rank
-
-Make sure you launched through TraceML with `--nproc-per-node`, not plain
-`python`:
-
-```bash
-traceml run train.py --nproc-per-node=4
-```
-
-### I want a baseline without TraceML
-
-Run the same script with TraceML disabled:
-
-```bash
-traceml run train.py --disable-traceml
-```
-
-This launches your script natively through `torchrun` without TraceML telemetry.
-
 ## Advanced: manual setup
+
+Existing scripts using `init()` and `TraceMLTrainerCallback()` also work with
+`traceml run`; TraceML reuses compatible setup without adding another callback.
 
 Use this path for a direct `python`/`torchrun` launch or a custom Trainer loop
 that still dispatches Hugging Face callbacks. A direct launch needs a running
@@ -379,38 +313,35 @@ auto-timers). It is idempotent and returns the effective `TraceMLInitConfig`.
 `TraceMLTrainerCallback()` takes no TraceML-specific arguments and records
 standard step-level timing and memory.
 
-### Migration from `TraceMLTrainer`
+## Limitations
 
-`TraceMLTrainer` was intentionally removed because it only installed
-`TraceMLTrainerCallback`. Replace it with `transformers.Trainer`, call
-`traceml_hf.init()` once, and add `traceml_hf.TraceMLTrainerCallback()` to the
-Trainer's callbacks, as shown above. Keep the rest of your Trainer arguments.
-
-The `traceml_enabled` argument was removed with the wrapper. For optional
-tracing, control initialization and callback registration in your code:
-
-```python
-enable_tracing = True
-callbacks = []  # Add any other Trainer callbacks here.
-if enable_tracing:
-    traceml_hf.init()
-    callbacks.append(traceml_hf.TraceMLTrainerCallback())
-
-trainer = Trainer(
-    model=model,
-    args=training_args,
-    train_dataset=train_dataset,
-    callbacks=callbacks,
-)
-trainer.train()
-```
-
-To disable TraceML for an entire launched run, use `--disable-traceml` as
-shown in Troubleshooting.
+- **Training input timing.** The input collection hook requires
+  `transformers>=4.46.1`, where `Trainer.get_batch_samples` is available. If an
+  older version is installed manually, TraceML warns once and lets training
+  continue, but omits training Input Wait and pre-step H2D measurements.
+- **Lifecycle guard.** Failure/retry cleanup and duplicate-callback handling
+  require automatic launch or `traceml_hf.init()` to install the Trainer
+  lifecycle guard. If installation fails, TraceML reports the error and
+  training continues without those guarantees. Custom `_inner_training_loop`
+  overrides must call the guarded parent implementation to receive this handling.
+- **Custom batch collection.** A Trainer subclass that overrides
+  `get_batch_samples` bypasses the standard training-input hook. TraceML warns
+  once for the affected Trainer class and continues without training Input
+  Wait or pre-step H2D signals rather than reporting partial measurements.
+- **Iterable checkpoint resume.** When Accelerate lazily consumes skipped
+  batches, the entire first resumed optimizer group is omitted from step
+  telemetry. It still trains normally; subsequent groups are recorded.
+- **Memory window.** Temporary allocation peaks before the callback starts
+  a step are outside its memory measurement.
+- **Custom loops.** Automatic attachment requires the standard
+  `_inner_training_loop`. Register the callback before `trainer.train()` for
+  custom loops that drive Hugging Face callbacks themselves.
 
 ## Next Steps
 
 - [How to Read Output](../reading-output.md)
+- [Compare Runs](../compare.md)
+- [Catch Regressions in CI](../regression-guard.md)
 - [Distributed Training](../distributed-training.md)
 - [W&B / MLflow](wandb-mlflow.md)
 - [Open an issue](https://github.com/traceopt-ai/traceml/issues)
