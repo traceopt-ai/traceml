@@ -129,6 +129,7 @@ def test_launcher_accumulates_and_attaches_once(tmp_path, namespace, manual):
         else "TraceML callback added automatically"
     )
     assert (result.stdout + result.stderr).count(message) == 1
+    assert "batch_to_device is not wrapped" not in result.stderr
     records = _records(tmp_path)
     assert [step for step, _ in records] == [1, 2]
     for (_, payload), expected in zip(records, [2, 1]):

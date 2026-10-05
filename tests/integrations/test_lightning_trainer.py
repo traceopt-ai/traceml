@@ -210,10 +210,17 @@ def test_lightning_auto_attachment_preserves_user_setup(
         config = initial.get_init_config()
     else:
 
-        def fail(trainer):
-            raise RuntimeError("injected attachment failure")
+        class FailingCallback:
+            def __init__(self):
+                raise RuntimeError("injected attachment failure")
 
-        monkeypatch.setattr(lightning_auto, "_prepare_callback", fail)
+        def unexpected_init():
+            raise AssertionError("init ran before callback registration")
+
+        monkeypatch.setattr(
+            traceml_lightning, "TraceMLCallback", FailingCallback
+        )
+        monkeypatch.setattr(traceml_lightning, "init", unexpected_init)
     train, _ = _loaders()
     trainer = _trainer(L, [], max_steps=2)
     trainer.fit(model, train_dataloaders=train)

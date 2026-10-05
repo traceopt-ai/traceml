@@ -128,15 +128,17 @@ def _prepare_callback(trainer) -> None:
             )
         return
 
-    if lightning.init().disabled:
-        return
     if not existing:
         connector = import_module(
             f"{namespace}.trainer.connectors.callback_connector"
         )
+        # Register first: init arms process-wide timing patches, which must not
+        # be left active if automatic callback attachment cannot complete.
         trainer.callbacks = connector._CallbackConnector._reorder_callbacks(
             [*callbacks, lightning.TraceMLCallback()]
         )
+    if lightning.init().disabled:
+        return
     trainer._traceml_auto_status = (
         "using existing TraceML callback"
         if existing
