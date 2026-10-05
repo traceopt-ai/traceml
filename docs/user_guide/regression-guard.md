@@ -1,17 +1,15 @@
-# Regression guard measurement contract
+# Catch Training Regressions in CI
 
-TraceML's local regression guard is an **experimental pilot**. A guarded
-run captures a small workload declaration and records whether the training
-command completed on every launcher node. The existing `traceml compare`
-command can use two completed guarded-run summaries for an optional local CI
-decision.
+Compare a reference training run with a candidate and fail CI when Step Time
+increases beyond your threshold.
 
-The contract format uses `schema_version: 1`. This identifies the first file
-format; it does not indicate that the pilot is a stable 1.0 feature.
+Regression Guard is experimental. It checks that both runs declared the same
+workload and topology, completed successfully, and have comparable Step Time
+measurements.
 
-## Configure a run
+## 1. Declare your workload
 
-Add an optional `guard` section to the existing `traceml.yaml`:
+Add a `guard` section to `traceml.yaml` in your training project:
 
 ```yaml
 mode: summary
@@ -31,37 +29,168 @@ guard:
     completed_steps: 50
 ```
 
-Run the training normally:
+Use the same declaration for both runs. Record parameters that materially
+change the workload. TraceML searches the launch directory and its parents
+for `traceml.yaml`.
+
+**The measurement fields declare the intended range; they do not select the
+steps used for comparison.** The check uses aggregate Step Time from each
+saved summary. Different analyzed ranges and step counts are allowed.
+
+## 2. Run the reference and candidate
+
+Run your reference code:
 
 ```bash
-traceml run train.py \
-  --nnodes 1 \
-  --nproc-per-node 2 \
-  --run-name reference
+traceml run train.py --run-name reference
 ```
 
-TraceML searches the launch directory and its parents for `traceml.yaml`. No
-second configuration file or guard-specific launch option is required.
+Then run your candidate code with the same workload declaration:
 
-The guard pilot currently requires `traceml run`, summary mode, and history
-recording. One-process and fixed-size DDP runs on one or more nodes are
-allowed. `traceml watch`, `traceml serve`, and direct `traceml.init()` launches
-ignore the guard declaration.
+```bash
+traceml run train.py --run-name candidate
+```
 
-For multi-node DDP, use the ordinary TraceML launch shape documented in
-[Distributed Training](distributed-training.md#multi-node-ddp). Every launcher
-must discover the same `guard` declaration and use the same explicit
-`--run-name`, `--nnodes`, and `--nproc-per-node`; only `--node-rank` differs.
-Guarded multi-node runs must also resolve `--logs-dir` to the same shared
-directory on every node. Node 0 records the normalized declaration, and every
-launcher writes its outcome beneath that shared run directory. These small
-files stay on the filesystem; TraceML does not send them through telemetry.
+Use comparable hardware and the same process topology. Choose a fresh run
+name for every execution; guarded runs do not overwrite an existing manifest.
 
-A guarded run name identifies exactly one execution. Node 0 refuses to start
-when `logs/<run-name>/manifest.json` already exists, so choose a fresh
-`--run-name` for every guarded launch. TraceML leaves the existing run intact.
+These commands assume your script uses a supported automatic trainer or the
+required [explicit integration](integrations.md). Regression Guard requires
+`traceml run`, summary mode, and history recording.
 
-## Contract fields
+For DDP, use the same node count and processes per node in both runs. See
+[Multi-node requirements](#multi-node-requirements) for shared storage and
+per-node launch configuration.
+
+## 3. Compare the results
+
+```bash
+traceml compare \
+  logs/reference/final_summary.json \
+  logs/candidate/final_summary.json \
+  --max-step-time-regression-pct 5 \
+  --output compare/reference-vs-candidate
+```
+
+The reference comes first. A candidate more than 5% slower fails the check.
+TraceML saves JSON and text comparison reports.
+
+Both runs need matching normalized declarations and expected topology,
+completed training and launcher outcomes, and positive Step Time on a common
+CPU or GPU clock. Only Step Time determines the CI result; other measurements
+remain comparison context.
+
+| Result | Exit code | Meaning |
+| --- | ---: | --- |
+| `WITHIN_THRESHOLD_IN_THIS_PAIR` | 0 | Difference is within the threshold. |
+| `FASTER_IN_THIS_PAIR` | 0 | Candidate is faster beyond the threshold. |
+| `SLOWER_IN_THIS_PAIR` | 4 | Candidate is slower beyond the threshold. |
+| `INCONCLUSIVE` | 3 | Required evidence is missing or incompatible. |
+
+Invalid input or output failures return `1`; invalid command-line usage
+returns `2`. Without `--max-step-time-regression-pct`, comparison is
+exploratory and does not enforce a CI threshold. See
+[Compare Runs](compare.md#use-compare-in-ci) for decision details.
+
+## 4. Add the check to CI
+
+The experimental pilot deliberately leaves reference selection to the user.
+Make the chosen reference `final_summary.json` available to the job, run the
+candidate, and pass both explicit paths to `traceml compare`. For example:
+
+```yaml
+- name: Check Step Time
+  run: |
+    traceml compare \
+      artifacts/reference/final_summary.json \
+      logs/candidate/final_summary.json \
+      --max-step-time-regression-pct 5 \
+      --output compare/reference-vs-candidate
+
+- name: Preserve comparison evidence
+  if: always()
+  uses: actions/upload-artifact@v4
+  with:
+    name: traceml-performance-comparison
+    path: compare/
+```
+
+The comparison step succeeds for a faster candidate or a result within the
+threshold. It fails for a slower candidate, invalid input, or inconclusive
+evidence. See the [exit-code table](compare.md#use-compare-in-ci) when a CI
+system needs to distinguish those outcomes.
+
+## 5. Choose a useful threshold
+
+Repeat the reference workload on comparable hardware before choosing a
+threshold. Allow for normal variation, and keep the model, data, precision,
+batch size, and process topology consistent.
+
+This check describes one pair of runs. It does not establish statistical
+significance or equivalent model quality. TraceML checks your declarations;
+it does not verify that the training program actually used those parameters.
+
+## Try the complete CPU DDP workflow
+
+<details markdown="1">
+<summary>Run a small reference-and-candidate trial</summary>
+
+The checked-in minimal DDP example provides a small end-to-end trial on a
+CPU-only machine. From the repository root, create this `traceml.yaml`:
+
+```yaml
+mode: summary
+history_enabled: true
+
+guard:
+  schema_version: 1
+  workload:
+    name: ddp-minimal-guard-trial
+    parameters:
+      model: tiny-mlp
+      data_version: synthetic-v1
+  measurement:
+    start_step: 1
+    completed_steps: 20
+```
+
+Run the same declared workload twice with fresh run names:
+
+```bash
+OMP_NUM_THREADS=1 traceml run examples/distributed/ddp_minimal.py \
+  --run-name guard-reference \
+  --nproc-per-node 2 \
+  --args --steps 20
+
+OMP_NUM_THREADS=1 traceml run examples/distributed/ddp_minimal.py \
+  --run-name guard-candidate \
+  --nproc-per-node 2 \
+  --args --steps 20
+```
+
+Then evaluate the pair:
+
+```bash
+traceml compare \
+  logs/guard-reference/final_summary.json \
+  logs/guard-candidate/final_summary.json \
+  --max-step-time-regression-pct 1000 \
+  --output compare/guard-reference-vs-candidate
+```
+
+The first summary is always the reference and the second is the candidate.
+TraceML writes both JSON and text comparison artifacts before returning the
+CI exit code. This tiny CPU workload can vary by tens of percent between
+identical runs, so the wide threshold demonstrates the complete workflow rather
+than a meaningful performance verdict.
+
+</details>
+
+## Advanced reference
+
+### Configuration fields
+
+`schema_version: 1` identifies the contract format, not a stable 1.0 release.
 
 | Field | Required | Type | Rules |
 | --- | --- | --- | --- |
@@ -70,15 +199,15 @@ when `logs/<run-name>/manifest.json` already exists, so choose a fresh
 | `guard.workload.parameters` | No | Mapping | Defaults to `{}` and may contain at most 32 entries. |
 | Parameter key | Yes per entry | String | Nonempty, no surrounding whitespace, at most 64 characters. |
 | Parameter value | Yes per entry | Scalar | A nonempty string, signed integer, finite float, or Boolean. Strings may contain at most 256 characters. |
-| `guard.measurement.start_step` | Yes | Integer | First completed step to measure; must be at least `1`. |
-| `guard.measurement.completed_steps` | Yes | Integer | Number of completed steps to measure; must be at least `1`. |
+| `guard.measurement.start_step` | Yes | Integer | Declared first completed step; must be at least `1`. |
+| `guard.measurement.completed_steps` | Yes | Integer | Declared number of completed steps; must be at least `1`. |
 
 Unknown fields, lists, nested parameter mappings, and null parameter values
 are rejected. Integers and the inclusive measurement end must fit in a signed
 64-bit value. Workload names, parameter keys, and string values cannot contain
 Unicode category C characters, including control and format characters.
 
-## Workload identity
+### Workload identity
 
 `workload.name` is the only required workload field. Choose a stable name that
 identifies the work being compared. TraceML stores it exactly as written, so
@@ -107,7 +236,7 @@ These values are user declarations. TraceML records them but does not infer or
 verify that the training program used them. Do not include secrets, credentials,
 or machine-local paths because the values are persisted in run artifacts.
 
-## Measurement window
+### Measurement and history retention
 
 TraceML completed steps are numbered from 1. `start_step` is inclusive and
 `completed_steps` is the exact requested count. This example:
@@ -118,8 +247,8 @@ measurement:
   completed_steps: 50
 ```
 
-requests steps 10 through 59. If `--trace-max-steps` is used, it must include
-the complete requested range.
+declares an intended range of steps 10 through 59. If `--trace-max-steps` is
+used, it must include the complete requested range.
 
 The complete requested window should remain inside `history_retention` until
 the run is finalized. In the experimental pilot, this declaration is a
@@ -128,11 +257,25 @@ does not compare individual step IDs or use the declaration to re-aggregate
 telemetry. The CI decision uses the aggregate Step Time already stored for each
 final summary's `step_time.global.window`. That analyzed range can differ from
 the requested range or from the other run, and its analyzed-step count remains
-visible in the comparison. Exact-window verification can be added later if
-pilot use shows it is needed; it does not require SQLite or additional
-artifacts now.
+visible in the comparison.
 
-## Captured artifact
+### Multi-node requirements
+
+One-process and fixed-size DDP runs on one or more nodes are allowed.
+`traceml watch`, `traceml serve`, and direct `traceml.init()` launches ignore
+the guard declaration.
+
+For multi-node DDP, use the ordinary launch shape in
+[Distributed Training](distributed-training.md#multi-node-ddp). Every launcher
+must discover the same `guard` declaration and use the same explicit
+`--run-name`, `--nnodes`, and `--nproc-per-node`; only `--node-rank` differs.
+Resolve `--logs-dir` to the same shared directory on every node. Node 0 records
+the declaration, and each launcher writes its outcome under that directory.
+
+### Saved artifacts and completion checks
+
+<details markdown="1">
+<summary>Manifest, node outcomes, and final-summary context</summary>
 
 The launcher validates and normalizes the declaration before starting the
 aggregator or training workers. After writing the manifest, it prints a short
@@ -235,110 +378,9 @@ To inspect the captured declaration, format the manifest and look under
 python -m json.tool logs/reference/manifest.json
 ```
 
-## Compare two guarded runs
+</details>
 
-Pass the two portable summaries and an explicit Step Time threshold to the
-existing compare command:
-
-```bash
-traceml compare \
-  logs/reference/final_summary.json \
-  logs/candidate/final_summary.json \
-  --max-step-time-regression-pct 5 \
-  --output compare/reference-vs-candidate
-```
-
-The reference comes first and the candidate second. Their normalized
-declarations and expected topology must match, and both training and launcher
-completion states must be completed. TraceML makes the decision from their
-common-clock Step Time; it does not reopen the manifests or SQLite databases.
-
-See [Compare Runs](compare.md#use-compare-in-ci) for result values, exit codes,
-and compatibility behavior.
-
-## Try the complete CPU DDP workflow
-
-The checked-in minimal DDP example provides a small end-to-end trial on a
-CPU-only machine. From the repository root, create this `traceml.yaml`:
-
-```yaml
-mode: summary
-history_enabled: true
-
-guard:
-  schema_version: 1
-  workload:
-    name: ddp-minimal-guard-trial
-    parameters:
-      model: tiny-mlp
-      data_version: synthetic-v1
-  measurement:
-    start_step: 1
-    completed_steps: 20
-```
-
-Run the same declared workload twice with fresh run names:
-
-```bash
-OMP_NUM_THREADS=1 traceml run examples/distributed/ddp_minimal.py \
-  --run-name guard-reference \
-  --nproc-per-node 2 \
-  --args --steps 20
-
-OMP_NUM_THREADS=1 traceml run examples/distributed/ddp_minimal.py \
-  --run-name guard-candidate \
-  --nproc-per-node 2 \
-  --args --steps 20
-```
-
-Then evaluate the pair:
-
-```bash
-traceml compare \
-  logs/guard-reference/final_summary.json \
-  logs/guard-candidate/final_summary.json \
-  --max-step-time-regression-pct 1000 \
-  --output compare/guard-reference-vs-candidate
-```
-
-The first summary is always the reference and the second is the candidate.
-TraceML writes both JSON and text comparison artifacts before returning the
-CI exit code. This tiny CPU workload can vary by tens of percent between
-identical runs, so the wide threshold demonstrates the complete workflow rather
-than a meaningful performance verdict.
-
-## Use the result in CI
-
-The experimental pilot deliberately leaves reference selection to the user.
-Make the chosen reference `final_summary.json` available to the job, run the
-candidate, and pass both explicit paths to `traceml compare`. For example:
-
-```yaml
-- name: Check Step Time
-  run: |
-    traceml compare \
-      artifacts/reference/final_summary.json \
-      logs/candidate/final_summary.json \
-      --max-step-time-regression-pct 5 \
-      --output compare/reference-vs-candidate
-
-- name: Preserve comparison evidence
-  if: always()
-  uses: actions/upload-artifact@v4
-  with:
-    name: traceml-performance-comparison
-    path: compare/
-```
-
-The comparison step succeeds for a faster candidate or a result within the
-threshold. It fails for a slower candidate, invalid input, or inconclusive
-evidence. See the [exit-code table](compare.md#use-compare-in-ci) when a CI
-system needs to distinguish those outcomes.
-
-Before choosing a threshold, run the reference workload at least twice on the
-same CI runner and use its normal variation to set a suitable value.
-
-## Qualified scope
+### Tested environments
 
 The pilot keeps implementation support separate from environments exercised
 end to end in automated tests.
@@ -355,7 +397,7 @@ The comparison is one observation about one explicit pair. It does not claim
 repeatability, statistical significance, model-quality equivalence, complete
 telemetry delivery, or support for changing process membership.
 
-## Troubleshooting
+### Troubleshooting
 
 | Symptom | What to check |
 | --- | --- |
