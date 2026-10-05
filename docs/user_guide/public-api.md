@@ -292,8 +292,10 @@ Compatible existing setup is reused under automatic launch. See the
 
 ### RF-DETR
 
-Call `init()` before the existing `model.train()` call. See the
-[RF-DETR guide](integrations/rfdetr.md) for setup and supported modes.
+Run an ordinary RF-DETR `model.train()` script with `traceml run train.py` for
+automatic attachment. Manual setup needs only `rfdetr.init()` before training;
+the integration supplies its specialized callback. Compatible existing setup
+is reused. See the [RF-DETR guide](integrations/rfdetr.md) for supported modes.
 
 ::: traceml_ai.integrations.rfdetr.init
     options:

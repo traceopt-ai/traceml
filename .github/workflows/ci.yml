@@ -192,6 +192,7 @@ jobs:
           python -c 'import rfdetr.training; import torch; assert torch.distributed.is_gloo_available()'
           pytest \
             tests/integrations/test_rfdetr_trainer.py \
+            tests/integrations/test_rfdetr_auto_launch.py \
             tests/integrations/test_rfdetr_nano.py -q
 
   test-monai:

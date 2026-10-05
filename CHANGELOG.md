@@ -7,6 +7,9 @@ which carry the full historical notes for versions predating this file.
 
 ## [Unreleased]
 
+- `traceml run train.py` now activates the existing RF-DETR adapter for standard
+  eager detection training. Compatible manual `rfdetr.init()` calls are reused;
+  `watch` and disabled launches install no RF-DETR hooks.
 - **Breaking:** The `traceml` Python import path is no longer supported and
   raises `ImportError`. Use `import traceml_ai as traceml` instead.
 - `traceml run train.py` now attaches the existing Lightning callback

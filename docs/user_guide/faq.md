@@ -72,6 +72,9 @@ For supported integrations:
 - Lightning: run a standard script with `traceml run train.py` for automatic
   attachment. Direct launches can still call
   `traceml_ai.integrations.lightning.init()` and add `TraceMLCallback()` manually.
+- RF-DETR: run a standard `model.train()` script with `traceml run train.py`.
+  Manual setup can still call `traceml_ai.integrations.rfdetr.init()` before
+  training; it supplies the specialized callback automatically.
 
 The preferred public API is the top-level `traceml.*` API from
 `import traceml_ai as traceml`.

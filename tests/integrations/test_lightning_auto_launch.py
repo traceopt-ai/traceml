@@ -14,7 +14,7 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("lightning")
 
 
-def test_auto_policy_excludes_unsupported_modes(monkeypatch):
+def test_auto_policy_excludes_unsupported_modes(monkeypatch, capsys):
     class SingleDeviceStrategy:
         pass
 
@@ -51,7 +51,15 @@ def test_auto_policy_excludes_unsupported_modes(monkeypatch):
         "init",
         lambda: (_ for _ in ()).throw(AssertionError("must not initialize")),
     )
+    monkeypatch.setattr(lightning_auto, "_WARNINGS", set())
     lightning_auto._prepare_callback(SimpleNamespace(_traceml_auto_skip=True))
+    lightning_auto._prepare_callback(
+        SimpleNamespace(callbacks=[], lightning_module=RFDETRModule())
+    )
+    warning = capsys.readouterr().err
+    assert "traced through RFDETR.train()" in warning
+    assert "constructed directly" in warning
+    assert "Lightning integration's init()" not in warning
     lightning_auto._prepare_callback(
         SimpleNamespace(callbacks=[], lightning_module=compiled)
     )
@@ -230,7 +238,7 @@ def test_unrelated_launcher_does_not_import_training_frameworks(tmp_path):
     script.write_text("""
 import sys
 assert not any(name == root or name.startswith(root + ".")
-               for name in sys.modules for root in ("lightning", "pytorch_lightning", "transformers"))
+               for name in sys.modules for root in ("lightning", "pytorch_lightning", "transformers", "rfdetr"))
 """)
     result = _run(tmp_path, script, run_name="lightning-auto")
     assert result.returncode == 0, result.stdout + result.stderr

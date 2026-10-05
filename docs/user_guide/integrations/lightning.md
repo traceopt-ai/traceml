@@ -147,8 +147,9 @@ The same experiment is available in the
   supported. DeepSpeed, other strategies, and spawn/fork launch modes are not
   attached automatically. Existing manual callbacks remain unchanged.
 - **Specialized integrations.** RF-DETR keeps its dedicated, mode-aware adapter;
-  call `traceml_ai.integrations.rfdetr.init()` as documented in the
-  [RF-DETR guide](rfdetr.md). Generic Lightning attachment is skipped.
+  `traceml run train.py` activates it for standard RF-DETR `model.train()` runs.
+  Generic Lightning attachment is skipped. See the [RF-DETR guide](rfdetr.md)
+  for supported modes and advanced manual setup.
 - **Forward coverage.** Observes module calls during standard `training_step()`;
   deeper modules called without their direct parent, arbitrary functional-only
   computation, or direct `.forward()` calls can bypass module hooks. A completed
@@ -174,8 +175,8 @@ traceml run train.py --disable-traceml
 Disabled launch installs no automatic import observer or timing hooks. Disabling
 tracing later makes installed timing hooks stop recording.
 
-`traceml watch train.py` remains resource-only and does not install Lightning
-or Hugging Face training instrumentation.
+`traceml watch train.py` remains resource-only and does not install Lightning,
+Hugging Face, or RF-DETR training instrumentation.
 
 ## Advanced: manual setup
 

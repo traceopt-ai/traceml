@@ -122,7 +122,7 @@
     {
       "id": "rfdetr",
       "stack": "RF-DETR",
-      "recommended_api": "traceml_ai.integrations.rfdetr.init() + model.train()",
+      "recommended_api": "traceml run train.py (standard model.train); rfdetr.init() for manual setup",
       "guide": "user_guide/integrations/rfdetr.md",
       "tested_dependency_range": "Dedicated CPU CI pins rfdetr[train]==1.10.1. A reproducible one- and four-T4 case study uses RF-DETR development commit 0ed5be8 with torch 2.9.1; this is not a broad compatibility range.",
       "coverage": {

@@ -75,9 +75,9 @@ def _prepare_callback(trainer) -> None:
         if not existing:
             _warn_once(
                 "rfdetr",
-                "RF-DETR uses its dedicated TraceML adapter; call "
-                "traceml_ai.integrations.rfdetr.init() before training. "
-                "Generic Lightning attachment was skipped.",
+                "RF-DETR is traced through RFDETR.train() or "
+                "rfdetr.training.build_trainer(). This Trainer was "
+                "constructed directly, so TraceML attachment was skipped.",
             )
         return
     if _is_compiled(model):
@@ -88,13 +88,7 @@ def _prepare_callback(trainer) -> None:
                 "torch.compile; keeping existing callbacks unchanged.",
             )
         return
-    if config is not None and not (
-        config.mode == "selective"
-        and config.patch_dataloader
-        and config.patch_h2d
-        and not config.patch_forward
-        and not config.patch_backward
-    ):
+    if not lightning._auto_config_is_compatible(config):
         _warn_once(
             "configuration",
             "Lightning automatic instrumentation found an incompatible TraceML "
