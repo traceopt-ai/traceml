@@ -1,20 +1,19 @@
-# MONAI
+# MONAI Integration
 
-MONAI's `SupervisedTrainer` is an Ignite engine, so TraceML attaches to it as a
-MONAI handler. Pass `TraceMLHandler()` in `train_handlers` and each training
-step is timed. Some phases come from the engine's events and the rest from
-wrapping what the trainer calls, which the Limitations below spell out. The
-trainer keeps its own handlers, metrics and checkpoints.
+## Install
 
-## Install and initialize
-
-MONAI is not a TraceML dependency. Install the extra:
+This guide assumes PyTorch, MONAI, and its Ignite engine dependency are already
+installed.
 
 ```bash
-pip install "traceml-ai[monai]"
+pip install traceml-ai
 ```
 
-Initialize TraceML before building the trainer:
+## Add the handler
+
+Initialize the MONAI integration before building your `SupervisedTrainer`,
+then add `TraceMLHandler()` to its `train_handlers`. Keep your existing
+handlers alongside it.
 
 ```python
 from monai.engines import SupervisedTrainer
@@ -34,44 +33,109 @@ trainer = SupervisedTrainer(
 trainer.run()
 ```
 
-Run the script with `traceml run train.py` to start the telemetry collector.
+Use both the integration's `init()` and its handler. Do not also call generic
+`traceml.init()`: MONAI's handler measures batch fetching through engine events,
+so it requires the generic DataLoader timing patch to stay disabled.
 
-Use `traceml_monai.init()` as the only TraceML init in the process. A plain
-`traceml.init()` installs the torch DataLoader patch, which would count every
-fetch a second time. The handler declines to trace that run and says so on
-stderr.
+## Run
 
-## What one step is
+```bash
+traceml run train.py
+```
 
-One TraceML step is one optimizer update, as in the Lightning callback. With
-`accumulation_steps=N` a step spans N iterations.
+The command starts TraceML's collector and runs your script. MONAI requires the
+handler setup above; it is not attached automatically by the launcher.
 
-When the loader has a length, the last group of an epoch is published even if it
-holds fewer than N, because MONAI forces an optimizer step there. When it does
-not, as with an `IterableDataset` that has no `__len__`, MONAI does not force
-that step, and the window stays open past the epoch boundary. MONAI itself
-zeroes that window's gradients once it learns the epoch length, without ever
-stepping them, so TraceML drops it too rather than merging it into the group
-that steps next. A group still open when the run ends is dropped the same way.
+## Read the result
 
-## What each phase measures
+When training finishes, TraceML prints a diagnosis of the likely bottleneck
+and saves the report for comparison or CI.
 
-| Phase | Measured from |
-| --- | --- |
-| Input Wait | the engine's `GET_BATCH_STARTED` to `GET_BATCH_COMPLETED` bracket, on the training thread |
-| Forward | the `engine.inferer(...)` call, which is where MONAI runs the model |
-| Backward | `LOSS_COMPLETED` to `BACKWARD_COMPLETED` |
-| Optimizer | step hooks on the trainer's own optimizer |
-| Step memory | the step as a whole, on CUDA only |
-| H2D | the `.to()` calls `prepare_batch` makes, on CUDA only |
+The timing breakdown shows input waiting, forward, backward, and optimizer
+work. CUDA runs also show available host-to-device and memory measurements.
+A large Input Wait points to batch availability; Residual includes work such
+as loss computation and postprocessing that is outside the measured phases.
 
-The window opens when MONAI calls `prepare_batch`, so the batch transfer is
-inside it, and closes at `MODEL_COMPLETED`. That happens once per iteration, so
-under `accumulation_steps` a published step is the sum of its iterations'
-windows. Ignite fetches the batch before the iteration starts, which is why
-Input Wait sits outside the window rather than inside it.
+See [How to Read Output](../reading-output.md) for an example report and
+explanations.
 
-## Where MONAI's own work lands
+## How TraceML measures MONAI training
+
+TraceML attaches to MONAI's `SupervisedTrainer` through its Ignite events and
+wraps its batch preparation and inferer calls. MONAI continues to manage
+training, metrics, and checkpoints.
+
+```text
+MONAI training path                 TraceML measurement
+──────────────────────────────────────────────────────────────────
+GET_BATCH_STARTED →                 Input Wait
+GET_BATCH_COMPLETED
+          ↓
+prepare_batch()                     Open iteration + GPU transfer
+          ↓
+engine.inferer()                    Forward
+          ↓
+LOSS_COMPLETED → BACKWARD_COMPLETED  Backward
+          ↓
+optimizer.step()                    Optimizer
+          ↓
+MODEL_COMPLETED                     Close iteration timing;
+                                    publish if update group is complete
+```
+
+One reported step covers one optimizer update attempt. With
+`accumulation_steps=4`, four training iterations contribute to that step.
+TraceML adds their timings and reports peak CUDA memory across the group's
+measurement window. A loader with a known length can finish an epoch with a
+shorter group.
+
+Batch fetching appears separately as **Input Wait**. The traced iteration runs
+from `prepare_batch()` through the handler's `MODEL_COMPLETED` callback.
+Evaluation is not traced by this handler. For `ThreadDataLoader`, Input Wait
+measures how long the training thread waits, not how long the background
+thread spends preparing data.
+
+## Advanced options
+
+### Complete examples
+
+The [minimal example](https://github.com/traceopt-ai/traceml/blob/main/examples/integrations/monai_minimal.py)
+trains a small UNet on synthetic volumes and downloads nothing. From the
+repository root, run:
+
+```bash
+traceml run examples/integrations/monai_minimal.py
+```
+
+<details markdown="1">
+<summary>Compare input loading on a real workload</summary>
+
+[`examples/integrations/monai_dataloading_bottleneck.py`](https://github.com/traceopt-ai/traceml/blob/main/examples/integrations/monai_dataloading_bottleneck.py)
+trains a 3D UNet on patches from the Medical Segmentation Decathlon spleen task.
+Each flag changes one setting: the dataset class, the worker count, the loader
+class, or mixed precision. Compare two runs that differ in one setting, keeping the dataset and other
+training options fixed:
+
+```bash
+traceml run --logs-dir logs --run-name spleen_1_baseline \
+    examples/integrations/monai_dataloading_bottleneck.py --args --data-dir data
+traceml run --logs-dir logs --run-name spleen_2_workers \
+    examples/integrations/monai_dataloading_bottleneck.py \
+    --args --data-dir data --num-workers 4
+traceml compare logs/spleen_1_baseline/final_summary.json \
+    logs/spleen_2_workers/final_summary.json
+```
+
+The notebook runs six settings on one GPU, compares each adjacent pair, and
+shows where the bottleneck moves as each one changes:
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/notebooks/monai_dataloading_bottleneck.ipynb)
+
+</details>
+
+### Timing details
+
+<details markdown="1">
+<summary>Loss, postprocessing, schedulers, and mixed precision</summary>
 
 `network.train()`, `optimizer.zero_grad()` and the loss run between
 `prepare_batch` and the events above. They sit inside the step and in no phase.
@@ -90,88 +154,55 @@ whose scaler skips every step reports no optimizer time at all. A fused
 optimizer is the exception: the scaler calls its `step()` either way and skips
 the update inside the kernel, so the event is recorded.
 
-## Which engines are traced
-
-Only a `SupervisedTrainer` that runs MONAI's own `_iteration`, including a
-subclass that inherits it. `GanTrainer`, `AdversarialTrainer`, evaluators, a
-trainer built with `iteration_update=`, and a subclass that overrides
-`_iteration` each get one warning and nothing attached.
-
-One handler traces one trainer. A second handler on the same trainer is refused
-with a warning, so no number is silently doubled.
-
-## A threaded loader measures what the loop waited
-
-`ThreadDataLoader` fetches on a background thread. The bracket above measures
-what the training loop waited for a batch, not what the producer spent building
-it. A loader that keeps up reports a small Input Wait even while its thread
-works through the whole step.
-
-## Reading the measurements
-
-The end-of-run summary reports one row per published step, so the step count
-should equal the optimizer updates your trainer made. The example prints its own
-update count for exactly this comparison.
-
-Input Wait is the loop's idle time before a batch arrives, and forward, backward
-and optimizer are the three compute phases. Whatever is left inside the step is
-reported as residual. For a MONAI trainer that holds `zero_grad`, the loss,
-decollation, postprocessing, any handler that runs before the step closes, and
-on CPU the batch transfer as well.
-
-A large Input Wait points at the input pipeline. A large residual points at work
-around the model rather than in it, and the summary cannot say which part of it
-without a profiler.
+</details>
 
 ## Limitations
 
-- Backward is measured between the handler's own two callbacks. Another handler
+- **Supported engine.** The handler supports `SupervisedTrainer` with MONAI's
+  standard `_iteration`, including subclasses that inherit it. GAN trainers,
+  evaluators, `iteration_update=` replacements, and overridden iterations
+  receive a warning and are not traced.
+- **Initialization and duplicates.** Generic initialization with the DataLoader
+  patch enabled causes the handler to skip tracing with a warning. A duplicate
+  handler on the same trainer is also refused to avoid double counting.
+- **Unknown-length accumulation.** Unfinished groups are discarded when MONAI
+  clears their gradients or when the run ends. See the accumulation note below.
+
+- **Handler ordering.** Backward is measured between the handler's own two callbacks. Another handler
   registered between them falls inside that window.
-- While a run is traced, `engine.inferer` is a timing proxy. Reads and writes
+- **Inferer proxy.** While a run is traced, `engine.inferer` is a timing proxy. Reads and writes
   both reach the real inferer, so state a handler stores on it survives, but
   the object is not MONAI's `Inferer` for an `isinstance` check, `repr` shows
   the proxy, and it does not deepcopy. The original is restored at every run
   exit, including after an exception.
-- `engine.run` stays wrapped, and the engine keeps a marker naming its handler,
+- **Cleanup.** `engine.run` stays wrapped, and the engine keeps a marker naming its handler,
   for the life of the engine. Only `prepare_batch` and `inferer` are put back at
   a run exit.
-- Optimizer time is `optimizer.step()` only. A step-interval scheduler, such as
+- **Optimizer scope.** Optimizer time is `optimizer.step()` only. A step-interval scheduler, such as
   `LrScheduleHandler(epoch_level=False)`, runs on `ITERATION_COMPLETED`, so it
   is in neither the optimizer phase nor the step.
-- CUDA is a documented recipe, not CI tested: the spleen notebook below ran on
+- **Hardware validation.** CUDA is a documented recipe, not CI tested: the spleen notebook linked above ran on
   one T4, and CI covers CPU single-process runs only. `multi_process` and
   `multi_node` are not claimed, because the handler has no per-rank branch.
 
-## Full example
+<details markdown="1">
+<summary>Accumulation with an unknown-length loader</summary>
 
-[`examples/integrations/monai_minimal.py`](https://github.com/traceopt-ai/traceml/blob/main/examples/integrations/monai_minimal.py)
-trains a small UNet on synthetic volumes and downloads nothing. Run it with:
+With `accumulation_steps=N` and a loader of known length, the last group of an
+epoch is published even if it holds fewer than N iterations, because MONAI
+forces an optimizer step there. When the loader has no known length,
+as with an `IterableDataset` that has no `__len__`, MONAI does not force
+that step, and the window stays open past the epoch boundary. MONAI itself
+zeroes that window's gradients once it learns the epoch length, without ever
+stepping them, so TraceML drops it too rather than merging it into the group
+that steps next. A group still open when the run ends is dropped the same way.
 
-```bash
-traceml run examples/integrations/monai_minimal.py
-```
+</details>
 
-The end-of-run summary reports Input Wait, forward, backward and optimizer time
-for each published step.
+## Next Steps
 
-## Try it on a real workload
-
-[`examples/integrations/monai_dataloading_bottleneck.py`](https://github.com/traceopt-ai/traceml/blob/main/examples/integrations/monai_dataloading_bottleneck.py)
-trains a 3D UNet on patches from the Medical Segmentation Decathlon spleen task.
-Each flag changes one setting: the dataset class, the worker count, the loader
-class, or mixed precision. Two runs that differ in one flag measure that setting
-alone:
-
-```bash
-traceml run --mode summary --logs-dir logs --run-name spleen_1_baseline \
-    examples/integrations/monai_dataloading_bottleneck.py --args --data-dir data
-traceml run --mode summary --logs-dir logs --run-name spleen_2_workers \
-    examples/integrations/monai_dataloading_bottleneck.py \
-    --args --data-dir data --num-workers 4
-traceml compare logs/spleen_1_baseline/final_summary.json \
-    logs/spleen_2_workers/final_summary.json
-```
-
-The notebook runs six settings on one GPU, compares each adjacent pair, and
-shows where the bottleneck moves as each one changes:
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/notebooks/monai_dataloading_bottleneck.ipynb)
+- [How to Read Output](../reading-output.md)
+- [Compare Runs](../compare.md)
+- [Catch Regressions in CI](../regression-guard.md)
+- [Public API](../public-api.md)
+- [Open an issue](https://github.com/traceopt-ai/traceml/issues)
