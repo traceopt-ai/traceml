@@ -20,7 +20,10 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import pytest
 
 from traceml_ai.reporting.primary_diagnosis import build_primary_diagnosis
-from traceml_ai.reporting.terminal_card.common import format_scope
+from traceml_ai.reporting.terminal_card.common import (
+    format_duration,
+    format_scope,
+)
 from traceml_ai.reporting.terminal_card.card import (
     CardDoc,
     Span,
@@ -55,6 +58,27 @@ def test_format_scope_uses_only_present_stored_identity_parts(
 ) -> None:
     """Compact scope labels never infer missing rank, node, or GPU fields."""
     assert format_scope(**kwargs) == expected
+
+
+@pytest.mark.parametrize(
+    ("duration_s", "expected"),
+    [
+        (52.4, "52.4s"),
+        (59.94, "59.9s"),
+        (59.96, "1m 0s"),
+        (59.99, "1m 0s"),
+        (60.0, "1m 0s"),
+        (312.0, "5m 12s"),
+        (3599.4, "59m 59s"),
+        (3599.6, "1h 0m"),
+        (3840.0, "1h 4m"),
+    ],
+)
+def test_format_duration_rolls_over_to_minutes_after_rounding(
+    duration_s: float, expected: str
+) -> None:
+    """Durations that round to 60.0s render as minutes, not "60.0s"."""
+    assert format_duration(duration_s) == expected
 
 
 def _issue(
