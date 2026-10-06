@@ -21,16 +21,23 @@ def _run(
     script: Path,
     *,
     disabled: bool = False,
-    run_name="hf-auto",
-    command="run",
-):
+    run_name: str = "hf-auto",
+    command: str = "run",
+    nproc_per_node: int = 1,
+) -> subprocess.CompletedProcess[str]:
+    """Run a script through the TraceML launcher in an isolated test session.
+
+    ``nproc_per_node`` selects the number of local CPU workers. The launcher
+    validates the value and uses torchrun only when more than one worker is
+    requested.
+    """
     env = dict(os.environ)
     env["CUDA_VISIBLE_DEVICES"] = ""
     env["OMP_NUM_THREADS"] = "1"
     env["PYTHONPATH"] = os.pathsep.join(
         part for part in (str(SRC), env.get("PYTHONPATH", "")) if part
     )
-    command = [
+    argv = [
         sys.executable,
         "-m",
         "traceml_ai.launcher.cli",
@@ -45,14 +52,16 @@ def _run(
         _port(),
         "--master-port",
         _port(),
+        "--nproc-per-node",
+        str(nproc_per_node),
         "--finalize-timeout-sec",
         "60",
     ]
     if disabled:
-        command.append("--disable-traceml")
-    command.append(str(script))
+        argv.append("--disable-traceml")
+    argv.append(str(script))
     return subprocess.run(
-        command,
+        argv,
         cwd=ROOT,
         env=env,
         capture_output=True,

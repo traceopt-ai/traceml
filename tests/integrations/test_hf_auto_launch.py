@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import sys
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,7 @@ from tests.integrations.launcher_utils import _run
 
 _WORKLOAD = """
 import json
+import os
 import sys
 from pathlib import Path
 import torch
@@ -36,6 +38,10 @@ class Model(torch.nn.Module):
         return {"loss": torch.nn.functional.cross_entropy(logits, labels),
                 "logits": logits}
 
+torch.manual_seed(0)
+model = Model()
+initial_weight = model.linear.weight.detach().clone()
+
 if MANUAL:
     from traceml_ai.integrations import huggingface as traceml_hf
     traceml_hf.init()
@@ -44,19 +50,30 @@ else:
     callbacks = []
 
 trainer = Trainer(
-    model=Model(),
+    model=model,
     args=TrainingArguments(
         output_dir=str(Path(__file__).parent / "output"), max_steps=2,
         per_device_train_batch_size=2, report_to=[], logging_strategy="no",
-        save_strategy="no", disable_tqdm=True,
+        save_strategy="no", disable_tqdm=True, use_cpu=True,
     ),
     train_dataset=Dataset(), callbacks=callbacks,
 )
 trainer.train()
 from traceml_ai.integrations.huggingface import TraceMLTrainerCallback
-Path(__file__).with_suffix(".json").write_text(json.dumps({
+rank = int(os.environ.get("RANK", "0"))
+world_size = int(os.environ.get("WORLD_SIZE", "1"))
+state_path = Path(__file__).with_suffix(
+    ".json" if world_size == 1 else f".rank-{rank}.json"
+)
+state_path.write_text(json.dumps({
     "callbacks": sum(isinstance(cb, TraceMLTrainerCallback)
                      for cb in trainer.callback_handler.callbacks),
+    "global_step": trainer.state.global_step,
+    "rank": rank,
+    "world_size": world_size,
+    "weight_updated": not torch.equal(
+        initial_weight, model.linear.weight.detach().cpu()
+    ),
     "transformers_loaded": "transformers.trainer" in sys.modules,
     "patched": bool(getattr(Trainer._inner_training_loop,
                             "_traceml_lifecycle_guard", False)),
@@ -104,6 +121,54 @@ def test_hf_launcher_attaches_once_and_publishes_steps(
         "_traceml_internal:optimizer_step",
         "_traceml_internal:dataloader_next",
     } <= names
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="The two-rank torchrun smoke path is not verified on Windows.",
+)
+def test_hf_launcher_two_rank_auto_attachment(tmp_path: Path) -> None:
+    script = tmp_path / "train.py"
+    script.write_text(_WORKLOAD.replace("MANUAL", "False"), encoding="utf-8")
+
+    result = _run(
+        tmp_path,
+        script,
+        nproc_per_node=2,
+        run_name="hf-auto-ddp",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    for rank in range(2):
+        state = json.loads(
+            script.with_suffix(f".rank-{rank}.json").read_text()
+        )
+        assert state == {
+            "callbacks": 1,
+            "global_step": 2,
+            "rank": rank,
+            "world_size": 2,
+            "weight_updated": True,
+            "transformers_loaded": True,
+            "patched": True,
+            "hook": False,
+        }
+
+    session_root = tmp_path / "logs" / "hf-auto-ddp"
+    summary = json.loads((session_root / "final_summary.json").read_text())
+    step_time = summary["step_time"]
+    assert step_time["metadata"]["global_ranks_seen"] == 2
+    assert step_time["metadata"]["global_ranks_used"] == 2
+    assert step_time["global"]["window"]["steps_analyzed"] == 2
+    assert set(step_time["groups"]["rows"]) == {"0", "1"}
+    for metric in ("forward_ms", "backward_ms", "optimizer_ms"):
+        assert step_time["global"]["average"][metric] > 0
+        for rank in ("0", "1"):
+            assert step_time["groups"]["rows"][rank]["metrics"][metric] > 0
+
+    manifest = json.loads((session_root / "manifest.json").read_text())
+    assert manifest["status"] == "completed"
+    assert manifest["telemetry_status"] == "complete"
 
 
 def test_non_hf_script_does_not_import_transformers(tmp_path: Path) -> None:
