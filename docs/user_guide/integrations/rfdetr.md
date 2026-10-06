@@ -133,6 +133,12 @@ an unsupported configuration or cannot attach its callback, it reports the
 reason and RF-DETR continues with its existing callbacks. Native RF-DETR errors
 still propagate.
 
+`RFDETR.evaluate()` constructs an evaluation-only trainer with
+`include_training_callbacks=False`. TraceML intentionally leaves that trainer
+uninstrumented and does not emit RF-DETR step telemetry. A custom trainer built
+with the same flag also remains uninstrumented if it is later used with
+`fit()`.
+
 RF-DETR 1.10.1 is pinned in CI for single-process training and two-process Gloo
 coverage. The [RF-DETR Nano case study](https://github.com/traceopt-ai/traceml/tree/main/examples/case_studies/rfdetr_nano_training)
 also exercises eager CUDA training on one and four T4 GPUs against development
