@@ -11,7 +11,19 @@ For whole-run triage, start with
 [Find why PyTorch training is slow](slow-pytorch-training.md). This page stays
 focused on DDP rank skew.
 
+## Before you run
+
+Standard Hugging Face Trainer, Lightning `Trainer.fit()`, and RF-DETR
+`model.train()` scripts are instrumented automatically when launched with
+`traceml run`. For a custom PyTorch loop, call `traceml.init()` once and mark
+each training step with `traceml.trace_step(model)`. See the
+[quickstart](../user_guide/quickstart.md) for both setup paths.
+
 ## Run DDP with TraceML
+
+Your training script or framework configuration must already support DDP.
+TraceML launches the requested workers; it does not convert a single-process
+script into distributed training.
 
 For single-node DDP:
 
@@ -30,7 +42,10 @@ the node flags by hand.
 ## Reproduce rank stragglers
 
 The repo includes a small DDP demo with a compute-heavy baseline and two
-rank-local straggler modes.
+controlled rank-local delays. The input scenario exercises rank-straggler
+attribution. The historical `compute-straggler` scenario adds optimizer-side
+work, so use it to inspect phase timing rather than to require a specific
+straggler verdict.
 
 Balanced baseline:
 
@@ -44,7 +59,7 @@ Input straggler:
 traceml run examples/distributed/ddp_rank_straggler_demo.py --mode=summary --nproc-per-node=2 --run-name ddp_input_straggler --args --scenario input-straggler --straggler-rank 0 --input-sleep-ms 200
 ```
 
-Compute straggler:
+Optimizer-side delay (`compute-straggler` CLI name):
 
 ```bash
 traceml run examples/distributed/ddp_rank_straggler_demo.py --mode=summary --nproc-per-node=2 --run-name ddp_compute_straggler --args --scenario compute-straggler --straggler-rank 0 --compute-extra-matmuls 8
@@ -66,15 +81,13 @@ Example node 1:
 traceml run examples/distributed/ddp_rank_straggler_demo.py --mode=summary --nnodes=2 --nproc-per-node=1 --node-rank=1 --master-addr <NODE_0_PRIVATE_IP> --master-port 29546 --run-name ddp_compute_straggler --args --scenario compute-straggler --straggler-rank 0 --compute-extra-matmuls 8
 ```
 
-## Demo fingerprints
+## What the demo should show
 
-These fingerprints came from the DDP demo on two nodes with one GPU per node.
-
-| Scenario | Diagnosis | Key signal |
+| Scenario | Expected observation | Interpretation |
 |---|---|---|
-| Balanced | `COMPUTE-BOUND` | Step Time `124.6/124.6ms`, Input Wait `1.4/1.4ms`, compute `122.4/122.4ms` |
-| Input straggler | `INPUT STRAGGLER` | r0 input wait `201.6ms` vs r1 `1.4ms` |
-| Compute straggler | `COMPUTE STRAGGLER` | r0 optimizer `33.1ms` vs r1 `14.5ms` |
+| Balanced | Similar phase times across ranks | Control run with no injected rank-local delay |
+| Input straggler | Higher `Input Wait` on the selected rank | Can produce `INPUT STRAGGLER` when the delay is material |
+| Optimizer-side delay | Higher `Optimizer Step` on the selected rank | Demonstrates phase timing; it is not a `COMPUTE STRAGGLER` acceptance test |
 
 Read the balanced run as the control: both ranks have similar Step Time, Input
 Wait is small, and the run is mostly compute.
@@ -82,8 +95,10 @@ Wait is small, and the run is mostly compute.
 Read the input-straggler run as a rank-local input issue: rank 0 reaches compute
 late because its input path is slower.
 
-Read the compute-straggler run as a rank-local compute issue: rank 0 spends more
-time in optimizer work than the peer rank.
+Read the optimizer-delay run as a phase-timing example: the selected rank spends
+more time in optimizer work than its peers. The current DDP
+`COMPUTE STRAGGLER` attribution requires excess forward time, so this scenario
+does not guarantee that verdict.
 
 ## What to look for
 

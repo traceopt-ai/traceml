@@ -7,6 +7,14 @@ Low GPU utilization is a symptom. TraceML helps decide whether the likely cause
 is input loading, host-to-device transfer, residual time, rank skew, memory
 pressure, or model-side compute behavior.
 
+## Before you run
+
+Standard Hugging Face Trainer, Lightning `Trainer.fit()`, and RF-DETR
+`model.train()` scripts are instrumented automatically when launched with
+`traceml run`. For a custom PyTorch loop, call `traceml.init()` once and mark
+each training step with `traceml.trace_step(model)`. See the
+[quickstart](../user_guide/quickstart.md) for both setup paths.
+
 ## Confirm the symptom
 
 Run your training script:

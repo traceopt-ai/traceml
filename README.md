@@ -72,10 +72,10 @@ evidence behind it, and suggests the next investigation.
 |                                                                                                                                                          |
 |  STEP TIMING (Window Average), GPU Clock                      ||  STEP MEMORY: BALANCED                                                                  |
 |  Step Time           200.4 ms  100%                           ||                                                                                         |
-|  ├─ Input Wait       128.0 ms   64%  ◀  cause                 ||  avg per-step peak           avg                                                        |
-|  ├─ Compute           68.0 ms   34%                           ||  Allocated                   2.9 GB                                                     |
-|  │  ├─ Forward        24.0 ms   12%                           ||  Reserved                    3.2 GB                                                     |
-|  │  ├─ Backward       38.0 ms   19%                           ||                                                                                         |
+|  ├─ Input Wait       128.0 ms   64%  ◀  cause                 ||                                                                                         |
+|  ├─ Compute           68.0 ms   34%                           ||  avg per-step peak           avg                                                        |
+|  │  ├─ Forward        24.0 ms   12%                           ||  Allocated                   2.9 GB                                                     |
+|  │  ├─ Backward       38.0 ms   19%                           ||  Reserved                    3.2 GB                                                     |
 |  │  └─ Optimizer       6.0 ms    3%                           ||                                                                                         |
 |  ├─ H2D                0.4 ms   <1%                           ||                                                                                         |
 |  └─ Residual           3.6 ms    2%                           ||                                                                                         |
@@ -91,6 +91,7 @@ evidence behind it, and suggests the next investigation.
 |  GPU memory/device      3.3 GB (21%)                          ||  CUDA reserved        3.2 GB (20%)                                                      |
 |  GPU temperature        42C                                   ||                                                                                         |
 |  GPU power              58W                                   ||                                                                                         |
+|                                                                                                                                                          |
 |                                                                                                                                                          |
 |  Full evidence: logs/bert_finetune/final_summary.json  (--html-report)                                                                                   |
 +----------------------------------------------------------------------------------------------------------------------------------------------------------+
@@ -119,7 +120,7 @@ evidence behind it, and suggests the next investigation.
 |  │  └─ Optimizer      10.0 ms    3%                           ||                                                                                         |
 |  ├─ H2D                1.1 ms   <1%                           ||                                                                                         |
 |  └─ Residual          39.3 ms   13%                           ||                                                                                         |
-|  DataLoader fetch: 3.7 ms (CPU, supplemental)                ||                                                                                          |
+|  DataLoader fetch: 3.7 ms (CPU, supplemental)                 ||                                                                                         |
 |                                                                                                                                                          |
 |  SYSTEM METRICS: LOW GPU UTIL · 2/2 nodes                     ||  PROCESS METRICS: NORMAL · 4/4 ranks                                                    |
 |  Evidence: GPU utilization averaged 14%.                      ||                                                                                         |
@@ -131,6 +132,7 @@ evidence behind it, and suggests the next investigation.
 |  GPU memory/device      5.0 GB (31%)      7.0 GB (44%), N1    ||  CUDA reserved        3.2 GB (20%)      6.8 GB (43%), R3/N1                             |
 |  GPU temperature        58C               70C, N1             ||                                                                                         |
 |  GPU power              220W              280W, N1            ||                                                                                         |
+|                                                                                                                                                          |
 |                                                                                                                                                          |
 |  Full evidence: logs/ddp_pretrain/final_summary.json  (--html-report)                                                                                    |
 +----------------------------------------------------------------------------------------------------------------------------------------------------------+
@@ -214,8 +216,11 @@ most likely to be holding up the run. See
 [DDP rank stragglers](https://traceopt-ai.github.io/traceml/guides/ddp-slow-training-rank-straggler/),
 and [Slurm](https://traceopt-ai.github.io/traceml/user_guide/slurm/).
 
-Distributed GPU comparisons currently assume homogeneous GPU hardware across
-ranks. Check the support matrix for framework-specific distributed evidence.
+TraceML is currently focused on single-device training and DDP on one machine.
+You can launch multi-node runs, but that path remains experimental. Distributed
+GPU comparisons assume homogeneous hardware across ranks. See the
+[integration support matrix](https://traceopt-ai.github.io/traceml/user_guide/integrations/#integration-support-matrix)
+for framework-specific details, including FSDP.
 
 ## Featured case studies
 

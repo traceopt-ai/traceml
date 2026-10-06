@@ -6,6 +6,14 @@ shrinks over time, or a run eventually gets close to out-of-memory behavior.
 TraceML step-memory diagnostics separate memory pressure, memory imbalance, and
 memory growth over the observed window.
 
+## Before you run
+
+Standard Hugging Face Trainer, Lightning `Trainer.fit()`, and RF-DETR
+`model.train()` scripts are instrumented automatically when launched with
+`traceml run`. For a custom PyTorch loop, call `traceml.init()` once and mark
+each training step with `traceml.trace_step(model)`. See the
+[quickstart](../user_guide/quickstart.md) for both setup paths.
+
 ## Run TraceML
 
 Run your training script:

@@ -20,6 +20,7 @@ from traceml_ai.instrumentation.step_events import (  # noqa: E402
     drain_step_memory_events,
     drain_step_time_batches,
 )
+from traceml_ai.runtime import lightning_auto  # noqa: E402
 from traceml_ai.runtime.state import (  # noqa: E402
     configure_trace_recording,
     reset_trace_session_state,
@@ -45,6 +46,9 @@ def _reset_traceml():
     drain_step_time_batches()
     drain_step_memory_events()
     abort_step_capture(begin_step_capture())
+    # These tests call the ordinary Lightning example directly. Install the
+    # same automatic attachment that ``traceml run`` installs for users.
+    lightning_auto.install()
     yield
     drain_step_time_batches()
     drain_step_memory_events()

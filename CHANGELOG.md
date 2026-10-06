@@ -7,6 +7,10 @@ which carry the full historical notes for versions predating this file.
 
 ## [Unreleased]
 
+- `traceml run train.py` now attaches the existing Hugging Face Trainer
+  integration automatically for standard training. Compatible manual setup is
+  reused; `watch`, disabled launches, and unrelated scripts install no
+  Hugging Face hooks.
 - `traceml run train.py` now activates the existing RF-DETR adapter for standard
   eager detection training. Compatible manual `rfdetr.init()` calls are reused;
   `watch` and disabled launches install no RF-DETR hooks.
@@ -87,7 +91,7 @@ which carry the full historical notes for versions predating this file.
   `traceml_ai.integrations.huggingface.init()` and register
   `TraceMLTrainerCallback()` with standard `transformers.Trainer` instead.
   For optional tracing, register the callback conditionally. See the
-  [HF migration instructions](docs/user_guide/integrations/huggingface.md#migration)
+  [HF migration instructions](docs/user_guide/integrations/huggingface.md#advanced-manual-setup)
   for the replacement setup.
 - PyTorch Lightning: tracing now starts before batch transfer, excludes
   non-training loader fetches, and groups accumulated micro-batches into one
