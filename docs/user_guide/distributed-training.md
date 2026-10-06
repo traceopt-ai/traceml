@@ -22,7 +22,8 @@ not convert a single-device script into DDP or FSDP. FSDP timing support depends
 on the integration; it is not automatically enabled for every trainer.
 
 Summary mode is the default. For a single-node live view, add `--mode=cli` or
-`--mode=dashboard`.
+`--mode=dashboard`. Dashboard mode requires
+`pip install "traceml-ai[dashboard]"`.
 
 ## Multi-node DDP
 

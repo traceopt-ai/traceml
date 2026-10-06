@@ -47,15 +47,13 @@ dependencies = [
     "numpy>=1.26",
     "msgspec",
     "pyyaml>=6.0",
-    # Floor: the dashboard display driver calls ui.context, added in
-    # nicegui 1.4.23. Older nicegui imports fine and then raises
-    # AttributeError at runtime.
-    "nicegui>=1.4.23",
 ]
 
 [project.optional-dependencies]
 
 dashboard = [
+    # The dashboard calls ui.context, added in NiceGUI 1.4.23. Older
+    # releases import successfully but fail when the dashboard starts.
     "nicegui>=1.4.23",
 ]
 

@@ -108,6 +108,8 @@ traceml watch train.py                # system/process visibility
 traceml serve                         # standalone aggregator for direct launches
 ```
 
+Dashboard mode requires `pip install "traceml-ai[dashboard]"`.
+
 Summary mode is the default for every topology. Live CLI and dashboard modes
 are intended for single-node runs. `watch` does not install automatic trainer
 instrumentation or provide step timing.

@@ -202,15 +202,23 @@ def test_numpy_is_not_capped_below_version_2() -> None:
         )
 
 
-def test_nicegui_floor_covers_ui_context() -> None:
-    """Regression guard for issue #270.
+def test_nicegui_is_only_required_by_the_dashboard_extra() -> None:
+    """Keep the base install small while preserving the issue #270 floor.
 
     The display driver calls ui.context, which nicegui added in 1.4.23.
     Without a floor, an unrelated constraint elsewhere in the user's
     environment (an old fastapi pin, for example) walks nicegui back to
     a version that imports fine and raises AttributeError at runtime.
     """
-    for requirement in _runtime_dependencies():
+    runtime_names = {
+        _requirement_name(requirement)
+        for requirement in _runtime_dependencies()
+    }
+    assert (
+        "nicegui" not in runtime_names
+    ), "nicegui belongs in the dashboard extra, not the base install"
+
+    for requirement in _optional_dependencies("dashboard"):
         if _requirement_name(requirement) != "nicegui":
             continue
 
@@ -223,7 +231,7 @@ def test_nicegui_floor_covers_ui_context() -> None:
         )
         return
 
-    pytest.fail("nicegui not found among runtime dependencies")
+    pytest.fail("nicegui not found in the dashboard extra")
 
 
 def test_hf_extra_requires_supported_transformers() -> None:
