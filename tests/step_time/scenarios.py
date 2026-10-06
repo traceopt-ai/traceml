@@ -14,8 +14,9 @@ across the CLI, dashboard, and final-summary test suites.
 
 from __future__ import annotations
 
+import random
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -68,6 +69,22 @@ class StepTimeScenario:
         compatibility clock at twice the selected value.
     training_strategy:
         Advisory strategy persisted in ``runtime_environment``.
+    jitter:
+        Relative per-step variation applied to every metric value, drawn
+        from a generator seeded by ``seed``, rank, step and metric. The
+        same scenario always writes the same values; nothing is random at
+        test time.
+    seed:
+        Seed for ``jitter``.
+    missing_steps:
+        Steps a rank never reports, keyed by global rank. The other ranks
+        still report them, so the rank drops out of those steps mid-window.
+    metric_every:
+        Metrics that occur only on some steps: the metric is written on a
+        step when ``step % n == 0``, on every rank.
+    dropped_events:
+        Steps on which one rank's metric is absent, keyed by global rank,
+        then metric.
     """
 
     name: str
@@ -75,6 +92,13 @@ class StepTimeScenario:
     steps: tuple[int, ...]
     clock: str = "cpu"
     training_strategy: str = "ddp"
+    jitter: float = 0.0
+    seed: int = 0
+    missing_steps: Mapping[int, tuple[int, ...]] = field(default_factory=dict)
+    metric_every: Mapping[str, int] = field(default_factory=dict)
+    dropped_events: Mapping[int, Mapping[str, tuple[int, ...]]] = field(
+        default_factory=dict
+    )
 
 
 class SQLiteSelectRecorder:
@@ -189,8 +213,64 @@ SCENARIOS: tuple[StepTimeScenario, ...] = (
     ),
 )
 
+# Time-varying windows: per-step variation, a rank that drops out
+# mid-window, and metrics that do not occur on every step. They are kept
+# apart from SCENARIOS, whose hand-written goldens assume one identical
+# payload per rank; the public-schema golden covers every set.
+REALISM_SCENARIOS: tuple[StepTimeScenario, ...] = (
+    StepTimeScenario(
+        name="jittered_ddp",
+        profiles={0: _profile(), 1: _profile(backward=60.0)},
+        steps=tuple(range(110, 134)),
+        jitter=0.1,
+        seed=7,
+    ),
+    StepTimeScenario(
+        name="rank_missing_steps",
+        profiles={0: _profile(), 1: _profile()},
+        steps=tuple(range(140, 164)),
+        missing_steps={1: (150, 151, 152, 153)},
+    ),
+    StepTimeScenario(
+        name="intermittent_metrics",
+        profiles={0: _profile(), 1: _profile()},
+        steps=tuple(range(170, 194)),
+        # Gradient accumulation over four steps, and H2D on every other
+        # step: occurrence-driven metrics.
+        metric_every={"optimizer_step": 4, "h2d": 2},
+        # A phase that should occur on every step is missing once.
+        dropped_events={1: {"forward": (180,)}},
+    ),
+)
+
+# Windows that reach the diagnoses the scenarios above never do, so the
+# public-schema golden sees their evidence keys too.
+EVIDENCE_SCENARIOS: tuple[StepTimeScenario, ...] = (
+    StepTimeScenario(
+        name="h2d_bound_gpu",
+        profiles={
+            0: _profile(h2d=25.0, forward=15.0),
+            1: _profile(h2d=25.0, forward=15.0),
+        },
+        steps=tuple(range(200, 224)),
+        clock="gpu",
+    ),
+    StepTimeScenario(
+        name="forward_missing_everywhere",
+        profiles={
+            0: _without(_profile(), "forward"),
+            1: _without(_profile(), "forward"),
+        },
+        steps=tuple(range(230, 254)),
+    ),
+)
+
+ALL_SCENARIOS: tuple[StepTimeScenario, ...] = (
+    SCENARIOS + REALISM_SCENARIOS + EVIDENCE_SCENARIOS
+)
+
 SCENARIOS_BY_NAME: Mapping[str, StepTimeScenario] = {
-    scenario.name: scenario for scenario in SCENARIOS
+    scenario.name: scenario for scenario in ALL_SCENARIOS
 }
 
 
@@ -213,6 +293,29 @@ def _event_payload(profile: MetricProfile, clock: str) -> dict:
     return events
 
 
+def _step_profile(
+    scenario: StepTimeScenario,
+    global_rank: int,
+    step: int,
+) -> dict[str, float]:
+    """One rank's metric values on one step, after the scenario's rules."""
+    dropped = scenario.dropped_events.get(global_rank, {})
+    values = {}
+    for metric, value in scenario.profiles[global_rank].items():
+        every = scenario.metric_every.get(metric)
+        if every is not None and step % every != 0:
+            continue
+        if step in dropped.get(metric, ()):
+            continue
+        if scenario.jitter:
+            draw = random.Random(
+                f"{scenario.seed}:{global_rank}:{step}:{metric}"
+            )
+            value = value * (1.0 + draw.uniform(-1.0, 1.0) * scenario.jitter)
+        values[metric] = value
+    return values
+
+
 def create_step_time_database(
     path: str | Path,
     scenario: StepTimeScenario,
@@ -230,9 +333,15 @@ def create_step_time_database(
     with sqlite_database(path, init_step_time_schema) as conn:
         insert_training_strategy(conn, scenario.training_strategy)
         sequence = 0
-        for global_rank, profile in sorted(scenario.profiles.items()):
-            events = _event_payload(profile, scenario.clock)
+        for global_rank in sorted(scenario.profiles):
+            missing = scenario.missing_steps.get(global_rank, ())
             for step in scenario.steps:
+                if step in missing:
+                    continue
+                events = _event_payload(
+                    _step_profile(scenario, global_rank, step),
+                    scenario.clock,
+                )
                 sequence += 1
                 insert_step_time_sample(
                     conn,
@@ -251,7 +360,10 @@ def create_step_time_database(
 
 
 __all__ = [
+    "ALL_SCENARIOS",
     "BALANCED_PROFILE",
+    "EVIDENCE_SCENARIOS",
+    "REALISM_SCENARIOS",
     "SCENARIOS",
     "SCENARIOS_BY_NAME",
     "SQLiteSelectRecorder",
