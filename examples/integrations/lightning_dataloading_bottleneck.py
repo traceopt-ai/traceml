@@ -6,7 +6,8 @@ two runs measure the loader change alone. TraceML reports whether each run
 waited on input or on compute; ``traceml compare`` shows where the
 difference occurred.
 
-Launch through ``traceml run`` (a bare ``python`` run trains untraced). The
+Launch through ``traceml run`` so TraceML attaches automatically. This file
+contains ordinary Lightning code; a bare ``python`` run trains untraced. The
 two profiles expect a CUDA device; on a CPU-only machine use ``--smoke``:
 
     traceml run --mode summary --logs-dir logs --run-name lightning_baseline \\
@@ -40,8 +41,6 @@ import torch.nn.functional as F
 import torchvision
 import torchvision.transforms as T
 from torch.utils.data import DataLoader, Dataset
-
-from traceml_ai.integrations import lightning as traceml_lightning
 
 MEAN = (0.485, 0.456, 0.406)
 STD = (0.229, 0.224, 0.225)
@@ -242,8 +241,6 @@ def main(argv=None):
     accelerator = "cpu" if args.smoke else "auto"
     L.seed_everything(SEED, workers=True)
 
-    traceml_lightning.init()  # TraceML line 1: fetch and H2D timers.
-
     datamodule = ImagenetteDataModule(
         args.data_dir, args.batch_size, smoke=args.smoke, **settings
     )
@@ -269,7 +266,6 @@ def main(argv=None):
         logger=False,
         limit_val_batches=0,
         num_sanity_val_steps=0,
-        callbacks=[traceml_lightning.TraceMLCallback()],  # TraceML line 2
     )
     trainer.fit(model, datamodule=datamodule)
 
