@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import Mock
 
+import pytest
 from rich.console import Console
 
 from tests.step_time.factories import (
@@ -12,6 +13,7 @@ from traceml_ai.renderers.step_time.renderer import (
     StepTimeRenderer,
     _table_metrics,
 )
+from traceml_ai.renderers.utils import fmt_time_run
 from traceml_ai.step_time.model import StepTimeMetric, StepTimeWindow
 from traceml_ai.step_time.pipeline import LiveStepTimeResult
 
@@ -286,3 +288,24 @@ def test_cli_renders_multi_rank_sparse_table() -> None:
     assert "92.0 ms" in text
     assert "184.0 ms" in text
     assert "Worst Rank" in text
+
+
+@pytest.mark.parametrize(
+    "ms, expected",
+    [
+        (999.94, "999.9 ms"),
+        (999.96, "1.00 s"),
+        (999.99, "1.00 s"),
+        (1000.0, "1.00 s"),
+        (59994.0, "59.99 s"),
+        (59996.0, "1.00 min"),
+        (60000.0, "1.00 min"),
+        (3599700.0, "59.99 min"),
+        (3599800.0, "1.00 h"),
+        (3600000.0, "1.00 h"),
+    ],
+)
+def test_fmt_time_run_moves_to_next_unit_after_rounding(
+    ms: float, expected: str
+) -> None:
+    assert fmt_time_run(ms) == expected

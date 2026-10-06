@@ -289,7 +289,7 @@ def format_duration(duration_s: Optional[float]) -> Optional[str]:
     if duration_s is None:
         return None
     seconds = float(duration_s)
-    if seconds < 60.0:
+    if round(seconds, 1) < 60.0:
         return f"{seconds:.1f}s"
     total = int(round(seconds))
     if total < 3600:
