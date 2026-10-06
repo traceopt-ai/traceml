@@ -18,12 +18,11 @@ CANONICAL_REPORTS = (
     "run_input_bound_critical",
     "run_multi_input_straggler",
 )
-PUBLISHED_REPORTS = (
-    ROOT / "README.md",
-    ROOT / "docs" / "user_guide" / "quickstart.md",
-)
+FULL_REPORT_DOCUMENTS = (ROOT / "README.md",)
+QUICKSTART = ROOT / "docs" / "user_guide" / "quickstart.md"
 AFFECTED_OUTPUT_DOCS = (
-    *PUBLISHED_REPORTS,
+    *FULL_REPORT_DOCUMENTS,
+    QUICKSTART,
     ROOT / "docs" / "user_guide" / "reading-output.md",
     ROOT / "docs" / "guides" / "pytorch-input-pipeline-bottleneck.md",
     ROOT / "docs" / "user_guide" / "integrations" / "accelerate.md",
@@ -43,14 +42,29 @@ LEGACY_SUMMARY_MARKERS = (
 
 
 @pytest.mark.parametrize(
-    "document", PUBLISHED_REPORTS, ids=lambda path: path.name
+    "document", FULL_REPORT_DOCUMENTS, ids=lambda path: path.name
 )
 @pytest.mark.parametrize("golden_name", CANONICAL_REPORTS)
-def test_published_reports_match_formatter_golden(
+def test_full_reports_match_formatter_golden(
     document: Path, golden_name: str
 ) -> None:
-    """Require both canonical reports to be copied byte-for-byte."""
+    """Require each published full report to match the formatter exactly."""
     assert GOLDENS[golden_name] in document.read_text(encoding="utf-8")
+
+
+def test_quickstart_excerpt_uses_current_summary_language() -> None:
+    """Keep the short quickstart example aligned without requiring a full card."""
+    content = QUICKSTART.read_text(encoding="utf-8")
+    expected = (
+        "Verdict: INPUT-BOUND (CRITICAL)",
+        "Why: Input Wait took 64% of Step Time.",
+        "Next: Increase workers, prefetch, or storage throughput.",
+        "Step Time       200.4 ms  100%",
+        "\u251c\u2500 Input Wait   128.0 ms   64%  \u25c0 cause",
+        "\u2514\u2500 Residual        3.6 ms    2%",
+    )
+    missing = [marker for marker in expected if marker not in content]
+    assert not missing, f"quickstart summary markers missing: {missing}"
 
 
 @pytest.mark.parametrize(
