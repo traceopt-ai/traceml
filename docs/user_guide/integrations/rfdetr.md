@@ -171,13 +171,12 @@ an unsupported configuration or cannot attach its callback, it reports the
 reason and RF-DETR continues with its existing callbacks. Native RF-DETR errors
 still propagate.
 
-<<<<<<< HEAD
 `RFDETR.evaluate()` constructs an evaluation-only trainer with
 `include_training_callbacks=False`. TraceML intentionally leaves that trainer
 uninstrumented and does not emit RF-DETR step telemetry. A custom trainer built
 with the same flag also remains uninstrumented if it is later used with
 `fit()`.
-=======
+
 - **Timing boundaries.** Input Wait measures batch fetching in the training
   process, not total preprocessing in background workers. Backward includes
   distributed synchronization performed there. Optimizer timing can include
@@ -193,7 +192,6 @@ with the same flag also remains uninstrumented if it is later used with
 - **Versions.** The adapter warns once on rank zero for versions other than
   its CI pin, 1.10.1. The case studies below provide additional evidence,
   rather than a compatibility guarantee.
->>>>>>> 2536874b (rfdeter done)
 
 RF-DETR 1.10.1 is pinned in CI for single-process training and two-process Gloo
 coverage. The [RF-DETR Nano case study](https://github.com/traceopt-ai/traceml/tree/main/examples/case_studies/rfdetr_nano_training)
