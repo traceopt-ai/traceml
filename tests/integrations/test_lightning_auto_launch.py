@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -67,6 +68,7 @@ def test_auto_policy_excludes_unsupported_modes(monkeypatch, capsys):
 
 _WORKLOAD = """
 import json
+import os
 from pathlib import Path
 import torch
 import NAMESPACE as L
@@ -87,15 +89,30 @@ if MANUAL:
     trace.init()
     callbacks = [trace.TraceMLCallback()]
 
-loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(torch.ones(12, 4)), batch_size=4)
-trainer = L.Trainer(accelerator="cpu", devices=1, max_epochs=1, accumulate_grad_batches=2,
+torch.manual_seed(0)
+world_size = int(os.environ.get("WORLD_SIZE", "1"))
+model = Model()
+initial_weight = model.net[0].weight.detach().clone()
+loader = torch.utils.data.DataLoader(
+    torch.utils.data.TensorDataset(torch.ones(12 * world_size, 4)), batch_size=4
+)
+trainer = L.Trainer(accelerator="cpu", devices=world_size, max_epochs=1, accumulate_grad_batches=2,
     callbacks=callbacks, logger=False, enable_checkpointing=False, enable_progress_bar=False,
     enable_model_summary=False, num_sanity_val_steps=0)
-trainer.fit(Model(), train_dataloaders=loader)
+trainer.fit(model, train_dataloaders=loader)
 from traceml_ai.integrations.lightning import TraceMLCallback
-Path(__file__).with_suffix(".json").write_text(json.dumps({
+rank = int(os.environ.get("RANK", "0"))
+state_path = Path(__file__).with_suffix(
+    ".json" if world_size == 1 else f".rank-{rank}.json"
+)
+state_path.write_text(json.dumps({
     "callbacks": sum(isinstance(cb, TraceMLCallback) for cb in trainer.callbacks),
     "global_step": trainer.global_step,
+    "rank": rank,
+    "world_size": world_size,
+    "weight_updated": not torch.equal(
+        initial_weight, model.net[0].weight.detach().cpu()
+    ),
 }))
 """
 
@@ -130,6 +147,9 @@ def test_launcher_accumulates_and_attaches_once(tmp_path, namespace, manual):
     assert json.loads(script.with_suffix(".json").read_text()) == {
         "callbacks": 1,
         "global_step": 2,
+        "rank": 0,
+        "world_size": 1,
+        "weight_updated": True,
     }
     message = (
         "using existing TraceML callback"
@@ -164,6 +184,50 @@ def test_launcher_accumulates_and_attaches_once(tmp_path, namespace, manual):
             )
             == 1
         )
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="The two-rank torchrun smoke path is not verified on Windows.",
+)
+def test_lightning_launcher_two_rank_auto_attachment(tmp_path):
+    script = _script(tmp_path)
+
+    result = _run(
+        tmp_path,
+        script,
+        nproc_per_node=2,
+        run_name="lightning-auto-ddp",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    for rank in range(2):
+        state = json.loads(
+            script.with_suffix(f".rank-{rank}.json").read_text()
+        )
+        assert state == {
+            "callbacks": 1,
+            "global_step": 2,
+            "rank": rank,
+            "world_size": 2,
+            "weight_updated": True,
+        }
+
+    session_root = tmp_path / "logs" / "lightning-auto-ddp"
+    summary = json.loads((session_root / "final_summary.json").read_text())
+    step_time = summary["step_time"]
+    assert step_time["metadata"]["global_ranks_seen"] == 2
+    assert step_time["metadata"]["global_ranks_used"] == 2
+    assert step_time["global"]["window"]["steps_analyzed"] == 2
+    assert set(step_time["groups"]["rows"]) == {"0", "1"}
+    for metric in ("forward_ms", "backward_ms", "optimizer_ms"):
+        assert step_time["global"]["average"][metric] > 0
+        for rank in ("0", "1"):
+            assert step_time["groups"]["rows"][rank]["metrics"][metric] > 0
+
+    manifest = json.loads((session_root / "manifest.json").read_text())
+    assert manifest["status"] == "completed"
+    assert manifest["telemetry_status"] == "complete"
 
 
 def test_launcher_resumes_with_local_step_numbers(tmp_path):
