@@ -1,36 +1,25 @@
-# DeepSpeed
+# DeepSpeed Integration
 
-Use TraceML with DeepSpeed to find training bottlenecks without changing how
-your DeepSpeed job runs.
+## Install
 
-DeepSpeed leaves the training loop to you: you call `model_engine(...)`,
-`model_engine.backward(loss)`, and `model_engine.step()` yourself. So the
-integration is the same recipe used for plain PyTorch, DDP, and FSDP — wrap
-each step with `traceml.trace_step(...)`. There is no DeepSpeed-specific
-callback or wrapper to install.
-
-## 1. Install
-
-TraceML does not depend on DeepSpeed. Install DeepSpeed yourself:
+This guide assumes PyTorch and DeepSpeed are already installed. The existing
+DeepSpeed example requires a CUDA GPU.
 
 ```bash
-pip install "traceml-ai[deepspeed]"
+pip install traceml-ai
 ```
 
-or follow the [DeepSpeed getting-started guide](https://www.deepspeed.ai/getting-started/).
-DeepSpeed requires a CUDA GPU.
+## Add TraceML to your loop
 
-## 2. Wrap The Step
-
-Call `traceml.init(mode="auto")` once, then wrap each DeepSpeed step with
-`traceml.trace_step(...)`. Pass `model_engine.module` (the unwrapped model),
-exactly like `model.module` for DDP and `base_model` for FSDP.
+Initialize TraceML once, then mark the training region with `trace_step()`.
+Pass `model_engine.module` so forward timing targets the underlying model.
+DeepSpeed continues to manage backward, gradient accumulation, and updates.
 
 ```python
 import traceml_ai as traceml
 
-# ... deepspeed.initialize(...) returns model_engine ...
-
+# Keep your existing deepspeed.initialize(...) setup.
+# It returns model_engine, optimizer, loader, and scheduler.
 traceml.init(mode="auto")
 
 for batch_x, batch_y in loader:
@@ -38,100 +27,134 @@ for batch_x, batch_y in loader:
         batch_x = batch_x.to(model_engine.device, non_blocking=True)
         batch_y = batch_y.to(model_engine.device, non_blocking=True)
 
-        logits = model_engine(batch_x)      # forward
+        logits = model_engine(batch_x)
         loss = criterion(logits, batch_y)
-
-        model_engine.backward(loss)         # backward
-        model_engine.step()                 # optimizer step
+        model_engine.backward(loss)
+        model_engine.step()
 ```
 
-`traceml.init(mode="auto")` installs TraceML's process-wide auto-timers, so it
-records DataLoader fetch timing (when you iterate a real PyTorch `DataLoader`,
-as above), host-to-device (H2D) copies, forward, backward, optimizer, and step
-timing, plus GPU and process memory, and writes an end-of-run summary.
-Forward is timed on `model_engine.module`; backward is captured because
-`model_engine.backward(loss)` reaches `torch.Tensor.backward()`;
-optimizer time is captured from the underlying torch optimizer step inside
-`model_engine.step()`. You do not need to add anything else per step.
+Both `init()` and `trace_step()` are required for this setup. There is no
+DeepSpeed-specific callback or automatic attachment.
 
-## 3. Launch The Run
+## Run
 
-DeepSpeed reads `RANK` / `LOCAL_RANK` / `WORLD_SIZE` from the environment, and
-`traceml run` launches your script through torchrun, so the two work together
-directly.
-
-Single GPU:
+Launch the instrumented script:
 
 ```bash
-traceml run train.py --mode=summary
+traceml run train.py
 ```
 
-Single-node multi-GPU (e.g. 4 GPUs):
+TraceML starts the telemetry collector and launches the script through
+`torchrun`. Keep your existing DeepSpeed distributed initialization; the
+repository example uses `deepspeed.init_distributed()` with the launcher's
+rank environment.
 
-```bash
-traceml run train.py --nproc-per-node=4 --mode=summary
+## Read the result
+
+When training finishes, TraceML prints a diagnosis of the likely bottleneck
+and saves the report for comparison or CI.
+
+The report shows available input waiting, forward, backward, optimizer,
+host-to-device, and memory measurements. DeepSpeed-specific work may not have
+its own phase measurement; see [Limitations](#limitations).
+
+See [How to Read Output](../reading-output.md) for an example report and
+explanations.
+
+## How TraceML measures DeepSpeed training
+
+TraceML uses its PyTorch timing hooks inside the region you mark. It does not
+replace DeepSpeed's training loop or time the entire engine API as separate
+forward, backward, and optimizer calls.
+
+```text
+Your DeepSpeed loop                  TraceML measurement
+──────────────────────────────────────────────────────────────────
+PyTorch DataLoader fetch             Input Wait
+          ↓
+trace_step(model_engine.module)      Open step capture
+          ↓
+Batch Tensor.to()                    GPU transfer
+          ↓
+model_engine(batch)                  Underlying model forward
+          ↓
+model_engine.backward(loss)          Observed PyTorch backward calls
+          ↓
+model_engine.step()                  Observed PyTorch optimizer calls
+          ↓
+Exit trace_step()                    Complete one reported step
 ```
 
-For multi-node launch commands, see
-[Distributed Training](../distributed-training.md).
+**One reported step is one completed `trace_step()` block.** In the loop above,
+that means one microbatch. The repository example sets
+`gradient_accumulation_steps=1`, so each block also contains an optimizer update
+attempt.
 
-## Limitations
+With accumulation of four, the same loop reports four TraceML steps for one
+DeepSpeed optimizer update. TraceML does not automatically combine those
+microbatches into one record. Input Wait remains separate from traced training
+time, and CUDA memory reports the peak within each block.
 
-- **No explicit NCCL / collective timing.** With ZeRO, gradient reduce-scatter
-  runs during the backward pass and parameter all-gather runs inside the
-  optimizer step. That communication overlaps the phases TraceML measures, so
-  its cost is folded into backward / optimizer / step time and reported as
-  residual/proxy timing rather than as a separate collective number.
-- **Optimizer timing is "where available".** TraceML times the underlying torch
-  optimizer step reached inside `model_engine.step()`. DeepSpeed's own work
-  around that step (loss scaling, gradient clipping, ZeRO partitioning) is
-  outside the traced phases and shows up as residual.
-- **Gradient accumulation.** The example config uses
-  `gradient_accumulation_steps: 1`, so each `trace_step` brackets one optimizer
-  step. With accumulation greater than 1, `model_engine.step()` runs the
-  optimizer only on boundary micro-steps, so backward is timed every step while
-  optimizer time appears only on those boundaries, and TraceML's step count
-  follows micro-steps rather than optimizer steps.
+## Multi-GPU training
 
-## Troubleshooting
-
-### Multi-GPU run only shows one rank
-
-Make sure you launched through TraceML with `--nproc-per-node`, not plain
-`python`:
+For single-node training on four GPUs:
 
 ```bash
 traceml run train.py --nproc-per-node=4
 ```
 
-### I want a baseline without TraceML
+Initialize TraceML in every worker, as in the loop above. DeepSpeed reads the
+rank environment supplied by the launcher. For multi-node commands, see
+[Distributed Training](../distributed-training.md).
 
-Run the same script with TraceML disabled:
+## Advanced options
 
-```bash
-traceml run train.py --disable-traceml
-```
+### Runnable example
 
-This launches your script natively through `torchrun` without TraceML telemetry.
+The repository includes a small training script and a ZeRO stage-2 config:
 
-## Full Example
+- [DeepSpeed example](https://github.com/traceopt-ai/traceml/blob/main/examples/integrations/deepspeed_minimal.py)
+- [Example configuration](https://github.com/traceopt-ai/traceml/blob/main/examples/integrations/deepspeed_config_minimal.json)
 
-A runnable example and a minimal ZeRO stage-2 config live in the repo:
-
-- `examples/integrations/deepspeed_minimal.py`
-- `examples/integrations/deepspeed_config_minimal.json`
-
-Run it with:
+From the repository root:
 
 ```bash
-traceml run examples/integrations/deepspeed_minimal.py --mode=summary
+traceml run examples/integrations/deepspeed_minimal.py --args --steps 20
 ```
 
-The example exits cleanly when DeepSpeed or a CUDA GPU is unavailable.
+The example exits without training if DeepSpeed or a CUDA GPU is unavailable.
+
+### Direct launches
+
+For a direct launch, start a TraceML aggregator with `traceml serve` and
+configure workers to connect to it. Keep the same `init()` and `trace_step()`
+setup. See [Direct Launch](../public-api.md#direct-launch-with-traceml-serve).
+
+## Limitations
+
+- **Phase coverage.** Backward timing observes patched PyTorch backward entry
+  points. Optimizer timing observes PyTorch optimizer step hooks. DeepSpeed
+  implementations that bypass these hooks may leave those signals unavailable.
+  An observed optimizer event does not measure the whole `model_engine.step()`
+  call. Other engine work can contribute to Residual.
+- **Distributed communication.** TraceML does not separately time NCCL
+  collectives. Communication can occur within observed phases or elsewhere in
+  the traced region; the report does not isolate its cost.
+- **Step boundaries.** The illustrated setup reports microbatch steps when
+  accumulation is enabled. Evaluation or other work placed inside `trace_step()`
+  is also included; keep it outside if you want training-only measurements.
+- **Input timing.** Automatic fetch timing covers a normal PyTorch DataLoader.
+  Other input sources need explicit fetch wrapping; see the
+  [core API](../public-api.md#manual-instrumentation-helpers).
+- **Validation.** This is a documented recipe, not a real-DeepSpeed CI-tested
+  integration. The repository has no real DeepSpeed CUDA or distributed signal
+  validation job. See the
+  [support matrix](../integrations.md#integration-support-matrix).
 
 ## Next Steps
 
 - [How to Read Output](../reading-output.md)
+- [Compare Runs](../compare.md)
+- [Catch Regressions in CI](../regression-guard.md)
 - [Distributed Training](../distributed-training.md)
-- [Quickstart](../quickstart.md)
 - [Open an issue](https://github.com/traceopt-ai/traceml/issues)

@@ -66,6 +66,13 @@ def test_committed_manifest_validates_and_matches_the_generated_docs():
     assert documentation == module.generated_document(
         documentation, module.render_matrix(manifest)
     ), "integrations.md is stale; run tools/integration_support_matrix.py --write"
+    overview, coverage = documentation.split('<details markdown="1">', 1)
+    assert "| Framework | Setup | Example |" in overview
+    assert "| Validation level |" not in overview
+    assert "| Validation level |" in coverage
+    assert all(
+        entry["setup"] in overview for entry in manifest["integrations"]
+    )
 
 
 def test_support_matrix_rejects_an_unknown_coverage_status():

@@ -2,15 +2,12 @@
 
 # TraceML
 
-**Diagnose slow PyTorch training. Catch regressions in CI.**
+**Diagnose slow PyTorch training with zero-code instrumentation. Catch regressions in CI.**
 
-**Works with:** [PyTorch](https://traceopt-ai.github.io/traceml/user_guide/quickstart/) ·
+**Works automatically with:**
 [Hugging Face Trainer](https://traceopt-ai.github.io/traceml/user_guide/integrations/huggingface/) ·
 [PyTorch Lightning](https://traceopt-ai.github.io/traceml/user_guide/integrations/lightning/) ·
-[RF-DETR](https://traceopt-ai.github.io/traceml/user_guide/integrations/rfdetr/) ·
-[Ray Train](https://traceopt-ai.github.io/traceml/user_guide/integrations/ray/) ·
-[Slurm](https://traceopt-ai.github.io/traceml/user_guide/slurm/)
-([support details](https://traceopt-ai.github.io/traceml/user_guide/integrations/))
+[RF-DETR](https://traceopt-ai.github.io/traceml/user_guide/integrations/rfdetr/)
 
 [![PyPI version](https://img.shields.io/pypi/v/traceml-ai.svg)](https://pypi.org/project/traceml-ai/)
 [![CI](https://github.com/traceopt-ai/traceml/actions/workflows/ci.yml/badge.svg)](https://github.com/traceopt-ai/traceml/actions/workflows/ci.yml)
@@ -18,33 +15,50 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](https://github.com/traceopt-ai/traceml/blob/main/LICENSE)
 [![GitHub stars](https://badgen.net/github/stars/traceopt-ai/traceml?icon=github)](https://github.com/traceopt-ai/traceml)
 
-[**Quickstart**](#quickstart) •
-[**Performance checks**](#performance-regression-checks) •
-[**Interactive demo**](https://huggingface.co/spaces/abhinavsriva/traceml-training-diagnosis) •
-[**Try in Colab**](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/notebooks/data_loading_bottleneck.ipynb) •
-[**Integrations**](https://traceopt-ai.github.io/traceml/user_guide/integrations/) •
+[**Quickstart**](#quickstart) ·
+[**What you get**](#what-you-get) ·
+[**Compare runs**](#compare-runs) ·
+[**Regression checks**](#performance-regression-checks) ·
+[**Integrations**](#training-integrations) ·
 [**Documentation**](https://traceopt-ai.github.io/traceml/)
 
-⭐ **If TraceML helps you, please [star this repo](https://github.com/traceopt-ai/traceml). It helps others find the project.**
+⭐ If TraceML helps you find a bottleneck, please
+[star the repository](https://github.com/traceopt-ai/traceml).
 
 </div>
 
-**TraceML is an open-source tool designed for lightweight, always-on diagnostics
-during PyTorch training.**
-See how much time is spent waiting for the next batch, where step time goes,
-and whether a slow worker is holding up a distributed run. Compare completed
-runs to see what changed, and apply a Step Time threshold to the same
-comparison in CI.
+TraceML shows where each training step goes—input loading, data transfer, forward, backward, and optimizer work—then identifies the bottleneck and saves evidence for local comparison or CI.
 
-At the end of a run, it gives you:
+## Quickstart
 
-- **A diagnosis:** waiting for input, costly data transfers, compute-heavy steps,
-  or a likely slow distributed worker.
-- **The evidence:** step timings, CPU/GPU usage, memory trends, and
-  per-worker comparisons.
-- **The next step:** what part of your training setup to investigate first.
+### 1. Install
 
-### Example diagnosis
+If your training framework is already installed:
+
+```bash
+pip install traceml-ai
+```
+
+### 2. Run your existing script
+
+```diff
+- python train.py
++ traceml run train.py
+```
+
+For standard Hugging Face Trainer, PyTorch Lightning, and RF-DETR training,
+TraceML instruments the run without changes to the training script. It prints a
+diagnosis when training finishes and writes `final_summary.json` and
+`final_summary.txt` under `logs/<run-name>/`.
+
+No training script ready? Try the
+[interactive demo](https://huggingface.co/spaces/abhinavsriva/traceml-training-diagnosis)
+or [Colab example](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/notebooks/data_loading_bottleneck.ipynb).
+
+## What you get
+
+The terminal report identifies the bottleneck, shows the timing and resource
+evidence behind it, and suggests the next investigation.
 
 ```text
 +----------------------------------------------------------------------------------------------------------------------------------------------------------+
@@ -58,10 +72,10 @@ At the end of a run, it gives you:
 |                                                                                                                                                          |
 |  STEP TIMING (Window Average), GPU Clock                      ||  STEP MEMORY: BALANCED                                                                  |
 |  Step Time           200.4 ms  100%                           ||                                                                                         |
-|  ├─ Input Wait       128.0 ms   64%  ◀  cause                 ||                                                                                         |
-|  ├─ Compute           68.0 ms   34%                           ||  avg per-step peak           avg                                                        |
-|  │  ├─ Forward        24.0 ms   12%                           ||  Allocated                   2.9 GB                                                     |
-|  │  ├─ Backward       38.0 ms   19%                           ||  Reserved                    3.2 GB                                                     |
+|  ├─ Input Wait       128.0 ms   64%  ◀  cause                 ||  avg per-step peak           avg                                                        |
+|  ├─ Compute           68.0 ms   34%                           ||  Allocated                   2.9 GB                                                     |
+|  │  ├─ Forward        24.0 ms   12%                           ||  Reserved                    3.2 GB                                                     |
+|  │  ├─ Backward       38.0 ms   19%                           ||                                                                                         |
 |  │  └─ Optimizer       6.0 ms    3%                           ||                                                                                         |
 |  ├─ H2D                0.4 ms   <1%                           ||                                                                                         |
 |  └─ Residual           3.6 ms    2%                           ||                                                                                         |
@@ -78,71 +92,12 @@ At the end of a run, it gives you:
 |  GPU temperature        42C                                   ||                                                                                         |
 |  GPU power              58W                                   ||                                                                                         |
 |                                                                                                                                                          |
-|                                                                                                                                                          |
 |  Full evidence: logs/bert_finetune/final_summary.json  (--html-report)                                                                                   |
 +----------------------------------------------------------------------------------------------------------------------------------------------------------+
 ```
 
-TraceML produces this diagnosis at the end of the instrumented training run.
-
-Running distributed training? See the
-[rank-straggler example report](#example-reports).
-
-## Quickstart
-
-### 1. Install
-
-TraceML expects an existing PyTorch project. Install the TraceML package with:
-
-```bash
-pip install traceml-ai
-```
-
-Using [uv](https://docs.astral.sh/uv/) instead? Run `uv add traceml-ai`.
-
-### 2. Instrument the training step
-
-Add TraceML around the core step in your existing PyTorch training script:
-
-```diff
-+   import traceml_ai as traceml
-
-+   traceml.init(mode="auto")
-
-    for batch in dataloader:
-+       with traceml.trace_step(model):
-            optimizer.zero_grad(set_to_none=True)
-            outputs = model(batch["x"])
-            loss = criterion(outputs, batch["y"])
-            loss.backward()
-            optimizer.step()
-```
-
-### 3. Run
-
-```bash
-traceml run train.py
-```
-
-Summary mode is the default. TraceML prints the final diagnosis and writes
-`final_summary.json` and `final_summary.txt` under `logs/<run_name>/`.
-
-No training script ready? [Try the Colab example](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/notebooks/data_loading_bottleneck.ipynb).
-
-## Featured case studies
-
-| Investigation | What you can learn |
-|---|---|
-| [ResNet-18 input pipeline](examples/case_studies/resnet18_input_bound/README.md) | See an input-bound run become compute-bound after changing only its DataLoader settings. |
-| [RF-DETR Nano training](examples/case_studies/rfdetr_nano_training/README.md) | Examine single-GPU phase timing and four-GPU DDP scaling on real COCO batches. |
-| [RF-DETR release regression](examples/case_studies/rfdetr_input_pipeline_regression/README.md) | Trace a release-to-release training slowdown to input waiting and verify recovery in the fixed release. |
-
-[All case studies and reproduction packages →](https://traceopt-ai.github.io/traceml/case-studies/)
-
-## Example Reports
-
 <details>
-<summary><strong>Running distributed training? See a rank-straggler diagnosis</strong></summary>
+<summary><strong>Training with multiple ranks? See a rank-straggler diagnosis</strong></summary>
 
 ```text
 +----------------------------------------------------------------------------------------------------------------------------------------------------------+
@@ -164,7 +119,7 @@ No training script ready? [Try the Colab example](https://colab.research.google.
 |  │  └─ Optimizer      10.0 ms    3%                           ||                                                                                         |
 |  ├─ H2D                1.1 ms   <1%                           ||                                                                                         |
 |  └─ Residual          39.3 ms   13%                           ||                                                                                         |
-|  DataLoader fetch: 3.7 ms (CPU, supplemental)                 ||                                                                                         |
+|  DataLoader fetch: 3.7 ms (CPU, supplemental)                ||                                                                                          |
 |                                                                                                                                                          |
 |  SYSTEM METRICS: LOW GPU UTIL · 2/2 nodes                     ||  PROCESS METRICS: NORMAL · 4/4 ranks                                                    |
 |  Evidence: GPU utilization averaged 14%.                      ||                                                                                         |
@@ -177,48 +132,45 @@ No training script ready? [Try the Colab example](https://colab.research.google.
 |  GPU temperature        58C               70C, N1             ||                                                                                         |
 |  GPU power              220W              280W, N1            ||                                                                                         |
 |                                                                                                                                                          |
-|                                                                                                                                                          |
 |  Full evidence: logs/ddp_pretrain/final_summary.json  (--html-report)                                                                                    |
 +----------------------------------------------------------------------------------------------------------------------------------------------------------+
 ```
 
 </details>
 
-Read [How to Read TraceML Output](https://traceopt-ai.github.io/traceml/user_guide/reading-output/)
-for the complete field definitions, diagnosis rules, evidence, and recommended
-actions.
+TraceML is designed for lightweight, always-on training diagnosis. It shows
+enough evidence to choose the next investigation; use a kernel profiler when
+the result points inside GPU compute.
 
-## What TraceML Diagnoses
+## What TraceML diagnoses
 
 | Diagnosis | Where to investigate |
 |---|---|
 | Input-bound | DataLoader workers, transforms, tokenization, collation, or storage |
 | H2D-bound | Pinned memory, non-blocking copies, batch size, or transfer overlap |
 | Compute-bound | Model compute, mixed precision, batch size, or deeper profiling |
-| Residual-heavy | Work outside traced phases, CPU stalls, logging, checkpointing, validation, or unobserved transfers |
+| Residual-heavy | Logging, checkpointing, validation, CPU stalls, or unobserved work |
 | Rank straggler | Rank-local input, data imbalance, node variance, or networking |
 | Memory creep | Retained tensors, logging references, or cached activations |
 
-## Compare Runs
+Read [How to Read TraceML Output](https://traceopt-ai.github.io/traceml/user_guide/reading-output/)
+for definitions, diagnosis rules, and evidence limits.
 
-After fixing a bottleneck, compare two summaries to see whether training
-improved and what changed:
+## Compare runs
+
+After changing the DataLoader, batch size, model, or infrastructure, compare two
+completed runs:
 
 ```bash
 traceml compare before/final_summary.json after/final_summary.json
 ```
 
-For example, reducing the DataLoader bottleneck shown above changes the
-diagnosis and cuts step time:
-
 ```text
 +--------------------------------------------------------------------------------------+
 |  TraceML Compare                                                                     |
 +--------------------------------------------------------------------------------------+
-|                                                                                      |
 |  A: before_dataloader_fix                                                            |
 |  B: after_dataloader_fix                                                             |
-|  Delta: B - A                                                                        |
 |  Primary diagnosis: INPUT-BOUND -> COMPUTE-BOUND (changed)                           |
 |                                                                                      |
 |  Verdict: IMPROVEMENT                                                                |
@@ -226,63 +178,13 @@ diagnosis and cuts step time:
 +--------------------------------------------------------------------------------------+
 ```
 
-<details>
-<summary><strong>See the full comparison</strong></summary>
+TraceML keeps the comparison evidence in JSON and text so the result is easy to
+review, archive, or use in automation. See
+[Compare Runs](https://traceopt-ai.github.io/traceml/user_guide/compare/).
 
-```text
-+--------------------------------------------------------------------------------------+
-|  TraceML Compare                                                                     |
-+--------------------------------------------------------------------------------------+
-|                                                                                      |
-|  A: before_dataloader_fix                                                            |
-|  B: after_dataloader_fix                                                             |
-|  Delta: B - A                                                                        |
-|  Primary diagnosis: INPUT-BOUND -> COMPUTE-BOUND (changed)                           |
-|                                                                                      |
-|  Verdict: IMPROVEMENT                                                                |
-|  Why: GPU Step Time decreased by 59.9%.                                              |
-|                                                                                      |
-|  Step Time (GPU comparison clock)                                                    |
-|  Metric                       A                 B                 Delta              |
-|  Step time diagnosis          INPUT-BOUND       COMPUTE-BOUND     changed            |
-|  GPU Step Time                200.4 ms          80.4 ms           -120.0 ms (-59.9%) |
-|  Input                        128.0 ms          8.0 ms            -120.0 ms (-93.8%) |
-|  H2D                          0.4 ms            0.4 ms            +0.0 ms (+0.0%)    |
-|  Compute                      68.0 ms           68.0 ms           +0.0 ms (+0.0%)    |
-|  Residual                     3.6 ms            3.6 ms            +0.0 ms (+0.0%)    |
-|                                                                                      |
-|  Step Memory                                                                         |
-|  Metric                       A                 B                 Delta              |
-|  Step memory diagnosis        BALANCED          BALANCED          same               |
-|  Peak reserved                3.1 GB            3.1 GB            0 B (+0.0%)        |
-|  Memory skew                  0.0%              0.0%              +0.0 pp            |
-|                                                                                      |
-|  Process                                                                             |
-|  Metric                       A                 B                 Delta              |
-|  Process diagnosis            NORMAL            NORMAL            same               |
-|  Process CPU avg              95.0%             110.0%            +15.0 pp           |
-|  Process RSS avg              1.4 GB            1.6 GB            +0.2 GB (+14.3%)   |
-|                                                                                      |
-|  System                                                                              |
-|  Metric                       A                 B                 Delta              |
-|  System diagnosis             LOW GPU UTIL      NORMAL            changed            |
-|  System CPU avg               18.4%             32.0%             +13.6 pp           |
-|  System RAM avg               12.0 GB           13.5 GB           +1.5 GB (+12.5%)   |
-|  GPU util avg                 24.0%             88.0%             +64.0 pp           |
-|  GPU memory avg               18.0%             18.0%             +0.0 pp            |
-+--------------------------------------------------------------------------------------+
-```
+## Performance regression checks
 
-</details>
-
-See [Compare Runs](https://traceopt-ai.github.io/traceml/user_guide/compare/)
-for the complete workflow and artifact format.
-
-## Performance Regression Checks
-
-The regression guard is an experimental pilot. Compatible guarded runs can use
-the same comparison command as a local CI gate. Pass the reference first and
-the candidate second, then set the maximum allowed Step Time increase:
+Use the same comparison as a local or CI gate for compatible runs:
 
 ```bash
 traceml compare \
@@ -292,90 +194,117 @@ traceml compare \
   --output compare/reference-vs-candidate
 ```
 
-TraceML writes JSON and text evidence before returning the CI exit code. See
-the [Regression Guard](https://traceopt-ai.github.io/traceml/user_guide/regression-guard/)
-for run configuration and supported environments, and
-[Compare Runs](https://traceopt-ai.github.io/traceml/user_guide/compare/#use-compare-in-ci)
-for result meanings and exit codes.
+TraceML writes the evidence before returning the CI exit code. The regression
+guard is an experimental pilot; read the
+[Regression Guard](https://traceopt-ai.github.io/traceml/user_guide/regression-guard/)
+for comparability requirements and supported environments.
 
-## Save the Result
+## Distributed training
 
-Send the compact diagnosis to an existing W&B run:
+Launch one TraceML process per training process:
+
+```diff
+- torchrun --nproc-per-node=4 train.py
++ traceml run train.py --nproc-per-node=4
+```
+
+The final summary aligns common steps across ranks and can identify the worker
+most likely to be holding up the run. See
+[Distributed Training](https://traceopt-ai.github.io/traceml/user_guide/distributed-training/),
+[DDP rank stragglers](https://traceopt-ai.github.io/traceml/guides/ddp-slow-training-rank-straggler/),
+and [Slurm](https://traceopt-ai.github.io/traceml/user_guide/slurm/).
+
+Distributed GPU comparisons currently assume homogeneous GPU hardware across
+ranks. Check the support matrix for framework-specific distributed evidence.
+
+## Featured case studies
+
+| Investigation | Result |
+|---|---|
+| [ResNet-18 input pipeline](examples/case_studies/resnet18_input_bound/README.md) | See an input-bound run become compute-bound after changing only DataLoader settings. |
+| [RF-DETR Nano training](examples/case_studies/rfdetr_nano_training/README.md) | Examine single-GPU phase timing and four-GPU DDP scaling on real COCO batches. |
+| [RF-DETR release regression](examples/case_studies/rfdetr_input_pipeline_regression/README.md) | Attribute a release-to-release slowdown to input waiting and verify the fixed release. |
+
+[Browse all case studies →](https://traceopt-ai.github.io/traceml/case-studies/)
+
+## Training integrations
+
+The zero-code command works with these standard trainer APIs:
+
+| Framework | Training API |
+|---|---|
+| [Hugging Face Trainer](https://traceopt-ai.github.io/traceml/user_guide/integrations/huggingface/) | `trainer.train()` |
+| [PyTorch Lightning](https://traceopt-ai.github.io/traceml/user_guide/integrations/lightning/) | `trainer.fit(...)` |
+| [RF-DETR](https://traceopt-ai.github.io/traceml/user_guide/integrations/rfdetr/) | `model.train(...)` |
+
+### Manual and explicit integrations
+
+Custom loops and other training paths use their existing TraceML integration:
+
+| Training path | Setup |
+|---|---|
+| Plain PyTorch or a custom loop | [`traceml.init()` and `trace_step(...)`](https://traceopt-ai.github.io/traceml/user_guide/quickstart/) |
+| Hugging Face Accelerate | [Explicit step instrumentation](https://traceopt-ai.github.io/traceml/user_guide/integrations/accelerate/) |
+| Ray Train and Ray Data | [TraceML Trainer/config wrappers](https://traceopt-ai.github.io/traceml/user_guide/integrations/ray/) |
+| DeepSpeed | [Explicit step instrumentation](https://traceopt-ai.github.io/traceml/user_guide/integrations/deepspeed/) |
+| MONAI | [TraceML handler setup](https://traceopt-ai.github.io/traceml/user_guide/integrations/monai/) |
+
+<details>
+<summary><strong>Plain PyTorch example</strong></summary>
 
 ```python
 import traceml_ai as traceml
-import wandb
 
-...
+traceml.init(mode="auto")
 
-summary = traceml.summary(print_text=True)
-if summary is not None:
-    wandb.log(summary)
+for batch in dataloader:
+    with traceml.trace_step(model):
+        optimizer.zero_grad(set_to_none=True)
+        outputs = model(batch["x"])
+        loss = criterion(outputs, batch["y"])
+        loss.backward()
+        optimizer.step()
 ```
 
-The same result can be stored in MLflow. See
-[W&B and MLflow](https://traceopt-ai.github.io/traceml/user_guide/integrations/wandb-mlflow/)
-for complete examples.
-
-<details>
-<summary><strong>Want live diagnostics during training?</strong></summary>
-
-Use the live terminal view locally or over SSH:
-
-```bash
-traceml run train.py --mode=cli
-```
-
-Use the browser dashboard on a single node:
-
-```bash
-traceml run train.py --mode=dashboard
-```
-
-For remote browser access and SSH tunneling, see the
-[full quickstart](https://traceopt-ai.github.io/traceml/user_guide/quickstart/).
+Run it with `traceml run train.py`.
 
 </details>
 
-## Distributed Training and Integrations
+Manual APIs remain available for custom loops and advanced timing boundaries.
+See the [Public API](https://traceopt-ai.github.io/traceml/user_guide/public-api/)
+and [integration support matrix](https://traceopt-ai.github.io/traceml/user_guide/integrations/).
 
-- **Distributed:** [DDP, FSDP, and multi-node](https://traceopt-ai.github.io/traceml/user_guide/distributed-training/)
-  or [Slurm](https://traceopt-ai.github.io/traceml/user_guide/slurm/)
-- **Frameworks:** [Hugging Face](https://traceopt-ai.github.io/traceml/user_guide/integrations/huggingface/),
-  [PyTorch Lightning](https://traceopt-ai.github.io/traceml/user_guide/integrations/lightning/),
-  [RF-DETR](https://traceopt-ai.github.io/traceml/user_guide/integrations/rfdetr/),
-  [Ray Train](https://traceopt-ai.github.io/traceml/user_guide/integrations/ray/),
-  [DeepSpeed](https://traceopt-ai.github.io/traceml/user_guide/integrations/deepspeed/),
-  and [MONAI](https://traceopt-ai.github.io/traceml/user_guide/integrations/monai/)
-- **Trackers:** [W&B and MLflow](https://traceopt-ai.github.io/traceml/user_guide/integrations/wandb-mlflow/)
+## Reports and experiment trackers
 
-Summary mode is the documented path for single-node and multi-node runs. Live
-terminal and dashboard modes are explicit single-node options. See the
-[FAQ](https://traceopt-ai.github.io/traceml/user_guide/faq/) for current
-support and limitations.
+Summary mode is the default. For live local diagnostics, use the terminal or
+browser view:
 
-Distributed GPU analysis currently assumes homogeneous GPU hardware across
-ranks. Heterogeneous GPU configurations may produce inaccurate cross-rank
-analysis and diagnoses.
+```bash
+traceml run train.py --mode=cli
+traceml run train.py --mode=dashboard
+```
 
-## Learn More
+TraceML can also export a self-contained HTML report and send its compact
+summary to an existing W&B or MLflow run. See
+[W&B and MLflow](https://traceopt-ai.github.io/traceml/user_guide/integrations/wandb-mlflow/)
+and the [complete quickstart](https://traceopt-ai.github.io/traceml/user_guide/quickstart/).
 
-- [Complete quickstart](https://traceopt-ai.github.io/traceml/user_guide/quickstart/)
+## Learn more
+
+- [Documentation](https://traceopt-ai.github.io/traceml/)
 - [Examples](https://github.com/traceopt-ai/traceml/blob/main/examples/README.md)
 - [Troubleshoot slow training](https://traceopt-ai.github.io/traceml/guides/slow-pytorch-training/)
-- [Public API](https://traceopt-ai.github.io/traceml/user_guide/public-api/)
+- [Integration support matrix](https://traceopt-ai.github.io/traceml/user_guide/integrations/)
 - [FAQ](https://traceopt-ai.github.io/traceml/user_guide/faq/)
 
 ## Community
 
-If TraceML helps you find a bottleneck, consider
-[starring the repository](https://github.com/traceopt-ai/traceml).
-Contributions and real-world slowdown reports are welcome:
+Questions, contributions, and real-world slowdown reports are welcome:
 
-- [Contributing guide](https://github.com/traceopt-ai/traceml/blob/main/CONTRIBUTING.md)
 - [Open an issue](https://github.com/traceopt-ai/traceml/issues)
-- [Security policy](https://github.com/traceopt-ai/traceml/blob/main/SECURITY.md)
+- [Contributing guide](https://github.com/traceopt-ai/traceml/blob/main/CONTRIBUTING.md)
 - [Discord](https://discord.gg/rY3EQguZAN)
+- [Security policy](https://github.com/traceopt-ai/traceml/blob/main/SECURITY.md)
 
 ## License
 

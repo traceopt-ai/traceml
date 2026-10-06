@@ -1,456 +1,261 @@
 # FAQ
 
-Short answers to common questions before or during adoption.
-
-If you are new to TraceML, start with:
-
-- [Quickstart](quickstart.md)
-- [How to Read TraceML Output](reading-output.md)
-- [Compare Runs](compare.md)
-
----
-
-## Do I need to replace W&B, MLflow, or TensorBoard?
-
-No.
-
-TraceML is designed to work alongside your existing stack.
-
-Use your current tools for:
-
-- experiment tracking
-- artifacts
-- dashboards
-- reporting
-
-Use TraceML for:
-
-- bottleneck diagnosis
-- stragglers
-- residual-heavy behavior
-- memory creep
-- run-to-run bottleneck comparison from saved TraceML summary JSON files
-
-See:
-
-- [Use TraceML with W&B / MLflow](integrations/wandb-mlflow.md)
-
----
-
-## How is TraceML different from `torch.profiler`?
-
-`torch.profiler` is an operator-level profiling tool.
-
-TraceML is a lighter-weight bottleneck finder for real training runs.
-
-A simple rule:
-
-- use TraceML to find where the problem is
-- use `torch.profiler` when you need low-level operator analysis
-
----
+Common questions about running TraceML and reading its diagnosis. For your
+first run, start with the [Quickstart](quickstart.md).
 
 ## How much code do I need to change?
 
-Usually just this:
+For a standard Hugging Face Trainer, PyTorch Lightning `Trainer.fit()`, or
+RF-DETR `model.train()` script, launch your existing script with:
 
-```python
-import traceml_ai as traceml
-
-traceml.init(mode="auto")
-
-with traceml.trace_step(model):
-    ...
+```bash
+traceml run train.py
 ```
 
-For supported integrations:
+TraceML attaches the matching integration automatically. Plain PyTorch and
+custom loops need explicit setup. See [Integrations](integrations.md) to
+choose your path.
 
-- Hugging Face Trainer: run a standard script with `traceml run train.py` for
-  automatic attachment. Direct launches can still call
-  `traceml_ai.integrations.huggingface.init()` and add
-  `TraceMLTrainerCallback()` manually.
-- Lightning: run a standard script with `traceml run train.py` for automatic
-  attachment. Direct launches can still call
-  `traceml_ai.integrations.lightning.init()` and add `TraceMLCallback()` manually.
-- RF-DETR: run a standard `model.train()` script with `traceml run train.py`.
-  Manual setup can still call `traceml_ai.integrations.rfdetr.init()` before
-  training; it supplies the specialized callback automatically.
+## Does TraceML work with Hugging Face Trainer?
 
-The preferred public API is the top-level `traceml.*` API from
-`import traceml_ai as traceml`.
+Yes. Automatic attachment supports Trainer subclasses that use Hugging Face's
+standard inner training loop. See the [Hugging Face guide](integrations/huggingface.md).
 
----
+## Does TraceML work with PyTorch Lightning?
+
+Yes, with both `lightning.pytorch` and `pytorch_lightning`. See the
+[Lightning guide](integrations/lightning.md) for automatic attachment and
+supported strategies.
+
+## Does TraceML work with RF-DETR?
+
+Yes, for its supported object-detection `model.train()` path. See the
+[RF-DETR guide](integrations/rfdetr.md).
+
+## What is the default run mode?
+
+`traceml run train.py` uses summary mode. It prints the diagnosis when training
+finishes and saves `final_summary.json` and `final_summary.txt` in the run
+folder. Summary mode is the default for single-node and multi-node runs.
+
+See [Reading the Output](reading-output.md) for the report fields.
+
+## What is the difference between `watch` and `run`?
+
+Use `run` for step timing and training bottleneck diagnosis. It automatically
+instruments supported trainers; other training paths need explicit setup.
+
+Use `watch` for system and process visibility without automatic training
+instrumentation. It does not provide step measurements or a performance
+verdict.
 
 ## Can I trace only a small number of steps?
 
-Yes. Use `--trace-max-steps` with `traceml run`:
+Yes. Record the first 100 TraceML steps while letting training continue:
 
 ```bash
 traceml run train.py --trace-max-steps 100 --args --epochs 5
 ```
 
-TraceML records and flushes the first N TraceML steps, then stops recording
-telemetry while your training job continues normally.
-
----
-
-## Should I use `traceml.trace_step()` or `trace_step()`?
-
-Prefer:
-
-```python
-import traceml_ai as traceml
-
-traceml.init(mode="auto")
-
-with traceml.trace_step(model):
-    ...
-```
-
-Use the top-level `traceml.*` API from `import traceml_ai as traceml`. Do not
-import from decorator compatibility paths.
-
----
-
-## What is the difference between `auto`, `manual`, and `selective`?
-
-Use:
-
-- `traceml.init(mode="auto")` for the default TraceML workflow
-- `traceml.init(mode="manual")` when you want fully explicit wrappers
-- `traceml.init(mode="selective", ...)` when you want some automatic patching
-  and some explicit wrapping
-
-Call `init()` after imports and before creating any TraceML wrapper. Models and
-DataLoaders may be constructed first; only TraceML instrumentation order is
-restricted. Start with `auto` unless you already know you need more control.
-
----
-
-## When should I use the wrapper APIs?
-
-Use wrappers when you do not want the default automatic patching path or when
-part of your training loop is outside that path. A standard phase has one
-owner: automatic instrumentation or a manual wrapper, never both.
-
-The main wrapper entrypoints are:
-
-- `traceml.wrap_dataloader_fetch(...)`
-- `traceml.wrap_forward(...)`
-- `traceml.wrap_backward(...)`
-- `traceml.wrap_optimizer(...)`
-
-In `manual` mode all wrappers are available. In `selective` mode a wrapper is
-available only when its matching automatic patch is disabled. In `auto` mode,
-standard PyTorch phase wrappers raise a configuration error. The narrow
-exception is `wrap_dataloader_fetch(...)` for a custom iterator, such as Ray
-Data, that the PyTorch `DataLoader` patch cannot observe.
-
----
-
-## Does TraceML work with Hugging Face Trainer?
-
-Yes.
-
-See:
-
-- [Hugging Face Trainer](integrations/huggingface.md)
-
----
-
-## Does TraceML work with PyTorch Lightning?
-
-Yes.
-
-See:
-
-- [PyTorch Lightning](integrations/lightning.md)
-
----
-
-## Does TraceML support DDP?
-
-Yes.
-
-TraceML can surface:
-
-- input stragglers
-- compute stragglers
-- rank imbalance
-- worst-rank vs median-rank skew
-
-Single-node DDP supports live CLI/dashboard views and final summaries.
-Multi-node DDP is supported for end-of-run summary reports.
-
-Capacity-relative GPU memory diagnoses currently assume equal GPU memory
-capacity across ranks. Mixed-capacity runs still collect per-rank telemetry,
-but global `HIGH_PRESSURE`, `IMBALANCE`, and aggregate Process pressure
-diagnoses may be inaccurate.
-
----
-
-## Does TraceML support multi-node?
-
-Yes, for summary-mode DDP runs.
-
-Use the same `--run-name`, `--nnodes`, `--nproc-per-node`, and
-`--master-addr` on every node. Node 0 starts the TraceML aggregator; other
-nodes connect to it for telemetry. Multi-node live CLI/dashboard views are not
-yet supported.
-
-`--session-id` remains accepted as a backward-compatible alias for
-`--run-name`.
-
-Pick a new `--run-name` for each launch. TraceML refuses to start if
-`<logs-dir>/<run-name>` already exists, and leaves that folder untouched. For
-multi-node runs, `--logs-dir` must be on storage that every node can see.
-
----
-
-## Does TraceML support FSDP?
-
-Yes, for single-node FSDP. Multi-node FSDP summary reports use the same
-distributed launch path as DDP, but should be validated on your environment.
-TraceML currently surfaces FSDP timing and rank skew, but it does not yet split
-FSDP parameter all-gather or reduce-scatter wait into separate collective
-buckets. In FSDP, elevated forward time may be real compute or exposed
-all-gather wait.
-
-If you hit an issue on your setup, please open an issue with a minimal repro and environment details.
-
----
-
-## Does TraceML support tensor parallel or pipeline parallel?
-
-Not yet.
-
----
-
-## What is the difference between `watch` and `run`?
-
-`watch`
-
-- zero-code system and process visibility
-- the same terminal System/Process panes as `run`, without a performance
-  verdict or step measurements
-
-`run`
-
-- the default command
-- step-aware bottleneck diagnosis
-- the best place to start for most users
-
-Start with `run`.
-
-TraceML no longer ships layer-level/deep profiling. If TraceML shows you need
-lower-level detail, use PyTorch Profiler, Nsight, or another operator-level
-profiler for that follow-up.
-
----
+The limit counts reported TraceML steps, not necessarily individual batches.
+For automatic trainers, see the integration guide's accumulation semantics.
 
 ## Is there a local UI?
 
-Yes.
-
-Run:
+Yes. For a single-node run, including multiple GPUs, use:
 
 ```bash
 traceml run train.py --mode=dashboard
 ```
 
-The local UI is intended for single-node runs, including single-node
-multi-GPU. For multi-node runs, use summary mode.
+Open `http://127.0.0.1:8765`. Use `--mode=cli` for a live terminal view instead.
+Multi-node runs use summary mode.
 
-The local UI runs at:
-
-```text
-http://127.0.0.1:8765
-```
-
-<details>
-<summary>Running on a remote server?</summary>
-
-SSH into the server and start the dashboard there. TraceML prints a tunnel
-command like this:
+On a remote server, start the dashboard there and forward its port from your
+local terminal:
 
 ```bash
 ssh -L 8765:127.0.0.1:8765 user@remote-host
 ```
 
-Copy that command into a local terminal on your laptop. Leave the training
-command running on the server, then open `http://127.0.0.1:8765` locally.
+Then open the same URL locally.
 
-</details>
+## Does TraceML support DDP?
 
----
+Yes. TraceML reports per-rank timing and can identify input or compute
+stragglers. Single-node DDP supports summary, CLI, and dashboard modes;
+multi-node DDP uses summary mode.
 
-## What is the default run mode?
+Use the [Distributed Training guide](distributed-training.md) and your
+framework's integration guide for launch settings.
 
-`traceml run train.py` uses summary mode for single-node and multi-node runs.
-It skips the live UI, prints the final diagnosis, and writes
-`final_summary.json` plus `final_summary.txt`.
+Capacity-relative GPU memory diagnoses assume equal GPU memory capacity
+across ranks. Mixed-capacity runs still collect per-rank telemetry, but
+aggregate memory-pressure and imbalance diagnoses may be inaccurate.
 
-Select the browser dashboard explicitly on a single-node run:
+## Does TraceML support multi-node?
 
-```bash
-traceml run train.py --mode=dashboard
-```
+Yes, for summary-mode DDP runs. Use matching launch settings and a shared
+`--logs-dir` on every node, with a different `--node-rank` on each node.
+Node 0 owns the aggregator and final reports.
 
-The dashboard listens on `http://127.0.0.1:8765` by default. Use
-`--mode=cli` instead when you want live diagnostics in the terminal.
+Choose a fresh `--run-name` for each launch. TraceML refuses to overwrite an
+existing run folder. See [Distributed Training](distributed-training.md) for
+the per-node commands, or [Slurm](slurm.md) for a cluster template.
 
----
+## Does TraceML support FSDP?
+
+TraceML supports timing and rank-skew reporting for explicitly instrumented
+PyTorch FSDP training. This does not imply automatic FSDP support in every
+framework integration. Check the [integration coverage](integrations.md)
+before choosing a setup.
+
+FSDP communication is not reported in separate collective buckets: forward
+and backward can include all-gather or reduce-scatter work. Multi-node FSDP
+should be validated in your environment.
+
+## Does TraceML support tensor parallel or pipeline parallel?
+
+Not yet.
+
+## Do I need to replace W&B, MLflow, or TensorBoard?
+
+No. Keep your existing experiment tracker. TraceML adds training timing,
+bottleneck diagnosis, and saved evidence for comparison.
+
+See [W&B / MLflow](integrations/wandb-mlflow.md) if you want to export the
+TraceML summary to your tracker.
+
+## How is TraceML different from `torch.profiler`?
+
+TraceML reports training phases and likely bottlenecks. `torch.profiler`
+provides operator-level traces for a closer investigation. Use the TraceML
+diagnosis to decide which part of training to profile next.
 
 ## Can TraceML compare two runs?
 
-Yes.
-
-Use:
+Yes. Compare their saved final summaries:
 
 ```bash
-traceml compare run_a.json run_b.json
+traceml compare logs/reference/final_summary.json logs/candidate/final_summary.json
 ```
 
-`traceml compare` is designed to consume TraceML `final_summary.json`
-artifacts.
+The comparison shows changes in timing, memory, and diagnosis, and writes
+JSON and text reports. See [Compare Runs](compare.md).
 
+## Can I catch training regressions in CI?
 
-It writes:
+Yes, with the experimental [Regression Guard](regression-guard.md). Declare
+the same workload for the reference and candidate runs, then compare them
+with a Step Time threshold. A slower candidate beyond the threshold returns
+a failing exit code; missing or incompatible evidence returns an inconclusive
+result.
 
-- a structured compare JSON
-- a compact text report
+The guard compares aggregate Step Time from the saved summaries. Its declared
+measurement range does not select the analyzed steps.
 
-A good workflow is:
+## When should I use compare instead of live output?
 
-1. run each job with TraceML
-2. retain `final_summary.json` for each run
-3. compare the two runs with `traceml compare`
-
-See:
-
-- [Compare Runs](compare.md)
-
----
+Use live output to inspect a run while it is in progress. Use compare after
+both runs finish to see whether timing, memory, or the diagnosis changed.
+Use Regression Guard when that comparison should determine a CI result.
 
 ## Can I log TraceML output into W&B or MLflow?
 
-Yes.
+Yes. After training finishes, call `traceml.summary()` to get a flat dictionary
+for tracker logging, or `traceml.final_summary()` for the full report.
+Keep the tracker run open until you export it.
 
-TraceML is designed to work alongside your existing tracking stack. The
-recommended low-noise path is:
-
-1. launch with `traceml run train.py`
-2. call `traceml.summary()` near the end of your script
-3. log the returned flat dict into W&B or MLflow
-
-Use `traceml.final_summary()` if you need the full structured JSON payload.
-Both APIs reuse the same canonical `final_summary.json` once it has been
-generated.
-
-See:
-
-- [Use TraceML with W&B / MLflow](integrations/wandb-mlflow.md)
-
----
+These APIs return the finalized report, not live metrics, and return `None`
+on non-primary ranks by default. See [W&B / MLflow](integrations/wandb-mlflow.md)
+for examples and finalization requirements.
 
 ## Can I run without TraceML telemetry for a baseline?
 
-Yes.
-
-Use:
+For an automatically instrumented script, use your usual `python` or
+`torchrun` command. If the script contains explicit TraceML setup, or you
+want to keep the same TraceML launcher settings, use:
 
 ```bash
 traceml run train.py --disable-traceml
 ```
 
----
+Keep the training workload and process count the same when comparing timings.
 
 ## Where are training stdout and stderr saved?
 
-`traceml run` and `traceml watch` save both streams by default:
+`run` and `watch` save both streams by default:
 
 ```text
 logs/<run-name>/nodes/node_<node-rank>/training.stdout.log
 logs/<run-name>/nodes/node_<node-rank>/training.stderr.log
 ```
 
-The node launcher owns these files, so they include Python output, native
-writes, torchrun diagnostics, and output from local workers that inherits the
-launcher's descriptors. CLI mode keeps the streams out of the live Rich
-display and shows a bounded stderr excerpt after a failure. Use
-`--no-save-training-output` when another system already captures the streams
-or when the workload requires a real terminal.
-
-See [What Happens When My Training Crashes](training-crashes.md) for what
-these files contain after a Python exception or a native crash.
-
----
+Use `--no-save-training-output` to let the training command inherit the
+terminal directly. See [Training Crashes](training-crashes.md) for failure
+output and the artifacts available after a crash.
 
 ## What does `MEMORY CREEP` usually mean?
 
-It usually means memory is rising over time instead of staying stable.
-
-A common cause is retaining tensors across steps, for example by storing graph-backed tensors in a persistent cache or list.
-
-See:
-
-- [How to Read TraceML Output](reading-output.md)
-
----
+Memory is rising across measured steps. Retaining tensors in a list or cache
+is one possible cause; the diagnosis alone does not prove a memory leak.
+See [Reading the Output](reading-output.md) for the supporting evidence.
 
 ## What does `INPUT STRAGGLER` mean?
 
-It means one rank is slower in the input path than the typical rank.
-
-In distributed runs, TraceML first finds visible wait cost. In DDP/default
-strategy that signal comes from backward time; in FSDP it comes from forward +
-backward time. `INPUT STRAGGLER` means the likely culprit rank has material
-input-wait excess compared with the victim rank.
-
-Common causes:
-
-- uneven data loading
-- preprocessing imbalance
-- host-side jitter
-
-See:
-
-- [How to Read TraceML Output](reading-output.md)
-
----
+TraceML found rank imbalance with evidence that excess input waiting on one
+rank is making another rank wait. Uneven loading, preprocessing, or host
+jitter are common causes. Inspect the per-rank evidence in
+[Reading the Output](reading-output.md).
 
 ## What does `COMPUTE STRAGGLER` mean?
 
-It means the likely culprit rank spends materially more time in DDP forward
-compute than the victim rank.
+In DDP, the likely culprit rank spends materially more time in forward than
+the waiting rank. Uneven shapes or rank-local work can cause this.
 
-TraceML emits `COMPUTE STRAGGLER` from the rank-skew rule for DDP/default
-strategy only. For FSDP, forward and backward can include sharding
-communication, so unexplained rank skew remains `STRAGGLER` unless input wait
-or H2D explains it.
+FSDP forward can include communication, so unexplained skew is reported as
+`STRAGGLER` rather than attributed to compute. See
+[Reading the Output](reading-output.md).
 
-Common causes:
+## Should I use `traceml.trace_step()` or `trace_step()`?
 
-- uneven shapes or data
-- rank-local branching or extra work
-- compute imbalance in forward
+For explicit loop setup, prefer the top-level API:
 
-See:
+```python
+import traceml_ai as traceml
 
-- [How to Read TraceML Output](reading-output.md)
+traceml.init(mode="auto")
 
----
+# Inside your training loop:
+with traceml.trace_step(model):
+    ...  # training work through optimizer.step()
+```
 
-## When should I use compare instead of live output?
+Automatic trainer integrations manage their own step boundaries. See the
+[Public API](public-api.md) for custom-loop setup and reference details.
 
-Use live output when you want to understand the current run while it is still in progress.
+## What is the difference between `auto`, `manual`, and `selective`?
 
-Use compare when you already have final summary JSON files and want to answer:
+These are `init()` instrumentation modes for explicit setup, separate from
+the launcher's `summary`, `cli`, and `dashboard` display modes.
 
-- did the run get slower or faster?
-- did the diagnosis change?
-- did memory or residual behavior regress?
+- `auto`: patch supported PyTorch operations inside your explicit step boundary.
+- `manual`: use explicit timing wrappers.
+- `selective`: enable selected patches and wrap other phases yourself.
 
-Live output is for in-run diagnosis.
+For a framework integration, use its own setup instructions rather than adding
+an extra generic `init()`. For custom loops, call `init()` before creating
+TraceML wrappers; models and DataLoaders may already exist.
 
-Compare is for run-to-run review after the runs have finished.
+## When should I use the wrapper APIs?
+
+Use wrappers for explicit timing in `manual` or `selective` mode. Each phase
+must have one timing owner: its automatic patch or its wrapper.
+
+The wrappers cover DataLoader fetch, forward, backward, and optimizer work.
+In `selective` mode, disable the matching patch before wrapping that phase.
+In `auto` mode, standard phase wrappers raise a configuration error; the
+exception is fetch wrapping for a custom iterator that the PyTorch DataLoader
+patch cannot observe, such as Ray Data.
+
+See the [Public API](public-api.md) for signatures and examples.

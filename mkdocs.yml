@@ -1,5 +1,5 @@
 site_name: TraceML
-site_description: Real-time bottleneck finder for PyTorch training runs
+site_description: Diagnose slow PyTorch training and catch performance regressions in CI
 site_url: https://traceopt-ai.github.io/traceml/
 repo_url: https://github.com/traceopt-ai/traceml
 repo_name: traceopt-ai/traceml
@@ -91,23 +91,24 @@ nav:
       - Case Studies: case-studies.md
   - User Guide:
       - Quickstart: user_guide/quickstart.md
-      - Distributed Training: user_guide/distributed-training.md
-      - Slurm (multi-node): user_guide/slurm.md
-      - Reading output: user_guide/reading-output.md
       - Integrations:
           - Overview: user_guide/integrations.md
           - Hugging Face: user_guide/integrations/huggingface.md
-          - Hugging Face Accelerate: user_guide/integrations/accelerate.md
           - PyTorch Lightning: user_guide/integrations/lightning.md
           - RF-DETR: user_guide/integrations/rfdetr.md
+          - Hugging Face Accelerate: user_guide/integrations/accelerate.md
           - MONAI: user_guide/integrations/monai.md
           - Ray Train: user_guide/integrations/ray.md
           - DeepSpeed: user_guide/integrations/deepspeed.md
           - W&B / MLflow: user_guide/integrations/wandb-mlflow.md
-      - FAQ: user_guide/faq.md
-      - When Training Crashes: user_guide/training-crashes.md
+      - Reading Output: user_guide/reading-output.md
       - Compare Runs: user_guide/compare.md
       - Regression Guard: user_guide/regression-guard.md
+      - Distributed Training: user_guide/distributed-training.md
+      - Slurm (multi-node): user_guide/slurm.md
+      - Troubleshooting:
+          - FAQ: user_guide/faq.md
+          - When Training Crashes: user_guide/training-crashes.md
       - Public API: user_guide/public-api.md
   - Developer Guide:
       - Architecture: developer_guide/architecture.md

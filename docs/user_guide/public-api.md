@@ -1,6 +1,12 @@
 # Public API
 
-Import the stable core API from `traceml_ai`:
+For supported Hugging Face Trainer, Lightning, and RF-DETR training, start
+with `traceml run train.py`. The launcher attaches the integration; you do not
+need the Python setup calls below. See [Integrations](integrations.md) for
+supported paths and explicit setup in other frameworks.
+
+Use this reference for custom-loop instrumentation, summary export, and
+advanced launches. Import the stable core API from `traceml_ai`:
 
 ```python
 import traceml_ai as traceml
@@ -53,7 +59,7 @@ the environment for a run or bug report.
 
 ### Manual instrumentation helpers
 
-Use these for manual or selective instrumentation. Automatic mode already
+Use these for manual or selective instrumentation. `init(mode="auto")` already
 owns the matching PyTorch paths, so wrappers reject duplicate instrumentation.
 The exception is `wrap_dataloader_fetch(...)` for a custom non-PyTorch iterator
 that automatic DataLoader instrumentation cannot observe. When TraceML is
@@ -92,82 +98,82 @@ their documented `TypeError` before initialization and ownership are checked.
 
 ## CLI
 
-TraceML installs the `traceml` command-line entry point:
+TraceML installs the `traceml` command:
 
 ```bash
-traceml run <script>                  # final summary JSON/text
-traceml run <script> --mode=summary   # explicit summary mode
-traceml run <script> --mode=cli       # live terminal view
-traceml run <script> --mode=dashboard # live browser view
-traceml watch <script>                # zero-code system/process summary
-traceml serve                         # standalone aggregator
+traceml run train.py                  # training diagnosis and saved reports
+traceml run train.py --mode=cli       # live terminal view
+traceml run train.py --mode=dashboard # live browser view
+traceml watch train.py                # system/process visibility
+traceml serve                         # standalone aggregator for direct launches
 ```
+
+Summary mode is the default for every topology. Live CLI and dashboard modes
+are intended for single-node runs. `watch` does not install automatic trainer
+instrumentation or provide step timing.
+
+Use `traceml run --help` for launch flags. See
+[Distributed Training](distributed-training.md) for multi-node commands,
+[Compare Runs](compare.md) for saved report comparison, and
+[Regression Guard](regression-guard.md) for CI thresholds.
+
+### Training output
+
+`run` and `watch` save training stdout and stderr by default under
+`logs/<run-name>/nodes/node_<node-rank>/`. Summary and dashboard modes mirror
+both streams; CLI mode shows a bounded stderr excerpt after failure.
+
+Use `--no-save-training-output` to inherit the terminal instead. Captured
+streams are pipes, so `isatty()` is false. TraceML does not replace Python's
+`sys.stdout` or `sys.stderr`. Aggregator diagnostics are saved separately.
+See [Training Crashes](training-crashes.md) for artifact paths and failure
+behavior.
+
+### History and configuration
 
 `run`, `watch`, and `serve` accept `--history-retention DURATION`. The default
-is `30m`; bare values are seconds, and `s`, `m`, `h`, and `d` suffixes are
-accepted. Step Time and Step Memory are pruned through the minimum step that is
-aligned across every expected rank in both streams and older than the selected
-duration. System, Process, and GPU history use that same step's timestamp.
-Later arrivals at or before a deleted step or timestamp are dropped before
-insertion. Use `--no-history` on `run` or `watch` when history should be
-disabled entirely.
+is `30m`; bare values are seconds, with `s`, `m`, `h`, and `d` suffixes accepted.
+Use `--no-history` on `run` or `watch` only with a live display mode.
+Summary mode, HTML reports, and summary APIs require history.
 
-The same setting is available as `history_retention` in `traceml.yaml` and as
-`TRACEML_HISTORY_RETENTION`. Precedence remains CLI, environment, YAML, then
-the 30-minute built-in default.
+The retention setting is also available as `history_retention` in
+`traceml.yaml` and `TRACEML_HISTORY_RETENTION`. CLI settings take precedence
+over environment variables, YAML, and built-in defaults, in that order.
 
-Summary mode is the default for every topology. Live `cli` and `dashboard`
-modes are intended for single-node runs. Use PyTorch Profiler or Nsight for
-operator- or kernel-level profiling.
+<details markdown="1">
+<summary>How history retention works</summary>
 
-`run` and `watch` save the supervised training command's stdout and stderr by
-default in separate node-scoped files:
+Step Time and Step Memory are pruned through a shared step boundary aligned
+across every expected rank in both streams and older than the chosen duration.
+System, Process, and GPU history use that step's timestamp. Later arrivals at
+or before a deleted step or timestamp are dropped before insertion.
 
-```text
-logs/<run-name>/nodes/node_<node-rank>/training.stdout.log
-logs/<run-name>/nodes/node_<node-rank>/training.stderr.log
-```
-
-Summary and dashboard modes also mirror both streams to the terminal. CLI mode
-does not mirror while its Rich display is active; after a training failure it
-prints a bounded stderr excerpt, the saved paths, and the final outcome. Use
-`--no-save-training-output` to inherit stdout/stderr and create no training
-output files. Captured streams are pipes, so `isatty()` returns false. TraceML
-does not replace Python's `sys.stdout` or `sys.stderr` objects.
-
-`--no-save-training-output` controls only the supervised training streams. The
-owner launcher always saves raw aggregator diagnostics to
-`logs/<run-name>/aggregator/process.stderr.log`; only node 0 creates this file
-in a multi-node run. Summary and dashboard modes mirror it live, while CLI mode
-reports its path if telemetry fails. Aggregator stdout remains attached to the
-terminal and is not persisted.
-
-TraceML implementation errors are stored separately in
-`rank_<global_rank>/traceml_errors.log`,
-`aggregator/traceml_errors.log`, and
-`nodes/node_<node_rank>/launcher_errors.log`. User exceptions remain in the
-native training stderr artifacts above.
+</details>
 
 ## Direct Launch with `traceml serve`
 
-`traceml run` starts the aggregator and your script together. For direct
-`python` or `torchrun` launches, start the aggregator yourself and call
-`traceml.init(...)` inside the training script:
+For a direct `python` or `torchrun` launch, start the aggregator separately
+and use the [manual setup for your integration](integrations.md) in the script.
+Custom PyTorch loops use `traceml.init()` and `traceml.trace_step()`; framework
+integrations may require their own initializer and callback or handler.
 
 ```bash
 # terminal 1
 traceml serve --aggregator-host 127.0.0.1 --aggregator-port 29765
 
-# terminal 2
+# terminal 2: script already contains its explicit TraceML setup
 python train.py
 ```
 
-`traceml serve` owns only the aggregator. It binds the endpoint, waits for a
-shutdown signal, and writes the final summary; it never launches or wraps the
-training script.
+`serve` does not launch training or attach framework callbacks. Stop it after
+training to finalize its reports. Training stdout/stderr remain owned by your
+terminal, scheduler, or container runtime.
 
-For multi-node workers, bind the aggregator on a reachable address and set the
-endpoint on every training node:
+<details markdown="1">
+<summary>Multi-node direct launches and serve flags</summary>
+
+Bind the aggregator on a reachable address and set its endpoint on every
+training node:
 
 ```bash
 traceml serve --aggregator-bind-host 0.0.0.0 --aggregator-host <node0-ip> \
@@ -177,77 +183,69 @@ TRACEML_AGGREGATOR_HOST=<node0-ip> TRACEML_AGGREGATOR_PORT=29765 \
   torchrun ... train.py
 ```
 
-Workers resolve `TRACEML_AGGREGATOR_HOST` as `127.0.0.1` by default, so every
-non-aggregator node needs the reachable node-0 address above.
-
-`traceml serve` flags:
+Workers default to `127.0.0.1`, so non-aggregator nodes need the reachable
+node-0 endpoint. Configure the expected world size to match your workers.
 
 | Flag | Meaning |
-|---|---|
-| `--aggregator-host` | Address workers connect to; default `127.0.0.1`. |
+| --- | --- |
+| `--aggregator-host` | Worker connection address; default `127.0.0.1`. |
 | `--aggregator-bind-host` | Bind address; use `0.0.0.0` for multi-node. |
-| `--aggregator-port` | Aggregator TCP port; default `29765`. |
-| `--nnodes` / `--nproc-per-node` | Expected world size; the aggregator waits for all ranks before finalizing. |
+| `--aggregator-port` | Telemetry port; default `29765`. |
+| `--nnodes` / `--nproc-per-node` | Expected world size for finalization. |
 | `--mode` | `summary` (default), `cli`, or `dashboard`. |
-| `--logs-dir` | Directory for session logs. |
-| `--run-name` / `--session-id` | Shared run identity for worker artifacts. Must be new for each launch: TraceML refuses to start if `<logs-dir>/<run-name>` already exists. Telemetry from a worker explicitly given a different id is ignored. A worker that generates its own id, such as a plain `python train.py`, is still traced. |
-| `--history-retention` | Aligned raw-history duration; default `30m`. |
+| `--logs-dir` | Session log directory. |
+| `--run-name` / `--session-id` | Shared run identity; choose a fresh name. |
+| `--history-retention` | History duration; default `30m`. |
+
+An existing run folder is not overwritten. Telemetry with a different
+explicit worker session ID is ignored. Workers that generate their own ID,
+such as a plain `python train.py`, are still admitted.
+
+</details>
 
 ### Missing-aggregator behavior
 
-`traceml run` and `traceml watch` are strict by default: if their aggregator
-cannot start or become ready, training is not launched. To explicitly continue
-under the normal supervised launcher without telemetry, use:
+Launcher startup and in-script initialization have different defaults:
+
+| Entry point | Default if the aggregator is unavailable |
+| --- | --- |
+| `traceml run` / `traceml watch` | Stop before launching training. |
+| Explicit `traceml.init()` | Retry within a bounded timeout, warn, and continue with tracing disabled. |
+
+To let the launcher continue without telemetry:
 
 ```bash
 traceml run train.py --on-missing-aggregator=warn
 ```
 
-The CLI policy resolves as the explicit flag,
-`TRACEML_ON_MISSING_AGGREGATOR`, then `raise`. A startup failure is recorded as
-`telemetry_status="unavailable"` by the aggregator-owning launcher; once
-training starts, a later telemetry or finalization failure is reported
-separately and does not replace the training exit code. In multi-node runs,
-only the node 0 launcher reports final aggregator health.
-
-The aggregator-owning launcher also refuses to start beside an earlier process
-that still owns the configured endpoint. Stop that process or choose another
-`--aggregator-port`. With `--on-missing-aggregator=warn`, TraceML is disabled
-and training starts, but aggregator-dependent calls, including
-`traceml.summary()`, still fail.
-
-After training starts, the aggregator-owning launcher prints one telemetry
-health line to stderr immediately before the final training result, including
-`[TraceML] Telemetry complete.` on a healthy run. This footer reports telemetry
-health only and never changes the training exit code. Non-owner nodes do not
-print an authoritative final telemetry footer.
-
-If the aggregator cannot be reached, `traceml.init(...)` retries for its
-bounded timeout, writes one stderr warning, and continues with tracing disabled
-as a no-op. This is the default `warn` policy; it does not stop training.
-
-Use strict behavior when telemetry is required, for example in CI:
+To require telemetry during explicit setup:
 
 ```python
 traceml.init(on_missing_aggregator="raise")
 ```
 
-The policy resolves in this order: the explicit
-`on_missing_aggregator` argument, `TRACEML_ON_MISSING_AGGREGATOR`, then `warn`.
-It is not read from `traceml.yaml`.
+The policy resolves from the explicit flag or argument, then
+`TRACEML_ON_MISSING_AGGREGATOR`, then the entry point's default. It is not a
+`traceml.yaml` setting. Calls that require an aggregator, including
+`traceml.summary()`, still fail when telemetry is unavailable.
 
-`aggregator_host` and `aggregator_port` are direct-launch settings, not
-`traceml.yaml` settings. Other runtime settings resolve as explicit
-`traceml.init(...)` arguments, then `TRACEML_*` environment variables, then
-`traceml.yaml`, then built-in defaults.
+An occupied telemetry endpoint is also a startup failure. Stop the earlier
+aggregator or choose another `--aggregator-port`.
 
-### Training output with direct launches
+After training starts, telemetry failures are reported separately and do not
+replace the training exit code. Only the aggregator-owning launcher reports
+final telemetry health; in multi-node runs this is node 0. See
+[Training Crashes](training-crashes.md) for the manifest and diagnostics.
 
-`traceml serve` owns only the aggregator and does not wrap worker descriptors.
-With a direct `python` or `torchrun` launch, stdout/stderr therefore remain
-owned by the terminal, scheduler, or container runtime. The node-scoped
-training output files above are created only by `traceml run` and
-`traceml watch`.
+### Direct-launch configuration
+
+Runtime settings resolve from explicit `init()` arguments, environment
+variables, `traceml.yaml`, then built-in defaults. For display mode, the Python
+argument is `ui_mode`; `init(mode=...)` selects instrumentation behavior.
+
+Aggregator host and port resolve from explicit arguments, environment
+variables, then defaults. Run identity and aggregator endpoints are not read
+from YAML. See the function references above for accepted arguments.
 
 ## Framework Integrations
 
@@ -319,6 +317,9 @@ each phase is measured from.
       show_source: false
 
 ### Ray Train
+
+Use `TraceMLTorchTrainer` and its configuration for explicit worker-side
+setup. See the [Ray Train guide](integrations/ray.md).
 
 ::: traceml_ai.integrations.ray.TraceMLTorchTrainer
     options:

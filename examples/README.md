@@ -5,11 +5,11 @@ This folder contains the easiest ways to try TraceML without reading the full co
 If you are new to TraceML, start here.
 
 The scripts in this folder are available only in a repository checkout; they
-are not included in the PyPI wheel. From the repository root, install their
-PyTorch dependency once:
+are not included in the PyPI wheel. From the repository root, install the
+dependencies for the zero-code starter example:
 
 ```bash
-pip install ".[torch]"
+pip install ".[torch,hf]"
 ```
 
 All commands below assume that checkout directory.
@@ -19,11 +19,14 @@ All commands below assume that checkout directory.
 ## Start here
 
 ```bash
-traceml run examples/quickstart.py
+traceml run examples/integrations/huggingface_trainer_minimal.py \
+  --args --steps 20
 ```
 
-Summary mode prints the final diagnosis and writes JSON/TXT artifacts. Keep
-the final summary JSON to compare runs later with `traceml compare`.
+This is a standard Hugging Face `Trainer` script with no TraceML code, model
+download, or dataset download. TraceML detects the Trainer, prints the final
+diagnosis, and writes JSON/TXT artifacts. Keep the final summary JSON to
+compare runs later with `traceml compare`.
 
 Prefer Colab? Browse the [runnable notebooks](../notebooks/README.md).
 
@@ -31,7 +34,7 @@ Prefer Colab? Browse the [runnable notebooks](../notebooks/README.md).
 
 | Example | What it shows | Works on |
 |---|---|---|
-| [Quickstart](quickstart.py) | Plain PyTorch loop with automatic instrumentation and a final summary | CPU / CUDA |
+| [Plain PyTorch quickstart](quickstart.py) | Plain PyTorch loop with an explicit step boundary and a final summary | CPU / CUDA |
 | [Summary logging](summary_logging_minimal.py) | Export `traceml.summary()` for W&B or MLflow | CPU / CUDA |
 | [Custom instrumentation](manual_custom_minimal.py) | Custom batch source and explicit wrappers in manual mode | CPU / CUDA |
 

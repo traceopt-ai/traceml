@@ -1,97 +1,93 @@
 # Compare Runs
 
-Use `traceml compare` to compare two TraceML final summary JSON files from two different runs.
+Compare two training runs to see whether Step Time improved, where time
+shifted, and whether memory or the bottleneck diagnosis changed.
 
-This is the cleanest way to answer questions like:
+## 1. Save two runs
 
-- did the run get slower or faster?
-- did the diagnosis change?
-- did residual time increase?
-- did memory pressure or skew get worse?
-
-`traceml compare` is designed for comparing finalized run summaries, not raw logs or raw SQLite databases.
-
----
-
-## What you need
-
-You need two TraceML final summary JSON files.
-
-A common way to produce them is:
+Run your reference code, then your candidate code:
 
 ```bash
-traceml run train.py --mode=summary
+traceml run train.py --run-name reference
+# Switch to the code or configuration you want to evaluate.
+traceml run train.py --run-name candidate
 ```
 
-Summary mode writes `final_summary.json` at the end of the run.
+Summary mode is the default. Each run saves `final_summary.json` in its run
+folder when telemetry finalization succeeds. Use a fresh name for each launch.
+Your script needs a supported automatic trainer or the required
+[explicit integration](integrations.md).
 
-If you are logging TraceML output into W&B or MLflow, you can also keep those summary JSON files as run artifacts and compare them later.
+For a useful performance comparison, keep hardware, data, batch size,
+precision, and process topology consistent except for the change you are
+investigating. Repeat runs when the difference is small or results vary.
 
----
+Already have two saved summaries? Start with the command below.
 
-## Basic usage
+## 2. Compare the summaries
 
 ```bash
-traceml compare run_a.json run_b.json
+traceml compare \
+  logs/reference/final_summary.json \
+  logs/candidate/final_summary.json
 ```
 
-This compares:
-
-- `A`: the first file you pass
-- `B`: the second file you pass
-
-TraceML writes:
-
-- a structured compare JSON
-- a compact text report
-
-By default, outputs are written under a local `compare/` directory in the current working directory.
-
-Example:
+The first file is **A** (reference); the second is **B** (candidate). TraceML
+prints a comparison and saves:
 
 ```text
-compare/run_a_vs_run_b.json
-compare/run_a_vs_run_b.txt
+compare/reference_vs_candidate.json
+compare/reference_vs_candidate.txt
 ```
 
-If the file names are generic, such as `final_summary.json`, TraceML falls back to parent directory names when naming the compare artifacts.
+The default names come from the input filenames, or their parent folders when
+both files are named `final_summary.json`. Compare uses the saved JSON reports;
+it does not need the original training environment, raw logs, or databases.
 
----
+## 3. Read the result
+
+Start with **Verdict** and **Why**, then inspect the measurements behind them.
+The report shows A, B, and **Delta = B − A**. For Step Time, a positive delta
+means the candidate is slower; a negative delta means it is faster.
+
+| Evidence | What it helps you understand |
+| --- | --- |
+| Step Time | Whether the average measured step became slower or faster. |
+| Input, H2D, Compute, Residual | Where training time shifted. |
+| Diagnosis changes | Whether the likely bottleneck changed between runs. |
+| Peak reserved memory and memory skew | Whether memory use or rank imbalance increased. |
+| Process and system measurements | CPU, RAM, and GPU context for the change. |
+
+The text report groups forward, backward, and optimizer timing into **Compute**.
+The comparison JSON retains those individual phases for closer inspection.
+DataLoader Fetch (CPU) is supplemental evidence; it is not added to Input Wait
+or Step Time.
+
+Missing measurements appear as unavailable rather than zero. Read the report's
+notes when evidence is partial or the timing clocks differ. For the meaning of
+individual measurements, see [Reading the Output](reading-output.md).
 
 ## Choose an output name
 
-If you want to control the output name, pass `--output`.
+Use `--output` to choose the base path for both artifacts:
 
 ```bash
-traceml compare run_a.json run_b.json --output=my_compare
+traceml compare \
+  logs/reference/final_summary.json \
+  logs/candidate/final_summary.json \
+  --output artifacts/reference-vs-candidate
 ```
 
-This writes:
-
-```text
-my_compare.json
-my_compare.txt
-```
-
-You can also pass a path:
-
-```bash
-traceml compare run_a.json run_b.json --output=artifacts/baseline_vs_candidate
-```
-
-This writes:
-
-```text
-artifacts/baseline_vs_candidate.json
-artifacts/baseline_vs_candidate.txt
-```
-
----
+This writes `artifacts/reference-vs-candidate.json` and
+`artifacts/reference-vs-candidate.txt`. You can also store the original
+summaries as [W&B or MLflow artifacts](integrations/wandb-mlflow.md) and compare
+them later.
 
 ## Use compare in CI
 
-Add an explicit Step Time threshold when a comparison should produce a CI
-decision:
+Ordinary comparison reports changes without enforcing a CI threshold. To fail
+CI on a Step Time regression, first configure both runs using
+[Regression Guard](regression-guard.md), then add a threshold:
 
 ```bash
 traceml compare \
@@ -101,205 +97,57 @@ traceml compare \
   --output compare/reference-vs-candidate
 ```
 
-The first summary is the reference and the second is the candidate. The
-threshold must be a finite, nonnegative percentage. Without the option,
-`traceml compare` keeps its existing exploratory behavior and does not enforce
-a CI threshold.
-
-The CI policy requires both summaries to come from compatible guarded runs:
-
-- normalized guard declarations and expected topology must match
-- training and launcher completion must be recorded as completed
-- both summaries must provide positive Step Time on a common CPU or GPU clock
-
-TraceML reads these facts from the two final summaries. It does not read their
-manifests or SQLite databases. Different analyzed-step counts are allowed and
-are reported as context. Step Memory and the remaining compare sections also
-remain descriptive context; only common-clock Step Time determines the CI
-result.
-
-The normalized guard declaration is a compatibility fingerprint: it confirms
-that both runs declared the same workload and requested measurement range. It
-does not prove or compare individual completed step IDs. The decision uses the
-aggregate Step Time from each summary's saved `step_time.global.window`, whose
-analyzed range can differ from the requested range or from the other summary.
-The analyzed-step counts remain visible so this evidence boundary is explicit.
-
-The signed percentage difference is calculated from reference to candidate:
-
-```text
-100 * (candidate - reference) / reference
-```
+The experimental CI policy requires matching guard declarations and expected
+topology, successful training and launcher completion, and positive Step Time
+on a common CPU or GPU clock. Only Step Time determines this CI result;
+memory and the other measurements remain context.
 
 | Result | Exit code | Meaning |
 | --- | ---: | --- |
-| `SLOWER_IN_THIS_PAIR` | 4 | Candidate Step Time increased beyond the threshold. |
-| `FASTER_IN_THIS_PAIR` | 0 | Candidate Step Time decreased beyond the threshold. |
-| `WITHIN_THRESHOLD_IN_THIS_PAIR` | 0 | The difference is on or within either threshold boundary. |
-| `INCONCLUSIVE` | 3 | The summaries are valid but incompatible or lack required evidence. |
+| `SLOWER_IN_THIS_PAIR` | 4 | Candidate Step Time increased by more than the threshold. |
+| `FASTER_IN_THIS_PAIR` | 0 | Candidate Step Time decreased by more than the threshold. |
+| `WITHIN_THRESHOLD_IN_THIS_PAIR` | 0 | Difference is within or exactly on the threshold boundaries. |
+| `INCONCLUSIVE` | 3 | Required evidence is missing or incompatible. |
 
-Invalid thresholds, malformed input, and output-writing failures use exit code
-`1`. Invalid command-line usage, such as a missing argument or unknown option,
-uses the standard `argparse` exit code `2`. TraceML writes the compare JSON and
-text artifacts before returning an evaluated result. The decision describes
-this pair of runs; it does not claim statistical significance, repeatability,
-or exact measurement-window completion.
+The threshold must be finite and nonnegative. Invalid input or output failures
+return `1`; invalid command-line usage returns `2`. Evaluated CI results,
+including inconclusive ones, are saved in the JSON and text artifacts.
 
-See [Regression Guard](regression-guard.md) for configuring guarded runs.
+The percentage change is `100 × (candidate − reference) / reference`.
+The decision uses aggregate Step Time from each saved summary. Guard measurement
+fields declare an intended range; they do not select the analyzed steps or
+require identical analyzed-step counts. The report shows both counts.
 
----
-
-## What the compare output shows
-
-The compare report is designed to stay compact and useful.
-
-It typically focuses on:
-
-- overall duration
-- primary diagnosis changes
-- step-time diagnosis changes
-- average step time changes
-- residual-time changes
-- high-level step split shifts across input, H2D, compute, and residual time
-- memory changes when they are meaningful
-- process or system changes when they add useful context
-
-The text report keeps step-time output compact by showing the aggregate compute
-bucket instead of printing forward, backward, and optimizer rows by default.
-The structured compare JSON still includes those compute sub-phases for deeper
-inspection and downstream tooling.
-
-The text report includes a small legend near the top:
-
-```text
-- A: <first run>
-- B: <second run>
-- Format: A -> B | delta = B - A
-```
-
-That means:
-
-- `A -> B` shows the value in the first run and then the second run
-- `delta` is computed as `B - A`
-
----
-
-## Recommended workflow
-
-A good workflow is:
-
-1. run TraceML for each run you care about
-2. save the TraceML final summary JSON file for each run
-3. compare two runs with `traceml compare`
-4. use the compare output to decide whether a regression looks real and where to dig next
-
-Example:
-
-```bash
-traceml run train_a.py
-traceml run train_b.py
-traceml compare run_a.json run_b.json
-```
-
-This is often enough to tell whether the slowdown is coming from:
-
-- more compute time
-- more residual time
-- a phase split change
-- worse memory behavior
-- a diagnosis shift
-
----
-
-## What compare is best at today
-
-TraceML compare is currently strongest for comparing:
-
-- step time
-- step memory
-- process-level context
-- selected system-level context
-
-It is best used as a compact run-to-run diagnosis tool.
-
-It is not meant to replace a full experiment tracking system.
-
-Use W&B, MLflow, or TensorBoard for:
-
-- run metadata
-- metrics history
-- artifacts
-- dashboards
-- experiment management
-
-Use TraceML compare for:
-
-- bottleneck changes
-- diagnosis changes
-- performance regressions you want to inspect quickly
-
----
+This is a decision about one pair of runs, not a statistical significance test.
+Use repeated reference runs to understand normal variation before choosing a
+threshold. See [Regression Guard](regression-guard.md) for setup and a CI example.
 
 ## Compatibility and missing fields
 
-`traceml compare` is designed to degrade gracefully when fields are missing.
+Compare requires valid TraceML summary JSON with a schema version and the
+required System, Process, Step Time, and Step Memory sections. Missing optional
+measurements are allowed; missing required sections or malformed JSON are
+rejected. Different schema versions produce a warning.
 
-That means:
+Step Time uses GPU timing when both runs have it, otherwise CPU timing when
+both have it. Without a common measured clock, Step Time comparison is
+unavailable. Phase comparisons require matching diagnosis clocks, so CPU and
+GPU phases are never mixed. Missing or `null` measurements have no delta.
 
-- if one summary has a field and the other does not, comparison still runs
-- if a section is missing, TraceML skips noisy output instead of failing when possible
-- if newer TraceML versions add more fields later, older comparisons should still remain usable for the shared fields
-- if the two summaries use different schema versions, compare emits a warning because some fields may have changed meaning
+<details markdown="1">
+<summary>Comparing older summary schemas</summary>
 
-This helps keep compare useful across incremental TraceML releases.
-Input Wait is compared only as selected-clock `input_wait_ms`; historical
-`dataloader_ms` is never substituted for it. Pre-1.7 `dataloader_ms` is
-instead adapted to the supplemental CPU `dataloader_fetch_cpu_ms` comparison
-field, which does not affect Step Time verdicts or phase shares.
-Schema 1.7 publishes explicit CPU and GPU outer Step Time aggregates. Compare
-uses GPU when both summaries have measured GPU Step Time; otherwise it uses CPU
-when both have measured CPU Step Time. If neither clock is shared, Step Time is
-inconclusive. Historical outer timing is interpreted only as CPU Step Time at
-the versioned compare boundary. Selected-clock phases still require matching
-diagnosis clocks, so CPU and GPU phase values are never mixed. Since schema
-1.7, a Step Time metric can be `null` when its timing signal was never measured
-in the analyzed window; compare treats a null side as unavailable (no delta)
-instead of reading it as zero.
+Schema 1.7 provides explicit CPU and GPU outer Step Time measurements. Older
+outer timing is interpreted as CPU Step Time at the comparison boundary.
 
----
+Historical `dataloader_ms` is adapted to supplemental CPU fetch timing. It is
+never substituted for Input Wait and does not affect Step Time verdicts or
+phase shares.
 
-## What files should you compare?
+</details>
 
-Compare:
+## Related guides
 
-- TraceML final summary JSON files from completed runs
-
-Do not compare:
-
-- raw database files
-- partial logs
-- screenshots
-- rendered text summaries alone
-
-The JSON file is the stable machine-readable input for compare.
-
----
-
-## When compare is most useful
-
-Use compare when:
-
-- a training change might have made runs slower
-- a new dataloader or preprocessing path may have changed throughput
-- a model or optimizer change may have shifted time into a different phase
-- memory behavior looks different between two runs
-- dashboards look similar but throughput feels worse
-
----
-
-## Related docs
-
-- [Quickstart](quickstart.md)
-- [How to Read TraceML Output](reading-output.md)
-- [Use TraceML with W&B / MLflow](integrations/wandb-mlflow.md)
-- [FAQ](faq.md)
+- [Reading the Output](reading-output.md)
+- [Regression Guard](regression-guard.md)
+- [W&B / MLflow](integrations/wandb-mlflow.md)

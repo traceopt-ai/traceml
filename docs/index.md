@@ -1,20 +1,34 @@
 # TraceML
 
-**Real-time bottleneck finder for PyTorch training runs.**
+**Diagnose slow PyTorch training with zero-code instrumentation. Catch
+regressions in CI.**
 
-TraceML instruments your existing training loop and tells you *why* it's
-slow — input-bound, compute-bound, waiting on a distributed straggler, or
-leaking memory — instead of leaving you to guess from raw CPU/GPU graphs. It
-runs alongside your script, streams a live terminal or dashboard view during
-the run, and writes a structured `final_summary.json` plus a human-readable
-report at the end.
+TraceML shows where each training step goes—input loading, data transfer,
+forward, backward, and optimizer work—then identifies the bottleneck and saves
+evidence you can compare locally or check in CI.
+
+**Works automatically with:**
+[Hugging Face Trainer](user_guide/integrations/huggingface.md) ·
+[PyTorch Lightning](user_guide/integrations/lightning.md) ·
+[RF-DETR](user_guide/integrations/rfdetr.md)
 
 ```bash
 pip install traceml-ai
+traceml run train.py
 ```
 
-Already using Hugging Face, Lightning, Ray, DeepSpeed, W&B, or MLflow? See
-[Integrations](user_guide/integrations.md) for framework-specific setup.
+For these standard trainers, no TraceML code is required in the training
+script. Plain PyTorch loops and other stacks use a small
+[explicit integration](user_guide/integrations.md).
+
+A completed run ends with a diagnosis, its evidence, and the next place to
+investigate:
+
+```text
+Verdict: INPUT-BOUND
+Why: Input Wait took 64% of Step Time.
+Next: Increase workers, prefetch, or storage throughput.
+```
 
 <div class="grid cards" markdown>
 
@@ -22,8 +36,8 @@ Already using Hugging Face, Lightning, Ray, DeepSpeed, W&B, or MLflow? See
 
     ---
 
-    Instrument your training step and get your first diagnosis in a few
-    minutes.
+    Run a supported trainer without changing its script, or instrument a
+    custom PyTorch loop.
 
     [:octicons-arrow-right-24: Get started](user_guide/quickstart.md)
 
@@ -40,8 +54,8 @@ Already using Hugging Face, Lightning, Ray, DeepSpeed, W&B, or MLflow? See
 
     ---
 
-    Use TraceML with Hugging Face, Accelerate, Lightning, Ray, DeepSpeed,
-    W&B, or MLflow.
+    Choose the supported setup for Hugging Face, Lightning, RF-DETR,
+    Accelerate, MONAI, Ray, DeepSpeed, W&B, or MLflow.
 
     [:octicons-arrow-right-24: See integrations](user_guide/integrations.md)
 
@@ -49,7 +63,8 @@ Already using Hugging Face, Lightning, Ray, DeepSpeed, W&B, or MLflow? See
 
     ---
 
-    Diff two `final_summary.json` files to see what changed between runs.
+    See what changed between two runs and optionally fail CI on a Step Time
+    regression.
 
     [:octicons-arrow-right-24: Compare runs](user_guide/compare.md)
 
