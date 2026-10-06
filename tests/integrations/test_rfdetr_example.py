@@ -77,16 +77,8 @@ def example_run(tmp_path, monkeypatch):
     torch.manual_seed = lambda seed: calls.append(("seed", seed))
     rfdetr = ModuleType("rfdetr")
     rfdetr.RFDETRNano = FakeNano
-    integration = ModuleType("traceml_ai.integrations.rfdetr")
-    integration.init = lambda: calls.append(("init", None))
-    integrations = ModuleType("traceml_ai.integrations")
-    integrations.rfdetr = integration
     monkeypatch.setitem(sys.modules, "torch", torch)
     monkeypatch.setitem(sys.modules, "rfdetr", rfdetr)
-    monkeypatch.setitem(sys.modules, "traceml_ai.integrations", integrations)
-    monkeypatch.setitem(
-        sys.modules, "traceml_ai.integrations.rfdetr", integration
-    )
     args = [
         "--dataset-dir",
         str(tmp_path / "dataset"),
@@ -100,7 +92,7 @@ def test_default_training_keeps_fixed_comparison_settings(example_run):
     args, calls, output = example_run
     example.main(args)
     assert output.is_dir()
-    assert [name for name, _ in calls] == ["seed", "init", "model", "train"]
+    assert [name for name, _ in calls] == ["seed", "model", "train"]
     model = dict(calls)["model"]
     training = dict(calls)["train"]
     assert model == {"device": "cpu", "resolution": 384, "compile": False}
@@ -138,7 +130,6 @@ def test_nonzero_rank_accepts_directory_created_by_rank_zero(
     assert training["strategy"] == "ddp"
     assert training["epochs"] == 3
     assert training["num_workers"] == 2
-    assert ("init", None) in calls
 
 
 def test_cuda_request_without_cuda_fails_before_creating_output(example_run):

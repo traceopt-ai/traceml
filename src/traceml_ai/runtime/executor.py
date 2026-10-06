@@ -282,7 +282,7 @@ def _execute_with_runtime() -> None:
         and not bool(cfg.get("disable_traceml"))
         and os.environ.get("TRACEML_DISABLED") != "1"
     ):
-        for name in ("hf_auto", "lightning_auto"):
+        for name in ("hf_auto", "lightning_auto", "rfdetr_auto"):
             try:
                 adapter = import_module(f"traceml_ai.runtime.{name}")
                 import_hooks.append((adapter, adapter.install()))

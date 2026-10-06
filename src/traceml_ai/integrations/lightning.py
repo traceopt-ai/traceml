@@ -131,6 +131,17 @@ def init():
     )
 
 
+def _auto_config_is_compatible(config) -> bool:
+    """Return whether an existing init config matches Lightning auto mode."""
+    return config is None or (
+        config.mode == "selective"
+        and config.patch_dataloader
+        and config.patch_h2d
+        and not config.patch_forward
+        and not config.patch_backward
+    )
+
+
 def _warn_once(key, message):
     if key not in _WARNINGS:
         _WARNINGS.add(key)
@@ -145,8 +156,11 @@ def _announce_auto(trainer):
     message = getattr(trainer, "_traceml_auto_status", None)
     try:
         if message and not _AUTO_MESSAGE_PRINTED and trainer.is_global_zero:
+            framework = getattr(
+                trainer, "_traceml_auto_framework", "PyTorch Lightning"
+            )
             print(
-                f"[TraceML] PyTorch Lightning Trainer detected; {message}",
+                f"[TraceML] {framework} Trainer detected; {message}",
                 flush=True,
             )
             _AUTO_MESSAGE_PRINTED = True

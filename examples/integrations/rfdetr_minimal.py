@@ -1,4 +1,10 @@
-"""Train RF-DETR Nano and compare DataLoader settings with TraceML."""
+"""Train RF-DETR Nano and compare DataLoader settings with TraceML.
+
+Run from the repository root with::
+
+    traceml run examples/integrations/rfdetr_minimal.py --args \\
+      --dataset-dir data/coco --output-dir checkpoints/rfdetr
+"""
 
 from __future__ import annotations
 
@@ -85,8 +91,6 @@ def main(argv: list[str] | None = None) -> None:
     import torch
     from rfdetr import RFDETRNano
 
-    from traceml_ai.integrations import rfdetr as traceml_rfdetr
-
     device = args.accelerator
     if device == "auto":
         device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -106,7 +110,6 @@ def main(argv: list[str] | None = None) -> None:
             )
 
     torch.manual_seed(42)
-    traceml_rfdetr.init()  # Every rank initializes its own instrumentation.
     model = RFDETRNano(device=device, resolution=384, compile=False)
     model.train(
         dataset_dir=str(dataset_dir),

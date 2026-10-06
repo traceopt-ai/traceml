@@ -48,11 +48,11 @@ class _ImportFinder(importlib.abc.MetaPathFinder):
             uninstall(self)
 
 
-def install(targets, activate):
+def install(targets, activate, *, ready_attribute="Trainer"):
     pending = []
     for name in targets:
         module = sys.modules.get(name)
-        if module is not None and hasattr(module, "Trainer"):
+        if module is not None and hasattr(module, ready_attribute):
             activate(module)
         else:
             pending.append(name)
