@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -138,3 +139,61 @@ def test_cuda_request_without_cuda_fails_before_creating_output(example_run):
         example.main(args + ["--accelerator", "cuda"])
     assert not output.exists()
     assert not calls
+
+
+@pytest.mark.parametrize(
+    "data_args", [[], ["--demo", "--dataset-dir", "data"]]
+)
+def test_requires_one_data_source(data_args):
+    with pytest.raises(SystemExit, match="2"):
+        example.build_parser().parse_args(
+            ["--output-dir", "checkpoints/demo", *data_args]
+        )
+
+
+def test_demo_annotations_match_generated_images(tmp_path):
+    from PIL import Image
+
+    example.write_demo_dataset(tmp_path)
+    for split, count in (("train", 32), ("valid", 4), ("test", 4)):
+        folder = tmp_path / split
+        payload = json.loads((folder / "_annotations.coco.json").read_text())
+        assert len(payload["images"]) == len(payload["annotations"]) == count
+        images = {row["id"]: row for row in payload["images"]}
+        categories = {row["id"] for row in payload["categories"]}
+        for annotation in payload["annotations"]:
+            row = images[annotation["image_id"]]
+            with Image.open(folder / row["file_name"]) as image:
+                assert image.size == (row["width"], row["height"])
+            x, y, width, height = annotation["bbox"]
+            assert 0 <= x < x + width <= row["width"]
+            assert 0 <= y < y + height <= row["height"]
+            assert annotation["area"] == width * height
+            assert annotation["category_id"] in categories
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_demo_data_lives_through_training_and_is_cleaned(
+    example_run, monkeypatch, fail
+):
+    args, calls, output = example_run
+    datasets = []
+
+    def train(self, **kwargs):
+        dataset = Path(kwargs["dataset_dir"])
+        datasets.append(dataset)
+        assert (dataset / "train/_annotations.coco.json").is_file()
+        assert len(list((dataset / "train").glob("*.jpg"))) == 32
+        if fail:
+            raise RuntimeError("training failed")
+
+    monkeypatch.setattr(sys.modules["rfdetr"].RFDETRNano, "train", train)
+    demo_args = ["--demo", *args[2:], "--epochs", "1"]
+    if fail:
+        with pytest.raises(RuntimeError, match="training failed"):
+            example.main(demo_args)
+    else:
+        example.main(demo_args)
+    assert len(datasets) == 1
+    assert not datasets[0].exists()
+    assert output.is_dir()
