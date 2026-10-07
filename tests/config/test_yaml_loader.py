@@ -282,7 +282,7 @@ def test_load_yaml_config_int_as_float(tmp_path: Path) -> None:
     assert isinstance(result["interval"], float)
 
 
-@pytest.mark.parametrize("value", ["0", "-5", "-0.5", ".nan"])
+@pytest.mark.parametrize("value", ["0", "-5", "-0.5", ".nan", ".inf"])
 def test_load_yaml_config_rejects_non_positive_finalize_timeout(
     tmp_path: Path, value: str
 ) -> None:
@@ -379,7 +379,7 @@ def test_resolve_config_env_float_coercion() -> None:
     assert result["finalize_timeout_sec"] == 42.5
 
 
-@pytest.mark.parametrize("value", ["0", "-5", "nan"])
+@pytest.mark.parametrize("value", ["0", "-5", "nan", "inf"])
 def test_resolve_config_rejects_non_positive_finalize_timeout_env(
     value: str,
 ) -> None:

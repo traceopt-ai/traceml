@@ -16,6 +16,7 @@ in ``traceml_ai.launcher.launch_config``.
 from __future__ import annotations
 
 import logging
+import math
 import warnings
 from pathlib import Path
 from typing import Any, Mapping
@@ -71,6 +72,11 @@ BUILT_IN_DEFAULTS: dict[str, Any] = {
 _BOOL_ENV_TRUE = frozenset({"1", "true", "yes"})
 
 _POSITIVE_FLOAT_KEYS = frozenset({"finalize_timeout_sec"})
+
+
+def is_finite_positive(value: float) -> bool:
+    number = float(value)
+    return math.isfinite(number) and number > 0.0
 
 
 def find_config_file(start_dir: Path) -> Path | None:
@@ -244,10 +250,10 @@ def _validate_and_coerce(
             )
         if isinstance(value, (int, float)):
             number = float(value)
-            if key in _POSITIVE_FLOAT_KEYS and not number > 0.0:
+            if key in _POSITIVE_FLOAT_KEYS and not is_finite_positive(number):
                 raise ValueError(
-                    f"[TraceML] {path}: '{key}' must be greater than 0, "
-                    f"got {value!r}"
+                    f"[TraceML] {path}: '{key}' must be a finite number "
+                    f"greater than 0, got {value!r}"
                 )
             return number
         raise ValueError(
@@ -290,10 +296,10 @@ def _coerce_env(key: str, raw_env: str) -> Any:
             raise ValueError(
                 f"[TraceML] env var {env_var}={raw_env!r} is not a valid number."
             ) from None
-        if key in _POSITIVE_FLOAT_KEYS and not number > 0.0:
+        if key in _POSITIVE_FLOAT_KEYS and not is_finite_positive(number):
             raise ValueError(
-                f"[TraceML] env var {env_var}={raw_env!r} must be greater "
-                "than 0."
+                f"[TraceML] env var {env_var}={raw_env!r} must be a finite "
+                "number greater than 0."
             )
         return number
     return raw_env  # str

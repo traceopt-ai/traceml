@@ -573,10 +573,14 @@ def validate_launch_args(args: argparse.Namespace) -> None:
             "Remove --no-history to enable HTML report generation."
         )
     finalize_timeout_sec = getattr(args, "finalize_timeout_sec", None)
-    if finalize_timeout_sec is not None and float(finalize_timeout_sec) <= 0.0:
-        raise SystemExit(
-            "[TraceML] ERROR: --finalize-timeout-sec must be greater than 0."
-        )
+    if finalize_timeout_sec is not None:
+        from traceml_ai.config.yaml_loader import is_finite_positive
+
+        if not is_finite_positive(finalize_timeout_sec):
+            raise SystemExit(
+                "[TraceML] ERROR: --finalize-timeout-sec must be a finite "
+                "number greater than 0."
+            )
     trace_max_steps = getattr(args, "trace_max_steps", None)
     if trace_max_steps is not None and int(trace_max_steps) <= 0:
         raise SystemExit(

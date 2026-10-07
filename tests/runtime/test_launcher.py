@@ -764,6 +764,18 @@ def test_explicit_live_mode_allows_no_history() -> None:
     validate_launch_args(args)
 
 
+@pytest.mark.parametrize("value", ["0", "-1", "nan", "inf"])
+def test_validate_rejects_non_finite_or_non_positive_finalize_timeout(
+    value: str,
+) -> None:
+    args = build_parser().parse_args(
+        ["run", "train.py", "--mode=cli", "--finalize-timeout-sec", value]
+    )
+
+    with pytest.raises(SystemExit, match="--finalize-timeout-sec"):
+        validate_launch_args(args)
+
+
 def _write_guard_config(tmp_path: Path, guard: str) -> None:
     (tmp_path / "traceml.yaml").write_text(
         "mode: summary\nhistory_enabled: true\nguard:\n" + guard,
