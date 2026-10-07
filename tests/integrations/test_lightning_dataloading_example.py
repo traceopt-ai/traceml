@@ -48,12 +48,26 @@ def _reset_traceml():
     abort_step_capture(begin_step_capture())
     # These tests call the ordinary Lightning example directly. Install the
     # same automatic attachment that ``traceml run`` installs for users.
-    lightning_auto.install()
-    yield
-    drain_step_time_batches()
-    drain_step_memory_events()
-    abort_step_capture(begin_step_capture())
-    reset_optimizer_timing()
+    finder = lightning_auto.install()
+    try:
+        yield
+    finally:
+        lightning_auto.uninstall(finder)
+        for name in (
+            "lightning.pytorch.trainer.trainer",
+            "pytorch_lightning.trainer.trainer",
+        ):
+            module = sys.modules.get(name)
+            if module is None:
+                continue
+            connector = module._CallbackConnector
+            attach = connector._attach_model_callbacks
+            if getattr(attach, "_traceml_auto_attach", False):
+                connector._attach_model_callbacks = attach.__wrapped__
+        drain_step_time_batches()
+        drain_step_memory_events()
+        abort_step_capture(begin_step_capture())
+        reset_optimizer_timing()
 
 
 def _example():
