@@ -157,10 +157,11 @@ Standard run with the default summary:
 traceml run examples/quickstart.py
 ```
 
-For the live browser dashboard, select dashboard mode explicitly. It listens
-on `http://127.0.0.1:8765` by default:
+For the live browser dashboard, install the dashboard extra and select
+dashboard mode. It listens on `http://127.0.0.1:8765` by default:
 
 ```bash
+pip install "traceml-ai[dashboard]"
 traceml run examples/quickstart.py --mode=dashboard
 ```
 

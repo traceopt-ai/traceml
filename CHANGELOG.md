@@ -7,6 +7,9 @@ which carry the full historical notes for versions predating this file.
 
 ## [Unreleased]
 
+- The browser dashboard is now installed with
+  `pip install "traceml-ai[dashboard]"`; the default install remains focused on
+  summary and terminal output.
 - `traceml run train.py` now attaches the existing Hugging Face Trainer
   integration automatically for standard training. Compatible manual setup is
   reused; `watch`, disabled launches, and unrelated scripts install no

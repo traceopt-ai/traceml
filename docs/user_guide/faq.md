@@ -65,6 +65,7 @@ For automatic trainers, see the integration guide's accumulation semantics.
 Yes. For a single-node run, including multiple GPUs, use:
 
 ```bash
+pip install "traceml-ai[dashboard]"
 traceml run train.py --mode=dashboard
 ```
 

@@ -169,7 +169,10 @@ while training runs.
 
 ### Local UI
 
+Install the optional dashboard dependencies before starting the browser view:
+
 ```bash
+pip install "traceml-ai[dashboard]"
 traceml run train.py --mode=dashboard
 ```
 

@@ -281,11 +281,16 @@ and [integration support matrix](https://traceopt-ai.github.io/traceml/user_guid
 
 ## Reports and experiment trackers
 
-Summary mode is the default. For live local diagnostics, use the terminal or
-browser view:
+Summary mode is the default. For live diagnostics in the terminal, use:
 
 ```bash
 traceml run train.py --mode=cli
+```
+
+For the browser dashboard, install the optional dashboard dependencies:
+
+```bash
+pip install "traceml-ai[dashboard]"
 traceml run train.py --mode=dashboard
 ```
 
