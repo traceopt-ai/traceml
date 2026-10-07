@@ -54,6 +54,13 @@ def _non_negative_int(value: Any, name: str) -> int:
     return parsed
 
 
+def _port(value: Any, name: str) -> int:
+    parsed = _positive_int(value, name)
+    if parsed > 65535:
+        raise ValueError(f"{name} must be <= 65535")
+    return parsed
+
+
 @dataclass(frozen=True)
 class TorchrunLaunchConfig:
     """Distributed launch arguments passed to ``torchrun``."""
@@ -83,7 +90,7 @@ class TorchrunLaunchConfig:
         if not master_addr:
             raise ValueError("--master-addr cannot be empty")
 
-        master_port = _positive_int(
+        master_port = _port(
             getattr(args, "master_port", 29500),
             "--master-port",
         )
@@ -157,7 +164,7 @@ class AggregatorLaunchConfig:
         return cls(
             connect_host=connect_host,
             bind_host=bind_host,
-            port=_positive_int(
+            port=_port(
                 getattr(args, "aggregator_port", 29765),
                 "--aggregator-port",
             ),
