@@ -282,6 +282,15 @@ def test_load_yaml_config_int_as_float(tmp_path: Path) -> None:
     assert isinstance(result["interval"], float)
 
 
+@pytest.mark.parametrize("value", ["0", "-5", "-0.5", ".nan", ".inf"])
+def test_load_yaml_config_rejects_non_positive_finalize_timeout(
+    tmp_path: Path, value: str
+) -> None:
+    p = _write(tmp_path, f"finalize_timeout_sec: {value}\n")
+    with pytest.raises(ValueError, match="finalize_timeout_sec"):
+        load_yaml_config(p)
+
+
 def test_load_yaml_config_top_level_not_mapping(tmp_path: Path) -> None:
     p = _write(tmp_path, "- item1\n- item2\n")
     with pytest.raises(ValueError, match="expected a YAML mapping"):
@@ -368,6 +377,15 @@ def test_resolve_config_env_float_coercion() -> None:
     result = resolve_config(cli, env, _no_yaml(), _defaults())
     assert result["interval"] == 0.5
     assert result["finalize_timeout_sec"] == 42.5
+
+
+@pytest.mark.parametrize("value", ["0", "-5", "nan", "inf"])
+def test_resolve_config_rejects_non_positive_finalize_timeout_env(
+    value: str,
+) -> None:
+    env = {"TRACEML_FINALIZE_TIMEOUT_SEC": value}
+    with pytest.raises(ValueError, match="TRACEML_FINALIZE_TIMEOUT_SEC"):
+        resolve_config(_no_cli(), env, _no_yaml(), _defaults())
 
 
 def test_resolve_config_history_disabled_via_cli() -> None:
