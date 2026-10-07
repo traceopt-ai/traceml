@@ -89,6 +89,28 @@ For multi-node launch commands, see
 need the same environment and dataset, with checkpoint output accessible to
 all ranks.
 
+## Try the example
+
+From a repository checkout, install the training dependencies and run Nano
+with generated sample data:
+
+```bash
+pip install "traceml-ai==0.5.0" "rfdetr[train]==1.10.1"
+traceml run examples/integrations/rfdetr_minimal.py --args \
+  --demo --output-dir checkpoints/rfdetr-demo --epochs 1
+```
+
+The demo creates 32 training images and four images each for validation and
+test in a temporary directory, removed when training finishes. No dataset
+download or Roboflow account is needed. RF-DETR downloads pretrained weights
+on first use. The example selects CUDA when available, otherwise CPU; CPU
+training can be slow. Use a new checkpoint directory for each attempt.
+Synthetic data verifies the integration; its timings are not benchmark evidence.
+
+For your own data, replace `--demo` with `--dataset-dir data/coco`. The example
+follows RF-DETR's [standard training API](https://rfdetr.roboflow.com/learn/train/)
+and needs no TraceML imports or callbacks.
+
 ## Advanced: manual setup
 
 Existing scripts using the RF-DETR integration's `init()` also work with

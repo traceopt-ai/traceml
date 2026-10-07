@@ -53,10 +53,24 @@ instrumentation.
 | [Lightning loader comparison](integrations/lightning_dataloading_bottleneck.py) | Compare DataLoader profiles on ResNet-18 and 320px Imagenette | CUDA; 326 MB download; CPU `--smoke`; companion Colab notebook |
 | [MONAI](integrations/monai_minimal.py) | `SupervisedTrainer` with `TraceMLHandler` | CPU / CUDA; synthetic volumes, no download; [guide](../docs/user_guide/integrations/monai.md) |
 | [MONAI pipeline comparison](integrations/monai_dataloading_bottleneck.py) | Compare loading, caching and compute settings on a 3D UNet | CUDA; 1.6 GB spleen dataset (CC BY-SA 4.0), `nibabel`; CPU `--smoke`; companion Colab notebook |
-| [RF-DETR](integrations/rfdetr_minimal.py) | Trace Nano training with `traceml run` and compare worker counts | CPU / CUDA recipe; `rfdetr[train]==1.10.1`, local COCO export, pretrained weights download; [guide](../docs/user_guide/integrations/rfdetr.md) |
+| [RF-DETR](integrations/rfdetr_minimal.py) | Try Nano training with generated sample data or your own COCO export | CPU / CUDA; `rfdetr[train]==1.10.1`, `--demo` needs no dataset download; pretrained weights download; [guide](../docs/user_guide/integrations/rfdetr.md) |
 | [DeepSpeed](integrations/deepspeed_minimal.py) | Engine loop with `trace_step` | CUDA; requires `deepspeed`, exits cleanly without it |
 | [Ray Train](integrations/ray/torchtrainer_minimal.py) | `TraceMLTorchTrainer` with Ray Data input timing | CPU / CUDA |
 | [Ray + Lightning](integrations/ray/lightning_text_classifier.py) | Text classifier with Ray Data, `TraceMLCallback`, and input/H2D controls | CPU / CUDA |
+
+To try RF-DETR without preparing a dataset:
+
+```bash
+pip install "traceml-ai==0.5.0" "rfdetr[train]==1.10.1"
+traceml run examples/integrations/rfdetr_minimal.py --args \
+  --demo --output-dir checkpoints/rfdetr-demo --epochs 1
+```
+
+Run from this checkout; no editable install is needed. The demo generates
+temporary sample images and uses CUDA when available, otherwise CPU. RF-DETR
+downloads pretrained weights on first use; CPU training can be slow. Use a new
+checkpoint directory for each attempt. For real data, replace `--demo` with
+`--dataset-dir data/coco`. Sample-data timings are not benchmark results.
 
 ## Distributed training
 
