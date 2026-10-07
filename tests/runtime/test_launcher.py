@@ -462,7 +462,7 @@ def test_serve_threads_expected_world_size(monkeypatch) -> None:
 
 
 def test_serve_dashboard_missing_deps_reports_hint_not_nameerror(
-    monkeypatch,
+    monkeypatch, tmp_path
 ) -> None:
     # Regression: run_serve referenced an undefined constant on the
     # dashboard-deps-missing path, so it raised NameError instead of the
@@ -477,6 +477,12 @@ def test_serve_dashboard_missing_deps_reports_hint_not_nameerror(
             None if name == "nicegui" else real_find_spec(name, *a, **k)
         ),
     )
+    monkeypatch.chdir(tmp_path)
+    start_aggregator = Mock(side_effect=AssertionError("must not start"))
+    monkeypatch.setattr(
+        "traceml_ai.aggregator.aggregator_main.run_aggregator",
+        start_aggregator,
+    )
     from traceml_ai.launcher.commands import run_serve
 
     args = build_parser().parse_args(["serve", "--mode", "dashboard"])
@@ -486,6 +492,38 @@ def test_serve_dashboard_missing_deps_reports_hint_not_nameerror(
     message = str(excinfo.value)
     assert "nicegui" in message
     assert "Missing:" in message
+    assert 'pip install "traceml-ai[dashboard]"' in message
+    start_aggregator.assert_not_called()
+    assert not (tmp_path / "logs").exists()
+
+
+def test_serve_checks_resolved_dashboard_mode_before_start(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TRACEML_UI_MODE", raising=False)
+    monkeypatch.delenv("TRACEML_MODE", raising=False)
+    (tmp_path / "traceml.yaml").write_text(
+        "mode: dashboard\nlogs_dir: ./configured-logs\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "traceml_ai.launcher.commands.importlib.util.find_spec",
+        lambda package: None if package == "nicegui" else object(),
+    )
+    start_aggregator = Mock(side_effect=AssertionError("must not start"))
+    monkeypatch.setattr(
+        "traceml_ai.aggregator.aggregator_main.run_aggregator",
+        start_aggregator,
+    )
+    from traceml_ai.launcher.commands import run_serve
+
+    with pytest.raises(SystemExit) as excinfo:
+        run_serve(build_parser().parse_args(["serve"]))
+
+    assert 'pip install "traceml-ai[dashboard]"' in str(excinfo.value)
+    start_aggregator.assert_not_called()
+    assert not (tmp_path / "configured-logs").exists()
 
 
 def test_dashboard_dep_check_passes_without_plotly(monkeypatch) -> None:
@@ -762,6 +800,18 @@ def test_explicit_live_mode_allows_no_history() -> None:
     )
 
     validate_launch_args(args)
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "nan", "inf"])
+def test_validate_rejects_non_finite_or_non_positive_finalize_timeout(
+    value: str,
+) -> None:
+    args = build_parser().parse_args(
+        ["run", "train.py", "--mode=cli", "--finalize-timeout-sec", value]
+    )
+
+    with pytest.raises(SystemExit, match="--finalize-timeout-sec"):
+        validate_launch_args(args)
 
 
 def _write_guard_config(tmp_path: Path, guard: str) -> None:
@@ -2627,8 +2677,10 @@ def test_dashboard_mode_requires_dashboard_dependencies(monkeypatch) -> None:
         lambda package: None if package == "nicegui" else object(),
     )
 
-    with pytest.raises(SystemExit, match="pip install -U traceml-ai"):
+    with pytest.raises(SystemExit) as excinfo:
         validate_launch_args(args)
+
+    assert 'pip install "traceml-ai[dashboard]"' in str(excinfo.value)
 
 
 def test_summary_mode_does_not_require_dashboard_dependencies(

@@ -30,6 +30,7 @@ REQUIRED_IDS = {
 REQUIRED_FIELDS = {
     "id",
     "stack",
+    "setup",
     "recommended_api",
     "guide",
     "tested_dependency_range",
@@ -259,17 +260,35 @@ def limitations_cell(limitations: dict[str, Any]) -> str:
 
 def render_matrix(manifest: dict[str, Any]) -> str:
     rows = [
-        "## Integration support matrix",
+        "## Choose Your Integration",
         "",
-        "The manifest at `docs/data/integration_support.json` is the source "
-        "of truth for this table. A status is evidence, not a promise: `CI "
-        "tested` means the linked job installs the extra and runs the linked "
-        "real-framework test. `documented recipe` and `experimental` are not "
-        "end-to-end validation.",
+        "Choose your framework to open its setup guide. Zero-code launch "
+        "uses `traceml run train.py` for the standard training paths.",
         "",
-        "| Stack | Recommended API | Tested dependency range | CPU / GPU | Single- / multi-process | Multi-node | Emitted signals | Example | Validation level | Limitations |",
-        "|---|---|---|---|---|---|---|---|---|---|",
+        "| Framework | Setup | Example |",
+        "|---|---|---|",
     ]
+    for entry in manifest["integrations"]:
+        guide = guide_link(entry["guide"], entry["stack"])
+        example = source_link(entry["example"], "Example")
+        rows.append(f"| {guide} | {entry['setup']} | {example} |")
+    rows.extend(
+        [
+            "",
+            "## Integration support matrix",
+            "",
+            '<details markdown="1">',
+            "<summary>Tested coverage, versions, and limitations</summary>",
+            "",
+            "`CI tested` identifies configurations checked by the linked job "
+            "and tests. `Documented recipe` and `experimental` identify "
+            "coverage without equivalent end-to-end validation. See each "
+            "framework guide for the requirements that apply to your run.",
+            "",
+            "| Stack | Recommended API | Tested dependency range | CPU / GPU | Single- / multi-process | Multi-node | Emitted signals | Example | Validation level | Limitations |",
+            "|---|---|---|---|---|---|---|---|---|---|",
+        ]
+    )
     for entry in manifest["integrations"]:
         coverage = entry["coverage"]
         device = f"CPU: {scope_claim(coverage['cpu'])}<br>GPU: {scope_claim(coverage['gpu'])}"
@@ -312,13 +331,10 @@ def render_matrix(manifest: dict[str, Any]) -> str:
             "",
             "- This matrix makes no GPU, multi-process, or multi-node claim "
             "without a corresponding reproducible job.",
-            "- Lightning, Ray, and DeepSpeed tests in the current integration "
-            "suite include mocked, lazy-import, or skipped paths; they are "
-            "therefore not classified as end-to-end validation here.",
-            "- Run `python tools/integration_support_matrix.py --check` after "
-            "editing the manifest, examples, or CI install extras. The check "
-            "fails if a `CI tested` row loses its cited extra, test, guide, "
-            "example, or generated documentation row.",
+            "- Tested configurations and recorded examples do not establish "
+            "compatibility with every version, device, or training strategy.",
+            "",
+            "</details>",
         ]
     )
     return "\n".join(rows)

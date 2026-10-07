@@ -454,6 +454,33 @@ def test_ci_regression_exits_after_writing_compare_artifacts(tmp_path) -> None:
     assert persisted["ci_policy"]["result"] == "SLOWER_IN_THIS_PAIR"
 
 
+def test_compare_artifacts_keep_dotted_run_labels(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    paths = []
+    for run_name in ("lr_0.1", "lr_0.01"):
+        run_dir = tmp_path / "logs" / run_name
+        run_dir.mkdir(parents=True)
+        path = run_dir / "final_summary.json"
+        path.write_text(json.dumps(_ci_payload()), encoding="utf-8")
+        paths.append(path)
+
+    result = compare_summaries(*paths, print_to_stdout=False)
+
+    compare_dir = (tmp_path / "compare").resolve()
+    assert result["artifacts"]["json"] == str(
+        compare_dir / "lr_0.1_vs_lr_0.01.json"
+    )
+    assert result["artifacts"]["txt"] == str(
+        compare_dir / "lr_0.1_vs_lr_0.01.txt"
+    )
+    assert sorted(p.name for p in compare_dir.iterdir()) == [
+        "lr_0.1_vs_lr_0.01.json",
+        "lr_0.1_vs_lr_0.01.txt",
+    ]
+
+
 def test_compare_text_renders_ci_policy_inconclusive_reason() -> None:
     lhs = _ci_payload()
     rhs = _ci_payload()

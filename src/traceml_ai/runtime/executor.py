@@ -13,6 +13,7 @@ torchrun remain responsible for exception reporting and process exit status.
 import os
 import runpy
 import sys
+from importlib import import_module
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Union
 
@@ -273,10 +274,33 @@ def _execute_with_runtime() -> None:
     """
     cfg = read_traceml_env()
     runtime = start_runtime(cfg)
+    import_hooks = []
+
+    if (
+        isinstance(runtime, TraceMLRuntime)
+        and str(cfg.get("profile", DEFAULT_PROFILE)) == "run"
+        and not bool(cfg.get("disable_traceml"))
+        and os.environ.get("TRACEML_DISABLED") != "1"
+    ):
+        for name in ("hf_auto", "lightning_auto", "rfdetr_auto"):
+            try:
+                adapter = import_module(f"traceml_ai.runtime.{name}")
+                import_hooks.append((adapter, adapter.install()))
+            except Exception as error:
+                _log_runtime_exception(
+                    f"Failed to register {name} import hook", error
+                )
 
     try:
         run_user_script(str(cfg["script_path"]), extract_script_args())
     finally:
+        for adapter, finder in import_hooks:
+            try:
+                adapter.uninstall(finder)
+            except Exception as error:
+                _log_runtime_exception(
+                    f"Failed to remove {adapter.__name__} import hook", error
+                )
         stop_runtime(runtime)
 
 

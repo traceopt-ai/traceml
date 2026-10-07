@@ -1,122 +1,123 @@
 # How to Read TraceML Output
 
-TraceML is built to answer one question quickly:
-
-**Why is this training job slow or unstable?**
-
-This guide explains how to read the output shown in:
-
-- the default end-of-run summary
-- the live CLI view
-- the local UI
-
-The concepts are the same in both.
-
----
+Start with the diagnosis, check the evidence, then follow the suggested next
+step. This guide explains the default final report first; live views and
+measurement details follow below.
 
 ## Start with the diagnosis
 
-TraceML output has three layers:
+By default, `traceml run train.py` prints a final report and saves
+`final_summary.json` and `final_summary.txt`. Here is an excerpt from the
+illustrative report in the README:
 
-1. **Primary Diagnosis**
-   - the first answer in the end-of-run summary
-   - focused on why training was slow
-   - example: `INPUT-BOUND`, `COMPUTE STRAGGLER`, `RESIDUAL-HEAVY`
+```text
+TraceML Run Summary
+bert_finetune · 1 rank · 1 GPU observed · 256 common steps · 52.4s
 
-2. **Section Diagnoses**
-   - detailed findings for System, Process, Step Time, and Step Memory
-   - includes performance findings and health/resource findings
-   - example: `HIGH GPU TEMP`, `MEMORY CREEP`, `HIGH PROCESS CPU`
+Verdict: INPUT-BOUND (CRITICAL)
+Why: Input Wait took 64% of Step Time.
+Next: Increase workers, prefetch, or storage throughput.
 
-3. **Evidence**
-   - the numbers and trends that support the diagnosis
-   - example: step breakdown, skew, residual time, memory peaks
+STEP TIMING (Window Average), GPU Clock
+Step Time           200.4 ms  100%
+├─ Input Wait       128.0 ms   64%
+├─ Compute           68.0 ms   34%
+│  ├─ Forward        24.0 ms   12%
+│  ├─ Backward       38.0 ms   19%
+│  └─ Optimizer       6.0 ms    3%
+├─ H2D                0.4 ms   <1%
+└─ Residual           3.6 ms    2%
+DataLoader fetch: 120.0 ms (CPU, supplemental)
+```
 
-The top-level primary diagnosis is the best place to start when asking why a
-run was slow. Section diagnoses explain the details and keep health warnings
-visible.
+| Report field | How to use it |
+| --- | --- |
+| **Verdict** | The likely performance bottleneck in the analyzed window. |
+| **Why** | The measurements supporting that verdict. |
+| **Next** | The first change or investigation to try. |
+| **Run context** | Check the device, observed ranks, analyzed steps, and duration before comparing runs. |
 
-The tables and charts are there to explain **why** that diagnosis was chosen.
+In this example, input waiting takes most of the step. Inspect the input
+pipeline before optimizing model compute. The numbers illustrate how to read
+the report; they are not a performance benchmark.
 
-The primary diagnosis is intentionally performance-focused. A high GPU
-temperature, memory creep, or high RSS finding can be important, but it stays
-in its section unless TraceML has step-time evidence that it explains slow
-training. GPU utilization is treated as supporting context or as an
-unexplained-utilization fallback, not as root-cause proof by itself.
+## Understand the timing breakdown
 
----
+| Measurement | Meaning |
+| --- | --- |
+| **Step Time** | Input Wait plus Traced Step Time, using one selected clock. |
+| **Input Wait** | Time waiting for training input on that clock; it is not worker-side preprocessing time or a direct GPU-idle measurement. |
+| **Compute** | The measured Forward, Backward, and Optimizer phases combined. |
+| **Forward** | Observed model computation, according to the integration's boundaries. |
+| **Backward** | Observed gradient computation; it can include distributed synchronization. |
+| **Optimizer** | Observed update work; the exact boundary depends on the integration. |
+| **H2D** | Observed host-to-device transfers. |
+| **Residual** | Traced training time not attributed to the measured phases. It is not automatically wasted time. |
+| **DataLoader Fetch (CPU)** | Supplemental CPU fetch timing. It is not added to Step Time again. |
 
-## What the summary, CLI, and local UI show
+The report uses GPU timing only when the required GPU signals are complete;
+otherwise it selects CPU timing. Read the clock label before comparing values.
+Unmeasured values are omitted or shown as `n/a`, rather than replaced with
+zero. A displayed `0.0 ms` can be a measured value rounded to display precision.
+H2D events occur only when transfers are observed; absent H2D alone does not
+mean timing coverage is incomplete.
 
-### End-of-run summary
+Step boundaries differ between trainers and custom loops. See your
+[integration guide](integrations.md) for accumulation, transfers, and optimizer
+coverage.
 
-By default, `traceml run train.py` prints a compact final summary and writes
-`final_summary.json` plus `final_summary.txt`.
+## Read distributed results
 
-The text summary is intentionally verdict-first:
+For multiple ranks, the final timing breakdown comes from one representative
+rank: the rank whose window-average Step Time is closest to the cross-rank
+median. Its phases stay together; the report does not combine unrelated
+per-phase medians.
 
-- the run context: run name, device and topology, analyzed steps, and duration
-- `Verdict`: the promoted performance diagnosis and severity
-- `Why`: the short evidence-backed reason
-- `Next`: the first action to try or inspect for that verdict, directly below
-  `Why`
-- the selected-clock step decomposition: a window average for one process, or
-  the median Step Time rank (including its node) for a distributed run
-- individual Forward, Backward, and Optimizer rows when those phases were
-  measured
-- diagnosed culprit/victim rank values in `Why` when a distributed straggler
-  has complete stored attribution evidence. In distributed output, `Scope: N
-  = node · R = global rank · G = GPU index` defines compact identities used
-  consistently in Why text, pane headings, evidence, and table cells
-- System, Process, and Step Memory status with the available measurements that
-  support each status. System uses node-average tables, while Process and Step
-  Memory use an `avg` table for one observed rank and a `median rank avg` /
-  `worst rank avg` table for multiple observed ranks. Step Timing and Step
-  Memory share fixed upper panes; System and Process use matching lower panes,
-  all separated by `||`. A non-normal resource section places its stored
-  Evidence directly below the heading; normal/balanced sections leave that
-  row blank
-- supplemental DataLoader fetch time when measured
-- additional warning or critical findings when they are present
-- `Full evidence`: the path to the structured JSON artifact and the optional
-  HTML-report hint
+| Label | Meaning |
+| --- | --- |
+| **N / R / G** | Node, global rank, and GPU index. |
+| **Median** | The middle value across the observed ranks or nodes for the displayed measurement. |
+| **Worst** | The largest or most pressured value for that measurement, not necessarily the same rank in every table. |
+| **Worst Rank / Node** | Where that value was observed. |
+| **Skew (%)** | How far the worst value is above the median. |
 
-For a distributed run, the median rank is the observed rank whose per-rank
-window-average Step Time is closest to the cross-rank median. Every displayed
-phase comes from that selected rank row; TraceML does not combine unrelated
-per-metric medians. The final report resolves one interval from the latest
-optimizer step completed across all observed ranks. System and Process query
-that same timestamp interval, while Step Memory uses the same step bounds.
-Their sample counts can differ because their sampling rates differ.
-Run and Watch share the same 156-column System/Process layout. Run also shows
-Step Timing, Step Memory, and a diagnostic `Verdict`/`Why`/`Next`. Watch omits
-those performance sections and instead points to `trace_step(model)` and
-`traceml run` for step-time measurement. Watch gets rank coverage from Process
-telemetry and node coverage from System telemetry; missing Process data stays
-at zero observed ranks rather than borrowing the expected world size. Its
-scope legend appears only when the card uses an `N`, `R`, or `G` identity.
-In the multi-node System table, each metric uses the median and worst
-node-average points already stored in the summary. “Worst” is not a temporal
-maximum, and different rows can identify different nodes. RAM and GPU-memory
-bytes/percent stay paired from the same selected node row.
-The Process table follows the same rule across observed ranks: every value is
-an observation-window average, each metric may name a different worst rank,
-and RSS and CUDA-reserved byte/percentage pairs come from one selected rank
-row. For non-normal System and Process statuses, `Evidence` uses a compact
-presentation of the stored structured trigger and scope, falling back to the
-stored diagnosis summary when needed. Normal statuses leave the evidence row
-blank. The table itself never labels its averages as peaks.
-Evidence and long values wrap within their pane and retain the fixed divider
-position.
-Unavailable measurements are omitted, while a measured zero remains visible.
-For older or partial artifacts that lack the stored fields needed by a
-structured scope, the renderer preserves the stored diagnosis summary instead
-of inferring new evidence.
+If the verdict identifies a straggler, inspect the named culprit and its
+supporting phase evidence. Large percentage skew on a tiny timing value can
+still be a minor issue.
 
-Detailed section prose remains in the `system.card`, `process.card`,
-`step_time.card`, and `step_memory.card` fields inside `final_summary.json`.
-If terminal-card rendering itself fails during shutdown, TraceML prints a
-minimal failure card and directs the user to the structured JSON evidence.
+## Check memory and resource context
+
+**Step Memory** shows CUDA allocation peaks within measured steps and findings
+such as pressure, imbalance, or growth. Its reported averages of per-step
+peaks differ from the sampled process-memory averages.
+
+**System** shows host and GPU resource measurements. **Process** shows the
+training processes' CPU and memory use. Their available measurements and
+section diagnoses help explain the run, but low GPU utilization alone does
+not prove an input bottleneck.
+
+Read the diagnosis together with its evidence. A memory trend hint or a
+single utilization percentage is not the complete diagnosis.
+
+## Find the saved report
+
+```text
+logs/<run-name>/final_summary.json
+logs/<run-name>/final_summary.txt
+```
+
+The JSON contains structured diagnoses and measurements for
+[Compare Runs](compare.md) and [Regression Guard](regression-guard.md).
+Read a saved report with:
+
+```bash
+traceml view logs/<run-name>/final_summary.json
+```
+
+Training stdout and stderr are saved by default under
+`logs/<run-name>/nodes/node_<node-rank>/`. If training fails, start with
+[Training Crashes](training-crashes.md) for log locations and incomplete
+telemetry.
 
 ### Shareable HTML report
 
@@ -152,138 +153,58 @@ This only changes what is printed. The stored artifact is not modified.
 Because earlier schemas use different Step Time meanings, payloads older than
 schema 1.7 keep their stored card instead of using the current renderer.
 
+## What the summary, CLI, and local UI show
+
+The final summary is the default. For live feedback, choose one of these
+single-node views, including for single-node multi-GPU runs.
+
 ### Live CLI
 
-When launched with `--mode=cli`, the terminal shows live:
-
-- system metrics
-- process metrics
-- step-time diagnosis and summary
-- step-memory diagnosis and summary
-
-Live CLI mode is intended for single-node runs, including single-node
-multi-GPU.
-
-### Training stdout and stderr
-
-`traceml run` and `traceml watch` save the supervised training command's raw
-streams by default:
-
-```text
-logs/<run-name>/nodes/node_<node-rank>/training.stdout.log
-logs/<run-name>/nodes/node_<node-rank>/training.stderr.log
+```bash
+traceml run train.py --mode=cli
 ```
 
-These are node-scoped files because each node launcher owns one local torchrun
-process tree. They include bytes that reach that tree's OS pipes, including
-Python output, native file-descriptor writes, torchrun diagnostics, and output
-from local workers that inherit the descriptors. They are intentionally not
-per-rank files.
-
-A guarded `traceml run` also writes one node-scoped execution record after the
-local torchrun process exits:
-
-```text
-logs/<run-name>/nodes/node_<node-rank>/guard_outcome.json
-```
-
-This atomic JSON file records the bounded launcher outcome used by the guard
-pilot. It is a filesystem coordination artifact, not a telemetry stream or a
-copy of training output. Guarded multi-node runs place `--logs-dir` on shared
-storage so node 0 can read every node's record. Node 0 waits within the
-configured finalization timeout and stores the consolidated result under
-`guard.training` in `manifest.json`. A completed result means every expected
-launcher reported exit code `0`; it does not verify telemetry or step IDs.
-
-Summary and dashboard modes mirror the saved streams live. CLI mode suppresses
-live mirroring so training output cannot corrupt the Rich display; if training
-fails, TraceML stops the display and prints at most the final 40 stderr lines
-and 8 KiB before the saved paths and final outcome.
-
-Use `--no-save-training-output` to inherit the terminal descriptors and create
-no training-output files. This is useful when a scheduler or container already
-owns the authoritative logs, or when a workload depends on terminal identity.
-With saving enabled the descriptors are pipes, so `isatty()` truthfully returns
-false. TraceML does not force unbuffered output and cannot recover bytes left
-in a process's user-space buffer after an abrupt crash. Applications that need
-every stdout write persisted before such a crash should flush explicitly, use
-`python -u`, or set `PYTHONUNBUFFERED=1` themselves.
-
-The launcher expects processes that inherit its output pipes to finish with
-the supervised training command. A deliberately detached process that may
-outlive training should redirect its own stdout and stderr, or the launch
-should use `--no-save-training-output`; otherwise the launcher eventually
-closes its output pipes during shutdown.
-
-The owner launcher also saves the aggregator's raw stderr separately:
-
-```text
-logs/<run-name>/aggregator/process.stderr.log
-```
-
-This file is a fallback for startup failures, native diagnostics, and errors
-emitted before structured logging is available. Summary and dashboard modes
-mirror it live. CLI mode does not mirror it over the Rich display; if telemetry
-fails, TraceML reports the saved path. This artifact is distinct from
-`aggregator/traceml_errors.log`, which contains structured TraceML log records.
-Aggregator stdout remains attached to the terminal and is not persisted.
-
-### TraceML internal error logs
-
-TraceML implementation failures are kept separate from workload output. Each
-owning process writes ERROR-level records to one rotating file:
-
-```text
-logs/<run-name>/rank_<global_rank>/traceml_errors.log
-logs/<run-name>/aggregator/traceml_errors.log
-logs/<run-name>/nodes/node_<node_rank>/launcher_errors.log
-```
-
-User exceptions remain in native training stderr and are not copied into these
-files. The internal logger does not add a terminal handler; terminal output
-continues to follow the launcher and display policies described above.
-
-Phases that were never measured in the current window are omitted from the
-live step-time table rather than shown as `0.0 ms`, and the diagnosis block
-shows `INCOMPLETE DATA` with the missing signal names when no reliable
-conclusion is possible. The local UI's step-time hero card behaves the same
-way. The ribbon is one real representative rank from the common eligible
-cohort, named in the window label; it never combines phases from unrelated
-ranks. An unmeasured phase renders as a hatched sliver rather than a measured
-zero, while unavailable shares and cross-rank gaps render as `n/a`. If no rank
-has a coherent composition, the ribbon clears and independently valid KPIs
-continue updating. H2D is the exception throughout: its events only occur
-when host-to-device copies happen, so an absent H2D means no observed
-transfers and never counts as partial coverage.
-
-The live reader bridges short empty or failed reads using its last good
-window, then expires that bridge. Persisted SQLite rows remain a valid saved
-snapshot; an unchanged step number is not treated as proof that the producer
-stopped. Detecting producer liveness requires a separate heartbeat or source
-timestamp.
+The terminal updates step timing, step memory, system, and process findings
+while training runs.
 
 ### Local UI
 
-The local UI shows the same ideas in a more compact review format:
+Install the optional dashboard dependencies before starting the browser view:
 
-- system card
-- process card
-- step-time analysis
-- step-memory analysis
-- diagnostics rail
+```bash
+pip install "traceml-ai[dashboard]"
+traceml run train.py --mode=dashboard
+```
 
-The local UI is also intended for single-node runs. Multi-node runs should use
-the default final summary path.
+The browser dashboard provides timing breakdowns, memory trends, resource
+cards, and a diagnostics rail. Start with the diagnosis, then inspect the
+corresponding chart or table. Multi-node runs use summary mode.
 
-The CLI is best for live diagnosis while the job is running.
+`traceml watch` provides system and process visibility without training-step
+measurements or a performance verdict. To diagnose step timing, use `run`
+with a supported trainer or explicit loop setup.
 
-The local UI is best for:
+## Common next actions
 
-- richer review
-- local comparison
-- browser-based inspection
+| Diagnosis | Good next step |
+|---|---|
+| `INPUT-BOUND` | inspect input loading, preprocessing, and storage |
+| `H2D-BOUND` | inspect pinned memory, batch transfer, and host-to-device copies |
+| `COMPUTE-BOUND` | inspect forward/backward/optimizer cost |
+| `INPUT STRAGGLER` | inspect input path on the culprit rank |
+| `COMPUTE STRAGGLER` | inspect DDP forward work on the culprit rank |
+| `H2D STRAGGLER` | inspect host-to-device transfer on the culprit rank |
+| `STRAGGLER` | inspect sync, collective, or unattributed work around the culprit rank |
+| `RESIDUAL-HEAVY` | inspect logging, checkpointing, validation, CPU stalls, and unobserved transfer paths |
+| `MEMORY RISING` | inspect retained state and watch the next window |
+| `MEMORY CREEP` | inspect retained tensors and growing caches |
+| `HIGH PRESSURE` | reduce memory load |
+| `IMBALANCE` | inspect per-rank memory workload |
 
----
+## Measurement and diagnosis reference
+
+Use the sections below when you need a field definition or want to interpret
+a specific diagnosis.
 
 ## Step Time glossary
 
@@ -325,9 +246,10 @@ The raw `_traceml_internal:step_time` event is an internal persisted telemetry
 key. After SQLite normalization, user-facing output calls that inner metric
 Traced Step Time.
 
----
-
 ## Step-time diagnoses
+
+<details markdown="1">
+<summary>Timing diagnoses, evidence, and suggested actions</summary>
 
 The step-time diagnosis explains where training time is going.
 
@@ -669,9 +591,12 @@ What to do next:
 - wait for more steps
 - make sure the training loop is actually running
 
----
+</details>
 
 ## How to read the step-time table
+
+<details markdown="1">
+<summary>Live table columns and rank statistics</summary>
 
 In the CLI step summary, the important columns are:
 
@@ -707,18 +632,12 @@ Important rows:
 - how much of Traced Step Time is unattributed to H2D, forward, backward, or
   optimizer work
 
-A good reading pattern is:
-
-1. read the diagnosis
-2. look at the median row
-3. compare worst vs median
-4. inspect `Worst Rank`
-5. inspect `Skew (%)`
-6. inspect `Residual`
-
----
+</details>
 
 ## Step-memory diagnoses
+
+<details markdown="1">
+<summary>Memory pressure, imbalance, and growth diagnoses</summary>
 
 The step-memory diagnosis explains memory pressure, imbalance, and drift over time.
 
@@ -865,9 +784,12 @@ What to do next:
 
 - wait for more completed steps
 
----
+</details>
 
 ## How to read the step-memory table
+
+<details markdown="1">
+<summary>Memory peaks and trend fields</summary>
 
 In the CLI memory summary, the important rows are:
 
@@ -894,9 +816,12 @@ In the CLI memory summary, the important rows are:
 Use the diagnosis as the main interpretation.
 The delta row is a helpful clue, not the full diagnosis logic.
 
----
+</details>
 
 ## System metrics
+
+<details markdown="1">
+<summary>Host and GPU measurements</summary>
 
 The system panel reports machine-level pressure and GPU-utilization symptoms.
 It is still context for the training diagnosis: low or moderate GPU
@@ -942,9 +867,12 @@ Use Step Time to explain the likely cause. For example, a System diagnosis of
 GPU was only partly utilized and the step breakdown points to input loading as
 the likely reason.
 
----
+</details>
 
 ## Process metrics
+
+<details markdown="1">
+<summary>Training-process measurements</summary>
 
 The process panel shows what the training processes themselves are consuming.
 
@@ -980,124 +908,66 @@ Use this panel when:
 - you want rank-level process context
 - you suspect a specific rank is heavier than the others
 
----
+</details>
 
-## In the local UI
+## Advanced report details
 
-The local UI shows the same ideas in a more compact form.
+<details markdown="1">
+<summary>Aligned windows, selected ranks, and rendering</summary>
 
-### Diagnostics rail
+The final report resolves one interval from the latest
+optimizer step completed across all observed ranks. System and Process query
+that same timestamp interval, while Step Memory uses the same step bounds.
+Their sample counts can differ because their sampling rates differ.
+Run and Watch share the same 156-column System/Process layout. Run also shows
+Step Timing, Step Memory, and a diagnostic `Verdict`/`Why`/`Next`. Watch omits
+those performance sections and instead points to `trace_step(model)` and
+`traceml run` for step-time measurement. Watch gets rank coverage from Process
+telemetry and node coverage from System telemetry; missing Process data stays
+at zero observed ranks rather than borrowing the expected world size. Its
+scope legend appears only when the card uses an `N`, `R`, or `G` identity.
+In the multi-node System table, each metric uses the median and worst
+node-average points already stored in the summary. “Worst” is not a temporal
+maximum, and different rows can identify different nodes. RAM and GPU-memory
+bytes/percent stay paired from the same selected node row.
+The Process table follows the same rule across observed ranks: every value is
+an observation-window average, each metric may name a different worst rank,
+and RSS and CUDA-reserved byte/percentage pairs come from one selected rank
+row. For non-normal System and Process statuses, `Evidence` uses a compact
+presentation of the stored structured trigger and scope, falling back to the
+stored diagnosis summary when needed. Normal statuses leave the evidence row
+blank. The table itself never labels its averages as peaks.
+Evidence and long values wrap within their pane and retain the fixed divider
+position.
+Unavailable measurements are omitted, while a measured zero remains visible.
+For older or partial artifacts that lack the stored fields needed by a
+structured scope, the renderer preserves the stored diagnosis summary instead
+of inferring new evidence.
 
-This is the best place to start in the local UI.
+Detailed section prose remains in the `system.card`, `process.card`,
+`step_time.card`, and `step_memory.card` fields inside `final_summary.json`.
+If terminal-card rendering itself fails during shutdown, TraceML prints a
+minimal failure card and directs the user to the structured JSON evidence.
 
-It gives:
+</details>
 
-- overall severity
-- compact step-time diagnosis
-- compact step-memory diagnosis
-- short evidence strings
+### TraceML internal error logs
 
-### Step Time Analysis
+TraceML implementation errors are separate from training stderr:
 
-This card shows:
+```text
+logs/<run-name>/rank_<global_rank>/traceml_errors.log
+logs/<run-name>/aggregator/traceml_errors.log
+logs/<run-name>/nodes/node_<node_rank>/launcher_errors.log
+```
 
-- median/reference vs rank breakdown
-- visible rank skew
-- culprit rank when a rank straggler is diagnosed
-- residual time
-- dominant split
+User exceptions remain in the saved training stderr. See
+[Training Crashes](training-crashes.md) and the [CLI reference](public-api.md#cli)
+for output capture and telemetry-failure details.
 
-Use it to validate the step-time diagnosis.
+## Next Steps
 
-### Step Memory Analysis
-
-This card shows:
-
-- worst vs median memory trend
-- compact KPIs
-- skew
-- worst rank
-
-Use it to validate the memory diagnosis.
-
-### System and Process cards
-
-Use these as context cards:
-
-- system tells you about host and GPU pressure
-- process tells you about training-process consumption
-
----
-
-## Common next actions
-
-| Diagnosis | Good next step |
-|---|---|
-| `INPUT-BOUND` | inspect input loading, preprocessing, and storage |
-| `H2D-BOUND` | inspect pinned memory, batch transfer, and host-to-device copies |
-| `COMPUTE-BOUND` | inspect forward/backward/optimizer cost |
-| `INPUT STRAGGLER` | inspect input path on the culprit rank |
-| `COMPUTE STRAGGLER` | inspect DDP forward work on the culprit rank |
-| `H2D STRAGGLER` | inspect host-to-device transfer on the culprit rank |
-| `STRAGGLER` | inspect sync, collective, or unattributed work around the culprit rank |
-| `RESIDUAL-HEAVY` | inspect logging, checkpointing, validation, CPU stalls, and unobserved transfer paths |
-| `MEMORY RISING` | inspect retained state and watch the next window |
-| `MEMORY CREEP` | inspect retained tensors and growing caches |
-| `HIGH PRESSURE` | reduce memory load |
-| `IMBALANCE` | inspect per-rank memory workload |
-
----
-
-## Common pitfalls
-
-### High residual skew alone does not automatically mean a material bottleneck
-
-Look at:
-
-- `Residual`
-- the diagnosis
-- the rest of the step breakdown
-
-A tiny residual value with large percentage skew can still be minor in practice.
-
-### A high compute share does not mean every compute phase is equally important
-
-Look at:
-
-- which compute phase is largest
-- whether forward, backward, or optimizer is dominating
-
-### A memory delta hint is not the whole memory diagnosis
-
-Use:
-
-- the diagnosis label
-- the diagnosis note
-- worst vs median trend
-
-not just a single raw delta
-
-### System metrics are context, not the final explanation
-
-Low GPU utilization by itself does not prove an input bottleneck.
-Moderate GPU utilization is the same kind of symptom: it means the GPU was not
-fully busy, not that the GPU was slow.
-
-Always read:
-
-- diagnosis first
-- evidence second
-
----
-
-## A simple reading workflow
-
-If you are in a hurry:
-
-1. read the diagnosis
-2. identify the culprit rank if shown
-3. compare culprit vs victim/reference rank
-4. look at residual time or memory trend
-5. take the suggested next action
-
-That is usually enough to decide where to investigate next.
+- [Compare Runs](compare.md)
+- [Catch Regressions in CI](regression-guard.md)
+- [Training Integrations](integrations.md)
+- [Training Crashes](training-crashes.md)

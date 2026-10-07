@@ -129,5 +129,7 @@ def test_dashboard_driver_missing_dependency_has_install_hint(
 
     monkeypatch.setattr(builtins, "__import__", fake_import)
 
-    with pytest.raises(RuntimeError, match="pip install -U traceml-ai"):
+    with pytest.raises(RuntimeError) as excinfo:
         _resolve_display_driver("dashboard")
+
+    assert 'pip install "traceml-ai[dashboard]"' in str(excinfo.value)

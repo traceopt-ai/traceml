@@ -1,18 +1,102 @@
-# RF-DETR
+# RF-DETR Integration
 
-Use TraceML to see where RF-DETR training time goes and compare configuration
-changes. Keep RF-DETR's normal `model.train()` API; TraceML attaches its callback
-without replacing RF-DETR's EMA, checkpoints, evaluation, or loggers.
+## Install
 
-## Install and initialize
-
-Install RF-DETR separately; it is not a TraceML dependency:
+This guide assumes PyTorch and RF-DETR's training dependencies are already
+installed.
 
 ```bash
-pip install "traceml-ai[torch]" "rfdetr[train]==1.10.1"
+pip install traceml-ai
 ```
 
-Add initialization before training, in every worker:
+## Run
+
+```bash
+traceml run train.py
+```
+
+Run your existing script with TraceML. Standard RF-DETR `model.train()`
+training is instrumented automatically, with no code changes required.
+For direct `python`/`torchrun` launches, see
+[Advanced: manual setup](#advanced-manual-setup).
+
+## Read the result
+
+When training finishes, TraceML prints a diagnosis of the likely bottleneck
+and saves the report for comparison or CI.
+
+The timing breakdown shows input waiting, forward, backward, and optimizer
+work. CUDA runs also show available host-to-device and memory measurements.
+
+See [How to Read Output](../reading-output.md) for an example report and
+explanations.
+
+## How TraceML measures RF-DETR training
+
+TraceML hooks RF-DETR's `build_trainer()` factory and attaches its specialized
+Lightning callback when a training Trainer is created. RF-DETR continues to
+manage its training loop, EMA, checkpoints, evaluation, and loggers.
+Importing RF-DETR alone does not initialize timing.
+
+```text
+RF-DETR training path                TraceML measurement
+──────────────────────────────────────────────────────────────────
+model.train() → build_trainer()      Attach RF-DETR callback
+          ↓
+Training DataLoader fetch            Input Wait
+          ↓
+Lightning batch transfer             Open capture + GPU transfer
+          ↓
+Inner detection model                Forward
+          ↓
+Lightning backward hooks             Backward
+(repeat for accumulating microbatches)
+          ↓
+Optimizer → batch-end callback       Complete step when update is due
+```
+
+One reported step covers one optimizer update attempt. With
+`grad_accum_steps=4`, four microbatches contribute to that step. TraceML adds
+their timings and reports peak CUDA memory within the group's memory window.
+The final group can contain fewer microbatches.
+
+**Forward** measures the inner detection model. Loss computation and Hungarian
+matching can appear in **Residual**, which is not automatically wasted time.
+Input waiting is separate from traced training time. Dataset previews, sanity
+checks, validation, and final evaluation are excluded from training-step
+measurements.
+
+**Checkpoint resume:** Continue using RF-DETR's normal `resume` argument.
+TraceML records resumed training with step numbering local to the process,
+which may differ from Lightning's restored `global_step`. See the
+[Lightning step-time contract](../../developer_guide/step-time-pipeline-contract.md#lightning-steps)
+for the callback's timing boundaries.
+
+## Multi-GPU training
+
+For single-node multi-GPU DDP:
+
+```bash
+traceml run train.py --nproc-per-node=4
+```
+
+Use the matching RF-DETR training configuration (`devices=4`, `num_nodes=1`).
+TraceML launches one worker per GPU. The
+[minimal example](https://github.com/traceopt-ai/traceml/blob/main/examples/integrations/rfdetr_minimal.py)
+derives these values from the launcher environment. Its batch size is per rank.
+For multi-node launch commands, see
+[Distributed Training](../distributed-training.md#multi-node-ddp). All nodes
+need the same environment and dataset, with checkpoint output accessible to
+all ranks.
+
+## Advanced: manual setup
+
+Existing scripts using the RF-DETR integration's `init()` also work with
+`traceml run`; TraceML reuses compatible setup without adding another callback.
+
+Use this path for direct `python`/`torchrun` launches. Initialize before training
+in every worker. The adapter adds its specialized callback; do not add a generic
+Lightning TraceML callback separately.
 
 ```python
 from rfdetr import RFDETRNano
@@ -25,13 +109,17 @@ model.train(
 )
 ```
 
-Use `device="cuda"` in both calls for GPU training. Run the script with
-`traceml run train.py` to start the telemetry collector.
-RF-DETR may download pretrained weights on the first run. Do a separate smoke
-run first so both measured runs reuse cached weights. TraceML does not change
-checkpoint or weight licensing.
+Use `device="cuda"` in both model creation and training for GPU runs.
+For a direct launch, start an aggregator with `traceml serve` first; see
+[Direct Launch](../public-api.md#direct-launch-with-traceml-serve).
+Compatible repeated initialization is a no-op. Explicit incompatible
+initialization retains its existing error behavior. Under automatic launch,
+an incompatible pre-existing configuration is left intact with a warning.
 
-## Example: compare input loading
+### Input-pipeline comparison example
+
+<details markdown="1">
+<summary>Compare DataLoader worker counts</summary>
 
 The [runnable example](https://github.com/traceopt-ai/traceml/blob/main/examples/integrations/rfdetr_minimal.py)
 uses Nano, seed 42, 384px inputs, no multi-scale resizing, and no gradient
@@ -43,12 +131,12 @@ From the repository root, run the same experiment with zero and two loader
 workers per training process:
 
 ```bash
-traceml run --mode summary --logs-dir logs --run-name rfdetr_workers0 \
+traceml run --logs-dir logs --run-name rfdetr_workers0 \
   examples/integrations/rfdetr_minimal.py \
   --args --dataset-dir data/coco --output-dir checkpoints/workers0 \
   --epochs 2 --batch-size 2 --num-workers 0 --accelerator cuda
 
-traceml run --mode summary --logs-dir logs --run-name rfdetr_workers2 \
+traceml run --logs-dir logs --run-name rfdetr_workers2 \
   examples/integrations/rfdetr_minimal.py \
   --args --dataset-dir data/coco --output-dir checkpoints/workers2 \
   --epochs 2 --batch-size 2 --num-workers 2 --accelerator cuda
@@ -71,46 +159,7 @@ variance. Loader worker changes can change random augmentation sequences even
 with the same seed, so this is a throughput experiment, not an accuracy claim.
 See [Compare Runs](../compare.md) for report details.
 
-## CPU and CUDA DDP
-
-The example derives RF-DETR's `devices` and `num_nodes` from the launcher and
-initializes TraceML on every rank. For two CPU/Gloo processes:
-
-```bash
-traceml run --nproc-per-node=2 --run-name rfdetr_cpu_ddp \
-  examples/integrations/rfdetr_minimal.py \
-  --args --dataset-dir data/coco --output-dir checkpoints/cpu_ddp \
-  --epochs 1 --batch-size 2 --num-workers 0 --accelerator cpu
-```
-
-For two CUDA/NCCL processes, use `--accelerator cuda`, a new run name and a new
-checkpoint directory. Launch one process per GPU. `--batch-size` is per rank;
-effective batch size in this example is `batch_size * WORLD_SIZE`.
-
-For multi-node runs, use the same script with the node-specific launch flags in
-[Distributed Training](../distributed-training.md#multi-node-ddp). Every node
-needs the same dataset contents and environment; RF-DETR checkpoint output must
-be accessible to all ranks, normally on a shared filesystem. Node 0 writes the
-TraceML final summary. Use homogeneous GPU hardware when comparing rank timing.
-
-## Reading the measurements
-
-- **Input Wait:** observed time waiting for the next PyTorch DataLoader batch,
-  not total preprocessing time in background workers.
-- **Forward:** RF-DETR's inner detection model. Loss computation and Hungarian
-  matching can appear in **Residual**; residual is not automatically wasted time.
-- **Backward:** includes distributed synchronization that occurs during backward.
-- **Optimizer:** the update region, which can include scheduler work, EMA updates
-  and batch-end callbacks that run before TraceML's callback.
-
-One TraceML step is one optimizer-update attempt. With gradient accumulation,
-micro-batch measurements are combined, including a shorter final group.
-Validation, sanity checks, dataset previews and final evaluation are excluded
-from training-step measurements. Whole-process duration still includes startup,
-evaluation and checkpoint work. Short runs include warm-up effects, so compare
-enough steps to avoid treating startup as steady-state performance.
-`--trace-max-steps` caps recording, **not training**; use `--epochs` to limit this
-example's training duration.
+</details>
 
 ## Limitations
 
@@ -121,6 +170,28 @@ and the separate `rfdetr fit` CLI are not supported. If the adapter encounters
 an unsupported configuration or cannot attach its callback, it reports the
 reason and RF-DETR continues with its existing callbacks. Native RF-DETR errors
 still propagate.
+
+`RFDETR.evaluate()` constructs an evaluation-only trainer with
+`include_training_callbacks=False`. TraceML intentionally leaves that trainer
+uninstrumented and does not emit RF-DETR step telemetry. A custom trainer built
+with the same flag also remains uninstrumented if it is later used with
+`fit()`.
+
+- **Timing boundaries.** Input Wait measures batch fetching in the training
+  process, not total preprocessing in background workers. Backward includes
+  distributed synchronization performed there. Optimizer timing can include
+  scheduler work, EMA updates, and earlier batch-end callbacks.
+- **Memory window.** Peak CUDA memory follows the Lightning callback's window,
+  which starts after batch transfer. Earlier allocation peaks are excluded;
+  validation between accumulating microbatches can affect the group's peak.
+- **Run duration.** Whole-process duration includes startup, evaluation, and
+  checkpoint work. RF-DETR may download weights on the first run; cache them
+  before comparing steady-state training. Repeat sufficiently long runs to
+  account for warm-up. `--trace-max-steps` limits recording, not training; use
+  the example's `--epochs` to limit its training duration.
+- **Versions.** The adapter warns once on rank zero for versions other than
+  its CI pin, 1.10.1. The case studies below provide additional evidence,
+  rather than a compatibility guarantee.
 
 RF-DETR 1.10.1 is pinned in CI for single-process training and two-process Gloo
 coverage. The [RF-DETR Nano case study](https://github.com/traceopt-ai/traceml/tree/main/examples/case_studies/rfdetr_nano_training)
@@ -135,8 +206,11 @@ multi-node execution have not yet been validated. See the
 [support matrix](../integrations.md#integration-support-matrix) for the current
 coverage.
 
-## Uninstrumented control
+## Next Steps
 
-For an uninstrumented control, add `--disable-traceml` to `traceml run` and choose
-a fresh checkpoint directory. This produces no TraceML telemetry. Initialization
-is idempotent, and `TRACEML_DISABLED=1` also disables the integration.
+- [How to Read Output](../reading-output.md)
+- [Compare Runs](../compare.md)
+- [Catch Regressions in CI](../regression-guard.md)
+- [Distributed Training](../distributed-training.md)
+- [W&B / MLflow](wandb-mlflow.md)
+- [Open an issue](https://github.com/traceopt-ai/traceml/issues)

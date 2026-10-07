@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - 'docs/**'
+      - 'tests/docs/**'
+      - '.github/workflows/docs.yml'
       - '*.md'
       - 'mkdocs.yml'
       - 'pyproject.toml'
@@ -14,6 +16,8 @@ on:
     branches: [main, 'version_*']
     paths:
       - 'docs/**'
+      - 'tests/docs/**'
+      - '.github/workflows/docs.yml'
       - '*.md'
       - 'mkdocs.yml'
       - 'pyproject.toml'
@@ -39,10 +43,13 @@ jobs:
           cache-dependency-path: pyproject.toml
 
       - name: Install dependencies
-        run: pip install -e ".[docs,torch,lightning,hf]"
+        run: pip install -e ".[docs,torch,lightning,hf]" pytest
 
       - name: Verify integration support evidence
         run: python tools/integration_support_matrix.py --check
+
+      - name: Test published documentation
+        run: pytest -q tests/docs
 
       - name: Build documentation
         run: mkdocs build --strict

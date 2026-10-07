@@ -14,6 +14,7 @@ import pytest
 
 from traceml_ai.integrations import lightning
 from traceml_ai.integrations import rfdetr
+from traceml_ai.runtime import rfdetr_auto
 
 
 @pytest.fixture
@@ -110,6 +111,7 @@ def test_init_preserves_defaults_factory_signature_and_arguments(rf_factory):
         limit_train_batches=3,
     )
     assert returned is rf_factory.trainer
+    assert returned._traceml_auto_skip is True
     assert returned.callbacks[:-1] == rf_factory.defaults
     assert isinstance(returned.callbacks[-1], rfdetr._callback_class())
     assert rf_factory.calls == [
@@ -208,6 +210,7 @@ def test_unsupported_modes_warn_and_preserve_native_trainer(
         rf_factory.train_config, rf_factory.model_config
     )
     assert returned is rf_factory.trainer
+    assert returned._traceml_auto_skip is True
     assert len(rf_factory.calls) == 1
     assert rf_factory.trainer.callbacks == rf_factory.defaults
     error = capsys.readouterr().err
@@ -469,6 +472,9 @@ def test_skipped_adapter_does_not_accumulate_fetches(
 
 def test_qualified_release_has_no_version_warning(rf_factory, capsys):
     rfdetr.init()
+    rf_factory.training.build_trainer(
+        rf_factory.train_config, rf_factory.model_config
+    )
     assert not capsys.readouterr().err
 
 
@@ -480,11 +486,23 @@ def test_unqualified_version_warns_once_without_blocking(
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         rfdetr.init()
+        assert not capsys.readouterr().err
+        rf_factory.trainer.is_global_zero = False
+        rf_factory.training.build_trainer(
+            rf_factory.train_config, rf_factory.model_config
+        )
+        assert not capsys.readouterr().err
+        rf_factory.trainer.is_global_zero = True
+        rf_factory.training.build_trainer(
+            rf_factory.train_config, rf_factory.model_config
+        )
         assert (
             "[TraceML] RF-DETR: version " + installed_version
             in capsys.readouterr().err
         )
-        rfdetr.init()
+        rf_factory.training.build_trainer(
+            rf_factory.train_config, rf_factory.model_config
+        )
     assert not capsys.readouterr().err
 
 
@@ -496,4 +514,96 @@ def test_source_checkout_without_package_metadata_warns(
 
     monkeypatch.setattr(rfdetr, "version", missing_version)
     rfdetr.init()
+    assert not capsys.readouterr().err
+    rf_factory.training.build_trainer(
+        rf_factory.train_config, rf_factory.model_config
+    )
     assert "[TraceML] RF-DETR: version unknown" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("manual", [False, True])
+def test_automatic_factory_is_lazy_and_reuses_manual_setup(
+    rf_factory, monkeypatch, manual
+):
+    calls = []
+    monkeypatch.setattr(
+        lightning, "init", lambda: calls.append(True) or rf_factory.effective
+    )
+    # The training module is already loaded and exports build_trainer, not Trainer.
+    assert rfdetr_auto.install() is None
+    factory = rf_factory.training.build_trainer
+    rfdetr._enable_auto_attach(rf_factory.training)
+    assert factory is rf_factory.training.build_trainer
+    assert calls == []
+    assert (
+        factory(
+            rf_factory.train_config,
+            rf_factory.model_config,
+            include_training_callbacks=False,
+        )
+        is rf_factory.trainer
+    )
+    assert calls == []
+    assert rf_factory.trainer.callbacks == rf_factory.defaults
+    if manual:
+        rfdetr.init()
+        rfdetr.init()
+        assert factory is rf_factory.training.build_trainer
+    factory(rf_factory.train_config, rf_factory.model_config)
+    assert len(rf_factory.trainer.callbacks) == len(rf_factory.defaults) + 1
+    assert rf_factory.trainer._traceml_auto_framework == "RF-DETR"
+    assert (
+        rf_factory.trainer._traceml_auto_status
+        == "TraceML callback added automatically"
+    )
+    factory(rf_factory.train_config, rf_factory.model_config)
+    assert len(rf_factory.trainer.callbacks) == len(rf_factory.defaults) + 1
+    assert (
+        rf_factory.trainer._traceml_auto_status
+        == "using existing TraceML callback"
+    )
+
+
+def test_automatic_factory_preserves_incompatible_configuration(
+    rf_factory, monkeypatch, capsys
+):
+    from traceml_ai.sdk import initial
+
+    config = initial.TraceMLInitConfig("manual", False, False, False, False)
+    monkeypatch.setattr(initial, "_INIT_CONFIG", config)
+    rfdetr._enable_auto_attach(rf_factory.training)
+    for _ in range(2):
+        assert (
+            rf_factory.training.build_trainer(
+                rf_factory.train_config, rf_factory.model_config
+            )
+            is rf_factory.trainer
+        )
+    assert initial.get_init_config() is config
+    assert rf_factory.trainer.callbacks == rf_factory.defaults
+    assert (
+        capsys.readouterr().err.count(
+            "incompatible TraceML init configuration"
+        )
+        == 1
+    )
+
+
+def test_automatic_factory_failure_preserves_native_trainer(
+    rf_factory, monkeypatch, capsys
+):
+    rfdetr._enable_auto_attach(rf_factory.training)
+
+    def unavailable():
+        raise RuntimeError("callback unavailable")
+
+    monkeypatch.setattr(
+        rfdetr._callback_class(), "__init__", lambda self: unavailable()
+    )
+    returned = rf_factory.training.build_trainer(
+        rf_factory.train_config, rf_factory.model_config
+    )
+    assert returned is rf_factory.trainer
+    assert returned._traceml_auto_skip
+    assert returned.callbacks == rf_factory.defaults
+    assert "callback unavailable" in capsys.readouterr().err

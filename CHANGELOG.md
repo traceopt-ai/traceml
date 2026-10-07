@@ -5,6 +5,31 @@ All notable changes to TraceML are documented here. This file follows
 should match the tags on [GitHub Releases](https://github.com/traceopt-ai/traceml/releases),
 which carry the full historical notes for versions predating this file.
 
+## [Unreleased]
+
+- The browser dashboard is now installed with
+  `pip install "traceml-ai[dashboard]"`; the default install remains focused on
+  summary and terminal output.
+- `traceml run train.py` now attaches the existing Hugging Face Trainer
+  integration automatically for standard training. Compatible manual setup is
+  reused; `watch`, disabled launches, and unrelated scripts install no
+  Hugging Face hooks.
+- `traceml run train.py` now activates the existing RF-DETR adapter for standard
+  eager detection training. Compatible manual `rfdetr.init()` calls are reused;
+  `watch` and disabled launches install no RF-DETR hooks.
+- **Breaking:** The `traceml` Python import path is no longer supported and
+  raises `ImportError`. Use `import traceml_ai as traceml` instead.
+- `traceml run train.py` now attaches the existing Lightning callback
+  automatically when the standard training loop is used. Existing compatible
+  manual setup is reused, and disabled runs install no framework hooks.
+- Lightning automatic attachment supports common eager CPU/CUDA single-device
+  and ordinary DDP training. It keeps RF-DETR on its dedicated adapter and
+  skips DeepSpeed, compiled models, and unsupported launch strategies. Forward
+  timing observes the selected module and its direct children without placing
+  hooks on every layer.
+- `traceml watch` remains resource-only and does not install Lightning training
+  instrumentation.
+
 ## [0.4.1] - 2026-09-24
 
 - Added `traceml_ai.integrations.monai` for MONAI's `SupervisedTrainer`
@@ -69,7 +94,7 @@ which carry the full historical notes for versions predating this file.
   `traceml_ai.integrations.huggingface.init()` and register
   `TraceMLTrainerCallback()` with standard `transformers.Trainer` instead.
   For optional tracing, register the callback conditionally. See the
-  [HF migration instructions](docs/user_guide/integrations/huggingface.md#migration)
+  [HF migration instructions](docs/user_guide/integrations/huggingface.md#advanced-manual-setup)
   for the replacement setup.
 - PyTorch Lightning: tracing now starts before batch transfer, excludes
   non-training loader fetches, and groups accumulated micro-batches into one

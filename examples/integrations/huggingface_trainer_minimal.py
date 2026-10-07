@@ -1,4 +1,4 @@
-"""Minimal Hugging Face Trainer example with TraceMLTrainerCallback.
+"""Minimal Hugging Face Trainer script with no TraceML code.
 
 Run with:
 
@@ -16,8 +16,6 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset
 from transformers import Trainer, TrainingArguments
-
-from traceml_ai.integrations import huggingface as traceml_hf
 
 SEED = 42
 INPUT_DIM = 128
@@ -91,8 +89,6 @@ def main() -> None:
     args = parse_args()
     torch.manual_seed(SEED)
 
-    traceml_hf.init()
-
     model = TinyMLPForTrainer()
     train_dataset = SyntheticClassificationDataset(NUM_SAMPLES)
 
@@ -111,7 +107,6 @@ def main() -> None:
         model=model,
         args=training_args,
         train_dataset=train_dataset,
-        callbacks=[traceml_hf.TraceMLTrainerCallback()],
     )
 
     trainer.train()

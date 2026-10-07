@@ -239,6 +239,16 @@ not a public metric name or presentation label.
 
 ## Lightning steps
 
+`traceml run` attaches the existing callback after Lightning finalizes model
+callbacks and before setup/checkpoint restoration. Compatible manual setup is
+reused. Disabled launch installs no observer or automatic hooks.
+
+Forward consists of calls to the selected training module or one of its direct
+children during `training_step`. Nested calls and backward recomputation are not
+counted again. Hooks and the arming wrapper are installed after checkpoint/EMA
+setup and removed on teardown or exception. H2D and backward keep their existing
+Lightning boundaries. Step IDs remain process-local after checkpoint resume.
+
 Under automatic optimization, one completed TraceML step corresponds to one
 Lightning accumulation/update group. Each micro-batch opens and closes its own
 traced region, while the owning `StepCapture` and CUDA peak-memory window stay
@@ -422,7 +432,8 @@ row ids are unchanged.
 ## Contract scenarios
 
 [`tests/step_time/scenarios.py`](https://github.com/traceopt-ai/traceml/blob/main/tests/step_time/scenarios.py)
-defines six explicit SQLite scenarios:
+defines eleven explicit SQLite scenarios.
+Every rank in the first six writes one identical payload on every step:
 
 | Scenario | Contract protected |
 |---|---|
@@ -432,6 +443,23 @@ defines six explicit SQLite scenarios:
 | `single_rank_cpu` | single-rank statistics and diagnosis without fabricated cross-rank skew |
 | `ddp_rank_straggler` | DDP visible-backward attribution and critical severity after a confident window |
 | `fsdp_rank_straggler` | FSDP strategy propagation, attribution behavior, and warning severity cap |
+
+Three more vary over time.
+Their variation is seeded, so every run writes the same rows:
+
+| Scenario | Contract protected |
+|---|---|
+| `jittered_ddp` | per-step variation on every metric, and a rank whose backward is slower |
+| `rank_missing_steps` | a rank that stops reporting for four steps mid-window drops those steps from the aligned window |
+| `intermittent_metrics` | `optimizer_step` and `h2d` that occur on some steps stay measured; a forward missing on one step leaves that rank's forward, compute and residual unknown |
+
+The last two reach diagnoses the others never do, so their evidence keys are
+covered too:
+
+| Scenario | Contract protected |
+|---|---|
+| `h2d_bound_gpu` | H2D-bound diagnosis on the GPU clock |
+| `forward_missing_everywhere` | incomplete-data diagnosis when no rank reports forward |
 
 The cross-surface tests cover:
 
@@ -444,6 +472,26 @@ The cross-surface tests cover:
 They intentionally do not snapshot timestamps, private cache state, complete
 Rich/NiceGUI markup, or dictionary ordering.
 
+`tests/step_time/test_public_schema_golden.py` builds the Step Time summary
+section for all eleven scenarios, with the analysis window the final report
+resolves, and compares it with
+`tests/step_time/golden/step_time_public_schema.json`.
+The golden holds the public key set, and, per scenario and per metric, which
+values are present and which are `null`.
+A renamed key or a changed `null` pattern fails the test with a diff.
+To accept an intended change, bump `SCHEMA_VERSION` in
+`src/traceml_ai/reporting/final.py`, add a `CHANGELOG.md` entry, and run:
+
+```bash
+pytest tests/step_time/test_public_schema_golden.py --update-golden
+```
+
+The command refuses to rewrite a key or `null`-pattern change at an unchanged
+schema version.
+A new scenario that brings no new key needs no version bump.
+The check runs when the golden is regenerated, not in CI, so deleting or
+hand-editing the golden file bypasses it.
+
 ## Changing Step Time safely
 
 Before submitting a Step Time change:
@@ -454,8 +502,8 @@ Before submitting a Step Time change:
 3. Run the cross-surface tests and inspect CLI, dashboard, and summary effects
    together.
 4. If SQL changes, record fresh benchmark measurements.
-5. If public summary keys or meanings change, update `reporting/SCHEMA.md` and
-   consider schema-version compatibility.
+5. If public summary keys or meanings change, update `reporting/SCHEMA.md`,
+   bump the schema version, and regenerate the public-schema golden.
 6. If diagnosis vocabulary or thresholds change, update
    `diagnostics/DIAGNOSIS.md` and user-facing interpretation guidance.
 

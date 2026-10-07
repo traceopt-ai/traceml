@@ -28,7 +28,12 @@ _PATCH_GATED = {
 }
 
 
-def warn_if_missing_streams(integration: str, requires: set[str]) -> None:
+def warn_if_missing_streams(
+    integration: str,
+    requires: set[str],
+    *,
+    advice: str = "Call traceml_ai.init(mode='auto') before training to enable them.",
+) -> None:
     """
     Warn (never raise) if patch-gated streams the integration owes won't be
     captured under the current TraceML init config.
@@ -50,10 +55,10 @@ def warn_if_missing_streams(integration: str, requires: set[str]) -> None:
         if missing:
             logger.warning(
                 "[TraceML] %s is active but these telemetry streams will NOT be "
-                "captured: %s. Call traceml_ai.init(mode='auto') before training "
-                "to enable them.",
+                "captured: %s. %s",
                 integration,
                 ", ".join(missing),
+                advice,
             )
     except Exception:
         # Capability check is best-effort; it must never break training.

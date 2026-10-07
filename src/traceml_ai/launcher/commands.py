@@ -73,9 +73,8 @@ from traceml_ai.utils.msgpack_codec import Decoder as MsgpackDecoder
 from traceml_ai.utils.torch_support import torch_available
 
 DASHBOARD_DEPENDENCY_INSTALL_HINT = (
-    "Dashboard mode requires nicegui. It is included in the "
-    "default TraceML install; if it is missing, run "
-    "`pip install -U traceml-ai` or `pip install nicegui`."
+    "Dashboard mode requires the optional dashboard dependencies. "
+    'Install them with `pip install "traceml-ai[dashboard]"`.'
 )
 
 SINGLE_NODE_DEFAULT_MODE = DEFAULT_UI_MODE
@@ -573,10 +572,14 @@ def validate_launch_args(args: argparse.Namespace) -> None:
             "Remove --no-history to enable HTML report generation."
         )
     finalize_timeout_sec = getattr(args, "finalize_timeout_sec", None)
-    if finalize_timeout_sec is not None and float(finalize_timeout_sec) <= 0.0:
-        raise SystemExit(
-            "[TraceML] ERROR: --finalize-timeout-sec must be greater than 0."
-        )
+    if finalize_timeout_sec is not None:
+        from traceml_ai.config.yaml_loader import is_finite_positive
+
+        if not is_finite_positive(finalize_timeout_sec):
+            raise SystemExit(
+                "[TraceML] ERROR: --finalize-timeout-sec must be a finite "
+                "number greater than 0."
+            )
     trace_max_steps = getattr(args, "trace_max_steps", None)
     if trace_max_steps is not None and int(trace_max_steps) <= 0:
         raise SystemExit(
@@ -1508,23 +1511,12 @@ def run_serve(args: argparse.Namespace) -> None:
     prints the reachable endpoint, blocks until SIGINT/SIGTERM, shuts down
     cleanly, and preserves final-summary behavior.
     """
-    if getattr(args, "mode", None) == "dashboard":
-        missing = [
-            package
-            for package in ("nicegui",)
-            if importlib.util.find_spec(package) is None
-        ]
-        if missing:
-            raise SystemExit(
-                "[TraceML] ERROR: "
-                f"{DASHBOARD_DEPENDENCY_INSTALL_HINT} "
-                f"Missing: {', '.join(missing)}."
-            )
-
     try:
         settings = _resolve_serve_settings(args)
     except ValueError as exc:
         raise SystemExit(f"[TraceML] ERROR: {exc}") from exc
+
+    _require_dashboard_dependencies(settings.mode)
 
     from traceml_ai.aggregator.aggregator_main import run_aggregator
 
