@@ -814,6 +814,25 @@ def test_validate_rejects_non_finite_or_non_positive_finalize_timeout(
         validate_launch_args(args)
 
 
+@pytest.mark.parametrize("flag", ["--master-port", "--aggregator-port"])
+def test_validate_rejects_port_above_65535(flag: str) -> None:
+    args = build_parser().parse_args(
+        ["run", "train.py", "--mode=cli", flag, "65536"]
+    )
+
+    with pytest.raises(SystemExit, match=f"{flag} must be <= 65535"):
+        validate_launch_args(args)
+
+
+@pytest.mark.parametrize("flag", ["--master-port", "--aggregator-port"])
+def test_validate_accepts_highest_port(flag: str) -> None:
+    args = build_parser().parse_args(
+        ["run", "train.py", "--mode=cli", flag, "65535"]
+    )
+
+    validate_launch_args(args)
+
+
 def _write_guard_config(tmp_path: Path, guard: str) -> None:
     (tmp_path / "traceml.yaml").write_text(
         "mode: summary\nhistory_enabled: true\nguard:\n" + guard,
