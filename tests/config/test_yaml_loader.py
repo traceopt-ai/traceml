@@ -283,6 +283,15 @@ def test_load_yaml_config_int_as_float(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("value", ["0", "-5", "-0.5", ".nan", ".inf"])
+def test_load_yaml_config_rejects_non_positive_interval(
+    tmp_path: Path, value: str
+) -> None:
+    p = _write(tmp_path, f"interval: {value}\n")
+    with pytest.raises(ValueError, match="'interval' must be a finite"):
+        load_yaml_config(p)
+
+
+@pytest.mark.parametrize("value", ["0", "-5", "-0.5", ".nan", ".inf"])
 def test_load_yaml_config_rejects_non_positive_finalize_timeout(
     tmp_path: Path, value: str
 ) -> None:
@@ -377,6 +386,15 @@ def test_resolve_config_env_float_coercion() -> None:
     result = resolve_config(cli, env, _no_yaml(), _defaults())
     assert result["interval"] == 0.5
     assert result["finalize_timeout_sec"] == 42.5
+
+
+@pytest.mark.parametrize("value", ["0", "-5", "nan", "inf"])
+def test_resolve_config_rejects_non_positive_interval_env(
+    value: str,
+) -> None:
+    env = {"TRACEML_INTERVAL": value}
+    with pytest.raises(ValueError, match="TRACEML_INTERVAL.*greater than 0"):
+        resolve_config(_no_cli(), env, _no_yaml(), _defaults())
 
 
 @pytest.mark.parametrize("value", ["0", "-5", "nan", "inf"])

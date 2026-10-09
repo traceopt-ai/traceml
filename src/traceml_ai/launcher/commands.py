@@ -527,6 +527,19 @@ def _require_run_torch_support(args: argparse.Namespace) -> None:
     )
 
 
+def _require_positive_interval(args: argparse.Namespace) -> None:
+    interval = getattr(args, "interval", None)
+    if interval is None:
+        return
+    from traceml_ai.config.yaml_loader import is_finite_positive
+
+    if not is_finite_positive(interval):
+        raise SystemExit(
+            "[TraceML] ERROR: --interval must be a finite number greater "
+            "than 0."
+        )
+
+
 def validate_launch_args(args: argparse.Namespace) -> None:
     """Validate cross-argument constraints for TraceML launch commands."""
     if _disable_traceml_requested(args, os.environ):
@@ -572,6 +585,7 @@ def validate_launch_args(args: argparse.Namespace) -> None:
             "[TraceML] ERROR: --html-report requires history. "
             "Remove --no-history to enable HTML report generation."
         )
+    _require_positive_interval(args)
     finalize_timeout_sec = getattr(args, "finalize_timeout_sec", None)
     if finalize_timeout_sec is not None:
         from traceml_ai.config.yaml_loader import is_finite_positive
@@ -1527,6 +1541,7 @@ def run_serve(args: argparse.Namespace) -> None:
     prints the reachable endpoint, blocks until SIGINT/SIGTERM, shuts down
     cleanly, and preserves final-summary behavior.
     """
+    _require_positive_interval(args)
     try:
         settings = _resolve_serve_settings(args)
     except ValueError as exc:
