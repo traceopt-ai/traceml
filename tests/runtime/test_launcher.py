@@ -802,6 +802,71 @@ def test_explicit_live_mode_allows_no_history() -> None:
     validate_launch_args(args)
 
 
+@pytest.mark.parametrize("command", ["run", "watch"])
+@pytest.mark.parametrize("value", ["0", "-1", "nan", "inf"])
+def test_validate_rejects_non_finite_or_non_positive_interval(
+    command: str, value: str
+) -> None:
+    args = build_parser().parse_args(
+        [command, "train.py", "--mode=cli", "--interval", value]
+    )
+
+    with pytest.raises(
+        SystemExit, match="--interval must be a finite number greater than 0"
+    ):
+        validate_launch_args(args)
+
+
+def test_validate_accepts_small_positive_interval() -> None:
+    args = build_parser().parse_args(
+        ["run", "train.py", "--mode=cli", "--interval", "0.1"]
+    )
+
+    validate_launch_args(args)
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "nan", "inf"])
+def test_serve_rejects_non_finite_or_non_positive_interval(
+    monkeypatch, tmp_path, value: str
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    run_aggregator = Mock(side_effect=AssertionError("must not start"))
+    monkeypatch.setattr(
+        "traceml_ai.aggregator.aggregator_main.run_aggregator",
+        run_aggregator,
+    )
+    from traceml_ai.launcher.commands import run_serve
+
+    args = build_parser().parse_args(["serve", "--interval", value])
+
+    with pytest.raises(
+        SystemExit, match="--interval must be a finite number greater than 0"
+    ):
+        run_serve(args)
+
+    run_aggregator.assert_not_called()
+
+
+def test_run_rejects_non_positive_interval_env_before_launch(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TRACEML_INTERVAL", "0")
+    script = tmp_path / "train.py"
+    script.write_text("print('unused')\n", encoding="utf-8")
+    forbidden = _forbid_guard_launch_side_effects(monkeypatch)
+    args = build_parser().parse_args(["run", str(script)])
+
+    with pytest.raises(SystemExit) as exc:
+        launch_process(str(script), args)
+
+    assert exc.value.code == 1
+    stderr = capsys.readouterr().err
+    assert "TRACEML_INTERVAL='0' must be a finite number" in stderr
+    for replacement in forbidden.values():
+        replacement.assert_not_called()
+
+
 @pytest.mark.parametrize("value", ["0", "-1", "nan", "inf"])
 def test_validate_rejects_non_finite_or_non_positive_finalize_timeout(
     value: str,

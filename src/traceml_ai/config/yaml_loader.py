@@ -71,7 +71,7 @@ BUILT_IN_DEFAULTS: dict[str, Any] = {
 # Env var strings treated as True for bool fields.
 _BOOL_ENV_TRUE = frozenset({"1", "true", "yes"})
 
-_POSITIVE_FLOAT_KEYS = frozenset({"finalize_timeout_sec"})
+_POSITIVE_FLOAT_KEYS = frozenset({"interval", "finalize_timeout_sec"})
 
 MAX_PORT = 65535
 
