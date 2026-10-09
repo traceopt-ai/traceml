@@ -1,4 +1,3 @@
-
 """Minimal example for logging TraceML's summary to MLflow.
 
 Requires MLflow:
