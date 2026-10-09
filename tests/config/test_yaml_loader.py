@@ -501,6 +501,31 @@ def test_load_yaml_config_dashboard_port_type_error(tmp_path: Path) -> None:
         load_yaml_config(p)
 
 
+@pytest.mark.parametrize("value", ["0", "-1", "65536", "70000"])
+def test_load_yaml_config_rejects_out_of_range_dashboard_port(
+    tmp_path: Path, value: str
+) -> None:
+    p = _write(tmp_path, f"dashboard_port: {value}\n")
+    with pytest.raises(ValueError, match="dashboard_port.*1 and 65535"):
+        load_yaml_config(p)
+
+
+def test_load_yaml_config_accepts_highest_dashboard_port(
+    tmp_path: Path,
+) -> None:
+    p = _write(tmp_path, "dashboard_port: 65535\n")
+    assert load_yaml_config(p)["dashboard_port"] == 65535
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "65536", "70000"])
+def test_resolve_config_rejects_out_of_range_dashboard_port_env(
+    value: str,
+) -> None:
+    env = {"TRACEML_DASHBOARD_PORT": value}
+    with pytest.raises(ValueError, match="TRACEML_DASHBOARD_PORT"):
+        resolve_config(_no_cli(), env, _no_yaml(), _defaults())
+
+
 def test_resolve_config_dashboard_defaults() -> None:
     result = resolve_config(_no_cli(), _no_env(), _no_yaml(), _defaults())
     assert result["dashboard_port"] == 8765

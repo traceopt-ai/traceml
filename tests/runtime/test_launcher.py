@@ -833,6 +833,73 @@ def test_validate_accepts_highest_port(flag: str) -> None:
     validate_launch_args(args)
 
 
+@pytest.mark.parametrize("value", ["0", "-1", "65536", "70000"])
+def test_validate_rejects_out_of_range_dashboard_port(value: str) -> None:
+    args = build_parser().parse_args(
+        ["run", "train.py", "--mode=cli", "--dashboard-port", value]
+    )
+
+    with pytest.raises(
+        SystemExit, match="--dashboard-port must be an integer between"
+    ):
+        validate_launch_args(args)
+
+
+def test_validate_accepts_highest_dashboard_port() -> None:
+    args = build_parser().parse_args(
+        ["run", "train.py", "--mode=cli", "--dashboard-port", "65535"]
+    )
+
+    validate_launch_args(args)
+
+
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        ("65536", "--aggregator-port must be <= 65535"),
+        ("0", "--aggregator-port must be >= 1"),
+    ],
+)
+def test_serve_rejects_out_of_range_aggregator_port(
+    monkeypatch, tmp_path, value: str, message: str
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    run_aggregator = Mock(side_effect=AssertionError("must not start"))
+    monkeypatch.setattr(
+        "traceml_ai.aggregator.aggregator_main.run_aggregator",
+        run_aggregator,
+    )
+    from traceml_ai.launcher.commands import run_serve
+
+    args = build_parser().parse_args(["serve", "--aggregator-port", value])
+
+    with pytest.raises(SystemExit, match=f"\\[TraceML\\] ERROR: {message}"):
+        run_serve(args)
+
+    run_aggregator.assert_not_called()
+
+
+def test_run_rejects_out_of_range_dashboard_port_env_before_launch(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TRACEML_DASHBOARD_PORT", "70000")
+    script = tmp_path / "train.py"
+    script.write_text("print('unused')\n", encoding="utf-8")
+    forbidden = _forbid_guard_launch_side_effects(monkeypatch)
+    args = build_parser().parse_args(["run", str(script)])
+
+    with pytest.raises(SystemExit) as exc:
+        launch_process(str(script), args)
+
+    assert exc.value.code == 1
+    stderr = capsys.readouterr().err
+    assert "TRACEML_DASHBOARD_PORT='70000'" in stderr
+    assert "between 1 and 65535" in stderr
+    for replacement in forbidden.values():
+        replacement.assert_not_called()
+
+
 def _write_guard_config(tmp_path: Path, guard: str) -> None:
     (tmp_path / "traceml.yaml").write_text(
         "mode: summary\nhistory_enabled: true\nguard:\n" + guard,
