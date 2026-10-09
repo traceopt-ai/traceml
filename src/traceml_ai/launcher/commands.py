@@ -22,6 +22,7 @@ from typing import Any, BinaryIO, Callable, Iterable, Mapping, Optional
 
 from traceml_ai.launcher.launch_config import (
     TORCH_LAUNCHER_REQUIRED,
+    AggregatorLaunchConfig,
     DistributedLaunchConfig,
     RunIdentity,
     TorchrunLaunchConfig,
@@ -580,6 +581,15 @@ def validate_launch_args(args: argparse.Namespace) -> None:
                 "[TraceML] ERROR: --finalize-timeout-sec must be a finite "
                 "number greater than 0."
             )
+    dashboard_port = getattr(args, "dashboard_port", None)
+    if dashboard_port is not None:
+        from traceml_ai.config.yaml_loader import MAX_PORT, is_valid_port
+
+        if not is_valid_port(dashboard_port):
+            raise SystemExit(
+                "[TraceML] ERROR: --dashboard-port must be an integer "
+                f"between 1 and {MAX_PORT}."
+            )
     trace_max_steps = getattr(args, "trace_max_steps", None)
     if trace_max_steps is not None and int(trace_max_steps) <= 0:
         raise SystemExit(
@@ -660,12 +670,16 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         ),
     }
 
-    cfg = resolve_config(
-        cli_overrides=cli_overrides,
-        parent_env=launcher_env,
-        yaml_config=yaml_cfg,
-        defaults=launch_defaults,
-    )
+    try:
+        cfg = resolve_config(
+            cli_overrides=cli_overrides,
+            parent_env=launcher_env,
+            yaml_config=yaml_cfg,
+            defaults=launch_defaults,
+        )
+    except ValueError as exc:
+        print(f"[TraceML] ERROR: {exc}", file=sys.stderr)
+        raise SystemExit(1)
     cfg["finalize_timeout_sec"] = float(
         cfg.get("finalize_timeout_sec") or DEFAULT_FINALIZE_TIMEOUT_SEC
     )
@@ -1415,8 +1429,9 @@ def _resolve_serve_settings(args: argparse.Namespace):
 
     UI/telemetry settings route through the shared config resolver
     (CLI > env > traceml.yaml > default), the same resolver the launcher uses.
-    Aggregator host/bind-host/port come from serve's own flags, and run
-    identity reuses the launcher's ``RunIdentity``.
+    Aggregator host/bind-host/port come from serve's own flags, validated by
+    the launcher's ``AggregatorLaunchConfig``, and run identity reuses the
+    launcher's ``RunIdentity``.
     """
     from traceml_ai.config.yaml_loader import (
         BUILT_IN_DEFAULTS,
@@ -1457,9 +1472,10 @@ def _resolve_serve_settings(args: argparse.Namespace):
         require_explicit=False,
     )
 
-    connect_host = str(getattr(args, "aggregator_host", None) or "127.0.0.1")
-    bind_host = str(getattr(args, "aggregator_bind_host", None) or "127.0.0.1")
-    port = int(getattr(args, "aggregator_port", 29765))
+    aggregator_cfg = AggregatorLaunchConfig.from_args(
+        args,
+        torchrun=TorchrunLaunchConfig(),
+    )
 
     # Expected worker count so the aggregator waits for ALL ranks before
     # finalizing (and warns about ranks that never report). Prefer explicit
@@ -1496,9 +1512,9 @@ def _resolve_serve_settings(args: argparse.Namespace):
         enforce_session_id=run_identity.source != "generated",
         admit_generated_session_id=True,
         aggregator=AggregatorTransportSettings(
-            connect_host=connect_host,
-            bind_host=bind_host,
-            port=port,
+            connect_host=aggregator_cfg.connect_host,
+            bind_host=aggregator_cfg.bind_host,
+            port=aggregator_cfg.port,
         ),
     )
 

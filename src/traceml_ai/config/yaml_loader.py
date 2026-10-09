@@ -73,10 +73,18 @@ _BOOL_ENV_TRUE = frozenset({"1", "true", "yes"})
 
 _POSITIVE_FLOAT_KEYS = frozenset({"finalize_timeout_sec"})
 
+MAX_PORT = 65535
+
+_PORT_KEYS = frozenset({"dashboard_port"})
+
 
 def is_finite_positive(value: float) -> bool:
     number = float(value)
     return math.isfinite(number) and number > 0.0
+
+
+def is_valid_port(value: int) -> bool:
+    return 1 <= int(value) <= MAX_PORT
 
 
 def find_config_file(start_dir: Path) -> Path | None:
@@ -238,6 +246,11 @@ def _validate_and_coerce(
                 f"[TraceML] {path}: '{key}' must be an integer, got {value!r}"
             )
         if isinstance(value, int):
+            if key in _PORT_KEYS and not is_valid_port(value):
+                raise ValueError(
+                    f"[TraceML] {path}: '{key}' must be an integer between "
+                    f"1 and {MAX_PORT}, got {value!r}"
+                )
             return value
         raise ValueError(
             f"[TraceML] {path}: '{key}' must be an integer, got {value!r}"
@@ -284,11 +297,17 @@ def _coerce_env(key: str, raw_env: str) -> Any:
         return raw_env.strip().lower() in _BOOL_ENV_TRUE
     if expected_type is int:
         try:
-            return int(raw_env)
+            number = int(raw_env)
         except ValueError:
             raise ValueError(
                 f"[TraceML] env var {env_var}={raw_env!r} is not a valid integer."
             ) from None
+        if key in _PORT_KEYS and not is_valid_port(number):
+            raise ValueError(
+                f"[TraceML] env var {env_var}={raw_env!r} must be an integer "
+                f"between 1 and {MAX_PORT}."
+            )
+        return number
     if expected_type is float:
         try:
             number = float(raw_env)
