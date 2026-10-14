@@ -6,8 +6,13 @@ from unittest.mock import Mock
 
 import pytest
 
-from traceml_ai.aggregator import aggregator_main, trace_aggregator
+from traceml_ai.aggregator import (
+    aggregator_main,
+    summary_service,
+    trace_aggregator,
+)
 from traceml_ai.aggregator.sqlite_writer import SQLiteFinalizeResult
+from traceml_ai.aggregator.summary_service import FinalSummaryService
 from traceml_ai.aggregator.trace_aggregator import (
     TraceMLAggregator,
     TraceMLFinalizationError,
@@ -110,6 +115,7 @@ def _make_aggregator(tmp_path: Path, *, writer: _Writer, tcp: _TCP):
     agg._finished_ranks = {}
     agg._foreign_senders = {}
     agg._drain_lock = threading.Lock()
+    agg._summary_lock = threading.Lock()
     agg._thread = _StoppedThread()
     agg._display_driver = _Display()
     agg._tcp_server = tcp
@@ -185,6 +191,87 @@ def test_stop_writes_warning_when_rank_finished_markers_are_missing(
     assert warning["status"] == "warning"
     assert warning["finished_ranks"] == [0]
     assert warning["missing_ranks"] == [1]
+
+
+def test_stop_waits_for_a_requested_summary_before_generating(
+    monkeypatch,
+    tmp_path,
+):
+    # A final_summary() request is still generating on the loop thread when
+    # stop() runs; stop() joins that thread for at most 5 s, so the two
+    # paths must not generate at the same time.
+    agg = _make_aggregator(
+        tmp_path,
+        writer=_Writer(_ok_result()),
+        tcp=_TCP(open_connections=0),
+    )
+    service = FinalSummaryService(
+        logger=_Logger(),
+        session_root=tmp_path / "run",
+        db_path="db",
+        flush_history=lambda timeout: True,
+        settle_telemetry=lambda timeout: True,
+        summary_lock=agg._summary_lock,
+    )
+    state = {"active": 0, "peak": 0, "calls": []}
+    state_lock = threading.Lock()
+    entered = threading.Event()
+
+    def fake_generate(*args, **kwargs):
+        with state_lock:
+            state["active"] += 1
+            state["peak"] = max(state["peak"], state["active"])
+            state["calls"].append(kwargs["print_to_stdout"])
+        entered.set()
+        time.sleep(0.2)
+        _write_fake_summary(tmp_path)
+        with state_lock:
+            state["active"] -= 1
+
+    monkeypatch.setattr(summary_service, "generate_summary", fake_generate)
+    monkeypatch.setattr(trace_aggregator, "generate_summary", fake_generate)
+
+    request = threading.Thread(
+        target=service._handle_request,
+        kwargs={"request_id": "request-1"},
+    )
+    request.start()
+    assert entered.wait(timeout=2.0)
+    agg.stop(timeout_sec=5.0)
+    request.join(timeout=2.0)
+
+    assert state["peak"] == 1
+    # The request path ran first; stop() still refreshed the summary.
+    assert state["calls"] == [False, True]
+
+
+def test_stop_fails_when_a_requested_summary_never_finishes(
+    monkeypatch,
+    tmp_path,
+):
+    agg = _make_aggregator(
+        tmp_path,
+        writer=_Writer(_ok_result()),
+        tcp=_TCP(open_connections=0),
+    )
+    generated = []
+    monkeypatch.setattr(
+        trace_aggregator,
+        "generate_summary",
+        lambda *args, **kwargs: generated.append(True),
+    )
+    monkeypatch.setattr(trace_aggregator, "_SUMMARY_WAIT_FLOOR_SEC", 0.05)
+
+    agg._summary_lock.acquire()
+    try:
+        with pytest.raises(TraceMLFinalizationError, match="still"):
+            agg.stop(timeout_sec=0.01)
+    finally:
+        agg._summary_lock.release()
+
+    assert generated == []
+    error_path = tmp_path / "run" / "aggregator" / "finalization_error.json"
+    assert "still" in json.loads(error_path.read_text())["error"]
 
 
 def test_stop_writes_error_and_raises_when_sqlite_finalize_fails(tmp_path):
