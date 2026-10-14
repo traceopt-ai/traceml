@@ -322,8 +322,8 @@ def build_step_memory_combined_result(
         if not rank_maps:
             continue
 
-        # The fetch is already bounded to the scan span ending at
-        # completed_step, so this is the same window the summary uses.
+        # The fetch above already bounds the steps to the scan span ending
+        # at completed_step, so only the common suffix is left to pick.
         steps = common_suffix_steps(rank_maps, max_rows=ws)
         if not steps:
             continue
