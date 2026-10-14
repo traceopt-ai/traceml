@@ -44,9 +44,6 @@ _SQLITE_FINALIZE_BUDGET_FRACTION = 0.25
 _SQLITE_FINALIZE_BUDGET_MIN_SEC = 5.0
 _SQLITE_FINALIZE_BUDGET_MAX_SEC = 60.0
 _SQLITE_FINALIZE_TINY_FLOOR_SEC = 0.001
-# stop() joins the loop thread for at most 5 s, so a final_summary() request
-# can still be generating there. stop() waits at least this long for it.
-_SUMMARY_WAIT_FLOOR_SEC = 30.0
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -275,9 +272,10 @@ class TraceMLAggregator:
                 and self._settings.db_path
             ):
                 summary_path = get_final_summary_json_path(session_root)
-                if not self._summary_lock.acquire(
-                    timeout=max(remaining(), _SUMMARY_WAIT_FLOOR_SEC)
-                ):
+                # stop() joins the loop thread for at most 5 s, so a
+                # final_summary() request can still be generating there.
+                # Wait for it, but never past this call's own deadline.
+                if not self._summary_lock.acquire(timeout=remaining()):
                     raise TraceMLFinalizationError(
                         "A requested final summary was still being "
                         "generated, so the end-of-run summary was not "

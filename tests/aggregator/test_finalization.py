@@ -260,7 +260,6 @@ def test_stop_fails_when_a_requested_summary_never_finishes(
         "generate_summary",
         lambda *args, **kwargs: generated.append(True),
     )
-    monkeypatch.setattr(trace_aggregator, "_SUMMARY_WAIT_FLOOR_SEC", 0.05)
 
     agg._summary_lock.acquire()
     try:
