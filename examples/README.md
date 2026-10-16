@@ -159,8 +159,8 @@ traceml run examples/workloads/bert_single_gpu_compare.py --mode=summary --run-n
 
 ## Case studies
 
-[Browse case studies](case_studies/README.md) for measured investigations and
-reproduction packages, including ResNet, LeRobot, and RF-DETR.
+[Browse case studies](case_studies/README.md) for measured investigations,
+including ResNet, LeRobot, and RF-DETR.
 
 ---
 

@@ -6,6 +6,15 @@ with the executable examples in the TraceML repository.
 
 ## Measured investigations
 
+### LeRobot v3 image-loading regression
+
+Across two broken/fixed pairs run in opposite orders on one NVIDIA L4, the
+TraceML diagnosis changed from input-bound to compute-bound. Step time fell by
+**92.2%** and **92.4%**, predominantly because input wait disappeared after the
+upstream fix.
+
+[Read the complete case study and reproduce it](https://github.com/traceopt-ai/traceml/tree/main/examples/case_studies/lerobot_v3_image_regression)
+
 ### ResNet-18 input pipeline
 
 A single-T4 run was input-bound while JPEG decoding happened synchronously.
@@ -30,9 +39,3 @@ measured GPU compute became faster. RF-DETR 1.11.1 restored step time and input
 wait to within 0.5% of the 1.10.1 baseline.
 
 [Read the complete case study and reproduce it](https://github.com/traceopt-ai/traceml/tree/main/examples/case_studies/rfdetr_input_pipeline_regression)
-
-## Reproduction packages
-
-The [LeRobot v3 image-loading regression package](https://github.com/traceopt-ai/traceml/tree/main/examples/case_studies/lerobot_v3_image_regression)
-provides pinned before-and-after revisions, a runnable ACT workload and an
-analysis notebook. It does not yet publish a measured headline result.

@@ -10,6 +10,25 @@ This is a case-study reproduction, not a portable benchmark. Exact timings and
 percentage changes depend on the host; the useful result is the paired
 diagnosis and attribution.
 
+## Measured result
+
+Two broken/fixed pairs were measured in opposite orders on one NVIDIA L4. The
+workload, instrumentation and environment were held constant within each pair.
+
+| Metric | Pair 1: broken → fixed | Pair 2: broken → fixed |
+|---|---:|---:|
+| Step time | 1496.9 → 116.8 ms | 1542.7 → 117.2 ms |
+| DataLoader fetch | 1375.7 → 1.5 ms | 1427.5 → 1.3 ms |
+| Compute | 115.9 → 110.5 ms | 110.4 → 111.1 ms |
+| Diagnosis | INPUT-BOUND → COMPUTE-BOUND | INPUT-BOUND → COMPUTE-BOUND |
+
+Step time fell by **92.2%** and **92.4%**. The improvement was predominantly in
+DataLoader fetch time while compute remained close to its original range. These
+measurements were recorded in [TraceML PR #450](https://github.com/traceopt-ai/traceml/pull/450).
+An [independent T4 reproduction](https://discuss.huggingface.co/t/reproducing-a-lerobot-regression-with-traceml/180066/4)
+reached the same input-bound to compute-bound diagnosis transition, although
+absolute timings differed across hosts.
+
 ## Run it
 
 You need Linux x86-64, Python 3.10, one NVIDIA GPU, and network access. The

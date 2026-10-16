@@ -226,6 +226,7 @@ for framework-specific details, including FSDP.
 
 | Investigation | Result |
 |---|---|
+| [LeRobot v3 image-loading regression](examples/case_studies/lerobot_v3_image_regression/README.md) | Reproduce a known input-pipeline regression and see TraceML change from input-bound to compute-bound after the upstream fix. |
 | [ResNet-18 input pipeline](examples/case_studies/resnet18_input_bound/README.md) | See an input-bound run become compute-bound after changing only DataLoader settings. |
 | [RF-DETR Nano training](examples/case_studies/rfdetr_nano_training/README.md) | Examine single-GPU phase timing and four-GPU DDP scaling on real COCO batches. |
 | [RF-DETR release regression](examples/case_studies/rfdetr_input_pipeline_regression/README.md) | Attribute a release-to-release slowdown to input waiting and verify the fixed release. |
