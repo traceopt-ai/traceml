@@ -59,7 +59,8 @@ class _BaseProcessRule(DiagnosticRule[ProcessSummarySignals]):
             metric=metric,
             phase=phase,
             score=float(score) if score is not None else None,
-            ranks=tuple(int(rank) for rank in ranks),
+            # One rank can fill two roles, e.g. highest and least headroom.
+            ranks=tuple(dict.fromkeys(int(rank) for rank in ranks)),
             evidence=dict(evidence or {}),
         )
 

@@ -283,6 +283,33 @@ def test_reserved_overhang_uses_rank_local_peak_ratio() -> None:
     assert issue.evidence["gpu_mem_reserved_peak_percent"] == 60.0
 
 
+@pytest.mark.parametrize(
+    "rank1_reserved",
+    [
+        pytest.param(300.0, id="reserved_imbalance"),
+        # One reserved value cannot form an imbalance, so the rule falls
+        # back to used memory while headroom still comes from rank 0.
+        pytest.param(None, id="used_imbalance"),
+    ],
+)
+def test_rank_gpu_memory_imbalance_lists_each_rank_once(
+    rank1_reserved,
+) -> None:
+    # Rank 0 is both the highest-memory rank and the least-headroom rank.
+    issue = RankGPUMemoryImbalanceRule().evaluate(
+        _signals(
+            per_rank={
+                0: _rank(used_peak=600.0, reserved_peak=600.0),
+                1: _rank(used_peak=300.0, reserved_peak=rank1_reserved),
+            }
+        )
+    )
+
+    assert issue is not None
+    assert issue.evidence["least_headroom_rank"] == 0
+    assert issue.ranks == (0,)
+
+
 def test_rank_gpu_memory_imbalance_uses_pressure_gate() -> None:
     low_pressure = RankGPUMemoryImbalanceRule().evaluate(
         _signals(
