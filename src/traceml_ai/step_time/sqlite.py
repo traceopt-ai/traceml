@@ -383,8 +383,8 @@ class SQLiteStepTimeRepository:
         ]
         identity_projection = ",\n                    ".join(projected)
         identity_order = (
-            "latest.sample_ts_s DESC, latest.id DESC"
-            if "sample_ts_s" in columns
+            "latest.timestamp_unix_ns DESC, latest.id DESC"
+            if "timestamp_unix_ns" in columns
             else "latest.id DESC"
         )
         query = f"""

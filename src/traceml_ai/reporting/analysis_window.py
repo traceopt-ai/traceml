@@ -13,6 +13,7 @@ from contextlib import closing
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from traceml_ai.telemetry.legacy_source_time import legacy_source_time_storage
 from traceml_ai.telemetry.retention import (
     DEFAULT_HISTORY_RETENTION_S,
     parse_history_retention,
@@ -91,7 +92,7 @@ def resolve_analysis_window(
 def _common_completed_steps(
     conn: sqlite3.Connection,
 ) -> list[tuple[int, float]]:
-    """Return step completion timestamps present on every observed rank."""
+    """Return completed-step source times in seconds for the public window."""
     try:
         rows = conn.execute("""
             WITH deduplicated AS (
@@ -99,7 +100,7 @@ def _common_completed_steps(
                     COALESCE(global_rank, rank) AS rank_id,
                     world_size,
                     step,
-                    sample_ts_s,
+                    timestamp_unix_ns,
                     ROW_NUMBER() OVER (
                         PARTITION BY COALESCE(global_rank, rank), step
                         ORDER BY id DESC
@@ -107,7 +108,7 @@ def _common_completed_steps(
                 FROM step_time_samples
                 WHERE COALESCE(global_rank, rank) IS NOT NULL
                   AND step IS NOT NULL
-                  AND sample_ts_s IS NOT NULL
+                  AND timestamp_unix_ns IS NOT NULL
                   AND events_json IS NOT NULL
                   AND events_json != ''
             ),
@@ -119,7 +120,7 @@ def _common_completed_steps(
                 FROM deduplicated
                 WHERE duplicate_row = 1
             )
-            SELECT step, MAX(sample_ts_s) AS completion_ts_s
+            SELECT step, MAX(timestamp_unix_ns)
             FROM deduplicated, rank_count
             WHERE duplicate_row = 1
             GROUP BY step
@@ -128,7 +129,8 @@ def _common_completed_steps(
             """).fetchall()
     except sqlite3.Error:
         return []
-    return [(int(row[0]), float(row[1])) for row in rows]
+    # LEGACY SOURCE TIME: public seconds bounds until RFC-0011 PR 5.
+    return [(int(row[0]), row[1] / 1_000_000_000) for row in rows]
 
 
 def _periodic_bounds(
@@ -139,14 +141,15 @@ def _periodic_bounds(
     """Return up-to-retention bounds from available System/Process samples."""
     values: list[float] = []
     for table in ("system_samples", "process_samples"):
+        column, units_per_s = legacy_source_time_storage(table)
         try:
             row = conn.execute(
-                f"SELECT MIN(sample_ts_s), MAX(sample_ts_s) FROM {table};"
+                f"SELECT MIN({column}), MAX({column}) FROM {table};"
             ).fetchone()
         except sqlite3.Error:
             continue
         if row and row[0] is not None and row[1] is not None:
-            values.extend((float(row[0]), float(row[1])))
+            values.extend((row[0] / units_per_s, row[1] / units_per_s))
     if not values:
         return None
     end_ts = max(values)
@@ -184,17 +187,22 @@ def _section_observation(
     if window.start_ts_s is None or window.end_ts_s is None:
         return _empty_observation()
 
+    column, units_per_s = legacy_source_time_storage(table)
     if section in _STEP_SECTIONS and window.start_step is not None:
         where = "step BETWEEN ? AND ?"
         params: tuple[Any, ...] = (window.start_step, window.end_step)
     else:
-        where = "sample_ts_s BETWEEN ? AND ?"
-        params = (window.start_ts_s, window.end_ts_s)
+        where = f"{column} BETWEEN ? AND ?"
+        # LEGACY SOURCE TIME: public seconds bounds until RFC-0011 PR 5.
+        params = tuple(
+            round(value * units_per_s) if units_per_s != 1 else value
+            for value in (window.start_ts_s, window.end_ts_s)
+        )
 
     try:
         row = conn.execute(
             f"""
-            SELECT COUNT(*), MIN(sample_ts_s), MAX(sample_ts_s)
+            SELECT COUNT(*), MIN({column}), MAX({column})
             FROM {table}
             WHERE {where};
             """,
@@ -207,10 +215,10 @@ def _section_observation(
     return {
         "samples": samples,
         "observed_start_ts_s": (
-            float(row[1]) if row and row[1] is not None else None
+            row[1] / units_per_s if row and row[1] is not None else None
         ),
         "observed_end_ts_s": (
-            float(row[2]) if row and row[2] is not None else None
+            row[2] / units_per_s if row and row[2] is not None else None
         ),
     }
 

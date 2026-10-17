@@ -307,7 +307,7 @@ def insert_step_time_sample(
     )
     sample = StepTimeEventSample(
         seq=_defaulted(seq, row_id),
-        timestamp=float(step) if ts is None else ts,
+        timestamp_unix_ns=round((float(step) if ts is None else ts) * 1e9),
         step=step,
         events=dict(payload),
     )
@@ -349,7 +349,7 @@ def insert_step_memory_sample(
     ts: float | None = None,
     seq: int | None | object = _UNSET,
 ) -> None:
-    """Insert one canonical Step Memory projection row."""
+    """Insert one canonical Step Memory row; ``ts`` is in seconds."""
     _insert_row(
         conn,
         "step_memory_samples",
@@ -361,7 +361,7 @@ def insert_step_memory_sample(
         local_world_size=local_world_size,
         node_rank=_defaulted(node_rank, rank),
         hostname=_defaulted(hostname, f"worker-{rank}"),
-        sample_ts_s=float(step) if ts is None else ts,
+        timestamp_unix_ns=round((float(step) if ts is None else ts) * 1e9),
         seq=_defaulted(seq, row_id),
         device=device,
         step=step,

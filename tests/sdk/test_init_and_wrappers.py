@@ -580,7 +580,7 @@ def test_trace_step_discards_failure_before_publishing_next_step(monkeypatch):
         with instrumentation.trace_step(nn.Linear(1, 1)):
             record_event(TimeEvent("failed_body", "cpu", 2.0, 3.0))
             step_events.record_step_memory_event(
-                StepMemoryEvent(-1, "cpu", 3.0, None, None)
+                StepMemoryEvent(-1, "cpu", 3_000_000_000, None, None)
             )
             raise RuntimeError("user step failed")
 

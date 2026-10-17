@@ -52,20 +52,20 @@ def _insert_aligned_step(
                 """
                 INSERT INTO step_time_samples(
                     recv_ts_ns, rank, global_rank, world_size,
-                    sample_ts_s, step, events_json
+                    timestamp_unix_ns, step, events_json
                 ) VALUES (?, ?, ?, 2, ?, ?, '{}');
                 """,
-                (recv_ts_ns, rank, rank, float(step * 100), step),
+                (recv_ts_ns, rank, rank, step * 100_000_000_000, step),
             )
         else:
             conn.execute(
                 """
                 INSERT INTO step_memory_samples(
                     recv_ts_ns, rank, global_rank, world_size,
-                    sample_ts_s, step
+                    timestamp_unix_ns, step
                 ) VALUES (?, ?, ?, 2, ?, ?);
                 """,
-                (recv_ts_ns, rank, rank, float(step * 100), step),
+                (recv_ts_ns, rank, rank, step * 100_000_000_000, step),
             )
 
 
@@ -150,13 +150,13 @@ def test_retention_prunes_through_minimum_aligned_aged_step() -> None:
     late_system_row[7] = 100.0
     late_step_row = [None] * 12
     late_step_row[0] = late_recv_ts_ns
-    late_step_row[8] = 100.0
+    late_step_row[8] = 100_000_000_000
     late_step_row[10] = 1
     late_step_row[11] = "{}"
     fresh_system_row = list(late_system_row)
     fresh_system_row[7] = 500.0
     fresh_step_row = list(late_step_row)
-    fresh_step_row[8] = 500.0
+    fresh_step_row[8] = 500_000_000_000
     fresh_step_row[10] = 5
     projection_rows = {
         system_projection: {
