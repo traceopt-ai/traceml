@@ -27,7 +27,7 @@ Therefore, the SQL schema keeps only stable fields in first-class columns:
 - global_rank, local_rank, world_size, local_world_size, node_rank
 - hostname
 - step
-- sample_ts_s
+- timestamp_unix_ns
 - seq
 
 and stores the dynamic event map as JSON text in `events_json`.
@@ -152,7 +152,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
             local_world_size   INTEGER,
             node_rank          INTEGER,
             hostname           TEXT,
-            sample_ts_s        REAL,
+            timestamp_unix_ns  INTEGER,
             seq                INTEGER,
             step               INTEGER,
             events_json        TEXT NOT NULL
@@ -195,12 +195,12 @@ def init_schema(conn: sqlite3.Connection) -> None:
         definition="TEXT",
     )
     conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_step_time_samples_rank_step_ts
-        ON step_time_samples(rank, step, sample_ts_s, id);
+        CREATE INDEX IF NOT EXISTS idx_step_time_samples_rank_step_timestamp
+        ON step_time_samples(rank, step, timestamp_unix_ns, id);
         """)
     conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_step_time_samples_global_rank_step_ts
-        ON step_time_samples(global_rank, step, sample_ts_s, id);
+        CREATE INDEX IF NOT EXISTS idx_step_time_samples_global_rank_step_timestamp
+        ON step_time_samples(global_rank, step, timestamp_unix_ns, id);
         """)
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_step_time_samples_global_rank_step_id
@@ -340,14 +340,26 @@ def build_rows(
                 continue
 
             seq_raw = row.get("seq")
-            ts_raw = row.get("timestamp")
+            timestamp_unix_ns = row.get("timestamp_unix_ns")
+            # LEGACY SOURCE TIME: old payloads; remove in RFC-0011 PR 5.
+            if "timestamp_unix_ns" not in row:
+                legacy_timestamp = row.get("timestamp")
+                if type(legacy_timestamp) in (int, float):
+                    try:
+                        timestamp_unix_ns = round(
+                            legacy_timestamp * 1_000_000_000
+                        )
+                    except (ValueError, OverflowError):
+                        timestamp_unix_ns = None
+            if not (
+                type(timestamp_unix_ns) is int
+                and -(2**63) <= timestamp_unix_ns < 2**63
+            ):
+                timestamp_unix_ns = None
             step_raw = row.get("step")
             events_raw = row.get("events")
 
             seq = int(seq_raw) if isinstance(seq_raw, int) else None
-            sample_ts_s = (
-                float(ts_raw) if isinstance(ts_raw, (int, float)) else None
-            )
             step = int(step_raw) if isinstance(step_raw, int) else None
 
             restricted_events = _normalize_events(events_raw)
@@ -367,7 +379,7 @@ def build_rows(
                     identity.local_world_size,
                     identity.node_rank,
                     identity.hostname,
-                    sample_ts_s,
+                    timestamp_unix_ns,
                     seq,
                     step,
                     events_json,
@@ -403,7 +415,7 @@ def insert_rows(
                 local_world_size,
                 node_rank,
                 hostname,
-                sample_ts_s,
+                timestamp_unix_ns,
                 seq,
                 step,
                 events_json

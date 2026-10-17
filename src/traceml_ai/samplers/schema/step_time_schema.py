@@ -16,7 +16,7 @@ StepTimeSampler emits a *totally ordered* stream of **one record per step**
 (per rank). A record is written into a single DB table (e.g. "step_time").
 
 Each record contains:
-- step metadata (seq, timestamp, step)
+- step metadata (seq, timestamp_unix_ns, step)
 - a nested event map holding aggregated timings for that step
 
 Aggregation rules (produced by sampler)
@@ -41,8 +41,8 @@ Clocks
 Schema (per DB row)
 ------------------
 {
-    "seq": int,              # monotonically increasing sequence per rank
-    "timestamp": float,      # step timestamp (seconds); typically max cpu_end in step
+    "seq": int,              # sampler-cycle sequence per rank
+    "timestamp_unix_ns": int, # source time: max cpu_end, in Unix nanoseconds
     "step": int,             # training step id
     "events": {              # nested map: events[event_name][device] = stats
         "<event_name>": {
@@ -87,12 +87,13 @@ class StepTimeEventSample:
     Notes
     -----
     - `events` must be JSON/msgpack-serializable (str keys; bool/int/float values).
-    - `timestamp` is in seconds (CPU wall clock), typically max cpu_end in step.
+    - `timestamp_unix_ns` is the latest CPU event end in Unix nanoseconds;
+      asynchronous CUDA resolution does not change this source time.
     - Consumers should treat unknown keys as forward-compatible extensions.
     """
 
     seq: int
-    timestamp: float
+    timestamp_unix_ns: int
     step: int
     events: StepEventMap
 
@@ -104,7 +105,7 @@ class StepTimeEventSample:
         """
         return {
             "seq": int(self.seq),
-            "timestamp": float(self.timestamp),
+            "timestamp_unix_ns": int(self.timestamp_unix_ns),
             "step": int(self.step),
             "events": self.events,
         }
@@ -120,7 +121,7 @@ class StepTimeEventSample:
         """
         return StepTimeEventSample(
             seq=int(data["seq"]),
-            timestamp=float(data["timestamp"]),
+            timestamp_unix_ns=int(data["timestamp_unix_ns"]),
             step=int(data["step"]),
             events=dict(data.get("events", {})),
         )
