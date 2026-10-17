@@ -50,11 +50,11 @@ for that step, expressed as integer Unix nanoseconds. Delayed CUDA resolution,
 queue draining, and transport preserve this source time; it is not an absolute
 GPU completion timestamp. The existing CPU duration clocks remain unchanged.
 
-During the source timestamp migration, other raw tables and
-public summary timestamp metadata still use seconds. A temporary storage
-bridge keeps shared readers consistent, and the Step Time projection accepts
-the former row `timestamp` key until cleanup in PR 5. New Step Time rows store
-and emit only the canonical timestamp.
+During the source timestamp migration, other raw tables and public summary
+timestamp metadata still use seconds. A temporary storage bridge keeps shared
+readers consistent. Until cleanup in PR 5, the Step Time projection accepts the
+former row `timestamp` key and Step Memory accepts `ts`. New rows for both
+domains store and emit only `timestamp_unix_ns`.
 
 Publication and reading transfer references, not copies. After publication,
 the producer must not change event membership or step identity. Only the timing
@@ -72,6 +72,9 @@ Its peak values describe the process's PyTorch allocator on a tracked device;
 the model selects that device but is not the owner of the measured memory.
 Memory events and wire records therefore do not include `model_id`. The SQLite
 projection already stores device and rank identity without that field.
+`timestamp_unix_ns` is captured with `time.time_ns()` immediately after the
+allocator peak reads and preserved through capture completion, queue draining,
+transport, and storage; it is not GPU completion or sampler drain time.
 
 The active capture keeps one memory snapshot per process for one active step on
 one tracked device. `record()` replaces that snapshot. The memory queue retains

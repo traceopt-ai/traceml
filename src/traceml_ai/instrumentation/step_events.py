@@ -89,12 +89,13 @@ class StepMemoryEvent:
 
     Peaks are bytes, or ``None`` when CUDA memory is not applicable. Capture
     completion assigns ``step`` before publication; producers must not modify
-    the event afterward. ``timestamp`` is the measurement time, not drain time.
+    the event afterward. ``timestamp_unix_ns`` is the measurement time in Unix
+    nanoseconds, not drain time.
     """
 
     step: int
     device: str
-    timestamp: float
+    timestamp_unix_ns: int
     peak_allocated: Optional[float]
     peak_reserved: Optional[float]
 
