@@ -62,10 +62,10 @@ def _insert_aligned_step(
                 """
                 INSERT INTO step_memory_samples(
                     recv_ts_ns, rank, global_rank, world_size,
-                    sample_ts_s, step
+                    timestamp_unix_ns, step
                 ) VALUES (?, ?, ?, 2, ?, ?);
                 """,
-                (recv_ts_ns, rank, rank, float(step * 100), step),
+                (recv_ts_ns, rank, rank, step * 100_000_000_000, step),
             )
 
 

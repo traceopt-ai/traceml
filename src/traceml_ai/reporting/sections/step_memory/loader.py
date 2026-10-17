@@ -96,24 +96,24 @@ def _load_candidate_rows(
     *,
     start_step: Optional[int] = None,
     end_step: Optional[int] = None,
-    start_ts_s: Optional[float] = None,
-    end_ts_s: Optional[float] = None,
+    start_time_unix_ns: Optional[int] = None,
+    end_time_unix_ns: Optional[int] = None,
 ) -> Dict[int, Dict[int, _StepMemoryCandidateRow]]:
     """Load complete memory rows, deduped by `(global_rank, step)`."""
     predicates = []
-    params: list[float | int] = []
+    params: list[int] = []
     if start_step is not None:
         predicates.append("step >= ?")
         params.append(int(start_step))
     if end_step is not None:
         predicates.append("step <= ?")
         params.append(int(end_step))
-    if start_step is None and start_ts_s is not None:
-        predicates.append("sample_ts_s >= ?")
-        params.append(float(start_ts_s))
-    if end_step is None and end_ts_s is not None:
-        predicates.append("sample_ts_s <= ?")
-        params.append(float(end_ts_s))
+    if start_step is None and start_time_unix_ns is not None:
+        predicates.append("timestamp_unix_ns >= ?")
+        params.append(int(start_time_unix_ns))
+    if end_step is None and end_time_unix_ns is not None:
+        predicates.append("timestamp_unix_ns <= ?")
+        params.append(int(end_time_unix_ns))
     step_filter = (
         "\n              AND " + " AND ".join(predicates) if predicates else ""
     )
@@ -196,8 +196,8 @@ def _build_aligned_window(
     *,
     start_step: Optional[int] = None,
     end_step: Optional[int] = None,
-    start_ts_s: Optional[float] = None,
-    end_ts_s: Optional[float] = None,
+    start_time_unix_ns: Optional[int] = None,
+    end_time_unix_ns: Optional[int] = None,
 ) -> StepMemoryAlignedWindow:
     """Build the complete common step-memory history across global ranks."""
     global_ranks_seen = _load_global_ranks_seen(conn)
@@ -205,8 +205,8 @@ def _build_aligned_window(
         conn,
         start_step=start_step,
         end_step=end_step,
-        start_ts_s=start_ts_s,
-        end_ts_s=end_ts_s,
+        start_time_unix_ns=start_time_unix_ns,
+        end_time_unix_ns=end_time_unix_ns,
     )
     common_steps = common_suffix_steps(candidates)
     if not common_steps:
@@ -249,8 +249,8 @@ def load_step_memory_section_data(
     *,
     start_step: Optional[int] = None,
     end_step: Optional[int] = None,
-    start_ts_s: Optional[float] = None,
-    end_ts_s: Optional[float] = None,
+    start_time_unix_ns: Optional[int] = None,
+    end_time_unix_ns: Optional[int] = None,
 ) -> StepMemorySectionData:
     """
     Load bounded step-memory section data from the SQLite history database.
@@ -273,8 +273,8 @@ def load_step_memory_section_data(
             conn,
             start_step=start_step,
             end_step=end_step,
-            start_ts_s=start_ts_s,
-            end_ts_s=end_ts_s,
+            start_time_unix_ns=start_time_unix_ns,
+            end_time_unix_ns=end_time_unix_ns,
         )
         metrics = sorted(
             build_combined_metrics_from_window(aligned_window),

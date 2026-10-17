@@ -62,14 +62,17 @@ class StepMemorySummarySection(
                 if self.analysis_window is not None
                 else None
             ),
-            start_ts_s=(
-                self.analysis_window.start_ts_s
+            # LEGACY SOURCE TIME: public seconds bounds until RFC-0011 PR 5.
+            start_time_unix_ns=(
+                round(self.analysis_window.start_ts_s * 1_000_000_000)
                 if self.analysis_window is not None
+                and self.analysis_window.start_ts_s is not None
                 else None
             ),
-            end_ts_s=(
-                self.analysis_window.end_ts_s
+            end_time_unix_ns=(
+                round(self.analysis_window.end_ts_s * 1_000_000_000)
                 if self.analysis_window is not None
+                and self.analysis_window.end_ts_s is not None
                 else None
             ),
         )
