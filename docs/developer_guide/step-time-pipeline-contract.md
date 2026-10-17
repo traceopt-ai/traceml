@@ -45,6 +45,17 @@ own finalization and replacement of the active capture; integrations should
 not call the capture's private finalization methods. CUDA resolution may finish
 later in the sampler because queued events already carry their step number.
 
+Step Time rows carry `timestamp_unix_ns`, the maximum recorded CPU event end
+for that step, expressed as integer Unix nanoseconds. Delayed CUDA resolution,
+queue draining, and transport preserve this source time; it is not an absolute
+GPU completion timestamp. The existing CPU duration clocks remain unchanged.
+
+During the source timestamp migration, other raw tables and
+public summary timestamp metadata still use seconds. A temporary storage
+bridge keeps shared readers consistent, and the Step Time projection accepts
+the former row `timestamp` key until cleanup in PR 5. New Step Time rows store
+and emit only the canonical timestamp.
+
 Publication and reading transfer references, not copies. After publication,
 the producer must not change event membership or step identity. Only the timing
 sampler resolves CUDA events.

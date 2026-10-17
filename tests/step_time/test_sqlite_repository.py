@@ -493,7 +493,7 @@ def test_writer_events_json_round_trips_through_repository_decoder(
                 "step_time": [
                     StepTimeEventSample(
                         seq=1,
-                        timestamp=1.0,
+                        timestamp_unix_ns=1_000_000_000,
                         step=7,
                         events=events,
                     ).to_wire()
@@ -600,6 +600,18 @@ def test_repository_returns_filtered_progress_identity_and_context(
                 recv_ts_ns, rank, global_rank, step, events_json
             ) VALUES (99, 0, NULL, 99, '{}');
             """)
+        # Source time wins over insertion order, even one nanosecond apart.
+        timestamp_unix_ns = 1_700_000_000_000_000_000
+        conn.execute(
+            "UPDATE step_time_samples SET timestamp_unix_ns = ? "
+            "WHERE global_rank = 1;",
+            (timestamp_unix_ns,),
+        )
+        conn.execute(
+            "UPDATE step_time_samples SET timestamp_unix_ns = ?, "
+            "hostname = 'source-latest' WHERE global_rank = 1 AND step = 3;",
+            (timestamp_unix_ns + 1,),
+        )
         snapshot = SQLiteStepTimeRepository(conn).load_summary(
             StepTimeLoadRequest(rank_filter=(1,))
         )
@@ -609,7 +621,7 @@ def test_repository_returns_filtered_progress_identity_and_context(
     assert snapshot.cursor.latest_step == 99
     assert snapshot.cursor.last_row_id == 7
     assert snapshot.training_strategy == "fsdp"
-    assert snapshot.identities[1].hostname == "worker-0"
+    assert snapshot.identities[1].hostname == "source-latest"
     assert snapshot.identities[1].global_rank == 1
 
 
