@@ -309,12 +309,21 @@ def test_process_section_loader_and_builder_use_sqlite_fixture(tmp_path):
 
 def test_process_loader_uses_selected_time_window(tmp_path):
     db_path = tmp_path / "process_latest.db"
+    boundary_unix_ns = 1_792_336_915_368_049_000
     with summary_database(db_path) as conn:
         _seed_process_samples(conn)
+        conn.execute(
+            "UPDATE process_samples SET timestamp_unix_ns = ? WHERE id = 2",
+            (boundary_unix_ns,),
+        )
 
     data = load_process_section_data(
         str(db_path),
-        analysis_window=AnalysisWindow(30.0, start_ts_s=11.0, end_ts_s=11.0),
+        analysis_window=AnalysisWindow(
+            30.0,
+            start_ts_s=boundary_unix_ns / 1_000_000_000,
+            end_ts_s=boundary_unix_ns / 1_000_000_000,
+        ),
     )
 
     assert data.aggregate.process_samples == 1

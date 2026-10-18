@@ -193,10 +193,15 @@ def _section_observation(
         params: tuple[Any, ...] = (window.start_step, window.end_step)
     else:
         where = f"{column} BETWEEN ? AND ?"
-        # LEGACY SOURCE TIME: public seconds bounds until RFC-0011 PR 5.
-        params = tuple(
-            round(value * units_per_s) if units_per_s != 1 else value
-            for value in (window.start_ts_s, window.end_ts_s)
+        # LEGACY SOURCE TIME: public float seconds until RFC-0011 PR 5;
+        # 1 us keeps inclusive epoch-scale nanosecond bounds inclusive.
+        params = (
+            (
+                round(window.start_ts_s * units_per_s) - 1_000,
+                round(window.end_ts_s * units_per_s) + 1_000,
+            )
+            if units_per_s != 1
+            else (window.start_ts_s, window.end_ts_s)
         )
 
     try:

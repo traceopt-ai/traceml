@@ -20,7 +20,10 @@ import pytest
 
 from tests.renderers.process.conftest import GB
 from traceml_ai.renderers.process.repository import ProcessRepository
-from traceml_ai.renderers.shared.run_series import RunSeriesPlan
+from traceml_ai.renderers.shared.run_series import (
+    HAS_RANGE_FRAME,
+    RunSeriesPlan,
+)
 
 
 @pytest.fixture
@@ -242,3 +245,27 @@ def test_run_history_sql_errors_propagate(repo):
     )
     with pytest.raises(sqlite3.OperationalError, match="query failed"):
         repository.fetch_cpu_capacity_run(_FailingConnection(), plan)
+
+
+@pytest.mark.skipif(not HAS_RANGE_FRAME, reason="requires SQLite RANGE frames")
+def test_run_history_range_window_keeps_second_units(repo):
+    repository, db = repo
+    for seq, timestamp, rss in (
+        (1, 100.0, 1.0 * GB),
+        (2, 102.0, 3.0 * GB),
+        (3, 120.0, 9.0 * GB),
+    ):
+        db.sample(seq=seq, rank=0, ts=timestamp, ram=rss)
+    plan = RunSeriesPlan(
+        window_s=5.0,
+        cadence_s=5.0,
+        stride=1,
+        max_points=120,
+        sample_count=3,
+    )
+
+    with repository.connect() as conn:
+        rows = repository.fetch_rss_run(conn, plan)
+
+    assert [row[1] for row in rows] == [102.0, 120.0]
+    assert [row[2] for row in rows] == pytest.approx([2.0 * GB, 9.0 * GB])

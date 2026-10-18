@@ -62,15 +62,16 @@ class StepMemorySummarySection(
                 if self.analysis_window is not None
                 else None
             ),
-            # LEGACY SOURCE TIME: public seconds bounds until RFC-0011 PR 5.
+            # LEGACY SOURCE TIME: public float seconds until RFC-0011 PR 5;
+            # 1 us keeps inclusive epoch-scale nanosecond bounds inclusive.
             start_time_unix_ns=(
-                round(self.analysis_window.start_ts_s * 1_000_000_000)
+                round(self.analysis_window.start_ts_s * 1_000_000_000) - 1_000
                 if self.analysis_window is not None
                 and self.analysis_window.start_ts_s is not None
                 else None
             ),
             end_time_unix_ns=(
-                round(self.analysis_window.end_ts_s * 1_000_000_000)
+                round(self.analysis_window.end_ts_s * 1_000_000_000) + 1_000
                 if self.analysis_window is not None
                 and self.analysis_window.end_ts_s is not None
                 else None

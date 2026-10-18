@@ -29,21 +29,23 @@ class ProcessSectionData:
 
 def _process_samples_cte(
     analysis_window: Optional[AnalysisWindow],
-) -> tuple[str, tuple[float, ...]]:
+) -> tuple[str, tuple[int, ...]]:
     """
     Return the CTE used for process history with resolved global ranks.
     """
-    params: tuple[float, ...] = ()
+    params: tuple[int, ...] = ()
     time_filter = ""
     if (
         analysis_window is not None
         and analysis_window.start_ts_s is not None
         and analysis_window.end_ts_s is not None
     ):
-        time_filter = "AND sample_ts_s BETWEEN ? AND ?"
+        time_filter = "AND timestamp_unix_ns BETWEEN ? AND ?"
+        # LEGACY SOURCE TIME: public float seconds until RFC-0011 PR 5;
+        # 1 us keeps inclusive epoch-scale nanosecond bounds inclusive.
         params = (
-            analysis_window.start_ts_s,
-            analysis_window.end_ts_s,
+            round(analysis_window.start_ts_s * 1_000_000_000) - 1_000,
+            round(analysis_window.end_ts_s * 1_000_000_000) + 1_000,
         )
     return (
         f"""
@@ -71,8 +73,8 @@ def load_process_summary_aggregate(
         sample_cte + """
         SELECT
             COUNT(*),
-            MIN(sample_ts_s),
-            MAX(sample_ts_s),
+            MIN(timestamp_unix_ns),
+            MAX(timestamp_unix_ns),
             COUNT(DISTINCT global_rank)
         FROM selected_process_samples;
         """,
@@ -81,8 +83,12 @@ def load_process_summary_aggregate(
 
     n_rows = int(count_row[0] or 0)
     # Convert nullable SQLite scalars into typed summary fields.
-    first_ts = float(count_row[1]) if count_row[1] is not None else None
-    last_ts = float(count_row[2]) if count_row[2] is not None else None
+    first_ts = (
+        count_row[1] / 1_000_000_000 if count_row[1] is not None else None
+    )
+    last_ts = (
+        count_row[2] / 1_000_000_000 if count_row[2] is not None else None
+    )
     distinct_global_ranks = int(count_row[3] or 0)
 
     # Compute aggregate CPU, RAM, and GPU process metrics over the same window.

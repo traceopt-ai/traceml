@@ -1151,7 +1151,7 @@ def test_the_card_renders_the_same_from_a_real_database(tmp_path):
     for seq in (1, 2):
         conn.execute(
             "INSERT INTO process_samples (recv_ts_ns, rank, global_rank, "
-            "seq, sample_ts_s, cpu_percent, cpu_logical_core_count, "
+            "seq, timestamp_unix_ns, cpu_percent, cpu_logical_core_count, "
             "ram_used_bytes, ram_total_bytes, gpu_available, "
             "gpu_mem_used_bytes, gpu_mem_reserved_bytes, "
             "gpu_mem_total_bytes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -1160,7 +1160,7 @@ def test_the_card_renders_the_same_from_a_real_database(tmp_path):
                 0,
                 0,
                 seq,
-                1_700_000_000.0 + seq,
+                round((1_700_000_000.0 + seq) * 1_000_000_000),
                 200.0,
                 8,
                 4.0 * GIB,

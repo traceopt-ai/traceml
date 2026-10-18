@@ -49,7 +49,9 @@ def _run(
                 global_rank=rank,
                 node_rank=0,
                 seq=seq,
-                sample_ts_s=1_700_000_000.0 + seq * cadence_s,
+                timestamp_unix_ns=round(
+                    (1_700_000_000.0 + seq * cadence_s) * 1_000_000_000
+                ),
                 cpu_percent=(700.0 if rank == hot_rank else 200.0),
                 cpu_logical_core_count=cores,
                 ram_used_bytes=(2.0 + rank * 0.5) * GB,
@@ -375,7 +377,9 @@ def test_an_even_run_leaves_the_rows_shut(process_db):
                 global_rank=rank,
                 node_rank=0,
                 seq=seq,
-                sample_ts_s=1_700_000_000.0 + seq * 2,
+                timestamp_unix_ns=round(
+                    (1_700_000_000.0 + seq * 2) * 1_000_000_000
+                ),
                 cpu_percent=200.0,
                 cpu_logical_core_count=8,
                 ram_used_bytes=2.0 * GB,
@@ -412,7 +416,9 @@ def test_the_recent_window_is_a_duration_not_a_sample_count(process_db):
             global_rank=0,
             node_rank=0,
             seq=seq,
-            sample_ts_s=1_700_000_000.0 + seq * 0.5,
+            timestamp_unix_ns=round(
+                (1_700_000_000.0 + seq * 0.5) * 1_000_000_000
+            ),
             cpu_percent=200.0,
             cpu_logical_core_count=8,
             ram_used_bytes=2.0 * GB,
@@ -423,12 +429,14 @@ def test_the_recent_window_is_a_duration_not_a_sample_count(process_db):
         db_path=process_db.path, sampler_interval_s=0.5
     )
     with computer._db.connect() as conn:
-        newest = computer._db.newest_sample_ts(conn)
+        newest = computer._db.newest_timestamp_unix_ns(conn)
         rows = computer._db.fetch_recent_rank_window(
-            conn, window_s=RECENT_WINDOW_S, newest_ts=newest
+            conn,
+            window_s=RECENT_WINDOW_S,
+            newest_timestamp_unix_ns=newest,
         )
-    stamps = [r["sample_ts_s"] for r in rows]
-    span = max(stamps) - min(stamps)
+    stamps = [r["timestamp_unix_ns"] for r in rows]
+    span = (max(stamps) - min(stamps)) / 1_000_000_000
     assert span <= RECENT_WINDOW_S
     # A sample-count window would have taken all 200 rows, i.e. 100 s.
     assert len(rows) < 200
@@ -451,7 +459,9 @@ def test_the_rss_tile_shows_the_median_not_the_newest_sample(process_db):
             global_rank=0,
             node_rank=0,
             seq=seq,
-            sample_ts_s=1_700_000_000.0 + seq * 2,
+            timestamp_unix_ns=round(
+                (1_700_000_000.0 + seq * 2) * 1_000_000_000
+            ),
             cpu_percent=200.0,
             cpu_logical_core_count=8,
             ram_used_bytes=used,
@@ -480,7 +490,9 @@ def test_reserved_selects_on_each_rank_s_peak_not_its_newest(process_db):
                 global_rank=rank,
                 node_rank=0,
                 seq=seq,
-                sample_ts_s=1_700_000_000.0 + seq * 2,
+                timestamp_unix_ns=round(
+                    (1_700_000_000.0 + seq * 2) * 1_000_000_000
+                ),
                 cpu_percent=200.0,
                 cpu_logical_core_count=8,
                 ram_used_bytes=2.0 * GB,
@@ -520,7 +532,9 @@ def test_allocated_and_reserved_come_from_the_same_rank_and_row(process_db):
                 global_rank=rank,
                 node_rank=0,
                 seq=seq,
-                sample_ts_s=1_700_000_000.0 + seq * 2,
+                timestamp_unix_ns=round(
+                    (1_700_000_000.0 + seq * 2) * 1_000_000_000
+                ),
                 cpu_percent=200.0,
                 cpu_logical_core_count=8,
                 ram_used_bytes=2.0 * GB,
@@ -559,7 +573,9 @@ def test_the_total_sums_ranks_on_their_own_clocks(process_db):
                 global_rank=rank,
                 node_rank=0,
                 seq=seq,
-                sample_ts_s=1_700_000_000.0 + seq * 2 + offset,
+                timestamp_unix_ns=round(
+                    (1_700_000_000.0 + seq * 2 + offset) * 1_000_000_000
+                ),
                 cpu_percent=cpu,
                 cpu_logical_core_count=8,
                 ram_used_bytes=2.0 * GB,

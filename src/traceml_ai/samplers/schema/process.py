@@ -102,6 +102,7 @@ class ProcessSample:
 
     Notes
     -----
+    - ``timestamp_unix_ns`` is the source measurement time in Unix nanoseconds
     - CPU usage is process-relative (not system-wide)
     - RAM usage reflects resident set size (RSS)
     - GPU metrics, if present, refer to the single device used by the process
@@ -109,7 +110,7 @@ class ProcessSample:
     """
 
     sample_idx: int
-    timestamp: float
+    timestamp_unix_ns: int
     pid: int
 
     cpu_percent: Optional[float]
@@ -138,7 +139,7 @@ class ProcessSample:
         """
         return {
             "seq": self.sample_idx,
-            "ts": self.timestamp,
+            "timestamp_unix_ns": int(self.timestamp_unix_ns),
             "pid": self.pid,
             "cpu": self.cpu_percent,
             "cpu_cores": self.cpu_logical_core_count,
@@ -168,7 +169,7 @@ class ProcessSample:
 
         return ProcessSample(
             sample_idx=data["seq"],
-            timestamp=data["ts"],
+            timestamp_unix_ns=int(data["timestamp_unix_ns"]),
             pid=data["pid"],
             cpu_percent=data["cpu"],
             cpu_logical_core_count=data["cpu_cores"],

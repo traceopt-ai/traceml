@@ -83,19 +83,25 @@ def _sample_order(row: Any) -> Tuple[float, int]:
     return (seq if seq is not None else float("-inf"), int(row["id"]))
 
 
+def _timestamp_unix_ns(row: Any) -> Optional[int]:
+    """The row's canonical source time, or ``None`` when unusable."""
+    value = row["timestamp_unix_ns"]
+    return int(value) if type(value) is int else None
+
+
 def observed_cadence(by_rank: Dict[int, List[Any]]) -> Optional[float]:
     """The gap the ranks actually sample at, from the busiest rank."""
     best: Optional[float] = None
     for rows in by_rank.values():
         stamps = [
             value
-            for value in (opt_float(r["sample_ts_s"]) for r in rows)
+            for value in (_timestamp_unix_ns(r) for r in rows)
             if value is not None
         ]
         if len(stamps) < 2:
             continue
-        span = max(stamps) - min(stamps)
-        cadence = finite(span / float(len(stamps) - 1))
+        span_s = (max(stamps) - min(stamps)) / 1_000_000_000
+        cadence = finite(span_s / float(len(stamps) - 1))
         if cadence and cadence > 0:
             best = cadence if best is None else min(best, cadence)
     return best
@@ -149,7 +155,7 @@ def read_rank_clock(
     db: ProcessRepository,
     conn: Any,
     *,
-    newest_ts: Optional[float],
+    newest_timestamp_unix_ns: Optional[int],
     configured_interval_s: Optional[float],
     window_s: float = RECENT_WINDOW_S,
 ) -> RankClock:
@@ -161,7 +167,9 @@ def read_rank_clock(
     so a rank is stale when its peers keep reporting and it does not.
     """
     window_rows = db.fetch_recent_rank_window(
-        conn, window_s=window_s, newest_ts=newest_ts
+        conn,
+        window_s=window_s,
+        newest_timestamp_unix_ns=newest_timestamp_unix_ns,
     )
     latest_rows = db.fetch_rank_latest(conn)
 

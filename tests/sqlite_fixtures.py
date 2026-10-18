@@ -190,7 +190,7 @@ def insert_process_sample(
         local_world_size=local_world_size,
         node_rank=node_rank,
         hostname=_defaulted(hostname, f"worker-{rank}"),
-        sample_ts_s=ts,
+        timestamp_unix_ns=round(ts * 1_000_000_000),
         seq=_defaulted(seq, row_id),
         cpu_percent=50.0 + rank if cpu_percent is None else cpu_percent,
         cpu_logical_core_count=cpu_logical_core_count,
