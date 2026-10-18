@@ -670,7 +670,7 @@ def test_sqlite_window_has_one_share_across_live_and_summary_consumers(
                 local_world_size INTEGER,
                 node_rank INTEGER,
                 hostname TEXT,
-                sample_ts_s REAL,
+                timestamp_unix_ns INTEGER,
                 seq INTEGER,
                 step INTEGER,
                 events_json TEXT NOT NULL
@@ -710,12 +710,12 @@ def test_sqlite_window_has_one_share_across_live_and_summary_consumers(
             """
             INSERT INTO step_time_samples(
                 recv_ts_ns, rank, global_rank, local_rank, world_size,
-                local_world_size, node_rank, hostname, sample_ts_s,
+                local_world_size, node_rank, hostname, timestamp_unix_ns,
                 seq, step, events_json
             ) VALUES (?, 0, 0, 0, 1, 1, 0, 'worker-0', ?, ?, ?, ?);
             """,
             [
-                (step, float(step), step, step, events_json)
+                (step, step * 1_000_000_000, step, step, events_json)
                 for step in range(1, 31)
             ],
         )

@@ -231,7 +231,10 @@ def test_completed_captures_wait_until_sampler_drains(
     assert rows[0]["events"]["forward"]["cpu"]["cpu_ms"] == pytest.approx(5.0)
     assert rows[0]["events"]["forward"]["cpu"]["n_calls"] == 2
     assert rows[1]["events"]["forward"]["cpu"]["cpu_ms"] == pytest.approx(4.0)
-    assert [row["timestamp"] for row in rows] == [2.003, 3.004]
+    assert [row["timestamp_unix_ns"] for row in rows] == [
+        2_003_000_000,
+        3_004_000_000,
+    ]
     assert step_events.drain_step_time_batches() == []
     sampler.sample()
     assert len(rows) == 2
@@ -299,6 +302,11 @@ def test_unresolved_cuda_batch_holds_back_later_batches(
     end.ready = True
     sampler.sample()
     assert [row["step"] for row in rows] == [10, 11]
+    assert [row["timestamp_unix_ns"] for row in rows] == [
+        1_002_000_000,
+        2_001_000_000,
+    ]
+    assert all("timestamp" not in row for row in rows)
     assert rows[0]["events"]["gpu"]["cuda:0"]["gpu_ms"] == 7.0
     assert returned == [start, end]
     assert event.gpu_start is event.gpu_end is None

@@ -307,7 +307,7 @@ def insert_step_time_sample(
     )
     sample = StepTimeEventSample(
         seq=_defaulted(seq, row_id),
-        timestamp=float(step) if ts is None else ts,
+        timestamp_unix_ns=round((float(step) if ts is None else ts) * 1e9),
         step=step,
         events=dict(payload),
     )

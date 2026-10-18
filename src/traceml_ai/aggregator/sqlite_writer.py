@@ -33,6 +33,7 @@ from traceml_ai.telemetry.envelope import (
     TelemetryEnvelope,
     normalize_telemetry_envelope,
 )
+from traceml_ai.telemetry.legacy_source_time import legacy_source_time_storage
 from traceml_ai.telemetry.retention import (
     DEFAULT_HISTORY_RETENTION_S,
     retention_cutoff_recv_ts_ns,
@@ -150,7 +151,7 @@ class SQLiteWriterSimple:
         self._written = 0
         self._last_prune_monotonic: Optional[float] = None
         self._deleted_through_step: Optional[int] = None
-        self._deleted_through_ts_s: Optional[float] = None
+        self._deleted_through_timestamp_unix_ns: Optional[int] = None
         self._last_error: Optional[str] = None
         self._finalize_result: Optional[SQLiteFinalizeResult] = None
 
@@ -401,6 +402,10 @@ class SQLiteWriterSimple:
                 if positions is None:
                     continue
                 sample_position, step_position = positions
+                _, units_per_s = legacy_source_time_storage(table)
+                source_floor = self._deleted_through_timestamp_unix_ns
+                if source_floor is not None and units_per_s == 1:
+                    source_floor = source_floor / 1_000_000_000
 
                 def keep(row: tuple) -> bool:
                     if step_position is not None:
@@ -410,11 +415,11 @@ class SQLiteWriterSimple:
                             and self._deleted_through_step is not None
                         ):
                             return int(step) > self._deleted_through_step
-                    sample_ts_s = row[sample_position]
+                    sample_time = row[sample_position]
                     return (
-                        sample_ts_s is None
-                        or self._deleted_through_ts_s is None
-                        or float(sample_ts_s) > self._deleted_through_ts_s
+                        sample_time is None
+                        or source_floor is None
+                        or sample_time > source_floor
                     )
 
                 rows_by_table[table] = [row for row in rows if keep(row)]
@@ -459,23 +464,24 @@ class SQLiteWriterSimple:
 
     def _advance_retention_floor(
         self,
-        frontier: tuple[Optional[int], Optional[float]],
+        frontier: tuple[Optional[int], Optional[int]],
     ) -> None:
         """Remember committed deletion boundaries for future inserts."""
-        step, sample_ts_s = frontier
+        step, timestamp_unix_ns = frontier
         if step is not None:
             self._deleted_through_step = max(
                 step, self._deleted_through_step or step
             )
-        if sample_ts_s is not None:
-            self._deleted_through_ts_s = max(
-                sample_ts_s, self._deleted_through_ts_s or sample_ts_s
+        if timestamp_unix_ns is not None:
+            self._deleted_through_timestamp_unix_ns = max(
+                timestamp_unix_ns,
+                self._deleted_through_timestamp_unix_ns or timestamp_unix_ns,
             )
 
     def _prune_all_retained_rows(
         self,
         conn: sqlite3.Connection,
-    ) -> Optional[tuple[Optional[int], Optional[float]]]:
+    ) -> Optional[tuple[Optional[int], Optional[int]]]:
         """Prune history through one Step Time/Step Memory aligned frontier."""
         owns_transaction = not conn.in_transaction
         pruned_through = None
@@ -494,7 +500,7 @@ class SQLiteWriterSimple:
                 )
                 if frontier is not None:
                     pruned_through = frontier
-                    step, boundary_ts_s = frontier
+                    step, boundary_timestamp_unix_ns = frontier
                     if step is not None:
                         for table in _STEP_HISTORY_TABLES:
                             self._prune_history_table(
@@ -504,17 +510,25 @@ class SQLiteWriterSimple:
                                 where_params=(step,),
                             )
                     for table in _TIME_HISTORY_TABLES:
-                        if boundary_ts_s is None:
+                        if boundary_timestamp_unix_ns is None:
                             where_sql = "recv_ts_ns < ?"
                             where_params: tuple[Any, ...] = (cutoff,)
                         else:
                             # Periodic history follows the shared step timestamp.
                             # Malformed rows still age out by receive time.
-                            where_sql = (
-                                "sample_ts_s <= ? OR "
-                                "(sample_ts_s IS NULL AND recv_ts_ns < ?)"
+                            column, units_per_s = legacy_source_time_storage(
+                                table
                             )
-                            where_params = (boundary_ts_s, cutoff)
+                            boundary = (
+                                boundary_timestamp_unix_ns
+                                if units_per_s == 1_000_000_000
+                                else boundary_timestamp_unix_ns / 1_000_000_000
+                            )
+                            where_sql = (
+                                f"{column} <= ? OR "
+                                f"({column} IS NULL AND recv_ts_ns < ?)"
+                            )
+                            where_params = (boundary, cutoff)
                         self._prune_history_table(
                             conn,
                             table=table,
@@ -645,7 +659,7 @@ class SQLiteWriterSimple:
         conn: sqlite3.Connection,
         *,
         cutoff_recv_ts_ns: int,
-    ) -> Optional[tuple[Optional[int], Optional[float]]]:
+    ) -> Optional[tuple[Optional[int], Optional[int]]]:
         """Return the shared step/timestamp frontier, or a time-only fallback."""
         expected_ranks = cls._expected_step_ranks(conn)
         if expected_ranks is None:
@@ -677,7 +691,7 @@ class SQLiteWriterSimple:
         )
         row = conn.execute(
             """
-            SELECT MAX(sample_ts_s)
+            SELECT MAX(timestamp_unix_ns)
             FROM step_time_samples
             WHERE step = ?;
             """,
@@ -685,7 +699,7 @@ class SQLiteWriterSimple:
         ).fetchone()
         if not row or row[0] is None:
             return None
-        return frontier_step, float(row[0])
+        return frontier_step, int(row[0])
 
     @staticmethod
     def _prune_history_table(
@@ -707,13 +721,17 @@ class SQLiteWriterSimple:
     def _init_retention_indexes(conn: sqlite3.Connection) -> None:
         """Create indexes used by periodic retention queries."""
         for table in _HISTORY_TABLES:
+            column, units_per_s = legacy_source_time_storage(table)
+            index_clock = (
+                "timestamp" if units_per_s == 1_000_000_000 else "sample_ts"
+            )
             conn.execute(
                 f"CREATE INDEX IF NOT EXISTS idx_{table}_recv_ts "
                 f"ON {table}(recv_ts_ns);"
             )
             conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_{table}_sample_ts_global "
-                f"ON {table}(sample_ts_s, id);"
+                f"CREATE INDEX IF NOT EXISTS idx_{table}_{index_clock}_global "
+                f"ON {table}({column}, id);"
             )
 
     def _flush_once(self, conn: sqlite3.Connection) -> None:

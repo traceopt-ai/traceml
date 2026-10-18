@@ -75,7 +75,7 @@ class StepTimeSampler(BaseSampler):
 
     def _build_step_payload(
         self, batch: StepTimeBatch
-    ) -> Tuple[float, Dict[str, Dict[str, Dict[str, Any]]]]:
+    ) -> Tuple[int, Dict[str, Dict[str, Dict[str, Any]]]]:
         """
         Build a single per-step payload containing all aggregated event timings.
         """
@@ -118,17 +118,17 @@ class StepTimeSampler(BaseSampler):
                 "n_calls": int(n_calls[(name, device, is_gpu)]),
             }
 
-        return float(ts_max), dict(events)
+        return int(round(ts_max * 1_000_000_000)), dict(events)
 
     def _save_step(
-        self, step: int, timestamp: float, events: Dict[str, Any]
+        self, step: int, timestamp_unix_ns: int, events: Dict[str, Any]
     ) -> None:
         """
         Persist one step-aligned record.
         """
         sample = StepTimeEventSample(
             seq=self.sample_idx,
-            timestamp=float(timestamp),
+            timestamp_unix_ns=timestamp_unix_ns,
             step=int(step),
             events=events,
         )
@@ -150,10 +150,10 @@ class StepTimeSampler(BaseSampler):
 
                 self._pending.popleft()
 
-                ts, events = self._build_step_payload(batch)
+                timestamp_unix_ns, events = self._build_step_payload(batch)
                 self._save_step(
                     step=int(batch.step),
-                    timestamp=ts,
+                    timestamp_unix_ns=timestamp_unix_ns,
                     events=events,
                 )
 
