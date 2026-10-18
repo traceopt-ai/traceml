@@ -83,20 +83,14 @@ def _sample_order(row: Any) -> Tuple[float, int]:
     return (seq if seq is not None else float("-inf"), int(row["id"]))
 
 
-def _timestamp_unix_ns(row: Any) -> Optional[int]:
-    """The row's canonical source time, or ``None`` when unusable."""
-    value = row["timestamp_unix_ns"]
-    return int(value) if type(value) is int else None
-
-
 def observed_cadence(by_rank: Dict[int, List[Any]]) -> Optional[float]:
     """The gap the ranks actually sample at, from the busiest rank."""
     best: Optional[float] = None
     for rows in by_rank.values():
         stamps = [
             value
-            for value in (_timestamp_unix_ns(r) for r in rows)
-            if value is not None
+            for value in (r["timestamp_unix_ns"] for r in rows)
+            if type(value) is int
         ]
         if len(stamps) < 2:
             continue

@@ -10,7 +10,11 @@ from tests.sqlite_fixtures import (
     summary_database,
 )
 from traceml_ai.reporting.sections.process import ProcessSummarySection
-from traceml_ai.reporting.analysis_window import AnalysisWindow
+from traceml_ai.reporting.analysis_window import (
+    AnalysisWindow,
+    build_analysis_window_payload,
+    resolve_analysis_window,
+)
 from traceml_ai.reporting.sections.process.loader import (
     load_process_section_data,
 )
@@ -172,13 +176,14 @@ def test_system_section_reports_scoped_multinode_primary_issue(tmp_path):
 
 def test_system_loader_uses_selected_time_window(tmp_path):
     db_path = tmp_path / "system_latest.db"
+    timestamp_s = 1_792_336_915.3680508
     with summary_database(db_path) as conn:
         _seed_system_samples(conn)
         insert_system_sample(
             conn,
             row_id=2,
             rank=0,
-            ts=20.0,
+            ts=timestamp_s,
             gpu_available=True,
             gpu_count=1,
             cpu_percent=90.0,
@@ -196,10 +201,9 @@ def test_system_loader_uses_selected_time_window(tmp_path):
             ),
         )
 
-    data = load_system_section_data(
-        str(db_path),
-        analysis_window=AnalysisWindow(30.0, start_ts_s=20.0, end_ts_s=20.0),
-    )
+    window = resolve_analysis_window(str(db_path), retention_s=1.0)
+    assert window.end_time_unix_ns / 1_000_000_000 == timestamp_s
+    data = load_system_section_data(str(db_path), analysis_window=window)
 
     assert data.cluster.aggregate.system_samples == 1
     assert data.cluster.aggregate.cpu_avg_percent == 90.0
@@ -245,7 +249,11 @@ def test_system_loader_uses_selected_time_window_per_node(tmp_path):
 
     data = load_system_section_data(
         str(db_path),
-        analysis_window=AnalysisWindow(30.0, start_ts_s=12.0, end_ts_s=12.0),
+        analysis_window=AnalysisWindow(
+            30.0,
+            start_time_unix_ns=12_000_000_000,
+            end_time_unix_ns=12_000_000_000,
+        ),
     )
 
     assert data.cluster.aggregate.system_samples == 2
@@ -316,16 +324,32 @@ def test_process_loader_uses_selected_time_window(tmp_path):
             "UPDATE process_samples SET timestamp_unix_ns = ? WHERE id = 2",
             (boundary_unix_ns,),
         )
+        conn.execute(
+            "UPDATE process_samples SET timestamp_unix_ns = ? WHERE id = 1",
+            (boundary_unix_ns - 1,),
+        )
+        conn.execute(
+            "INSERT INTO process_samples(recv_ts_ns, global_rank, "
+            "timestamp_unix_ns, cpu_percent) VALUES (3, 0, ?, 90.0)",
+            (boundary_unix_ns + 1,),
+        )
 
+    window = AnalysisWindow(
+        30.0,
+        start_time_unix_ns=boundary_unix_ns,
+        end_time_unix_ns=boundary_unix_ns,
+    )
     data = load_process_section_data(
         str(db_path),
-        analysis_window=AnalysisWindow(
-            30.0,
-            start_ts_s=boundary_unix_ns / 1_000_000_000,
-            end_ts_s=boundary_unix_ns / 1_000_000_000,
-        ),
+        analysis_window=window,
     )
 
+    assert (
+        build_analysis_window_payload(str(db_path), window)["sections"][
+            "process"
+        ]["samples"]
+        == 1
+    )
     assert data.aggregate.process_samples == 1
     assert data.aggregate.cpu_avg_percent == 40.0
     assert data.aggregate.ram_avg_bytes == 2000000000.0

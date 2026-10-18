@@ -272,17 +272,20 @@ def test_periodic_window_observes_nanosecond_step_memory(tmp_path) -> None:
     start_unix_ns = end_unix_ns - 1_000_000_000
     with summary_database(db_path) as conn:
         conn.execute(
-            "INSERT INTO system_samples(recv_ts_ns, sample_ts_s) "
-            "VALUES (1, ?), (2, ?);",
-            (start_unix_ns / 1_000_000_000, end_unix_ns / 1_000_000_000),
-        )
-        conn.execute(
-            "INSERT INTO step_memory_samples(recv_ts_ns, timestamp_unix_ns) "
+            "INSERT INTO process_samples(recv_ts_ns, timestamp_unix_ns) "
             "VALUES (1, ?), (2, ?);",
             (start_unix_ns, end_unix_ns),
         )
+        conn.execute(
+            "INSERT INTO step_memory_samples(recv_ts_ns, timestamp_unix_ns) "
+            "VALUES (1, ?), (2, ?), (3, ?), (4, ?);",
+            (start_unix_ns - 1, start_unix_ns, end_unix_ns, end_unix_ns + 1),
+        )
 
     window = resolve_analysis_window(str(db_path), retention_s=1.0)
+    assert window.start_time_unix_ns == start_unix_ns
+    assert window.end_time_unix_ns == end_unix_ns
+    assert window.duration_s == 1.0
     assert (
         build_analysis_window_payload(str(db_path), window)["sections"][
             "step_memory"

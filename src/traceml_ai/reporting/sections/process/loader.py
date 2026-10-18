@@ -37,15 +37,13 @@ def _process_samples_cte(
     time_filter = ""
     if (
         analysis_window is not None
-        and analysis_window.start_ts_s is not None
-        and analysis_window.end_ts_s is not None
+        and analysis_window.start_time_unix_ns is not None
+        and analysis_window.end_time_unix_ns is not None
     ):
         time_filter = "AND timestamp_unix_ns BETWEEN ? AND ?"
-        # LEGACY SOURCE TIME: public float seconds until RFC-0011 PR 5;
-        # 1 us keeps inclusive epoch-scale nanosecond bounds inclusive.
         params = (
-            round(analysis_window.start_ts_s * 1_000_000_000) - 1_000,
-            round(analysis_window.end_ts_s * 1_000_000_000) + 1_000,
+            analysis_window.start_time_unix_ns,
+            analysis_window.end_time_unix_ns,
         )
     return (
         f"""

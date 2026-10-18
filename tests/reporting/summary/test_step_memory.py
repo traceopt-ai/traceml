@@ -307,13 +307,16 @@ def test_step_memory_loader_uses_latest_common_steps_per_global_rank(tmp_path):
             end_time_unix_ns=end_ns,
         )
         assert bounded.aligned_window.steps == expected_steps
-
-    section = StepMemorySummarySection(
-        analysis_window=AnalysisWindow(
-            retention_s=1.0, start_ts_s=2.0, end_ts_s=3.0
+        section = StepMemorySummarySection(
+            analysis_window=AnalysisWindow(
+                retention_s=1.0,
+                start_time_unix_ns=start_ns,
+                end_time_unix_ns=end_ns,
+            )
         )
-    )
-    assert section.load(str(db_path)).aligned_window.steps == (2, 3)
+        assert (
+            section.load(str(db_path)).aligned_window.steps == expected_steps
+        )
 
 
 def test_step_memory_summary_wrapper_delegates_to_section_path(tmp_path):

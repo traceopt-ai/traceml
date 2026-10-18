@@ -34,22 +34,31 @@ class AnalysisWindow:
 
     retention_s: float
     anchor: Optional[str] = None
-    start_ts_s: Optional[float] = None
-    end_ts_s: Optional[float] = None
+    start_time_unix_ns: Optional[int] = None
+    end_time_unix_ns: Optional[int] = None
     start_step: Optional[int] = None
     end_step: Optional[int] = None
 
     @property
     def duration_s(self) -> Optional[float]:
-        if self.start_ts_s is None or self.end_ts_s is None:
+        if self.start_time_unix_ns is None or self.end_time_unix_ns is None:
             return None
-        return max(0.0, self.end_ts_s - self.start_ts_s)
+        return max(0, self.end_time_unix_ns - self.start_time_unix_ns) / 1e9
 
     def metadata(self) -> dict[str, Any]:
         """Return common fields embedded in every section metadata block."""
+        # LEGACY SOURCE TIME: public seconds metadata until RFC-0011 PR 5.
         return {
-            "analysis_start_ts_s": self.start_ts_s,
-            "analysis_end_ts_s": self.end_ts_s,
+            "analysis_start_ts_s": (
+                self.start_time_unix_ns / 1_000_000_000
+                if self.start_time_unix_ns is not None
+                else None
+            ),
+            "analysis_end_ts_s": (
+                self.end_time_unix_ns / 1_000_000_000
+                if self.end_time_unix_ns is not None
+                else None
+            ),
             "analysis_start_step": self.start_step,
             "analysis_end_step": self.end_step,
         }
@@ -65,15 +74,15 @@ def resolve_analysis_window(
     with closing(sqlite3.connect(db_path)) as conn:
         steps = _common_completed_steps(conn)
         if steps:
-            end_step, end_ts = steps[-1]
-            cutoff = end_ts - retention
+            end_step, end_time_unix_ns = steps[-1]
+            cutoff = end_time_unix_ns - round(retention * 1_000_000_000)
             selected = [item for item in steps if item[1] >= cutoff]
-            start_step, start_ts = selected[0]
+            start_step, start_time_unix_ns = selected[0]
             return AnalysisWindow(
                 retention_s=retention,
                 anchor="step_time",
-                start_ts_s=start_ts,
-                end_ts_s=end_ts,
+                start_time_unix_ns=start_time_unix_ns,
+                end_time_unix_ns=end_time_unix_ns,
                 start_step=start_step,
                 end_step=end_step,
             )
@@ -84,15 +93,15 @@ def resolve_analysis_window(
         return AnalysisWindow(
             retention_s=retention,
             anchor="periodic_telemetry",
-            start_ts_s=bounds[0],
-            end_ts_s=bounds[1],
+            start_time_unix_ns=bounds[0],
+            end_time_unix_ns=bounds[1],
         )
 
 
 def _common_completed_steps(
     conn: sqlite3.Connection,
-) -> list[tuple[int, float]]:
-    """Return completed-step source times in seconds for the public window."""
+) -> list[tuple[int, int]]:
+    """Return completed-step source times in Unix nanoseconds."""
     try:
         rows = conn.execute("""
             WITH deduplicated AS (
@@ -129,17 +138,16 @@ def _common_completed_steps(
             """).fetchall()
     except sqlite3.Error:
         return []
-    # LEGACY SOURCE TIME: public seconds bounds until RFC-0011 PR 5.
-    return [(int(row[0]), row[1] / 1_000_000_000) for row in rows]
+    return [(int(row[0]), int(row[1])) for row in rows]
 
 
 def _periodic_bounds(
     conn: sqlite3.Connection,
     *,
     retention_s: float,
-) -> Optional[tuple[float, float]]:
+) -> Optional[tuple[int, int]]:
     """Return up-to-retention bounds from available System/Process samples."""
-    values: list[float] = []
+    values: list[int] = []
     for table in ("system_samples", "process_samples"):
         column, units_per_s = legacy_source_time_storage(table)
         try:
@@ -149,11 +157,24 @@ def _periodic_bounds(
         except sqlite3.Error:
             continue
         if row and row[0] is not None and row[1] is not None:
-            values.extend((row[0] / units_per_s, row[1] / units_per_s))
+            for value in row:
+                if units_per_s == 1:
+                    # LEGACY SOURCE TIME: System seconds until PR 4. Split
+                    # before scaling to preserve the float's epoch precision.
+                    seconds, fraction = divmod(value, 1)
+                    value = int(seconds) * 1_000_000_000 + round(
+                        fraction * 1_000_000_000
+                    )
+                values.append(value)
     if not values:
         return None
-    end_ts = max(values)
-    return max(min(values), end_ts - retention_s), end_ts
+    end_time_unix_ns = max(values)
+    return (
+        max(
+            min(values), end_time_unix_ns - round(retention_s * 1_000_000_000)
+        ),
+        end_time_unix_ns,
+    )
 
 
 def build_analysis_window_payload(
@@ -166,11 +187,12 @@ def build_analysis_window_payload(
             section: _section_observation(conn, section, table, window)
             for section, table in _SECTION_TABLES.items()
         }
+    metadata = window.metadata()
     return {
         "anchor": window.anchor,
         "retention_s": window.retention_s,
-        "start_ts_s": window.start_ts_s,
-        "end_ts_s": window.end_ts_s,
+        "start_ts_s": metadata["analysis_start_ts_s"],
+        "end_ts_s": metadata["analysis_end_ts_s"],
         "duration_s": window.duration_s,
         "start_step": window.start_step,
         "end_step": window.end_step,
@@ -184,7 +206,7 @@ def _section_observation(
     table: str,
     window: AnalysisWindow,
 ) -> dict[str, Any]:
-    if window.start_ts_s is None or window.end_ts_s is None:
+    if window.start_time_unix_ns is None or window.end_time_unix_ns is None:
         return _empty_observation()
 
     column, units_per_s = legacy_source_time_storage(table)
@@ -193,15 +215,10 @@ def _section_observation(
         params: tuple[Any, ...] = (window.start_step, window.end_step)
     else:
         where = f"{column} BETWEEN ? AND ?"
-        # LEGACY SOURCE TIME: public float seconds until RFC-0011 PR 5;
-        # 1 us keeps inclusive epoch-scale nanosecond bounds inclusive.
-        params = (
-            (
-                round(window.start_ts_s * units_per_s) - 1_000,
-                round(window.end_ts_s * units_per_s) + 1_000,
-            )
-            if units_per_s != 1
-            else (window.start_ts_s, window.end_ts_s)
+        # LEGACY SOURCE TIME: System seconds until RFC-0011 PR 4.
+        params = tuple(
+            value if units_per_s != 1 else value / 1_000_000_000
+            for value in (window.start_time_unix_ns, window.end_time_unix_ns)
         )
 
     try:
