@@ -7,7 +7,7 @@ which carry the full historical notes for versions predating this file.
 
 ## [Unreleased]
 
-- **Breaking (raw telemetry):** Step Time source timestamps now use
+- **Breaking (raw telemetry):** Step Time and Step Memory source timestamps use
   `timestamp_unix_ns`. Raw SQLite histories are not migrated across TraceML
   versions; start a fresh run after upgrading and use the same version for the
   aggregator and workers. Existing saved summaries remain readable.

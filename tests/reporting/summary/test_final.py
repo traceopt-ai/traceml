@@ -15,7 +15,10 @@ from tests.sqlite_fixtures import (
     summary_database,
 )
 from traceml_ai.core.summaries import SummaryResult
-from traceml_ai.reporting.analysis_window import resolve_analysis_window
+from traceml_ai.reporting.analysis_window import (
+    build_analysis_window_payload,
+    resolve_analysis_window,
+)
 from traceml_ai.reporting.final import (
     FinalReportGenerator,
     build_summary_payload,
@@ -261,6 +264,27 @@ def test_final_summary_aligns_sections_to_step_derived_time_window(
         metadata = payload[section]["metadata"]
         assert metadata["analysis_start_ts_s"] == 1200.0
         assert metadata["analysis_end_ts_s"] == 3000.0
+
+
+def test_periodic_window_observes_nanosecond_step_memory(tmp_path) -> None:
+    db_path = tmp_path / "periodic.db"
+    with summary_database(db_path) as conn:
+        conn.execute(
+            "INSERT INTO system_samples(recv_ts_ns, sample_ts_s) "
+            "VALUES (1, 105.0), (2, 110.0);"
+        )
+        conn.execute(
+            "INSERT INTO step_memory_samples(recv_ts_ns, timestamp_unix_ns) "
+            "VALUES (1, 105000000000), (2, 110000000000);"
+        )
+
+    window = resolve_analysis_window(str(db_path), retention_s=5.0)
+    assert (
+        build_analysis_window_payload(str(db_path), window)["sections"][
+            "step_memory"
+        ]["samples"]
+        == 2
+    )
 
 
 def test_analysis_window_keeps_declared_rank_universe_after_pruning(
