@@ -13,7 +13,6 @@ from contextlib import closing
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from traceml_ai.telemetry.legacy_source_time import legacy_source_time_storage
 from traceml_ai.telemetry.retention import (
     DEFAULT_HISTORY_RETENTION_S,
     parse_history_retention,
@@ -149,23 +148,14 @@ def _periodic_bounds(
     """Return up-to-retention bounds from available System/Process samples."""
     values: list[int] = []
     for table in ("system_samples", "process_samples"):
-        column, units_per_s = legacy_source_time_storage(table)
         try:
             row = conn.execute(
-                f"SELECT MIN({column}), MAX({column}) FROM {table};"
+                f"SELECT MIN(timestamp_unix_ns), MAX(timestamp_unix_ns) FROM {table};"
             ).fetchone()
         except sqlite3.Error:
             continue
         if row and row[0] is not None and row[1] is not None:
-            for value in row:
-                if units_per_s == 1:
-                    # LEGACY SOURCE TIME: System seconds until PR 4. Split
-                    # before scaling to preserve the float's epoch precision.
-                    seconds, fraction = divmod(value, 1)
-                    value = int(seconds) * 1_000_000_000 + round(
-                        fraction * 1_000_000_000
-                    )
-                values.append(value)
+            values.extend(row)
     if not values:
         return None
     end_time_unix_ns = max(values)
@@ -209,22 +199,17 @@ def _section_observation(
     if window.start_time_unix_ns is None or window.end_time_unix_ns is None:
         return _empty_observation()
 
-    column, units_per_s = legacy_source_time_storage(table)
     if section in _STEP_SECTIONS and window.start_step is not None:
         where = "step BETWEEN ? AND ?"
         params: tuple[Any, ...] = (window.start_step, window.end_step)
     else:
-        where = f"{column} BETWEEN ? AND ?"
-        # LEGACY SOURCE TIME: System seconds until RFC-0011 PR 4.
-        params = tuple(
-            value if units_per_s != 1 else value / 1_000_000_000
-            for value in (window.start_time_unix_ns, window.end_time_unix_ns)
-        )
+        where = "timestamp_unix_ns BETWEEN ? AND ?"
+        params = (window.start_time_unix_ns, window.end_time_unix_ns)
 
     try:
         row = conn.execute(
             f"""
-            SELECT COUNT(*), MIN({column}), MAX({column})
+            SELECT COUNT(*), MIN(timestamp_unix_ns), MAX(timestamp_unix_ns)
             FROM {table}
             WHERE {where};
             """,
@@ -237,10 +222,10 @@ def _section_observation(
     return {
         "samples": samples,
         "observed_start_ts_s": (
-            row[1] / units_per_s if row and row[1] is not None else None
+            row[1] / 1_000_000_000 if row and row[1] is not None else None
         ),
         "observed_end_ts_s": (
-            row[2] / units_per_s if row and row[2] is not None else None
+            row[2] / 1_000_000_000 if row and row[2] is not None else None
         ),
     }
 

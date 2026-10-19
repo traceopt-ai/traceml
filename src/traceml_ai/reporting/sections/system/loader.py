@@ -23,7 +23,6 @@ from traceml_ai.reporting.sections.system.model import (
     average_optional,
     max_int_optional,
     max_optional,
-    min_timestamp,
     table_has_column,
 )
 
@@ -43,7 +42,7 @@ class _SampleRow:
     local_world_size: Optional[int]
     node_rank: Optional[int]
     hostname: Optional[str]
-    sample_ts_s: Optional[float]
+    timestamp_unix_ns: Optional[int]
     seq: Optional[int]
     cpu_percent: Optional[float]
     ram_used_bytes: Optional[float]
@@ -144,9 +143,14 @@ def _aggregate_samples(
         for row in rows
         if _sample_key(row) in gpu_rollups_by_key
     ]
+    timestamps = [
+        row.timestamp_unix_ns
+        for row in rows
+        if row.timestamp_unix_ns is not None
+    ]
     return SystemSummaryAgg(
-        first_ts=min_timestamp(row.sample_ts_s for row in rows),
-        last_ts=max_optional(row.sample_ts_s for row in rows),
+        first_ts=min(timestamps) / 1_000_000_000 if timestamps else None,
+        last_ts=max(timestamps) / 1_000_000_000 if timestamps else None,
         system_samples=len(rows),
         cpu_avg_percent=average_optional(row.cpu_percent for row in rows),
         cpu_peak_percent=max_optional(row.cpu_percent for row in rows),
@@ -244,12 +248,11 @@ def _system_samples_cte(
         and analysis_window.start_time_unix_ns is not None
         and analysis_window.end_time_unix_ns is not None
     ):
-        predicates.append("sample_ts_s BETWEEN ? AND ?")
-        # LEGACY SOURCE TIME: System seconds until RFC-0011 PR 4.
+        predicates.append("timestamp_unix_ns BETWEEN ? AND ?")
         params.extend(
             (
-                analysis_window.start_time_unix_ns / 1_000_000_000,
-                analysis_window.end_time_unix_ns / 1_000_000_000,
+                analysis_window.start_time_unix_ns,
+                analysis_window.end_time_unix_ns,
             )
         )
     where_clause = "WHERE " + " AND ".join(predicates) if predicates else ""
@@ -277,7 +280,7 @@ def _sample_rows(
     rows = conn.execute(
         sample_cte + """
         SELECT global_rank, local_rank, world_size, local_world_size,
-               node_rank, hostname, sample_ts_s, seq, cpu_percent,
+               node_rank, hostname, timestamp_unix_ns, seq, cpu_percent,
                ram_used_bytes, ram_total_bytes, gpu_available, gpu_count
         FROM selected_system_samples
         ORDER BY COALESCE(node_rank, global_rank, 0) ASC, id ASC;
@@ -292,7 +295,7 @@ def _sample_rows(
             local_world_size=row[3],
             node_rank=row[4],
             hostname=row[5],
-            sample_ts_s=row[6],
+            timestamp_unix_ns=row[6],
             seq=row[7],
             cpu_percent=row[8],
             ram_used_bytes=row[9],

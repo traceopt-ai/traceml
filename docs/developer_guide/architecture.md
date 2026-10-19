@@ -22,11 +22,14 @@ flowchart LR
 
 Samplers maintain an incremental append counter per rank per table. The sender ships only new rows. The aggregator writes canonical telemetry into SQLite-backed history, and renderers pull read-only views from that history.
 
-During the RFC-0011 source timestamp migration, Process raw measurement time
-uses integer `timestamp_unix_ns`. Existing chart coordinates and durations
-remain seconds, while terminal and dashboard rank liveness continue to use the
-separate aggregator receive clock. Shared summary bounds are integer Unix
-nanoseconds; public summary timestamp metadata remains in seconds until PR 5.
+During the RFC-0011 source timestamp migration, Step Time, Step Memory,
+Process, System, and Runtime Environment use integer `timestamp_unix_ns`.
+System GPU children share their parent's source time; Runtime Environment
+keeps its publication time across draining. Chart coordinates remain seconds;
+metric duration units stay unchanged. Terminal and dashboard rank liveness
+continue to use the separate aggregator receive clock. Shared summary bounds
+are integer Unix nanoseconds; public summary timestamp metadata remains in
+seconds until PR 5.
 
 ## Layers
 

@@ -99,7 +99,7 @@ def insert_system_sample(
     ram_total_bytes: float | None = 16_000.0,
     gpu_samples: Sequence[Mapping[str, Any]] | None = None,
 ) -> None:
-    """Insert one node sample and its optional per-GPU children."""
+    """Insert a node sample and GPU children; ``ts`` is Unix seconds."""
     resolved_node = _defaulted(node_rank, rank)
     resolved_global = _defaulted(global_rank, rank)
     resolved_hostname = _defaulted(hostname, f"worker-{rank}")
@@ -114,7 +114,7 @@ def insert_system_sample(
         local_world_size=local_world_size,
         node_rank=resolved_node,
         hostname=resolved_hostname,
-        sample_ts_s=ts,
+        timestamp_unix_ns=round(ts * 1_000_000_000),
         seq=resolved_seq,
         cpu_percent=30.0 + rank if cpu_percent is None else cpu_percent,
         ram_used_bytes=(
@@ -141,7 +141,9 @@ def insert_system_sample(
             local_world_size=gpu.get("local_world_size", local_world_size),
             node_rank=gpu.get("node_rank", resolved_node),
             hostname=gpu.get("hostname", resolved_hostname),
-            sample_ts_s=gpu.get("sample_ts_s", ts),
+            timestamp_unix_ns=gpu.get(
+                "timestamp_unix_ns", round(ts * 1_000_000_000)
+            ),
             seq=gpu.get("seq", resolved_seq),
             gpu_idx=gpu.get("gpu_idx", rank),
             util=gpu.get("util", gpu_util),

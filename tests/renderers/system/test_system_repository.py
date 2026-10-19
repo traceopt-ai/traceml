@@ -424,7 +424,7 @@ def test_an_old_engine_shows_the_recent_view_not_a_dead_card(
 
 # --- NULL sample timestamps (#418) ---------------------------------------
 def test_a_null_timestamp_row_is_not_a_sample(system_db):
-    """`sample_ts_s` is nullable, and a row without a clock is not usable.
+    """`timestamp_unix_ns` is nullable, and a row without a clock is not usable.
 
     Reproduced before it was fixed: with 30 such rows the CPU read raised
     `TypeError` out of `float(r[0])`. It is masked below a threshold, which
@@ -474,7 +474,7 @@ def test_one_unclocked_row_does_not_erase_the_whole_run_chart(system_db):
 
     The issue reported a crash, which needs more unclocked rows than the
     read's dropped prefix. The common case is one, and it never crashed:
-    `float(r["sample_ts_s"] or 0.0)` in the compute layer turned a missing
+    Coercing an unavailable source timestamp to zero turned a missing
     clock into epoch 1970, so the recent window appeared to span 54 years,
     the run could never outgrow it, and the whole-run chart silently
     vanished with the card falling back to the recent view.
@@ -489,7 +489,7 @@ def test_one_unclocked_row_does_not_erase_the_whole_run_chart(system_db):
     path = system_db(ticks=200, cadence_s=2.0)
     with sqlite3.connect(path) as conn:
         conn.execute(
-            "UPDATE system_samples SET sample_ts_s = NULL "
+            "UPDATE system_samples SET timestamp_unix_ns = NULL "
             "WHERE seq = (SELECT MAX(seq) FROM system_samples)"
         )
     out = SystemDashboardComputer(path).compute(window_n=100)

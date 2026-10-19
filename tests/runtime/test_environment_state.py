@@ -23,16 +23,24 @@ def _info(strategy: str = "single_process") -> RuntimeEnvironmentInfo:
 
 
 def test_publish_once_drain_once_and_reset(monkeypatch) -> None:
-    monkeypatch.setattr(environment_state.time, "time", lambda: 123.5)
+    timestamp_unix_ns = 123_500_000_001
+    monkeypatch.setattr(
+        environment_state.time, "time_ns", lambda: timestamp_unix_ns
+    )
 
     assert environment_state.has_runtime_environment_info() is False
     assert environment_state.publish_runtime_environment_once(_info()) is True
     assert environment_state.has_runtime_environment_info() is True
 
+    monkeypatch.setattr(
+        environment_state.time,
+        "time_ns",
+        lambda: timestamp_unix_ns + 10_000_000_000,
+    )
     row = environment_state.pop_runtime_environment_record()
     assert row == {
         "seq": 0,
-        "ts": 123.5,
+        "timestamp_unix_ns": timestamp_unix_ns,
         "topology": "single_process",
         "distributed_initialized": False,
         "distributed_backend": None,

@@ -50,7 +50,7 @@ def test_collection_failures_are_unavailable_not_zero(monkeypatch) -> None:
 def test_nullable_system_sample_round_trips_through_wire_schema() -> None:
     sample = SystemSample(
         sample_idx=1,
-        timestamp=2.0,
+        timestamp_unix_ns=2_000_000_001,
         cpu_percent=None,
         ram_used=None,
         ram_total=None,
@@ -59,4 +59,6 @@ def test_nullable_system_sample_round_trips_through_wire_schema() -> None:
         gpus=[GPUMetrics(None, None, None, None, None, None)],
     )
 
-    assert SystemSample.from_wire(sample.to_wire()) == sample
+    wire = sample.to_wire()
+    assert "ts" not in wire
+    assert SystemSample.from_wire(wire) == sample

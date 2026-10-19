@@ -82,7 +82,7 @@ def _system_envelope(*, global_rank: int = 0) -> dict:
     """One canonical SystemSampler envelope built from real wire types."""
     sample = SystemSample(
         sample_idx=1,
-        timestamp=time.time(),
+        timestamp_unix_ns=time.time_ns(),
         cpu_percent=12.5,
         ram_used=1_000_000.0,
         ram_total=8_000_000.0,

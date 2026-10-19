@@ -210,7 +210,7 @@ class SystemSampler(BaseSampler):
         try:
             sample = SystemSample(
                 sample_idx=self.sample_idx,
-                timestamp=time.time(),
+                timestamp_unix_ns=time.time_ns(),
                 cpu_percent=self._sample_cpu(),
                 ram_used=self._sample_ram(),
                 ram_total=self.ram_total_memory,

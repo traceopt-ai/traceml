@@ -456,7 +456,7 @@ def _sys_payload(global_rank: int = 5) -> dict:
             "SystemTable": [
                 {
                     "seq": 1,
-                    "ts": 123.0,
+                    "timestamp_unix_ns": 123_000_000_000,
                     "cpu": 42.0,
                     "ram_used": 4_000.0,
                     "ram_total": 16_000.0,

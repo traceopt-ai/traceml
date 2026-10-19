@@ -202,7 +202,7 @@ def test_system_loader_uses_selected_time_window(tmp_path):
         )
 
     window = resolve_analysis_window(str(db_path), retention_s=1.0)
-    assert window.end_time_unix_ns / 1_000_000_000 == timestamp_s
+    assert window.end_time_unix_ns == round(timestamp_s * 1_000_000_000)
     data = load_system_section_data(str(db_path), analysis_window=window)
 
     assert data.cluster.aggregate.system_samples == 1

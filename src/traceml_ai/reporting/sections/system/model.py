@@ -202,12 +202,6 @@ def max_int_optional(values: Iterable[Optional[int]]) -> Optional[int]:
     return max(nums) if nums else None
 
 
-def min_timestamp(values: Iterable[Optional[float]]) -> Optional[float]:
-    """Return the earliest non-null timestamp, if any."""
-    nums = [float(value) for value in values if value is not None]
-    return min(nums) if nums else None
-
-
 __all__ = [
     "SYSTEM_METRIC_NAMES",
     "PerGPUSummary",
@@ -218,7 +212,6 @@ __all__ = [
     "average_optional",
     "max_int_optional",
     "max_optional",
-    "min_timestamp",
     "node_gpu_headroom_min_gb",
     "node_gpu_mem_peak_percent",
     "percent",

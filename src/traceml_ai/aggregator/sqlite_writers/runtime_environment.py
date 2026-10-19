@@ -23,14 +23,6 @@ SAMPLER_NAME = "RuntimeEnvironmentSampler"
 TABLE_NAME = "RuntimeEnvironmentTable"
 
 
-def _optional_float(value: Any) -> Optional[float]:
-    """Best-effort float coercion for runtime environment rows."""
-    try:
-        return float(value) if value is not None else None
-    except Exception:
-        return None
-
-
 def _optional_int(value: Any) -> Optional[int]:
     """Best-effort integer coercion for runtime environment rows."""
     try:
@@ -107,7 +99,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
             node_rank                  INTEGER,
             hostname                   TEXT,
             pid                        INTEGER,
-            sample_ts_s                REAL,
+            timestamp_unix_ns          INTEGER,
             seq                        INTEGER,
             topology                   TEXT,
             distributed_initialized    INTEGER,
@@ -146,6 +138,21 @@ def build_rows(
         if not isinstance(row, dict):
             continue
 
+        timestamp_unix_ns = row.get("timestamp_unix_ns")
+        # LEGACY SOURCE TIME: old payloads; remove in RFC-0011 PR 5.
+        if "timestamp_unix_ns" not in row:
+            legacy_timestamp = row.get("ts")
+            if type(legacy_timestamp) in (int, float):
+                try:
+                    timestamp_unix_ns = round(legacy_timestamp * 1_000_000_000)
+                except (ValueError, OverflowError):
+                    timestamp_unix_ns = None
+        if not (
+            type(timestamp_unix_ns) is int
+            and -(2**63) <= timestamp_unix_ns < 2**63
+        ):
+            timestamp_unix_ns = None
+
         out["runtime_environment"].append(
             (
                 recv_ts_ns,
@@ -157,7 +164,7 @@ def build_rows(
                 identity.node_rank,
                 identity.hostname,
                 identity.pid,
-                _optional_float(row.get("ts")),
+                timestamp_unix_ns,
                 _optional_int(row.get("seq")),
                 _optional_str(row.get("topology")),
                 _optional_bool_int(row.get("distributed_initialized")),
@@ -190,7 +197,7 @@ def insert_rows(
                 node_rank,
                 hostname,
                 pid,
-                sample_ts_s,
+                timestamp_unix_ns,
                 seq,
                 topology,
                 distributed_initialized,
