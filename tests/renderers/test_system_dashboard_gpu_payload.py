@@ -1170,15 +1170,14 @@ def _with_arrival_clock(path: Path) -> None:
 
     The fixture writes `recv_ts_ns` as a synthetic row id, which is fine
     for ordering and useless as a clock. Liveness is measured against the
-    AGGREGATOR's arrival time rather than the sampler's `sample_ts_s`,
+    AGGREGATOR's arrival time rather than the sampler's `timestamp_unix_ns`,
     because the sampler may be a different machine and a skewed remote
     clock would otherwise read as a dead node. Process measures age the
     same way.
     """
     with sqlite_database(path, init_summary_schema) as conn:
         conn.execute(
-            "UPDATE system_samples "
-            "SET recv_ts_ns = CAST(sample_ts_s * 1000000000 AS INTEGER)"
+            "UPDATE system_samples " "SET recv_ts_ns = timestamp_unix_ns"
         )
         conn.commit()
 
@@ -1292,7 +1291,7 @@ def test_one_stall_does_not_inflate_the_staleness_threshold(
     # Push one sample two hours into the past, creating a huge gap.
     with sqlite_database(db, init_summary_schema) as conn:
         conn.execute(
-            "UPDATE system_samples SET sample_ts_s = sample_ts_s - 7200.0 "
+            "UPDATE system_samples SET timestamp_unix_ns = timestamp_unix_ns - 7200000000000 "
             "WHERE seq = 0"
         )
         conn.commit()

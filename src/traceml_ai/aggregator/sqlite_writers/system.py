@@ -138,7 +138,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
             local_world_size       INTEGER,
             node_rank              INTEGER,
             hostname               TEXT,
-            sample_ts_s            REAL,
+            timestamp_unix_ns      INTEGER,
             seq                    INTEGER,
             cpu_percent            REAL,
             ram_used_bytes         REAL,
@@ -157,7 +157,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
             local_world_size INTEGER,
             node_rank        INTEGER,
             hostname         TEXT,
-            sample_ts_s      REAL,
+            timestamp_unix_ns INTEGER,
             seq              INTEGER,
             gpu_idx          INTEGER NOT NULL,
             util             REAL,
@@ -241,12 +241,12 @@ def init_schema(conn: sqlite3.Connection) -> None:
         definition="TEXT",
     )
     conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_system_samples_node_ts
-        ON system_samples(node_rank, sample_ts_s, id);
+        CREATE INDEX IF NOT EXISTS idx_system_samples_node_timestamp
+        ON system_samples(node_rank, timestamp_unix_ns, id);
         """)
     conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_system_gpu_samples_global_gpu_ts
-        ON system_gpu_samples(global_rank, gpu_idx, sample_ts_s, id);
+        CREATE INDEX IF NOT EXISTS idx_system_gpu_samples_global_gpu_timestamp
+        ON system_gpu_samples(global_rank, gpu_idx, timestamp_unix_ns, id);
         """)
 
 
@@ -302,7 +302,22 @@ def build_rows(
                 continue
 
             seq_raw = row.get("seq")
-            ts_raw = row.get("ts")
+            timestamp_unix_ns = row.get("timestamp_unix_ns")
+            # LEGACY SOURCE TIME: old payloads; remove in RFC-0011 PR 5.
+            if "timestamp_unix_ns" not in row:
+                legacy_timestamp = row.get("ts")
+                if type(legacy_timestamp) in (int, float):
+                    try:
+                        timestamp_unix_ns = round(
+                            legacy_timestamp * 1_000_000_000
+                        )
+                    except (ValueError, OverflowError):
+                        timestamp_unix_ns = None
+            if not (
+                type(timestamp_unix_ns) is int
+                and -(2**63) <= timestamp_unix_ns < 2**63
+            ):
+                timestamp_unix_ns = None
             cpu_raw = row.get("cpu")
             ram_used_raw = row.get("ram_used")
             ram_total_raw = row.get("ram_total")
@@ -311,9 +326,6 @@ def build_rows(
             gpus_raw = row.get("gpus")
 
             seq = int(seq_raw) if isinstance(seq_raw, int) else None
-            sample_ts_s = (
-                float(ts_raw) if isinstance(ts_raw, (int, float)) else None
-            )
             cpu_percent = (
                 float(cpu_raw) if isinstance(cpu_raw, (int, float)) else None
             )
@@ -388,7 +400,7 @@ def build_rows(
                             identity.local_world_size,
                             identity.node_rank,
                             identity.hostname,
-                            sample_ts_s,
+                            timestamp_unix_ns,
                             seq,
                             gpu_idx,
                             util,
@@ -409,7 +421,7 @@ def build_rows(
                     identity.local_world_size,
                     identity.node_rank,
                     identity.hostname,
-                    sample_ts_s,
+                    timestamp_unix_ns,
                     seq,
                     cpu_percent,
                     ram_used_bytes,
@@ -447,7 +459,7 @@ def insert_rows(
                 local_world_size,
                 node_rank,
                 hostname,
-                sample_ts_s,
+                timestamp_unix_ns,
                 seq,
                 cpu_percent,
                 ram_used_bytes,
@@ -472,7 +484,7 @@ def insert_rows(
                 local_world_size,
                 node_rank,
                 hostname,
-                sample_ts_s,
+                timestamp_unix_ns,
                 seq,
                 gpu_idx,
                 util,

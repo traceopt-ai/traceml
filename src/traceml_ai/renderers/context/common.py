@@ -142,20 +142,20 @@ class ContextDB:
             pass
         try:
             sys_row = conn.execute(
-                "SELECT MIN(sample_ts_s), MAX(sample_ts_s) FROM system_samples"
+                "SELECT MIN(timestamp_unix_ns), MAX(timestamp_unix_ns) "
+                "FROM system_samples"
             ).fetchone()
             proc_row = conn.execute(
                 "SELECT MAX(timestamp_unix_ns) FROM process_samples"
             ).fetchone()
             firsts = [v for v in (sys_row[0],) if v is not None]
-            process_last_ts = (
-                proc_row[0] / 1_000_000_000
-                if proc_row[0] is not None
-                else None
+            lasts = [v for v in (sys_row[1], proc_row[0]) if v is not None]
+            facts["first_data_ts"] = (
+                min(firsts) / 1_000_000_000 if firsts else None
             )
-            lasts = [v for v in (sys_row[1], process_last_ts) if v is not None]
-            facts["first_data_ts"] = float(min(firsts)) if firsts else None
-            facts["last_data_ts"] = float(max(lasts)) if lasts else None
+            facts["last_data_ts"] = (
+                max(lasts) / 1_000_000_000 if lasts else None
+            )
         except sqlite3.Error:
             pass
         return facts

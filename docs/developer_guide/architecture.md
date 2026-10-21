@@ -22,10 +22,12 @@ flowchart LR
 
 Samplers maintain an incremental append counter per rank per table. The sender ships only new rows. The aggregator writes canonical telemetry into SQLite-backed history, and renderers pull read-only views from that history.
 
-Process raw measurement time uses integer `timestamp_unix_ns`. Chart
-coordinates, durations, and public summary timestamps remain in seconds. The
-Process panel's rank-liveness verdicts use the separate aggregator receive
-clock, while shared summary bounds remain integer Unix nanoseconds internally.
+Step Time, Step Memory, Process, System, and Runtime Environment raw timestamps
+use integer `timestamp_unix_ns`. System GPU rows share their parent sample's
+source time, and Runtime Environment keeps its publication time while queued.
+Chart coordinates, durations, and public summary timestamps remain in seconds.
+The Process and System panels use the separate aggregator receive clock for
+liveness, while shared summary bounds remain integer nanoseconds internally.
 
 ## Layers
 

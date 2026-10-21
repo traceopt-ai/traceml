@@ -337,7 +337,7 @@ def test_foreign_rows_never_reach_sqlite_over_the_real_wire(tmp_path):
     def system_envelope(rank: int, cpu: float, session: str) -> dict:
         sample = SystemSample(
             sample_idx=1,
-            timestamp=time.time(),
+            timestamp_unix_ns=time.time_ns(),
             cpu_percent=cpu,
             ram_used=1.0,
             ram_total=8.0,

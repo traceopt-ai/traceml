@@ -26,9 +26,9 @@ from traceml_ai.renderers.shared.run_series import (
 )
 
 # A row without a clock cannot be placed on a chart or counted toward a
-# cadence. `sample_ts_s` is nullable in the writer's schema, so this is a
+# cadence. `timestamp_unix_ns` is nullable in the writer's schema, so this is a
 # real state, not a defensive check: every time-series read requires it.
-_HAS_CLOCK_SQL = "sample_ts_s IS NOT NULL"
+_HAS_CLOCK_SQL = "timestamp_unix_ns IS NOT NULL"
 
 # Current sampling failures contain NULL metrics; older traces may use an
 # all-zero placeholder. Neither is a real 0 W observation. Apply one
@@ -55,6 +55,7 @@ class RunStats:
     first_ts: float
     last_ts: float
     sample_count: int
+    first_timestamp_unix_ns: int
 
     @property
     def span_s(self) -> float:
@@ -182,7 +183,7 @@ class SystemRepository:
         """The shape of the whole-run CPU history, for planning a read."""
         where_sql, bound = self._run_scope(hostname)
         row = conn.execute(
-            "SELECT MIN(sample_ts_s), MAX(sample_ts_s), COUNT(*) "
+            "SELECT MIN(timestamp_unix_ns), MAX(timestamp_unix_ns), COUNT(*) "
             f"FROM system_samples {where_sql} "
             f"{'AND' if where_sql else 'WHERE'} {_HAS_CLOCK_SQL}",
             tuple(bound),
@@ -190,9 +191,10 @@ class SystemRepository:
         if not row or row[0] is None or row[1] is None:
             return None
         return RunStats(
-            first_ts=float(row[0]),
-            last_ts=float(row[1]),
+            first_ts=row[0] / 1_000_000_000,
+            last_ts=row[1] / 1_000_000_000,
             sample_count=int(row[2] or 0),
+            first_timestamp_unix_ns=int(row[0]),
         )
 
     def fetch_cpu_run(
@@ -221,16 +223,16 @@ class SystemRepository:
             f"""
                 WITH rolled AS (
                     SELECT
-                        sample_ts_s AS t,
+                        timestamp_unix_ns / 1000000000.0 AS t,
                         AVG(cpu_percent) OVER w AS a,
                         MAX(cpu_percent) OVER w AS m,
-                        ROW_NUMBER() OVER (ORDER BY sample_ts_s) AS rn
+                        ROW_NUMBER() OVER (ORDER BY timestamp_unix_ns) AS rn
                     FROM system_samples
                     {where_sql}
                     {'AND' if where_sql else 'WHERE'} cpu_percent IS NOT NULL
                       AND {_HAS_CLOCK_SQL}
                     WINDOW w AS (
-                        ORDER BY sample_ts_s
+                        ORDER BY timestamp_unix_ns / 1000000000.0
                         {plan.frame_clause()}
                     )
                 )
@@ -248,7 +250,7 @@ class SystemRepository:
         """The shape of the whole-run power history, over reported rows."""
         where_sql, bound = self._run_scope(hostname)
         row = conn.execute(
-            "SELECT MIN(sample_ts_s), MAX(sample_ts_s), COUNT(*) FROM "
+            "SELECT MIN(timestamp_unix_ns), MAX(timestamp_unix_ns), COUNT(*) FROM "
             f"system_gpu_samples {where_sql} "
             f"{'AND' if where_sql else 'WHERE'} {_GPU_REPORTED_SQL} "
             f"AND {_HAS_CLOCK_SQL}",
@@ -257,9 +259,10 @@ class SystemRepository:
         if not row or row[0] is None or row[1] is None:
             return None
         return RunStats(
-            first_ts=float(row[0]),
-            last_ts=float(row[1]),
+            first_ts=row[0] / 1_000_000_000,
+            last_ts=row[1] / 1_000_000_000,
             sample_count=int(row[2] or 0),
+            first_timestamp_unix_ns=int(row[0]),
         )
 
     def fetch_gpu_power_run(
@@ -267,7 +270,7 @@ class SystemRepository:
         conn: sqlite3.Connection,
         *,
         width_s: float,
-        first_ts: float,
+        first_timestamp_unix_ns: int,
         hostname: Optional[str] = None,
     ) -> List[Tuple[int, float, float, float, float]]:
         """Whole-run per-GPU power in fixed-duration buckets.
@@ -280,16 +283,16 @@ class SystemRepository:
         past it, so it is NOT always the duration the rolling charts use.
 
         The offset is clamped at zero. ``CAST`` truncates toward zero
-        rather than flooring, so a row older than ``first_ts`` would
+        rather than flooring, so a row older than the run origin would
         otherwise land in a negative bucket and push the count past the
-        budget. ``first_ts`` is read by a separate query, so on a live
+        budget. The origin is read by a separate query, so on a live
         dashboard a delayed sample can arrive between the two.
         """
         where_sql, bound = self._run_scope(hostname)
         return [
             (
                 int(r[0]),
-                float(r[1]),
+                r[1] / 1_000_000_000,
                 float(r[2]),
                 float(r[3]),
                 float(r[4]),
@@ -298,7 +301,7 @@ class SystemRepository:
                 f"""
                     SELECT
                         gpu_idx,
-                        MIN(sample_ts_s),
+                        MIN(timestamp_unix_ns),
                         AVG(power_usage_w),
                         MIN(power_usage_w),
                         MAX(power_usage_w)
@@ -307,11 +310,15 @@ class SystemRepository:
                     {'AND' if where_sql else 'WHERE'} {_GPU_REPORTED_SQL}
                       AND {_HAS_CLOCK_SQL}
                     GROUP BY gpu_idx,
-                             CAST(MAX(sample_ts_s - ?, 0.0) / ?
+                             CAST(MAX(timestamp_unix_ns - ?, 0) / ?
                                   AS INTEGER)
                     ORDER BY gpu_idx ASC, 2 ASC
                     """,
-                (*bound, float(first_ts), float(width_s)),
+                (
+                    *bound,
+                    int(first_timestamp_unix_ns),
+                    width_s * 1_000_000_000,
+                ),
             ).fetchall()
         ]
 

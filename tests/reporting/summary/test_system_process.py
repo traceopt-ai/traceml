@@ -87,14 +87,21 @@ def test_system_section_loader_and_builder_use_sqlite_fixture(tmp_path):
     db_path = tmp_path / "system.db"
     with summary_database(db_path) as conn:
         _seed_system_samples(conn)
+        conn.execute(
+            "INSERT INTO system_samples("
+            "recv_ts_ns, global_rank, local_rank, world_size, "
+            "local_world_size, node_rank, hostname, timestamp_unix_ns"
+            ") VALUES (11, 0, 0, 1, 1, 0, 'worker-0', 11000000000)"
+        )
 
     data = load_system_section_data(str(db_path))
     result = SystemSummarySection().build(str(db_path))
 
-    assert data.cluster.aggregate.system_samples == 1
+    assert data.cluster.aggregate.system_samples == 2
     assert data.cluster.nodes["0"].per_gpu[0].util_peak_percent == 70.0
     assert result.section == "system"
-    assert result.payload["metadata"]["samples"] == 1
+    assert result.payload["metadata"]["samples"] == 2
+    assert result.payload["metadata"]["duration_s"] == 1.0
     assert "TraceML System Summary" in result.text
     assert "- Diagnosis: MODERATE GPU UTIL" in result.text
     assert result.payload["diagnosis"]["kind"] == "MODERATE_GPU_UTILIZATION"
@@ -202,7 +209,7 @@ def test_system_loader_uses_selected_time_window(tmp_path):
         )
 
     window = resolve_analysis_window(str(db_path), retention_s=1.0)
-    assert window.end_time_unix_ns / 1_000_000_000 == timestamp_s
+    assert window.end_time_unix_ns == round(timestamp_s * 1_000_000_000)
     data = load_system_section_data(str(db_path), analysis_window=window)
 
     assert data.cluster.aggregate.system_samples == 1

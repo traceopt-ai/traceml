@@ -50,11 +50,11 @@ for that step, expressed as integer Unix nanoseconds. Delayed CUDA resolution,
 queue draining, and transport preserve this source time; it is not an absolute
 GPU completion timestamp. The existing CPU duration clocks remain unchanged.
 
-Step Time, Step Memory, and Process raw rows store and emit
-`timestamp_unix_ns`. Public summary timestamps remain in seconds. During the
-transition, their projections accept the former Step Time `timestamp` key and
-Step Memory or Process `ts` key; System, Runtime Environment, and stdout/stderr
-raw timestamps retain their existing seconds representation.
+Step Time, Step Memory, Process, System, and Runtime Environment raw rows store
+and emit `timestamp_unix_ns`. Public summary timestamps remain in seconds.
+During the transition, their projections accept the former Step Time
+`timestamp` key and the other migrated samplers' `ts` key. Stdout/stderr raw
+timestamps retain their existing seconds representation.
 
 Publication and reading transfer references, not copies. After publication,
 the producer must not change event membership or step identity. Only the timing

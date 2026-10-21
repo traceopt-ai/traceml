@@ -292,7 +292,7 @@ class SystemDashboardComputer:
 
         Notes
         -----
-        - `sample_ts_s` is used as the canonical sample timestamp.
+        - `timestamp_unix_ns` is converted to seconds for chart coordinates.
         - `x_time` is emitted as ISO-8601 UTC strings so the UI can plot a
           real time axis instead of sample indices or relative negative values.
         """
@@ -316,7 +316,7 @@ class SystemDashboardComputer:
         gpu_available = bool(last["gpu_available"] or False)
 
         ts_hist = np.array(
-            [float(r["sample_ts_s"] or 0.0) for r in samples],
+            [r["timestamp_unix_ns"] / 1_000_000_000 for r in samples],
             dtype=np.float64,
         )
         # NaN for a missing reading, for the same reason the GPU arrays
@@ -653,7 +653,7 @@ class SystemDashboardComputer:
         """Whether the host this payload describes is still reporting.
 
         Age is measured against ``recv_ts_ns``, when the AGGREGATOR
-        received the sample, not ``sample_ts_s``, when the sampler took
+        received the sample, not ``timestamp_unix_ns``, when the sampler took
         it: the sampler may be another machine and a skewed remote clock
         would read as a dead node. ``recv_ts_ns`` is in the table's
         original schema and is ``NOT NULL``, so it is always present.
@@ -754,7 +754,7 @@ class SystemDashboardComputer:
         rows = self._db.fetch_gpu_power_run(
             conn,
             width_s=width,
-            first_ts=stats.first_ts,
+            first_timestamp_unix_ns=stats.first_timestamp_unix_ns,
             hostname=host,
         )
         by_gpu: Dict[int, Dict[str, Any]] = {}

@@ -29,7 +29,7 @@ def _runtime_environment_payload(
                 "RuntimeEnvironmentTable": [
                     {
                         "seq": 0,
-                        "ts": 123.25,
+                        "timestamp_unix_ns": 123_250_000_001,
                         "topology": "single_node_multi_process",
                         "distributed_initialized": True,
                         "distributed_backend": "nccl",
@@ -77,7 +77,7 @@ def test_runtime_environment_projection_inserts_identity_and_strategy() -> (
 
     row = conn.execute("""
         SELECT recv_ts_ns, rank, global_rank, local_rank, world_size,
-               local_world_size, node_rank, hostname, pid, sample_ts_s, seq,
+               local_world_size, node_rank, hostname, pid, timestamp_unix_ns, seq,
                topology, distributed_initialized, distributed_backend,
                training_strategy, strategy_source, strategy_confidence
         FROM runtime_environment;
@@ -93,7 +93,7 @@ def test_runtime_environment_projection_inserts_identity_and_strategy() -> (
         1,
         "worker-1",
         4321,
-        123.25,
+        123_250_000_001,
         0,
         "single_node_multi_process",
         1,
@@ -102,6 +102,39 @@ def test_runtime_environment_projection_inserts_identity_and_strategy() -> (
         "runtime_model",
         "high",
     )
+
+    legacy_rows = [
+        {"ts": 1.25},
+        {"timestamp_unix_ns": 123_250_000_001, "ts": 2.0},
+        {"timestamp_unix_ns": None, "ts": 3.0},
+        {"timestamp_unix_ns": True},
+        {"timestamp_unix_ns": 2**63},
+        {"ts": float("inf")},
+        {},
+    ]
+    runtime_environment_projection.insert_rows(
+        conn,
+        runtime_environment_projection.build_rows(
+            _envelope(
+                _runtime_environment_payload(
+                    tables={"RuntimeEnvironmentTable": legacy_rows}
+                )
+            ),
+            recv_ts_ns=1000,
+        ),
+    )
+    assert conn.execute(
+        "SELECT timestamp_unix_ns FROM runtime_environment ORDER BY id"
+    ).fetchall() == [
+        (123_250_000_001,),
+        (1_250_000_000,),
+        (123_250_000_001,),
+        (None,),
+        (None,),
+        (None,),
+        (None,),
+        (None,),
+    ]
 
 
 def test_runtime_environment_projection_ignores_non_matching_sampler() -> None:
