@@ -241,11 +241,17 @@ def _system_samples_cte(
         params.append(int(node_rank))
     if (
         analysis_window is not None
-        and analysis_window.start_ts_s is not None
-        and analysis_window.end_ts_s is not None
+        and analysis_window.start_time_unix_ns is not None
+        and analysis_window.end_time_unix_ns is not None
     ):
         predicates.append("sample_ts_s BETWEEN ? AND ?")
-        params.extend((analysis_window.start_ts_s, analysis_window.end_ts_s))
+        # LEGACY SOURCE TIME: System seconds until RFC-0011 PR 4.
+        params.extend(
+            (
+                analysis_window.start_time_unix_ns / 1_000_000_000,
+                analysis_window.end_time_unix_ns / 1_000_000_000,
+            )
+        )
     where_clause = "WHERE " + " AND ".join(predicates) if predicates else ""
     return f"""
         WITH selected_system_samples AS (

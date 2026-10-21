@@ -24,6 +24,7 @@ Storage units
 -------------
 This projection stores raw values wherever possible.
 
+- timestamp_unix_ns        : source measurement time in Unix nanoseconds
 - cpu_percent             : percent
 - ram_used_bytes          : bytes
 - ram_total_bytes         : bytes
@@ -150,7 +151,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
             local_world_size         INTEGER,
             node_rank                INTEGER,
             hostname                 TEXT,
-            sample_ts_s              REAL,
+            timestamp_unix_ns        INTEGER,
             seq                      INTEGER,
             cpu_percent              REAL,
             cpu_logical_core_count   INTEGER,
@@ -201,12 +202,12 @@ def init_schema(conn: sqlite3.Connection) -> None:
         definition="TEXT",
     )
     conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_process_samples_rank_ts
-        ON process_samples(rank, sample_ts_s, id);
+        CREATE INDEX IF NOT EXISTS idx_process_samples_rank_timestamp
+        ON process_samples(rank, timestamp_unix_ns, id);
         """)
     conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_process_samples_global_rank_ts
-        ON process_samples(global_rank, sample_ts_s, id);
+        CREATE INDEX IF NOT EXISTS idx_process_samples_global_rank_timestamp
+        ON process_samples(global_rank, timestamp_unix_ns, id);
         """)
 
 
@@ -260,7 +261,22 @@ def build_rows(
                 continue
 
             seq_raw = row.get("seq")
-            ts_raw = row.get("ts")
+            timestamp_unix_ns = row.get("timestamp_unix_ns")
+            # LEGACY SOURCE TIME: old payloads; remove in RFC-0011 PR 5.
+            if "timestamp_unix_ns" not in row:
+                legacy_timestamp = row.get("ts")
+                if type(legacy_timestamp) in (int, float):
+                    try:
+                        timestamp_unix_ns = round(
+                            legacy_timestamp * 1_000_000_000
+                        )
+                    except (ValueError, OverflowError):
+                        timestamp_unix_ns = None
+            if not (
+                type(timestamp_unix_ns) is int
+                and -(2**63) <= timestamp_unix_ns < 2**63
+            ):
+                timestamp_unix_ns = None
             cpu_percent_raw = row.get("cpu")
             cpu_logical_core_count_raw = row.get("cpu_cores")
             ram_used_raw = row.get("ram_used")
@@ -270,9 +286,6 @@ def build_rows(
             gpu_raw = row.get("gpu")
 
             seq = int(seq_raw) if isinstance(seq_raw, int) else None
-            sample_ts_s = (
-                float(ts_raw) if isinstance(ts_raw, (int, float)) else None
-            )
             cpu_percent = (
                 float(cpu_percent_raw)
                 if isinstance(cpu_percent_raw, (int, float))
@@ -344,7 +357,7 @@ def build_rows(
                     identity.local_world_size,
                     identity.node_rank,
                     identity.hostname,
-                    sample_ts_s,
+                    timestamp_unix_ns,
                     seq,
                     cpu_percent,
                     cpu_logical_core_count,
@@ -388,7 +401,7 @@ def insert_rows(
                 local_world_size,
                 node_rank,
                 hostname,
-                sample_ts_s,
+                timestamp_unix_ns,
                 seq,
                 cpu_percent,
                 cpu_logical_core_count,

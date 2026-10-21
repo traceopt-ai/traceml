@@ -85,7 +85,9 @@ class ProcessCLIComputer:
             return read_rank_clock(
                 self._db,
                 conn,
-                newest_ts=self._db.newest_sample_ts(conn),
+                newest_timestamp_unix_ns=(
+                    self._db.newest_timestamp_unix_ns(conn)
+                ),
                 configured_interval_s=self._configured_interval_s,
             ).reporting()
         except Exception:

@@ -4,7 +4,7 @@
 """Temporary source-time storage bridge; remove in RFC-0011 PR 5."""
 
 LEGACY_MIGRATED_NS_TABLES = frozenset(
-    {"step_time_samples", "step_memory_samples"}
+    {"step_time_samples", "step_memory_samples", "process_samples"}
 )
 
 

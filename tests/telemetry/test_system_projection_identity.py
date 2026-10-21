@@ -104,15 +104,25 @@ def test_retention_prunes_through_minimum_aligned_aged_step() -> None:
         ("process_samples", "", ()),
         ("stdout_stderr_samples", ", line", ("output",)),
     ):
+        timestamp_column = (
+            "timestamp_unix_ns"
+            if table == "process_samples"
+            else "sample_ts_s"
+        )
         sql = (
-            f"INSERT INTO {table}(recv_ts_ns, sample_ts_s{extra_columns}) "
+            f"INSERT INTO {table}(recv_ts_ns, {timestamp_column}{extra_columns}) "
             f"VALUES (?, ?{', ?' * len(extra_values)});"
         )
         for step in (1, 2, 3):
             recv_ts_ns = policy_watermark if step == 3 else cutoff - step
+            timestamp = (
+                step * 100_000_000_000
+                if table == "process_samples"
+                else float(step * 100)
+            )
             conn.execute(
                 sql,
-                (recv_ts_ns, float(step * 100), *extra_values),
+                (recv_ts_ns, timestamp, *extra_values),
             )
 
     conn.execute(
@@ -132,15 +142,16 @@ def test_retention_prunes_through_minimum_aligned_aged_step() -> None:
     assert conn.execute(
         "SELECT DISTINCT step FROM step_memory_samples ORDER BY step;"
     ).fetchall() == [(3,)]
-    for table in (
-        "system_samples",
-        "system_gpu_samples",
-        "process_samples",
-        "stdout_stderr_samples",
+    for table, timestamp_column, expected in (
+        ("system_samples", "sample_ts_s", 300.0),
+        ("system_gpu_samples", "sample_ts_s", 300.0),
+        ("process_samples", "timestamp_unix_ns", 300_000_000_000),
+        ("stdout_stderr_samples", "sample_ts_s", 300.0),
     ):
         assert conn.execute(
-            f"SELECT sample_ts_s FROM {table} ORDER BY sample_ts_s;"
-        ).fetchall() == [(300.0,)]
+            f"SELECT {timestamp_column} FROM {table} "
+            f"ORDER BY {timestamp_column};"
+        ).fetchall() == [(expected,)]
     assert conn.execute(
         "SELECT COUNT(*) FROM runtime_environment;"
     ).fetchone() == (1,)

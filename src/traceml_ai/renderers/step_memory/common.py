@@ -100,7 +100,9 @@ class StepMemoryMetricsDB:
             return read_rank_clock(
                 self._process,
                 conn,
-                newest_ts=self._process.newest_sample_ts(conn),
+                newest_timestamp_unix_ns=(
+                    self._process.newest_timestamp_unix_ns(conn)
+                ),
                 configured_interval_s=configured_interval_s,
             ).reporting()
         except Exception:

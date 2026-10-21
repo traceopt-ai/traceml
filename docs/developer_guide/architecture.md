@@ -22,6 +22,11 @@ flowchart LR
 
 Samplers maintain an incremental append counter per rank per table. The sender ships only new rows. The aggregator writes canonical telemetry into SQLite-backed history, and renderers pull read-only views from that history.
 
+Process raw measurement time uses integer `timestamp_unix_ns`. Chart
+coordinates, durations, and public summary timestamps remain in seconds. The
+Process panel's rank-liveness verdicts use the separate aggregator receive
+clock, while shared summary bounds remain integer Unix nanoseconds internally.
+
 ## Layers
 
 | Layer | Directory | Responsibility |

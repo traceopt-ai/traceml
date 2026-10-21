@@ -85,22 +85,25 @@ class ContextDB:
             # The tick is estimated from the fastest rank's own cadence so a
             # slow sampler is never called dead between its own ticks.
             rows = conn.execute("""
-                SELECT MIN(sample_ts_s), MAX(sample_ts_s), COUNT(*)
+                SELECT
+                    MIN(timestamp_unix_ns),
+                    MAX(timestamp_unix_ns),
+                    COUNT(*)
                 FROM process_samples
-                WHERE sample_ts_s IS NOT NULL
+                WHERE timestamp_unix_ns IS NOT NULL
                 GROUP BY COALESCE(global_rank, rank)
                 """).fetchall()
             if rows:
-                newest = max(float(r[1]) for r in rows)
+                newest = max(int(r[1]) for r in rows)
                 cadences = [
-                    (float(r[1]) - float(r[0])) / (int(r[2]) - 1)
+                    (int(r[1]) - int(r[0])) / 1_000_000_000 / (int(r[2]) - 1)
                     for r in rows
-                    if int(r[2]) > 1 and float(r[1]) > float(r[0])
+                    if int(r[2]) > 1 and int(r[1]) > int(r[0])
                 ]
                 tick = max(_TICK_SEC, min(cadences)) if cadences else _TICK_SEC
-                window = 3.0 * tick
+                window = round(3.0 * tick * 1_000_000_000)
                 facts["ranks_reporting"] = sum(
-                    1 for r in rows if float(r[1]) >= newest - window
+                    1 for r in rows if int(r[1]) >= newest - window
                 )
             else:
                 facts["ranks_reporting"] = 0
@@ -142,10 +145,15 @@ class ContextDB:
                 "SELECT MIN(sample_ts_s), MAX(sample_ts_s) FROM system_samples"
             ).fetchone()
             proc_row = conn.execute(
-                "SELECT MAX(sample_ts_s) FROM process_samples"
+                "SELECT MAX(timestamp_unix_ns) FROM process_samples"
             ).fetchone()
             firsts = [v for v in (sys_row[0],) if v is not None]
-            lasts = [v for v in (sys_row[1], proc_row[0]) if v is not None]
+            process_last_ts = (
+                proc_row[0] / 1_000_000_000
+                if proc_row[0] is not None
+                else None
+            )
+            lasts = [v for v in (sys_row[1], process_last_ts) if v is not None]
             facts["first_data_ts"] = float(min(firsts)) if firsts else None
             facts["last_data_ts"] = float(max(lasts)) if lasts else None
         except sqlite3.Error:

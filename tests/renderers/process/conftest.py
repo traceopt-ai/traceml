@@ -42,7 +42,7 @@ def process_db(tmp_path: Path):
             "world_size": None,
             "node_rank": None,
             "hostname": None,
-            "sample_ts_s": None,
+            "timestamp_unix_ns": None,
             "seq": None,
             "cpu_percent": None,
             "cpu_logical_core_count": None,
@@ -81,7 +81,9 @@ def process_db(tmp_path: Path):
         insert(
             seq=seq,
             rank=rank,
-            sample_ts_s=1_700_000_000.0 + seq if ts is None else ts,
+            timestamp_unix_ns=round(
+                (1_700_000_000.0 + seq if ts is None else ts) * 1_000_000_000
+            ),
             cpu_percent=cpu,
             ram_used_bytes=ram,
             ram_total_bytes=ram_total,
