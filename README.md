@@ -2,7 +2,7 @@
 
 # TraceML
 
-**Diagnose slow PyTorch training with zero-code instrumentation. Catch regressions in CI.**
+**Diagnose slow PyTorch training. Compare runs and catch performance regressions.**
 
 **Works automatically with:**
 [Hugging Face Trainer](https://traceopt-ai.github.io/traceml/user_guide/integrations/huggingface/) ·
@@ -16,9 +16,9 @@
 [![GitHub stars](https://badgen.net/github/stars/traceopt-ai/traceml?icon=github)](https://github.com/traceopt-ai/traceml)
 
 [**Quickstart**](#quickstart) ·
-[**Integrations**](#pytorch-native-integrations) ·
-[**Multi-node**](#multi-node-training-and-stragglers) ·
-[**Overhead**](#low-overhead-always-on) ·
+[**Integrations**](#integrations) ·
+[**Distributed training**](#distributed-training-and-straggler-detection) ·
+[**Monitoring**](#continuous-monitoring) ·
 [**Compare runs**](#compare-runs) ·
 [**Documentation**](https://traceopt-ai.github.io/traceml/)
 
@@ -27,17 +27,15 @@
 
 </div>
 
-TraceML shows where each training step goes (input loading, data transfer,
-forward, backward, and optimizer work), names the bottleneck, and saves the
-evidence for comparison or CI.
+TraceML breaks down training-step time, identifies likely bottlenecks,
+and saves reports for comparison or CI.
 
-- **PyTorch-native:** works in plain PyTorch loops and in libraries built on
-  PyTorch. Hugging Face Trainer, PyTorch Lightning, and RF-DETR need no code
-  changes.
-- **Multi-node and straggler-aware:** launch across nodes like `torchrun` and
-  see which rank is holding up the run.
-- **Low overhead, always on:** non-blocking timing and an out-of-process
-  aggregator let it run for the whole training job.
+- **Trainer integrations:** automatic setup for supported trainers;
+  explicit step instrumentation for custom PyTorch loops.
+- **Distributed diagnosis:** compare rank timings and identify stragglers
+  across GPUs and nodes.
+- **Continuous monitoring:** collect timing and resource metrics
+  throughout training.
 
 ## Quickstart
 
@@ -56,10 +54,9 @@ pip install traceml-ai
 + traceml run train.py
 ```
 
-For standard Hugging Face Trainer, PyTorch Lightning, and RF-DETR training,
-TraceML instruments the run without changes to the training script. It prints a
-diagnosis when training finishes and writes `final_summary.json` and
-`final_summary.txt` under `logs/<run-name>/`.
+For the standard trainer APIs listed above, no script changes are needed.
+TraceML prints a diagnosis when training finishes and writes
+`final_summary.json` and `final_summary.txt` under `logs/<run-name>/`.
 
 No training script ready? Try the
 [interactive demo](https://huggingface.co/spaces/abhinavsriva/traceml-training-diagnosis),
@@ -69,8 +66,8 @@ which needs no dataset download.
 
 ## What you get
 
-The terminal report identifies the bottleneck, shows the timing and resource
-evidence behind it, and suggests the next investigation.
+The terminal report identifies the likely bottleneck, shows the timing and
+resource evidence behind it, and suggests the next investigation.
 
 ```text
 +----------------------------------------------------------------------------------------------------------------------------------------------------------+
@@ -109,12 +106,25 @@ evidence behind it, and suggests the next investigation.
 +----------------------------------------------------------------------------------------------------------------------------------------------------------+
 ```
 
-## PyTorch-native integrations
 
-TraceML instruments PyTorch itself, so it works in plain PyTorch training
-loops and in the libraries built on top of PyTorch.
+## What TraceML diagnoses
 
-For these trainer APIs, `traceml run` needs no changes to your script:
+| Diagnosis | Where to investigate |
+|---|---|
+| Input-bound | DataLoader workers, transforms, tokenization, collation, or storage |
+| H2D-bound | Pinned memory, non-blocking copies, batch size, or transfer overlap |
+| Compute-bound | Model compute, mixed precision, batch size, or deeper profiling |
+| Residual-heavy | Logging, checkpointing, validation, CPU stalls, or unobserved work |
+| Rank straggler | Rank-local input, data imbalance, node variance, or networking |
+| Memory creep | Retained tensors, logging references, or cached activations |
+
+Read [How to Read TraceML Output](https://traceopt-ai.github.io/traceml/user_guide/reading-output/)
+for definitions, diagnosis rules, and evidence limits.
+
+
+## Integrations
+
+For these standard trainer APIs, `traceml run` needs no changes to your script:
 
 | Framework | Training API |
 |---|---|
@@ -122,9 +132,9 @@ For these trainer APIs, `traceml run` needs no changes to your script:
 | [PyTorch Lightning](https://traceopt-ai.github.io/traceml/user_guide/integrations/lightning/) | `trainer.fit(...)` |
 | [RF-DETR](https://traceopt-ai.github.io/traceml/user_guide/integrations/rfdetr/) | `model.train(...)` |
 
-### Manual and explicit integrations
+### Custom loops and other frameworks
 
-Custom loops and other training paths use their existing TraceML integration:
+Use the following setup for custom loops and other frameworks:
 
 | Training path | Setup |
 |---|---|
@@ -155,13 +165,13 @@ Run it with `traceml run train.py`.
 
 </details>
 
-Manual APIs remain available for custom loops and advanced timing boundaries.
 See the [Public API](https://traceopt-ai.github.io/traceml/user_guide/public-api/)
 and [integration support matrix](https://traceopt-ai.github.io/traceml/user_guide/integrations/).
 
-## Multi-node training and stragglers
+## Distributed training and straggler detection
 
-On one machine, replace `torchrun` with `traceml run`:
+For scripts already configured for distributed training, replace
+`torchrun` with `traceml run`:
 
 ```diff
 - torchrun --nproc-per-node=4 train.py
@@ -181,8 +191,9 @@ traceml run train.py \
   --logs-dir=/shared/traceml/logs
 ```
 
-Node 0 starts the TraceML aggregator and the other nodes join the same run.
-The logs directory must be on storage that every node can reach.
+Node 0 starts the TraceML aggregator; other nodes join the same run.
+All nodes require a shared logs directory. Multi-node DDP uses summary mode;
+multi-node GPU support is experimental.
 
 When training finishes, TraceML aligns common steps across all ranks and
 nodes and points to the rank most likely holding up the run:
@@ -233,33 +244,12 @@ for ports and shared storage,
 [integration support matrix](https://traceopt-ai.github.io/traceml/user_guide/integrations/#integration-support-matrix)
 for framework-specific details, including FSDP.
 
-## Low overhead, always on
+## Continuous monitoring
 
-TraceML is built to run for the whole training job:
+TraceML records GPU phase timings with CUDA events and resolves them
+asynchronously. Telemetry is batched and processed by a separate aggregator.
 
-- GPU phases are timed with CUDA events that are read without
-  `torch.cuda.synchronize()`, so reading a timing does not stall training.
-- Each rank runs one sampler thread at about 1 Hz and sends telemetry in
-  batches to a separate aggregator process.
-- In-memory telemetry buffers have a fixed size.
-- Training keeps running if TraceML instrumentation or the aggregator fails.
-
-TraceML shows enough evidence to choose the next investigation. When the
-result points inside GPU compute, follow up with a kernel profiler.
-
-## What TraceML diagnoses
-
-| Diagnosis | Where to investigate |
-|---|---|
-| Input-bound | DataLoader workers, transforms, tokenization, collation, or storage |
-| H2D-bound | Pinned memory, non-blocking copies, batch size, or transfer overlap |
-| Compute-bound | Model compute, mixed precision, batch size, or deeper profiling |
-| Residual-heavy | Logging, checkpointing, validation, CPU stalls, or unobserved work |
-| Rank straggler | Rank-local input, data imbalance, node variance, or networking |
-| Memory creep | Retained tensors, logging references, or cached activations |
-
-Read [How to Read TraceML Output](https://traceopt-ai.github.io/traceml/user_guide/reading-output/)
-for definitions, diagnosis rules, and evidence limits.
+Use a kernel profiler when the diagnosis points inside GPU compute.
 
 ## Compare runs
 
@@ -299,9 +289,8 @@ traceml compare \
   --output compare/reference-vs-candidate
 ```
 
-TraceML writes the evidence before returning the CI exit code. The regression
-guard is an experimental pilot; read the
-[Regression Guard](https://traceopt-ai.github.io/traceml/user_guide/regression-guard/)
+TraceML writes JSON and text reports before returning the CI exit code.
+See [Regression Guard](https://traceopt-ai.github.io/traceml/user_guide/regression-guard/)
 for comparability requirements and supported environments.
 
 ## Featured case studies
