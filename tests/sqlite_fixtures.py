@@ -107,7 +107,7 @@ def insert_system_sample(
     _insert_row(
         conn,
         "system_samples",
-        recv_ts_ns=row_id,
+        observed_timestamp_unix_ns=row_id,
         global_rank=resolved_global,
         local_rank=local_rank,
         world_size=world_size,
@@ -134,7 +134,9 @@ def insert_system_sample(
         _insert_row(
             conn,
             "system_gpu_samples",
-            recv_ts_ns=int(gpu.get("recv_ts_ns", row_id + offset)),
+            observed_timestamp_unix_ns=int(
+                gpu.get("observed_timestamp_unix_ns", row_id + offset)
+            ),
             global_rank=gpu.get("global_rank", resolved_global),
             local_rank=gpu.get("local_rank", local_rank),
             world_size=gpu.get("world_size", world_size),
@@ -184,7 +186,7 @@ def insert_process_sample(
     _insert_row(
         conn,
         "process_samples",
-        recv_ts_ns=row_id,
+        observed_timestamp_unix_ns=row_id,
         rank=rank,
         global_rank=resolved_global,
         local_rank=local_rank,
@@ -330,7 +332,9 @@ def insert_step_time_sample(
     )
     step_time_projection.insert_rows(
         conn,
-        step_time_projection.build_rows(envelope, recv_ts_ns=row_id),
+        step_time_projection.build_rows(
+            envelope, observed_timestamp_unix_ns=row_id
+        ),
     )
 
 
@@ -355,7 +359,7 @@ def insert_step_memory_sample(
     _insert_row(
         conn,
         "step_memory_samples",
-        recv_ts_ns=row_id,
+        observed_timestamp_unix_ns=row_id,
         rank=rank,
         global_rank=rank,
         local_rank=local_rank,
@@ -378,19 +382,19 @@ def insert_training_strategy(
 ) -> None:
     """Append runtime strategy rows in observation order.
 
-    ``recv_ts_ns`` continues after the latest stored row, so repeated calls
+    ``observed_timestamp_unix_ns`` continues after the latest stored row, so repeated calls
     keep the receive clock strictly increasing as the aggregator's does.
     """
-    (next_recv_ts_ns,) = conn.execute(
-        "SELECT COALESCE(MAX(recv_ts_ns), 0) + 1 FROM runtime_environment"
+    (next_observed_timestamp_unix_ns,) = conn.execute(
+        "SELECT COALESCE(MAX(observed_timestamp_unix_ns), 0) + 1 FROM runtime_environment"
     ).fetchone()
     conn.executemany(
-        "INSERT INTO runtime_environment(recv_ts_ns, training_strategy) "
+        "INSERT INTO runtime_environment(observed_timestamp_unix_ns, training_strategy) "
         "VALUES (?, ?)",
         [
-            (recv_ts_ns, strategy)
-            for recv_ts_ns, strategy in enumerate(
-                strategies, start=next_recv_ts_ns
+            (observed_timestamp_unix_ns, strategy)
+            for observed_timestamp_unix_ns, strategy in enumerate(
+                strategies, start=next_observed_timestamp_unix_ns
             )
         ],
     )

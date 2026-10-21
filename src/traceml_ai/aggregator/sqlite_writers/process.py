@@ -143,7 +143,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
     conn.execute("""
         CREATE TABLE IF NOT EXISTS process_samples (
             id                       INTEGER PRIMARY KEY AUTOINCREMENT,
-            recv_ts_ns               INTEGER NOT NULL,
+            observed_timestamp_unix_ns               INTEGER NOT NULL,
             rank                     INTEGER,
             global_rank              INTEGER,
             local_rank               INTEGER,
@@ -213,7 +213,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
 
 def build_rows(
     envelope: TelemetryEnvelope,
-    recv_ts_ns: int,
+    observed_timestamp_unix_ns: int,
 ) -> Dict[str, list[tuple]]:
     """
     Build SQLite projection rows from one decoded ProcessSampler payload.
@@ -222,8 +222,8 @@ def build_rows(
     ----------
     envelope:
         Canonical telemetry envelope from the main SQLite writer.
-    recv_ts_ns:
-        Receive timestamp assigned by the main writer for this payload.
+    observed_timestamp_unix_ns:
+        Time the main writer observes this payload, in Unix nanoseconds.
 
     Returns
     -------
@@ -339,7 +339,7 @@ def build_rows(
 
             out["process_samples"].append(
                 (
-                    recv_ts_ns,
+                    observed_timestamp_unix_ns,
                     identity.rank,
                     identity.global_rank,
                     identity.local_rank,
@@ -383,7 +383,7 @@ def insert_rows(
         conn.executemany(
             """
             INSERT INTO process_samples(
-                recv_ts_ns,
+                observed_timestamp_unix_ns,
                 rank,
                 global_rank,
                 local_rank,

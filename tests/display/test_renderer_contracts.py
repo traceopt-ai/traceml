@@ -106,7 +106,7 @@ def test_stdout_history_remains_readable(tmp_path) -> None:
         stdout_stderr.init_schema(conn)
         conn.execute("""
             INSERT INTO stdout_stderr_samples(
-                recv_ts_ns, rank, timestamp_unix_ns, line
+                observed_timestamp_unix_ns, rank, timestamp_unix_ns, line
             ) VALUES (1, 2, 3000000000, 'captured output');
             """)
         lines = reader.fetch_latest_lines(conn, rank=2)

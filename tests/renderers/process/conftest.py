@@ -36,7 +36,7 @@ def process_db(tmp_path: Path):
 
     def insert(**row: Any) -> None:
         columns = {
-            "recv_ts_ns": 0,
+            "observed_timestamp_unix_ns": 0,
             "rank": 0,
             "global_rank": None,
             "world_size": None,

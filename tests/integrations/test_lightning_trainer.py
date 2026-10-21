@@ -330,7 +330,9 @@ def test_lightning_completed_step_counts_reach_summary(L, tmp_path):
                 sampler.sender.collect_payload()
             )
             assert envelope is not None
-            rows_by_table = writer.build_rows(envelope, recv_ts_ns=1)
+            rows_by_table = writer.build_rows(
+                envelope, observed_timestamp_unix_ns=1
+            )
             assert sum(map(len, rows_by_table.values())) == 3
             writer.insert_rows(conn, rows_by_table)
     for section in (StepTimeSummarySection, StepMemorySummarySection):

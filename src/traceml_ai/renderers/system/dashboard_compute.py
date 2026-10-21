@@ -605,7 +605,7 @@ class SystemDashboardComputer:
         # Whether the machine is still reporting. Single-node, so this is
         # one answer about the payload: comparing the node against itself
         # would always say yes, and the reference is the aggregator's own
-        # arrival clock rather than the sampler's, which may be a remote
+        # observation clock rather than the sampler's, which may be a remote
         # machine's. The threshold is the shared module's, never a local
         # copy: one question with two thresholds is what this block has
         # already been bitten by twice.
@@ -652,11 +652,11 @@ class SystemDashboardComputer:
     def _node_liveness(self, samples: Any, ts_hist: Any) -> Dict[str, Any]:
         """Whether the host this payload describes is still reporting.
 
-        Age is measured against ``recv_ts_ns``, when the AGGREGATOR
-        received the sample, not ``timestamp_unix_ns``, when the sampler took
-        it: the sampler may be another machine and a skewed remote clock
-        would read as a dead node. ``recv_ts_ns`` is in the table's
-        original schema and is ``NOT NULL``, so it is always present.
+        Age is measured against ``observed_timestamp_unix_ns``, when the
+        aggregator processes the sample, not ``timestamp_unix_ns``, when the
+        sampler took it. The sampler may be another machine, and a skewed
+        remote clock would read as a dead node. The observation timestamp is
+        ``NOT NULL``, so it is always present.
 
         The threshold is the shared ``FreshnessPolicy``, fed the cadence
         this node was OBSERVED to report at. The context strip feeds the
@@ -668,18 +668,20 @@ class SystemDashboardComputer:
         fallback here only until a second sample makes a cadence
         measurable.
         """
-        recvs = [
+        observations = [
             v / 1e9
-            for v in (_opt_float(r["recv_ts_ns"]) for r in samples)
+            for v in (
+                _opt_float(r["observed_timestamp_unix_ns"]) for r in samples
+            )
             if v is not None
         ]
-        if not recvs:
+        if not observations:
             return {"state": "unknown", "age_s": None}
 
-        newest = max(recvs)
+        newest = max(observations)
         age = float(self._now_fn()) - newest
         if age < -_CLOCK_STEP_TOLERANCE_S:
-            # The arrival clock is wall time on both ends, so it is not
+            # The observation clock is wall time on both ends, so it is not
             # monotonic. A backward NTP step makes "now" earlier than a
             # sample we already hold. Clamping that to zero would assert
             # the host is live, which is the one answer we cannot

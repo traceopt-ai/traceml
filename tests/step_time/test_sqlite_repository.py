@@ -164,7 +164,7 @@ def test_summary_deduplicates_before_analysis_windowing(
         conn.executemany(
             """
             INSERT INTO step_time_samples(
-                recv_ts_ns, rank, global_rank, step, events_json
+                observed_timestamp_unix_ns, rank, global_rank, step, events_json
             ) VALUES (?, 0, 0, 5, ?);
             """,
             [(100 + index, latest_json) for index in range(12)],
@@ -294,7 +294,7 @@ def test_live_rank_universe_change_invalidates_cached_snapshot(
         first = repository.load_live(request)
         conn.execute("""
             INSERT INTO step_time_samples(
-                recv_ts_ns, rank, global_rank, step, events_json
+                observed_timestamp_unix_ns, rank, global_rank, step, events_json
             ) VALUES (2, 1, 1, NULL, '');
             """)
         conn.commit()
@@ -354,7 +354,7 @@ def test_live_selection_cost_is_independent_of_total_run_length(
             conn.executemany(
                 """
                 INSERT INTO step_time_samples(
-                    recv_ts_ns, global_rank, step, events_json
+                    observed_timestamp_unix_ns, global_rank, step, events_json
                 ) VALUES (0, ?, ?, '{}');
                 """,
                 (
@@ -501,7 +501,9 @@ def test_writer_events_json_round_trips_through_repository_decoder(
             }
         },
     )
-    rows = step_time_projection.build_rows(envelope, recv_ts_ns=1)
+    rows = step_time_projection.build_rows(
+        envelope, observed_timestamp_unix_ns=1
+    )
 
     events_json = rows["step_time_samples"][0][-1]
     # Integer inputs must persist as floats and call counts as integers.
@@ -564,7 +566,7 @@ def test_repository_flattens_multi_device_dual_clock_values(
         conn.execute(
             """
             INSERT INTO step_time_samples(
-                recv_ts_ns, global_rank, step, events_json
+                observed_timestamp_unix_ns, global_rank, step, events_json
             ) VALUES (0, 0, 1, ?);
             """,
             (json.dumps(events),),
@@ -597,7 +599,7 @@ def test_repository_returns_filtered_progress_identity_and_context(
     with sqlite3.connect(db_path) as conn:
         conn.execute("""
             INSERT INTO step_time_samples(
-                recv_ts_ns, rank, global_rank, step, events_json
+                observed_timestamp_unix_ns, rank, global_rank, step, events_json
             ) VALUES (99, 0, NULL, 99, '{}');
             """)
         # Source time wins over insertion order, even one nanosecond apart.

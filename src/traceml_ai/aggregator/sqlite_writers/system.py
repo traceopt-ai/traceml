@@ -131,7 +131,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
     conn.execute("""
         CREATE TABLE IF NOT EXISTS system_samples (
             id                     INTEGER PRIMARY KEY AUTOINCREMENT,
-            recv_ts_ns             INTEGER NOT NULL,
+            observed_timestamp_unix_ns             INTEGER NOT NULL,
             global_rank            INTEGER,
             local_rank             INTEGER,
             world_size             INTEGER,
@@ -150,7 +150,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
     conn.execute("""
         CREATE TABLE IF NOT EXISTS system_gpu_samples (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
-            recv_ts_ns       INTEGER NOT NULL,
+            observed_timestamp_unix_ns       INTEGER NOT NULL,
             global_rank      INTEGER,
             local_rank       INTEGER,
             world_size       INTEGER,
@@ -252,7 +252,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
 
 def build_rows(
     envelope: TelemetryEnvelope,
-    recv_ts_ns: int,
+    observed_timestamp_unix_ns: int,
 ) -> Dict[str, list[tuple]]:
     """
     Build SQLite projection rows from one decoded SystemSampler payload.
@@ -261,8 +261,8 @@ def build_rows(
     ----------
     envelope:
         Canonical telemetry envelope from the main SQLite writer.
-    recv_ts_ns:
-        Receive timestamp assigned by the main writer for this payload.
+    observed_timestamp_unix_ns:
+        Time the main writer observes this payload, in Unix nanoseconds.
 
     Returns
     -------
@@ -383,7 +383,7 @@ def build_rows(
 
                     out["system_gpu_samples"].append(
                         (
-                            recv_ts_ns,
+                            observed_timestamp_unix_ns,
                             identity.global_rank,
                             identity.local_rank,
                             identity.world_size,
@@ -404,7 +404,7 @@ def build_rows(
 
             out["system_samples"].append(
                 (
-                    recv_ts_ns,
+                    observed_timestamp_unix_ns,
                     identity.global_rank,
                     identity.local_rank,
                     identity.world_size,
@@ -442,7 +442,7 @@ def insert_rows(
         conn.executemany(
             """
             INSERT INTO system_samples(
-                recv_ts_ns,
+                observed_timestamp_unix_ns,
                 global_rank,
                 local_rank,
                 world_size,
@@ -467,7 +467,7 @@ def insert_rows(
         conn.executemany(
             """
             INSERT INTO system_gpu_samples(
-                recv_ts_ns,
+                observed_timestamp_unix_ns,
                 global_rank,
                 local_rank,
                 world_size,
