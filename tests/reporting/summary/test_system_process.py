@@ -275,6 +275,7 @@ def test_process_section_loader_and_builder_use_sqlite_fixture(tmp_path):
     assert data.aggregate.process_samples == 2
     assert result.section == "process"
     assert result.payload["metadata"]["samples"] == 2
+    assert result.payload["metadata"]["duration_s"] == 1.0
     assert "TraceML Process Summary" in result.text
     assert "- Diagnosis: NORMAL" in result.text
     assert (
