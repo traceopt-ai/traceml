@@ -83,6 +83,15 @@ def is_finite_positive(value: float) -> bool:
     return math.isfinite(number) and number > 0.0
 
 
+def _is_finite_positive_value(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    try:
+        return is_finite_positive(value)
+    except (TypeError, ValueError):
+        return False
+
+
 def is_valid_port(value: int) -> bool:
     return 1 <= int(value) <= MAX_PORT
 
@@ -338,6 +347,15 @@ def resolve_config(
     for key, (env_var, _) in YAML_KEY_SCHEMA.items():
         cli_val = cli_overrides.get(key)
         if cli_val is not None:
+            # Explicit overrides such as traceml.init(interval=...) get the
+            # same range check as env vars and traceml.yaml.
+            if key in _POSITIVE_FLOAT_KEYS and not _is_finite_positive_value(
+                cli_val
+            ):
+                raise ValueError(
+                    f"[TraceML] {key}={cli_val!r} must be a finite number "
+                    "greater than 0."
+                )
             result[key] = cli_val
         elif env_var in parent_env:
             result[key] = _coerce_env(key, parent_env[env_var])
