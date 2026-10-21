@@ -2,7 +2,7 @@
 
 # TraceML
 
-**Find what slows down PyTorch training, from one GPU to many nodes. Light enough to leave on for every run.**
+**Diagnose slow PyTorch training with zero-code instrumentation. Catch regressions in CI.**
 
 **Works automatically with:**
 [Hugging Face Trainer](https://traceopt-ai.github.io/traceml/user_guide/integrations/huggingface/) ·
