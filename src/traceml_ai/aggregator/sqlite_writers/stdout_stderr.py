@@ -26,7 +26,12 @@ Canonical telemetry envelope:
 {
     "meta": {"sampler": "Stdout/Stderr", ...},
     "body": {
-        "tables": {"stdout_stderr": [{"line": "..."}, ...]}
+        "tables": {
+            "stdout_stderr": [
+                {"timestamp_unix_ns": 1700000000000000000, "line": "..."},
+                ...
+            ]
+        }
     }
 }
 """
@@ -64,10 +69,6 @@ def init_schema(conn: sqlite3.Connection) -> None:
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_stdout_stderr_rank_id
         ON stdout_stderr_samples(rank, id);
-        """)
-    conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_stdout_stderr_timestamp
-        ON stdout_stderr_samples(timestamp_unix_ns, id);
         """)
 
 

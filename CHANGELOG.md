@@ -7,10 +7,21 @@ which carry the full historical notes for versions predating this file.
 
 ## [Unreleased]
 
-- Raw telemetry uses integer Unix nanoseconds in `timestamp_unix_ns`, including
-  stdout/stderr capture. Final-summary schema `2.0` exposes analysis and sample
-  bounds in the same unit. Use the same TraceML version for workers and the
-  aggregator, and start each run with a fresh run database.
+- **Breaking (raw telemetry and summary):** Raw source timestamps use integer
+  Unix nanoseconds in `timestamp_unix_ns`, including stdout/stderr capture.
+  Final-summary schema `2.0` replaces float-second bounds with integer Unix
+  nanoseconds:
+
+  - `analysis_window`: `start_ts_s` / `end_ts_s` become
+    `start_time_unix_ns` / `end_time_unix_ns`.
+  - `analysis_window.sections.*`: `observed_start_ts_s` / `observed_end_ts_s`
+    become `first_sample_time_unix_ns` / `last_sample_time_unix_ns`.
+  - Section `metadata`: `analysis_start_ts_s` / `analysis_end_ts_s` become
+    `analysis_start_time_unix_ns` / `analysis_end_time_unix_ns`.
+
+  Raw SQLite histories are not migrated. Start a fresh run after upgrading and
+  use the same TraceML version for workers and the aggregator. Saved summaries
+  remain readable by `traceml view` and `traceml compare`.
 - The browser dashboard is now installed with
   `pip install "traceml-ai[dashboard]"`; the default install remains focused on
   summary and terminal output.

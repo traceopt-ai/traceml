@@ -39,6 +39,14 @@ def test_stdout_drain_time_survives_transport_and_projection(
         {"timestamp_unix_ns": timestamp_unix_ns, "line": "first line"},
         {"timestamp_unix_ns": timestamp_unix_ns, "line": "second line"},
     ]
+    records.extend(
+        [
+            {"timestamp_unix_ns": 1.5, "line": "float timestamp"},
+            {"timestamp_unix_ns": True, "line": "boolean timestamp"},
+            {"timestamp_unix_ns": 2**63, "line": "overflowing timestamp"},
+            {"line": "missing timestamp"},
+        ]
+    )
     envelope = normalize_telemetry_envelope(
         {
             "meta": {"sampler": "Stdout/Stderr", "global_rank": 0},
@@ -58,4 +66,8 @@ def test_stdout_drain_time_survives_transport_and_projection(
     assert stored == [
         (timestamp_unix_ns, "first line"),
         (timestamp_unix_ns, "second line"),
+        (None, "float timestamp"),
+        (None, "boolean timestamp"),
+        (None, "overflowing timestamp"),
+        (None, "missing timestamp"),
     ]

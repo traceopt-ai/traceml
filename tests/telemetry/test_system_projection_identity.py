@@ -169,6 +169,12 @@ def test_retention_prunes_through_minimum_aligned_aged_step() -> None:
         step_time: {
             "step_time_samples": [tuple(late_step_row), tuple(fresh_step_row)]
         },
+        stdout_stderr: {
+            "stdout_stderr_samples": [
+                (late_recv_ts_ns, 0, 200_000_000_000, "late line"),
+                (late_recv_ts_ns, 0, 200_000_000_001, "fresh line"),
+            ]
+        },
     }
     writer._write_projection_rows(conn, projection_rows, prune=False)
 
@@ -178,6 +184,12 @@ def test_retention_prunes_through_minimum_aligned_aged_step() -> None:
     assert conn.execute(
         "SELECT timestamp_unix_ns FROM system_samples ORDER BY timestamp_unix_ns;"
     ).fetchall() == [(300_000_000_000,), (500_000_000_000,)]
+    assert conn.execute(
+        "SELECT timestamp_unix_ns, line FROM stdout_stderr_samples ORDER BY id;"
+    ).fetchall() == [
+        (300_000_000_000, "output"),
+        (200_000_000_001, "fresh line"),
+    ]
 
 
 def test_retention_waits_until_step_memory_is_aligned() -> None:

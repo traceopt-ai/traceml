@@ -123,6 +123,6 @@ Architectural risks and known structural debt. Day-to-day bugs live in the issue
 | RESIDUAL_HEAVY | A large window-wide share of Step Time is unattributed residual time. |
 | HIGH_PRESSURE / IMBALANCE | GPU memory is near capacity, or uneven across ranks. |
 | CREEP_EARLY / CREEP_CONFIRMED | Direction-confirmed GPU-memory growth across the run, early or confirmed. |
-| final_summary | The end-of-run `final_summary.{json,txt}`; schema `1.9` adds portable launcher facts under `run_context`. |
+| final_summary | The end-of-run `final_summary.{json,txt}` with performance measurements and portable launcher facts under `run_context`. |
 | Wire envelope | The per-batch message, `{meta, body: {tables}}`, sent as a msgpack frame behind a 4-byte length prefix. |
 | NoOpRuntime | The inert runtime the system falls back to if instrumentation boot fails (fail-open). |
