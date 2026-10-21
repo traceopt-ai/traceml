@@ -21,7 +21,6 @@ def _runtime_environment_payload(
         "hostname": "worker-1",
         "pid": 4321,
         "sampler": sampler,
-        "timestamp": 123.0,
         "tables": (
             tables
             if tables is not None
@@ -103,13 +102,12 @@ def test_runtime_environment_projection_inserts_identity_and_strategy() -> (
         "high",
     )
 
-    legacy_rows = [
+    source_time_rows = [
+        {"timestamp_unix_ns": 123_250_000_001},
         {"ts": 1.25},
-        {"timestamp_unix_ns": 123_250_000_001, "ts": 2.0},
-        {"timestamp_unix_ns": None, "ts": 3.0},
+        {"timestamp_unix_ns": None},
         {"timestamp_unix_ns": True},
         {"timestamp_unix_ns": 2**63},
-        {"ts": float("inf")},
         {},
     ]
     runtime_environment_projection.insert_rows(
@@ -117,7 +115,7 @@ def test_runtime_environment_projection_inserts_identity_and_strategy() -> (
         runtime_environment_projection.build_rows(
             _envelope(
                 _runtime_environment_payload(
-                    tables={"RuntimeEnvironmentTable": legacy_rows}
+                    tables={"RuntimeEnvironmentTable": source_time_rows}
                 )
             ),
             recv_ts_ns=1000,
@@ -127,7 +125,6 @@ def test_runtime_environment_projection_inserts_identity_and_strategy() -> (
         "SELECT timestamp_unix_ns FROM runtime_environment ORDER BY id"
     ).fetchall() == [
         (123_250_000_001,),
-        (1_250_000_000,),
         (123_250_000_001,),
         (None,),
         (None,),

@@ -77,8 +77,7 @@ def test_source_timestamp_survives_wire_and_projection(monkeypatch) -> None:
                     "ProcessTable": [
                         wire_row,
                         {"ts": 1.25},
-                        {"timestamp_unix_ns": timestamp_unix_ns, "ts": 2.0},
-                        {"timestamp_unix_ns": None, "ts": 3.0},
+                        {"timestamp_unix_ns": None},
                         {"timestamp_unix_ns": 2**63},
                         {},
                     ]
@@ -97,8 +96,7 @@ def test_source_timestamp_survives_wire_and_projection(monkeypatch) -> None:
 
     assert timestamps == [
         (timestamp_unix_ns,),
-        (1_250_000_000,),
-        (timestamp_unix_ns,),
+        (None,),
         (None,),
         (None,),
         (None,),

@@ -50,7 +50,6 @@ def test_envelope_meta_carries_stamp():
         ),
         sampler_name="SystemSampler",
         tables={"SystemTable": [{"seq": 1}]},
-        timestamp=1.0,
     )
 
     assert payload["meta"]["session_id"] == "run-a"
@@ -152,7 +151,6 @@ def test_session_source_rides_with_the_stamp():
         identity=identity,
         sampler_name="SystemSampler",
         tables={"SystemTable": [{"seq": 1}]},
-        timestamp=1.0,
     )
     control = build_rank_finished_payload(
         global_rank=0,

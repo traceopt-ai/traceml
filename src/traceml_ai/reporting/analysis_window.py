@@ -46,18 +46,9 @@ class AnalysisWindow:
 
     def metadata(self) -> dict[str, Any]:
         """Return common fields embedded in every section metadata block."""
-        # LEGACY SOURCE TIME: public seconds metadata until RFC-0011 PR 5.
         return {
-            "analysis_start_ts_s": (
-                self.start_time_unix_ns / 1_000_000_000
-                if self.start_time_unix_ns is not None
-                else None
-            ),
-            "analysis_end_ts_s": (
-                self.end_time_unix_ns / 1_000_000_000
-                if self.end_time_unix_ns is not None
-                else None
-            ),
+            "analysis_start_time_unix_ns": self.start_time_unix_ns,
+            "analysis_end_time_unix_ns": self.end_time_unix_ns,
             "analysis_start_step": self.start_step,
             "analysis_end_step": self.end_step,
         }
@@ -177,12 +168,11 @@ def build_analysis_window_payload(
             section: _section_observation(conn, section, table, window)
             for section, table in _SECTION_TABLES.items()
         }
-    metadata = window.metadata()
     return {
         "anchor": window.anchor,
         "retention_s": window.retention_s,
-        "start_ts_s": metadata["analysis_start_ts_s"],
-        "end_ts_s": metadata["analysis_end_ts_s"],
+        "start_time_unix_ns": window.start_time_unix_ns,
+        "end_time_unix_ns": window.end_time_unix_ns,
         "duration_s": window.duration_s,
         "start_step": window.start_step,
         "end_step": window.end_step,
@@ -221,11 +211,11 @@ def _section_observation(
     samples = int(row[0] or 0) if row else 0
     return {
         "samples": samples,
-        "observed_start_ts_s": (
-            row[1] / 1_000_000_000 if row and row[1] is not None else None
+        "first_sample_time_unix_ns": (
+            int(row[1]) if row and row[1] is not None else None
         ),
-        "observed_end_ts_s": (
-            row[2] / 1_000_000_000 if row and row[2] is not None else None
+        "last_sample_time_unix_ns": (
+            int(row[2]) if row and row[2] is not None else None
         ),
     }
 
@@ -233,8 +223,8 @@ def _section_observation(
 def _empty_observation() -> dict[str, Any]:
     return {
         "samples": 0,
-        "observed_start_ts_s": None,
-        "observed_end_ts_s": None,
+        "first_sample_time_unix_ns": None,
+        "last_sample_time_unix_ns": None,
     }
 
 

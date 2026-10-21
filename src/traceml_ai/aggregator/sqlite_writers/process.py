@@ -262,16 +262,6 @@ def build_rows(
 
             seq_raw = row.get("seq")
             timestamp_unix_ns = row.get("timestamp_unix_ns")
-            # LEGACY SOURCE TIME: old payloads; remove in RFC-0011 PR 5.
-            if "timestamp_unix_ns" not in row:
-                legacy_timestamp = row.get("ts")
-                if type(legacy_timestamp) in (int, float):
-                    try:
-                        timestamp_unix_ns = round(
-                            legacy_timestamp * 1_000_000_000
-                        )
-                    except (ValueError, OverflowError):
-                        timestamp_unix_ns = None
             if not (
                 type(timestamp_unix_ns) is int
                 and -(2**63) <= timestamp_unix_ns < 2**63

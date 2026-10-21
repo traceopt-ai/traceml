@@ -7,11 +7,10 @@ which carry the full historical notes for versions predating this file.
 
 ## [Unreleased]
 
-- **Breaking (raw telemetry):** Step Time, Step Memory, Process, System, and
-  Runtime Environment source timestamps use `timestamp_unix_ns`. Raw SQLite
-  histories are not migrated across TraceML versions; start a fresh run after
-  upgrading and use the same version for the aggregator and workers. Existing
-  saved summaries remain readable.
+- Raw telemetry uses integer Unix nanoseconds in `timestamp_unix_ns`, including
+  stdout/stderr capture. Final-summary schema `2.0` exposes analysis and sample
+  bounds in the same unit. Use the same TraceML version for workers and the
+  aggregator, and start each run with a fresh run database.
 - The browser dashboard is now installed with
   `pip install "traceml-ai[dashboard]"`; the default install remains focused on
   summary and terminal output.

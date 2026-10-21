@@ -114,7 +114,7 @@ class FreshnessPolicy:
 
     def age_of(
         self,
-        sample_ts_s: Optional[float],
+        timestamp_s: Optional[float],
         *,
         now_s: float,
     ) -> Optional[float]:
@@ -124,7 +124,7 @@ class FreshnessPolicy:
         put a sample slightly in the future, and a negative age would read
         as fresher than fresh rather than as noise.
         """
-        stamp = finite(sample_ts_s)
+        stamp = finite(timestamp_s)
         now = finite(now_s)
         if stamp is None or now is None:
             return None

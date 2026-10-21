@@ -451,7 +451,6 @@ def _sys_payload(global_rank: int = 5) -> dict:
         "node_rank": global_rank,
         "hostname": f"worker-{global_rank}",
         "sampler": "SystemSampler",
-        "timestamp": 123.0,
         "tables": {
             "SystemTable": [
                 {

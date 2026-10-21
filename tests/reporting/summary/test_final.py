@@ -155,7 +155,7 @@ def test_final_summary_fixture_schema_contains_all_sections(tmp_path) -> None:
 
     payload = build_summary_payload(str(db_path))
 
-    assert payload["schema_version"] == 1.9
+    assert payload["schema_version"] == 2.0
     assert set(payload) == {
         "schema_version",
         "generated_at",
@@ -253,17 +253,20 @@ def test_final_summary_aligns_sections_to_step_derived_time_window(
 
     assert window["start_step"] == 200
     assert window["end_step"] == 500
-    assert window["start_ts_s"] == 1200.0
-    assert window["end_ts_s"] == 3000.0
+    assert window["start_time_unix_ns"] == 1_200_000_000_000
+    assert window["end_time_unix_ns"] == 3_000_000_000_000
     assert window["sections"]["step_time"]["samples"] == 301
     assert window["sections"]["step_memory"]["samples"] == 301
     assert window["sections"]["system"]["samples"] == 500
     assert window["sections"]["process"]["samples"] == 400
     assert payload["duration_s"] is None
     for section in ("system", "process", "step_time", "step_memory"):
+        observation = window["sections"][section]
+        assert observation["first_sample_time_unix_ns"] == 1_200_000_000_000
+        assert observation["last_sample_time_unix_ns"] == 3_000_000_000_000
         metadata = payload[section]["metadata"]
-        assert metadata["analysis_start_ts_s"] == 1200.0
-        assert metadata["analysis_end_ts_s"] == 3000.0
+        assert metadata["analysis_start_time_unix_ns"] == 1_200_000_000_000
+        assert metadata["analysis_end_time_unix_ns"] == 3_000_000_000_000
 
 
 def test_periodic_window_observes_nanosecond_step_memory(tmp_path) -> None:
@@ -328,7 +331,7 @@ def test_final_report_generator_preserves_summary_schema_and_order():
         ),
     )
 
-    assert payload["schema_version"] == 1.9
+    assert payload["schema_version"] == 2.0
     assert payload["duration_s"] is None
     assert list(payload.keys()) == [
         "schema_version",

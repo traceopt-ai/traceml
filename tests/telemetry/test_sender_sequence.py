@@ -209,7 +209,7 @@ class TestDBIncrementalSender:
         assert payload["meta"]["hostname"] == ""
         assert payload["meta"]["pid"] == 0
         assert payload["meta"]["sampler"] == "test_sampler"
-        assert isinstance(payload["meta"]["timestamp"], float)
+        assert "timestamp" not in payload["meta"]
 
 
 # DatabaseWriter tests

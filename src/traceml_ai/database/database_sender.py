@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import time
 from typing import Any, Optional, Protocol
 
 from traceml_ai.loggers.error_log import get_error_logger
@@ -63,7 +62,6 @@ class DBIncrementalSender:
             "hostname": <str>,
             "pid": <int>,
             "sampler": <str>,
-            "timestamp": <float>,
             "session_id": <str | None>,
             "run_nonce": <str | None>,
             "session_source": <"explicit" | "generated" | None>
@@ -173,7 +171,6 @@ class DBIncrementalSender:
             identity=identity,
             sampler_name=self.sampler_name,
             tables=tables_payload,
-            timestamp=time.time(),
         )
 
     def flush(self) -> None:

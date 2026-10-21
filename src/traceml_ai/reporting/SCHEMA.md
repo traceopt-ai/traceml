@@ -1,15 +1,14 @@
 # Final Summary JSON
 
-TraceML writes one end-of-run JSON file. The current schema version is `1.9`.
+TraceML writes one end-of-run JSON file. The current schema version is `2.0`.
 Each section has the same outer shape so the output is easy to store, diff, and
 consume from tooling.
 
-Schema `1.9` adds portable launcher context for local comparison and export.
-It retains the shared analysis window introduced in schema `1.8` and the
-canonical Step Time vocabulary introduced in schema `1.7`. Every public timing
-metric is nullable: `null` means the
-underlying timing signal was never measured in the analyzed window (missing
-instrumentation), while a measured zero stays `0.0`. Null metrics are
+Analysis-window and sample-observation bounds are integer Unix nanoseconds;
+duration fields ending in `_s` remain seconds, and phase timing fields ending
+in `_ms` remain milliseconds. Every public timing metric is nullable: `null`
+means the underlying timing signal was never measured in the analyzed window
+(missing instrumentation), while a measured zero stays `0.0`. Null metrics are
 excluded from `global.average`, `global.median`, and `global.worst` and from
 rank median/worst selection; a rank with only some metrics measured (for
 example an H2D-only rank) keeps its row with `null` for the others.
@@ -17,11 +16,7 @@ example an H2D-only rank) keeps its row with `null` for the others.
 For Step Time and Step Memory, `training_total_steps` is the highest observed
 completed-step counter (`0` with no steps), independent of retained row count.
 `training_latest_step` is that counter, or `null` with no steps. Completed steps
-are numbered from one. Earlier releases incorrectly added one to a nonempty
-counter; regenerated summaries correct this, including for older telemetry.
-This calculation was corrected during schema `1.8` without changing fields or
-types, so previously written `1.8` files may contain the older count. Those
-files are not modified.
+are numbered from one.
 
 For user-facing definitions and examples, see the
 [Step Time glossary](../../../docs/user_guide/reading-output.md#step-time-glossary).
@@ -38,22 +33,22 @@ Sections:
 
 ```json
 {
-  "schema_version": 1.9,
+  "schema_version": 2.0,
   "generated_at": "...",
   "duration_s": null,
   "analysis_window": {
     "anchor": "step_time | periodic_telemetry | null",
     "retention_s": 1800.0,
-    "start_ts_s": null,
-    "end_ts_s": null,
+    "start_time_unix_ns": null,
+    "end_time_unix_ns": null,
     "duration_s": null,
     "start_step": null,
     "end_step": null,
     "sections": {
       "system": {
         "samples": 0,
-        "observed_start_ts_s": null,
-        "observed_end_ts_s": null
+        "first_sample_time_unix_ns": null,
+        "last_sample_time_unix_ns": null
       }
     }
   },
@@ -109,7 +104,8 @@ Step Time, the latest System/Process timestamp anchors a time-only window and
 the step bounds remain `null`.
 
 Each section reports its sample count and observed timestamp bounds. The same
-analysis bounds also appear in every section's `metadata`.
+analysis bounds also appear in every section's `metadata`. All of these bounds
+are integer Unix nanoseconds.
 
 Retention advances through one shared frontier: the minimum of the latest
 rank-aligned Step Time step, latest rank-aligned Step Memory step, and the
@@ -309,8 +305,8 @@ Fallback evidence types are:
     "training_total_steps": null,
     "training_latest_step": null,
     "section_metric_names": [],
-    "analysis_start_ts_s": null,
-    "analysis_end_ts_s": null,
+    "analysis_start_time_unix_ns": null,
+    "analysis_end_time_unix_ns": null,
     "analysis_start_step": null,
     "analysis_end_step": null
   },
@@ -545,9 +541,7 @@ step_time_ms = complete selected-clock step duration
 diagnosis_clock = "cpu" | "gpu"
 ```
 
-Since schema `1.8`, summaries do not publish historical timing aliases. Readers
-that support older summary files must use an explicit schema-versioned
-compatibility adapter at their input boundary; new output remains canonical.
+Summaries publish the canonical timing names only.
 
 `duration_ms` is stored compatibility timing and is not a Step Time display or
 diagnosis fallback. `residual_ms` can include validation, checkpointing,

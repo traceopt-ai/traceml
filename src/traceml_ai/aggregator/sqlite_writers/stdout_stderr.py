@@ -18,7 +18,7 @@ Stdout/stderr is intentionally stored as a very simple append-only stream:
 - one row per line
 - rank retained for filtering
 - receive timestamp retained for stable ordering
-- sampler timestamp retained when available
+- source collection timestamp retained when available
 
 Expected payload shape
 ----------------------
@@ -57,8 +57,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             recv_ts_ns   INTEGER NOT NULL,
             rank         INTEGER,
-            sample_ts_s  REAL,
-            line         TEXT NOT NULL
+            timestamp_unix_ns INTEGER,
+            line              TEXT NOT NULL
         );
         """)
     conn.execute("""
@@ -66,8 +66,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
         ON stdout_stderr_samples(rank, id);
         """)
     conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_stdout_stderr_sample_ts
-        ON stdout_stderr_samples(sample_ts_s, id);
+        CREATE INDEX IF NOT EXISTS idx_stdout_stderr_timestamp
+        ON stdout_stderr_samples(timestamp_unix_ns, id);
         """)
 
 
@@ -107,9 +107,6 @@ def build_rows(
 
     rank = envelope.meta.rank
 
-    ts_raw = envelope.meta.timestamp
-    sample_ts_s = float(ts_raw) if isinstance(ts_raw, (int, float)) else None
-
     tables = envelope.tables
     if not isinstance(tables, dict):
         return out
@@ -122,6 +119,12 @@ def build_rows(
             if not isinstance(row, dict):
                 continue
 
+            timestamp_unix_ns = row.get("timestamp_unix_ns")
+            if not (
+                type(timestamp_unix_ns) is int
+                and -(2**63) <= timestamp_unix_ns < 2**63
+            ):
+                timestamp_unix_ns = None
             line_raw = row.get("line")
             if line_raw is None:
                 continue
@@ -134,7 +137,7 @@ def build_rows(
                 (
                     recv_ts_ns,
                     rank,
-                    sample_ts_s,
+                    timestamp_unix_ns,
                     line,
                 )
             )
@@ -155,7 +158,7 @@ def insert_rows(
             INSERT INTO stdout_stderr_samples(
                 recv_ts_ns,
                 rank,
-                sample_ts_s,
+                timestamp_unix_ns,
                 line
             )
             VALUES (?, ?, ?, ?);

@@ -99,19 +99,19 @@ def test_cli_layout_has_no_legacy_stdout_panel(profile) -> None:
     )
 
 
-def test_legacy_stdout_history_remains_readable(tmp_path) -> None:
-    db_path = tmp_path / "legacy.db"
+def test_stdout_history_remains_readable(tmp_path) -> None:
+    db_path = tmp_path / "stdout.db"
     reader = StdoutStderrDB(str(db_path))
     with reader.connect() as conn:
         stdout_stderr.init_schema(conn)
         conn.execute("""
             INSERT INTO stdout_stderr_samples(
-                recv_ts_ns, rank, sample_ts_s, line
-            ) VALUES (1, 2, 3.0, 'legacy output');
+                recv_ts_ns, rank, timestamp_unix_ns, line
+            ) VALUES (1, 2, 3000000000, 'captured output');
             """)
         lines = reader.fetch_latest_lines(conn, rank=2)
 
-    assert [line.line for line in lines] == ["legacy output"]
+    assert [line.line for line in lines] == ["captured output"]
 
 
 def test_dashboard_driver_missing_dependency_has_install_hint(

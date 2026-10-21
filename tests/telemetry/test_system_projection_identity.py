@@ -104,25 +104,15 @@ def test_retention_prunes_through_minimum_aligned_aged_step() -> None:
         ("process_samples", "", ()),
         ("stdout_stderr_samples", ", line", ("output",)),
     ):
-        timestamp_column = (
-            "timestamp_unix_ns"
-            if table != "stdout_stderr_samples"
-            else "sample_ts_s"
-        )
         sql = (
-            f"INSERT INTO {table}(recv_ts_ns, {timestamp_column}{extra_columns}) "
+            f"INSERT INTO {table}(recv_ts_ns, timestamp_unix_ns{extra_columns}) "
             f"VALUES (?, ?{', ?' * len(extra_values)});"
         )
         for step in (1, 2, 3):
             recv_ts_ns = policy_watermark if step == 3 else cutoff - step
-            timestamp = (
-                step * 100_000_000_000
-                if table != "stdout_stderr_samples"
-                else float(step * 100)
-            )
             conn.execute(
                 sql,
-                (recv_ts_ns, timestamp, *extra_values),
+                (recv_ts_ns, step * 100_000_000_000, *extra_values),
             )
 
     conn.execute(
@@ -142,16 +132,16 @@ def test_retention_prunes_through_minimum_aligned_aged_step() -> None:
     assert conn.execute(
         "SELECT DISTINCT step FROM step_memory_samples ORDER BY step;"
     ).fetchall() == [(3,)]
-    for table, timestamp_column, expected in (
-        ("system_samples", "timestamp_unix_ns", 300_000_000_000),
-        ("system_gpu_samples", "timestamp_unix_ns", 300_000_000_000),
-        ("process_samples", "timestamp_unix_ns", 300_000_000_000),
-        ("stdout_stderr_samples", "sample_ts_s", 300.0),
+    for table in (
+        "system_samples",
+        "system_gpu_samples",
+        "process_samples",
+        "stdout_stderr_samples",
     ):
         assert conn.execute(
-            f"SELECT {timestamp_column} FROM {table} "
-            f"ORDER BY {timestamp_column};"
-        ).fetchall() == [(expected,)]
+            f"SELECT timestamp_unix_ns FROM {table} "
+            "ORDER BY timestamp_unix_ns;"
+        ).fetchall() == [(300_000_000_000,)]
     assert conn.execute(
         "SELECT COUNT(*) FROM runtime_environment;"
     ).fetchone() == (1,)
@@ -262,7 +252,6 @@ def _system_payload() -> dict:
         "node_rank": 1,
         "hostname": "worker-1",
         "sampler": "SystemSampler",
-        "timestamp": 123.0,
         "tables": {
             "SystemTable": [
                 {
@@ -303,17 +292,15 @@ def test_system_projection_stores_global_and_local_rank_identity() -> None:
     assert sample == (5, 1, 8, 4, 1, "worker-1", 7)
     assert gpu_sample == (5, 1, 8, 4, 1, "worker-1", 0)
 
-    # Temporary old input is accepted only when the canonical key is absent.
     payload = _system_payload()
     payload["tables"]["SystemTable"] = [
         {**source_time, "gpus": [[None] * 6]}
         for source_time in (
+            {"timestamp_unix_ns": 123_000_000_001},
             {"ts": 1.25},
-            {"timestamp_unix_ns": 123_000_000_001, "ts": 2.0},
-            {"timestamp_unix_ns": None, "ts": 3.0},
+            {"timestamp_unix_ns": None},
             {"timestamp_unix_ns": True},
             {"timestamp_unix_ns": 2**63},
-            {"ts": float("inf")},
             {},
         )
     ]
@@ -328,7 +315,6 @@ def test_system_projection_stores_global_and_local_rank_identity() -> None:
             f"SELECT timestamp_unix_ns FROM {table} ORDER BY id"
         ).fetchall() == [
             (123_000_000_001,),
-            (1_250_000_000,),
             (123_000_000_001,),
             (None,),
             (None,),

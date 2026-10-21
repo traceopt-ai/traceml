@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional
 
@@ -16,13 +15,6 @@ from typing import Any, Mapping, Optional
 def _optional_int(value: Any) -> Optional[int]:
     try:
         return int(value) if value is not None else None
-    except Exception:
-        return None
-
-
-def _optional_float(value: Any) -> Optional[float]:
-    try:
-        return float(value) if value is not None else None
     except Exception:
         return None
 
@@ -53,7 +45,6 @@ class TelemetryMeta:
     hostname: Optional[str]
     pid: Optional[int]
     sampler: Optional[str]
-    timestamp: Optional[float]
     session_id: Optional[str] = None
     run_nonce: Optional[str] = None
     session_source: Optional[str] = None
@@ -76,7 +67,6 @@ class TelemetryMeta:
             hostname=_optional_str(data.get("hostname")),
             pid=_optional_int(data.get("pid")),
             sampler=_optional_str(data.get("sampler")),
-            timestamp=_optional_float(data.get("timestamp")),
             session_id=_optional_str(data.get("session_id")),
             run_nonce=_optional_str(data.get("run_nonce")),
             session_source=_optional_str(data.get("session_source")),
@@ -94,7 +84,6 @@ class TelemetryMeta:
             "hostname": self.hostname,
             "pid": self.pid,
             "sampler": self.sampler,
-            "timestamp": self.timestamp,
             "session_id": self.session_id,
             "run_nonce": self.run_nonce,
             "session_source": self.session_source,
@@ -134,14 +123,10 @@ def build_telemetry_envelope(
     identity: Any,
     sampler_name: str,
     tables: Mapping[str, Any],
-    timestamp: Optional[float] = None,
 ) -> dict[str, Any]:
     """Build the canonical wire payload emitted by runtime sampler senders."""
     fields = dict(identity.to_payload_fields())
     fields["sampler"] = str(sampler_name)
-    fields["timestamp"] = (
-        time.time() if timestamp is None else float(timestamp)
-    )
     return TelemetryEnvelope(
         meta=TelemetryMeta.from_mapping(fields),
         body={"tables": dict(tables)},
