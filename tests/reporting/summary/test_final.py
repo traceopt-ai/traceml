@@ -7,6 +7,8 @@
 import json
 from dataclasses import dataclass
 
+import pytest
+
 from tests.sqlite_fixtures import (
     insert_process_sample,
     insert_step_memory_sample,
@@ -315,6 +317,46 @@ def test_analysis_window_keeps_declared_rank_universe_after_pruning(
     assert window.anchor is None
     assert window.start_step is None
     assert window.end_step is None
+
+
+def test_failed_system_section_leaves_gpus_observed_unknown():
+    # Four CPU ranks on one node: the world size says nothing about GPUs.
+    process = {
+        "card": "TraceML Process Summary",
+        "metadata": {"mode": "single_node", "global_ranks_seen": 4},
+    }
+    payload = build_summary_payload(
+        "fake.db",
+        generator=_generator(
+            _BrokenSection("system"),
+            _PayloadSection("process", process),
+            _StaticSection("step_time"),
+            _StaticSection("step_memory"),
+        ),
+    )
+
+    assert payload["meta"]["mode"] == "single_node"
+    assert payload["meta"]["world_size"] == 4
+    assert payload["meta"]["gpus_observed"] is None
+
+
+@pytest.mark.parametrize("observed", [0, 4])
+def test_gpus_observed_comes_from_system_telemetry(observed):
+    system = {
+        "card": "TraceML System Summary",
+        "metadata": {"mode": "single_node", "gpus_observed": observed},
+    }
+    payload = build_summary_payload(
+        "fake.db",
+        generator=_generator(
+            _PayloadSection("system", system),
+            _StaticSection("process"),
+            _StaticSection("step_time"),
+            _StaticSection("step_memory"),
+        ),
+    )
+
+    assert payload["meta"]["gpus_observed"] == observed
 
 
 def test_final_report_generator_preserves_summary_schema_and_order():

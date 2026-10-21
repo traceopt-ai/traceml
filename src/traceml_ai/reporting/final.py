@@ -173,21 +173,17 @@ def _final_meta_nodes_observed(
 
 
 def _final_meta_gpus_observed(
-    *,
     system_summary: Dict[str, Any],
-    mode: str,
-    world_size: Optional[int],
 ) -> Optional[int]:
-    """Infer observed GPU count from system metadata with a safe fallback."""
-    value = _safe_int(
+    """Return the GPU count System telemetry observed, or None.
+
+    The world size is not a GPU count: CPU ranks and several ranks per GPU
+    both break that equation, so a missing System count stays unknown.
+    """
+    return _safe_int(
         _section_metadata(system_summary).get("gpus_observed"),
         allow_zero=True,
     )
-    if value is not None:
-        return value
-    if mode == "single_node" and world_size is not None:
-        return int(world_size)
-    return None
 
 
 def _build_final_meta(
@@ -215,11 +211,7 @@ def _build_final_meta(
             system_summary,
             sections,
         ),
-        "gpus_observed": _final_meta_gpus_observed(
-            system_summary=system_summary,
-            mode=mode,
-            world_size=world_size,
-        ),
+        "gpus_observed": _final_meta_gpus_observed(system_summary),
     }
 
 

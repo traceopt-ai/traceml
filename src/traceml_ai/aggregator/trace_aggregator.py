@@ -114,6 +114,8 @@ class TraceMLAggregator:
         self._foreign_senders: dict[_ForeignSender, int] = {}
         self._started = False
         self._drain_lock = threading.Lock()
+        # Orders this class's end-of-run generation with the request path.
+        self._summary_lock = threading.Lock()
 
         # TCP server: aggregator listens for rank-local agents.
         self._tcp_server = TCPServer(
@@ -152,6 +154,7 @@ class TraceMLAggregator:
             write_html=bool(settings.html_report),
             profile=str(settings.profile),
             history_retention_s=float(settings.history_retention_s),
+            summary_lock=self._summary_lock,
         )
 
         # Display driver owns renderer selection and layout mapping.
@@ -269,21 +272,35 @@ class TraceMLAggregator:
                 and self._settings.db_path
             ):
                 summary_path = get_final_summary_json_path(session_root)
-                previous_generation = self._summary_generation_id(summary_path)
-                summary_error: Optional[Exception] = None
-                try:
-                    generate_summary(
-                        str(self._settings.db_path),
-                        session_root=str(session_root),
-                        print_to_stdout=True,
-                        history_retention_s=float(
-                            self._settings.history_retention_s
-                        ),
-                        write_html=bool(self._settings.html_report),
-                        profile=str(self._settings.profile),
+                # stop() joins the loop thread for at most 5 s, so a
+                # final_summary() request can still be generating there.
+                # Wait for it, but never past this call's own deadline.
+                if not self._summary_lock.acquire(timeout=remaining()):
+                    raise TraceMLFinalizationError(
+                        "A requested final summary was still being "
+                        "generated, so the end-of-run summary was not "
+                        "refreshed."
                     )
-                except Exception as summary_exc:
-                    summary_error = summary_exc
+                try:
+                    previous_generation = self._summary_generation_id(
+                        summary_path
+                    )
+                    summary_error: Optional[Exception] = None
+                    try:
+                        generate_summary(
+                            str(self._settings.db_path),
+                            session_root=str(session_root),
+                            print_to_stdout=True,
+                            history_retention_s=float(
+                                self._settings.history_retention_s
+                            ),
+                            write_html=bool(self._settings.html_report),
+                            profile=str(self._settings.profile),
+                        )
+                    except Exception as summary_exc:
+                        summary_error = summary_exc
+                finally:
+                    self._summary_lock.release()
 
                 if self._summary_generation_id(summary_path) in (
                     None,

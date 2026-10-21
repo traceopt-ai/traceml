@@ -6,6 +6,7 @@ history, generates a fresh final summary, writes canonical summary artifacts,
 and publishes a small response file for the requesting process to read.
 """
 
+import threading
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -39,6 +40,7 @@ class FinalSummaryService:
         history_retention_s: float = DEFAULT_HISTORY_RETENTION_S,
         write_html: bool = False,
         profile: str = "run",
+        summary_lock: Optional[threading.Lock] = None,
     ) -> None:
         self._logger = logger
         self._session_root = Path(session_root).resolve()
@@ -49,6 +51,9 @@ class FinalSummaryService:
         self._write_html = bool(write_html)
         self._profile = str(profile)
         self._last_request_id: Optional[str] = None
+        # Shared with the aggregator's end-of-run generation, so it cannot run
+        # between this service's existence check and its generation.
+        self._summary_lock = summary_lock or threading.Lock()
 
     def poll(self) -> None:
         """
@@ -66,6 +71,13 @@ class FinalSummaryService:
         self._handle_request(request_id=request_id)
 
     def _handle_request(self, *, request_id: str) -> None:
+        """
+        Handle one request while holding the shared summary lock.
+        """
+        with self._summary_lock:
+            self._handle_request_locked(request_id=request_id)
+
+    def _handle_request_locked(self, *, request_id: str) -> None:
         """
         Flush history, generate a fresh summary, and publish the response.
         """
