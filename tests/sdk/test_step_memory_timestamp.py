@@ -93,17 +93,15 @@ def test_sampler_preserves_event_timestamp_through_wire_schema() -> None:
         ).fetchone() == (sample.timestamp_unix_ns, 7, 100.0, 200.0)
 
 
-def test_projection_accepts_legacy_source_time_only_without_canonical_key():
+def test_projection_accepts_only_canonical_source_time():
     timestamp_unix_ns = 1_700_000_000_000_000_001
     inputs = [
+        {"timestamp_unix_ns": timestamp_unix_ns},
         {"ts": 1.25},
-        {"timestamp_unix_ns": timestamp_unix_ns, "ts": 2.0},
-        {"timestamp_unix_ns": None, "ts": 3.0},
-        {"timestamp_unix_ns": True, "ts": 3.0},
+        {"timestamp_unix_ns": None},
+        {"timestamp_unix_ns": True},
         {"timestamp_unix_ns": 1.5},
         {"timestamp_unix_ns": 2**63},
-        {"ts": float("nan")},
-        {"ts": float("inf")},
         {},
     ]
     envelope = normalize_telemetry_envelope(
@@ -122,7 +120,6 @@ def test_projection_accepts_legacy_source_time_only_without_canonical_key():
             for row in conn.execute("PRAGMA table_info(step_memory_samples);")
         }
         assert columns["timestamp_unix_ns"] == "INTEGER"
-        assert "sample_ts_s" not in columns
         indexes = conn.execute(
             "PRAGMA index_list(step_memory_samples);"
         ).fetchall()
@@ -130,9 +127,8 @@ def test_projection_accepts_legacy_source_time_only_without_canonical_key():
         assert conn.execute(
             "SELECT timestamp_unix_ns FROM step_memory_samples ORDER BY id;"
         ).fetchall() == [
-            (1_250_000_000,),
             (timestamp_unix_ns,),
-            *[(None,)] * (len(inputs) - 2),
+            *[(None,)] * (len(inputs) - 1),
         ]
 
 

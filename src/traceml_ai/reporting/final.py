@@ -44,8 +44,8 @@ from traceml_ai.sdk.protocol import (
 from traceml_ai.telemetry.retention import DEFAULT_HISTORY_RETENTION_S
 from traceml_ai.utils.atomic_io import write_json_atomic, write_text_atomic
 
-# Version 1.9 adds portable launcher context for local comparison and export.
-SCHEMA_VERSION = 1.9
+# Version 2.0 uses integer Unix-nanosecond analysis bounds.
+SCHEMA_VERSION = 2.0
 
 DEFAULT_PROFILE = "run"
 

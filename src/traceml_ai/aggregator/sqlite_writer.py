@@ -33,7 +33,6 @@ from traceml_ai.telemetry.envelope import (
     TelemetryEnvelope,
     normalize_telemetry_envelope,
 )
-from traceml_ai.telemetry.legacy_source_time import legacy_source_time_storage
 from traceml_ai.telemetry.retention import (
     DEFAULT_HISTORY_RETENTION_S,
     retention_cutoff_recv_ts_ns,
@@ -402,10 +401,7 @@ class SQLiteWriterSimple:
                 if positions is None:
                     continue
                 sample_position, step_position = positions
-                _, units_per_s = legacy_source_time_storage(table)
                 source_floor = self._deleted_through_timestamp_unix_ns
-                if source_floor is not None and units_per_s == 1:
-                    source_floor = source_floor / 1_000_000_000
 
                 def keep(row: tuple) -> bool:
                     if step_position is not None:
@@ -516,19 +512,15 @@ class SQLiteWriterSimple:
                         else:
                             # Periodic history follows the shared step timestamp.
                             # Malformed rows still age out by receive time.
-                            column, units_per_s = legacy_source_time_storage(
-                                table
-                            )
-                            boundary = (
-                                boundary_timestamp_unix_ns
-                                if units_per_s == 1_000_000_000
-                                else boundary_timestamp_unix_ns / 1_000_000_000
-                            )
                             where_sql = (
-                                f"{column} <= ? OR "
-                                f"({column} IS NULL AND recv_ts_ns < ?)"
+                                "timestamp_unix_ns <= ? OR "
+                                "(timestamp_unix_ns IS NULL "
+                                "AND recv_ts_ns < ?)"
                             )
-                            where_params = (boundary, cutoff)
+                            where_params = (
+                                boundary_timestamp_unix_ns,
+                                cutoff,
+                            )
                         self._prune_history_table(
                             conn,
                             table=table,
@@ -721,17 +713,13 @@ class SQLiteWriterSimple:
     def _init_retention_indexes(conn: sqlite3.Connection) -> None:
         """Create indexes used by periodic retention queries."""
         for table in _HISTORY_TABLES:
-            column, units_per_s = legacy_source_time_storage(table)
-            index_clock = (
-                "timestamp" if units_per_s == 1_000_000_000 else "sample_ts"
-            )
             conn.execute(
                 f"CREATE INDEX IF NOT EXISTS idx_{table}_recv_ts "
                 f"ON {table}(recv_ts_ns);"
             )
             conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_{table}_{index_clock}_global "
-                f"ON {table}({column}, id);"
+                f"CREATE INDEX IF NOT EXISTS idx_{table}_timestamp_global "
+                f"ON {table}(timestamp_unix_ns, id);"
             )
 
     def _flush_once(self, conn: sqlite3.Connection) -> None:

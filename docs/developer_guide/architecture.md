@@ -22,12 +22,12 @@ flowchart LR
 
 Samplers maintain an incremental append counter per rank per table. The sender ships only new rows. The aggregator writes canonical telemetry into SQLite-backed history, and renderers pull read-only views from that history.
 
-Step Time, Step Memory, Process, System, and Runtime Environment raw timestamps
-use integer `timestamp_unix_ns`. System GPU rows share their parent sample's
-source time, and Runtime Environment keeps its publication time while queued.
-Chart coordinates, durations, and public summary timestamps remain in seconds.
-The Process and System panels use the separate aggregator receive clock for
-liveness, while shared summary bounds remain integer nanoseconds internally.
+Every raw telemetry stream stores source time as integer Unix nanoseconds in
+`timestamp_unix_ns`. System GPU rows share their parent sample's source time,
+Runtime Environment keeps its publication time while queued, and stdout/stderr
+lines use the time their capture buffer is drained. Summary analysis bounds use
+the same unit; durations and chart coordinates remain in seconds. The Process
+and System panels use the separate aggregator receive clock for liveness.
 
 ## Layers
 
@@ -71,7 +71,7 @@ The load-bearing calls that shape the system, with the rationale and the main al
 | Run the aggregator out-of-process and talk over TCP | A crash or slowdown in the UI/diagnosis layer must never take down training (rejected: in-process aggregation sharing the training interpreter) | A serialize-and-send hop per batch, plus an env-var contract and a fixed port to manage |
 | Auto-instrument by patching PyTorch internals at `init()` | Deliver phase timing with zero manual logging (rejected: asking users to wrap every phase by hand) | Tight coupling to torch internals (`nn.Module.__call__`, `Tensor.backward` / `autograd.backward`, `Tensor.to`, `DataLoader.__iter__`); patches must be fail-open and are the most test-critical surface |
 | Time GPU phases with pooled CUDA events resolved by non-blocking `query()`, never `synchronize()` | Synchronizing to read a timing would stall the training stream and distort the very thing being measured (rejected: `torch.cuda.synchronize()` around phases) | Events resolve opportunistically from a capped pool; an occasional unresolved event is dropped (overhead safety chosen over total completeness) |
-| Length-prefixed msgpack frames, no version field, legacy flat shape still accepted | Keep the wire compact and simple while preserving existing v0.2.x senders (rejected: a versioned/handshaked protocol) | Wire evolution must stay additive and tolerant; there is no negotiated version to branch on |
+| Length-prefixed msgpack frames, no version field, flat envelope shape still accepted | Keep the wire compact and simple (rejected: a versioned/handshaked protocol) | Envelope shape remains tolerant, but row schemas are not negotiated; workers and the aggregator must use the same TraceML version |
 | Bounded in-memory deque tables for the live view, SQLite (WAL) for history | Cap per-rank memory yet keep a queryable history; renderers read from SQLite (rejected: unbounded in-memory retention) | Oldest in-memory rows evict at `maxlen`; SQLite retention advances only through the minimum Step Time/Step Memory step that is aligned across all ranks and older than `history_retention` |
 | Rule-based diagnosis: stateless per-window thresholds, min-step damping, no hysteresis | Verdicts must be explainable, deterministic, and cheap, with no training data required (rejected: a learned/ML classifier) | Thresholds are hand-tuned and documented; verdicts are named (`INPUT_BOUND`, `COMPUTE_STRAGGLER`, `CREEP_CONFIRMED`, and so on) |
 | Report residual time as a derived bucket: `residual = max(0, Traced Step Time - h2d - forward - backward - optimizer)` | No portable, in-process, cross-backend hook for collective/NCCL time exists today (rejected: backend-specific collective instrumentation) | Residual time can absorb legitimate non-collective gaps; explicit collective timing is on the roadmap and flagged in the user docs |
@@ -85,7 +85,7 @@ The load-bearing calls that shape the system, with the rationale and the main al
 | Low overhead | Lightweight enough to leave on for a full production run | Non-blocking CUDA timing (no `synchronize()`), bounded deque tables, one roughly 1 Hz sampler thread per rank, one msgpack batch per tick. Relative overhead is highest on very short steps and amortizes on long ones. A formal cross-configuration overhead benchmark is in progress and not yet published. |
 | Local-first | Core functionality works offline, no account required | Collection, display, diagnosis, and `final_summary` writing all run locally; cloud is additive, never required |
 | Bounded resource use | Memory and disk must not grow without limit during a long run | In-memory tables are deque-bounded; indexed SQLite pruning runs at most once per minute and at finalization, deleting step history through one shared aligned frontier and periodic history through the same timestamp; later arrivals at or before a deleted boundary are dropped before insertion |
-| Backward compatibility | Existing v0.2.x senders and saved outputs keep working | The wire accepts the legacy flat envelope; `compare` and `inspect` read saved summary JSON and msgpack logs without a live run |
+| Compatibility | Saved outputs and the flat envelope shape remain readable | `compare` and `inspect` read saved summary JSON and msgpack logs without a live run; active workers and the aggregator use the same TraceML version |
 | Explainability | A diagnosis must be traceable to the numbers behind it | Verdicts are named, threshold-based, and deterministic per window, not opaque scores |
 | Portability | Run on the common training setups | Python 3.10+, Linux/macOS/Windows launcher, PyTorch 2.x, single and multi-rank via `torchrun` including multi-node |
 
@@ -95,7 +95,7 @@ Architectural risks and known structural debt. Day-to-day bugs live in the issue
 
 - **PyTorch-internals coupling.** Auto-instrumentation patches torch internals that can change between releases, so a torch upgrade is the most likely source of a silent metric regression. Mitigation: the patches are fail-open and instrumentation is the most heavily tested surface in the codebase.
 - **Residual time is a proxy, not a measurement.** `residual` is what remains after h2d, forward, backward, and optimizer are subtracted from step time, so it can include real non-collective gaps. There is no explicit collective/NCCL timing yet; adding it is the main planned step toward distributed defensibility.
-- **No version field on the wire.** Backward compatibility relies on tolerating the legacy envelope shape rather than negotiating a version, so any non-additive wire change needs an explicit migration path.
+- **No version field on the wire.** The flat envelope shape remains accepted, but row schemas are not negotiated, so every process in a run must use the same TraceML version.
 - **Heterogeneous output schema versions.** `final_summary`, `compare`, and the run manifest each carry their own version number with no single shared contract. Downstream consumers (notably the viewer) couple to these shapes, so a version change must be coordinated across producer and consumer.
 - **Mixed-capacity GPU diagnostics.** Capacity-relative GPU memory diagnoses currently assume equal GPU memory capacity across ranks. Mixed-capacity runs still collect per-rank telemetry, but global `HIGH_PRESSURE`, `IMBALANCE`, and aggregate Process pressure diagnoses may be inaccurate.
 - **Single model per training process.** Module-level instrumentation state means one traced model per process; multiple independent models in the same process are not isolated.
@@ -123,6 +123,6 @@ Architectural risks and known structural debt. Day-to-day bugs live in the issue
 | RESIDUAL_HEAVY | A large window-wide share of Step Time is unattributed residual time. |
 | HIGH_PRESSURE / IMBALANCE | GPU memory is near capacity, or uneven across ranks. |
 | CREEP_EARLY / CREEP_CONFIRMED | Direction-confirmed GPU-memory growth across the run, early or confirmed. |
-| final_summary | The end-of-run `final_summary.{json,txt}`; schema `1.9` adds portable launcher facts under `run_context`. |
+| final_summary | The end-of-run `final_summary.{json,txt}` with performance measurements and portable launcher facts under `run_context`. |
 | Wire envelope | The per-batch message, `{meta, body: {tables}}`, sent as a msgpack frame behind a 4-byte length prefix. |
 | NoOpRuntime | The inert runtime the system falls back to if instrumentation boot fails (fail-open). |

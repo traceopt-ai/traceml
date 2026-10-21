@@ -100,7 +100,6 @@ def _system_envelope(*, global_rank: int = 0) -> dict:
             "hostname": "test-host",
             "pid": 4242,
             "sampler": "SystemSampler",
-            "timestamp": time.time(),
         },
         "body": {"tables": {"SystemTable": [sample.to_wire()]}},
     }

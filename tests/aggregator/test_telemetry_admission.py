@@ -77,7 +77,6 @@ def _envelope(**stamp) -> dict:
         ),
         sampler_name="SystemSampler",
         tables={"SystemTable": [{"seq": 1}]},
-        timestamp=1.0,
     )
     payload["meta"].update(stamp)
     return payload

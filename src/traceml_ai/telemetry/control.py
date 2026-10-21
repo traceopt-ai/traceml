@@ -14,7 +14,6 @@ from "all expected ranks have finished, so end-of-run finalization can begin".
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional
 
@@ -30,7 +29,6 @@ class RankFinishedControl:
     world_size: int
     node_rank: int
     hostname: str
-    timestamp: float
 
 
 def build_rank_finished_payload(
@@ -39,7 +37,6 @@ def build_rank_finished_payload(
     world_size: int,
     node_rank: int,
     hostname: str,
-    timestamp: Optional[float] = None,
     session_id: Optional[str] = None,
     run_nonce: Optional[str] = None,
     session_source: Optional[str] = None,
@@ -55,7 +52,6 @@ def build_rank_finished_payload(
         "world_size": int(world_size),
         "node_rank": int(node_rank),
         "hostname": str(hostname),
-        "timestamp": float(time.time() if timestamp is None else timestamp),
         "session_id": session_id or None,
         "run_nonce": run_nonce or None,
         "session_source": session_source or None,
@@ -76,7 +72,6 @@ def parse_rank_finished(
             world_size=int(payload.get("world_size", 1)),
             node_rank=int(payload.get("node_rank", 0)),
             hostname=str(payload.get("hostname", "")),
-            timestamp=float(payload.get("timestamp", 0.0)),
         )
     except Exception:
         return None

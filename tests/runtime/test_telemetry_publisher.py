@@ -120,7 +120,6 @@ def _payload(sampler: str) -> dict:
             "hostname": "",
             "pid": 0,
             "sampler": sampler,
-            "timestamp": 1.0,
         },
         "body": {"tables": {"rows": [{"v": 1}]}},
     }
