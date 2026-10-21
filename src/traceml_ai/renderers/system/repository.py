@@ -55,6 +55,7 @@ class RunStats:
     first_ts: float
     last_ts: float
     sample_count: int
+    first_timestamp_unix_ns: int
 
     @property
     def span_s(self) -> float:
@@ -193,6 +194,7 @@ class SystemRepository:
             first_ts=row[0] / 1_000_000_000,
             last_ts=row[1] / 1_000_000_000,
             sample_count=int(row[2] or 0),
+            first_timestamp_unix_ns=int(row[0]),
         )
 
     def fetch_cpu_run(
@@ -260,6 +262,7 @@ class SystemRepository:
             first_ts=row[0] / 1_000_000_000,
             last_ts=row[1] / 1_000_000_000,
             sample_count=int(row[2] or 0),
+            first_timestamp_unix_ns=int(row[0]),
         )
 
     def fetch_gpu_power_run(
@@ -267,7 +270,7 @@ class SystemRepository:
         conn: sqlite3.Connection,
         *,
         width_s: float,
-        first_ts: float,
+        first_timestamp_unix_ns: int,
         hostname: Optional[str] = None,
     ) -> List[Tuple[int, float, float, float, float]]:
         """Whole-run per-GPU power in fixed-duration buckets.
@@ -280,9 +283,9 @@ class SystemRepository:
         past it, so it is NOT always the duration the rolling charts use.
 
         The offset is clamped at zero. ``CAST`` truncates toward zero
-        rather than flooring, so a row older than ``first_ts`` would
+        rather than flooring, so a row older than the run origin would
         otherwise land in a negative bucket and push the count past the
-        budget. ``first_ts`` is read by a separate query, so on a live
+        budget. The origin is read by a separate query, so on a live
         dashboard a delayed sample can arrive between the two.
         """
         where_sql, bound = self._run_scope(hostname)
@@ -313,7 +316,7 @@ class SystemRepository:
                     """,
                 (
                     *bound,
-                    round(first_ts * 1_000_000_000),
+                    int(first_timestamp_unix_ns),
                     width_s * 1_000_000_000,
                 ),
             ).fetchall()

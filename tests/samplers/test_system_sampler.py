@@ -46,6 +46,18 @@ def test_collection_failures_are_unavailable_not_zero(monkeypatch) -> None:
     assert sampler._sample_ram() is None
     assert sampler._sample_gpus()[0].to_wire() == [None] * 6
 
+    timestamp_unix_ns = 1_700_000_000_000_000_001
+    sent = []
+    sampler.sample_idx = 0
+    sampler._add_record = sent.append
+    monkeypatch.setattr(
+        system_module.time, "time_ns", lambda: timestamp_unix_ns
+    )
+
+    sampler.sample()
+
+    assert sent[0]["timestamp_unix_ns"] == timestamp_unix_ns
+
 
 def test_nullable_system_sample_round_trips_through_wire_schema() -> None:
     sample = SystemSample(

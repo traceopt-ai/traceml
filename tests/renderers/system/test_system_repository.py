@@ -71,7 +71,7 @@ def _power_run(repo, conn, hostname=None):
     rows = repo.fetch_gpu_power_run(
         conn,
         width_s=width,
-        first_ts=stats.first_ts,
+        first_timestamp_unix_ns=stats.first_timestamp_unix_ns,
         hostname=hostname,
     )
     per_gpu = {}
@@ -469,6 +469,30 @@ def test_a_null_timestamp_row_is_not_a_power_sample(system_db):
     assert all(ts is not None for ts in out[0]["t"])
 
 
+def test_power_buckets_keep_the_integer_run_origin(system_db):
+    path = system_db(
+        ticks=2,
+        cadence_s=30.0,
+        gpus=lambda seq: [gpu(0)],
+    )
+    origin_unix_ns = 1_790_444_529_763_028_279
+    repo = _repo(path)
+    with repo.connect() as conn:
+        conn.execute(
+            "UPDATE system_gpu_samples SET timestamp_unix_ns = ? + seq * ?",
+            (origin_unix_ns, 30_000_000_000),
+        )
+        stats = repo.gpu_power_run_stats(conn)
+        assert stats is not None
+        rows = repo.fetch_gpu_power_run(
+            conn,
+            width_s=30.0,
+            first_timestamp_unix_ns=stats.first_timestamp_unix_ns,
+        )
+
+    assert len(rows) == 2
+
+
 def test_one_unclocked_row_does_not_erase_the_whole_run_chart(system_db):
     """The costly half of #418, and the half the issue did not describe.
 
@@ -561,7 +585,12 @@ def test_a_sample_older_than_the_run_start_cannot_break_the_cap(system_db):
         width = DEFAULT_RUN_SERIES_POLICY.bucket_width_for(stats.span_s)
         # A sample from well before the start the planner saw.
         rows = repo.fetch_gpu_power_run(
-            conn, width_s=width, first_ts=stats.first_ts + 2.0 * width
+            conn,
+            width_s=width,
+            first_timestamp_unix_ns=(
+                stats.first_timestamp_unix_ns
+                + round(2.0 * width * 1_000_000_000)
+            ),
         )
 
     budget = DEFAULT_RUN_SERIES_POLICY.max_points
@@ -595,7 +624,9 @@ def test_power_history_sql_errors_propagate(system_db):
 
     with pytest.raises(sqlite3.Error):
         repo.fetch_gpu_power_run(
-            _FailingConnection(), width_s=30.0, first_ts=0.0
+            _FailingConnection(),
+            width_s=30.0,
+            first_timestamp_unix_ns=0,
         )
 
 

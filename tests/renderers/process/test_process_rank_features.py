@@ -207,6 +207,7 @@ def test_a_short_run_stays_on_the_recent_view(process_db):
     assert chart.mode == "recent"
     assert chart.is_retained is False
     assert len(chart.traces) == 2
+    assert chart.traces[0].timestamps[0] == 1_700_000_002.0
     assert all(trace.timestamps for trace in chart.traces)
     assert all(
         len(trace.timestamps) == len(trace.values) for trace in chart.traces

@@ -754,7 +754,7 @@ class SystemDashboardComputer:
         rows = self._db.fetch_gpu_power_run(
             conn,
             width_s=width,
-            first_ts=stats.first_ts,
+            first_timestamp_unix_ns=stats.first_timestamp_unix_ns,
             hostname=host,
         )
         by_gpu: Dict[int, Dict[str, Any]] = {}
