@@ -43,7 +43,7 @@ def _insert_aligned_step(
     *,
     table: str,
     step: int,
-    recv_ts_ns: int,
+    observed_timestamp_unix_ns: int,
     ranks: tuple[int, ...] = (0, 1),
 ) -> None:
     for rank in ranks:
@@ -51,21 +51,33 @@ def _insert_aligned_step(
             conn.execute(
                 """
                 INSERT INTO step_time_samples(
-                    recv_ts_ns, rank, global_rank, world_size,
+                    observed_timestamp_unix_ns, rank, global_rank, world_size,
                     timestamp_unix_ns, step, events_json
                 ) VALUES (?, ?, ?, 2, ?, ?, '{}');
                 """,
-                (recv_ts_ns, rank, rank, step * 100_000_000_000, step),
+                (
+                    observed_timestamp_unix_ns,
+                    rank,
+                    rank,
+                    step * 100_000_000_000,
+                    step,
+                ),
             )
         else:
             conn.execute(
                 """
                 INSERT INTO step_memory_samples(
-                    recv_ts_ns, rank, global_rank, world_size,
+                    observed_timestamp_unix_ns, rank, global_rank, world_size,
                     timestamp_unix_ns, step
                 ) VALUES (?, ?, ?, 2, ?, ?);
                 """,
-                (recv_ts_ns, rank, rank, step * 100_000_000_000, step),
+                (
+                    observed_timestamp_unix_ns,
+                    rank,
+                    rank,
+                    step * 100_000_000_000,
+                    step,
+                ),
             )
 
 
@@ -74,7 +86,7 @@ def test_retention_prunes_through_minimum_aligned_aged_step() -> None:
 
     policy_watermark = 10_000_000_000_000
     cutoff = policy_watermark - int(30 * 60 * 1e9)
-    for step, recv_ts_ns in (
+    for step, observed_timestamp_unix_ns in (
         (1, cutoff - 20),
         (2, cutoff - 10),
         (3, cutoff + 10),
@@ -84,9 +96,9 @@ def test_retention_prunes_through_minimum_aligned_aged_step() -> None:
             conn,
             table="step_time_samples",
             step=step,
-            recv_ts_ns=recv_ts_ns,
+            observed_timestamp_unix_ns=observed_timestamp_unix_ns,
         )
-    for step, recv_ts_ns in (
+    for step, observed_timestamp_unix_ns in (
         (1, cutoff - 20),
         (2, cutoff - 10),
         (3, cutoff + 10),
@@ -95,7 +107,7 @@ def test_retention_prunes_through_minimum_aligned_aged_step() -> None:
             conn,
             table="step_memory_samples",
             step=step,
-            recv_ts_ns=recv_ts_ns,
+            observed_timestamp_unix_ns=observed_timestamp_unix_ns,
         )
 
     for table, extra_columns, extra_values in (
@@ -105,18 +117,24 @@ def test_retention_prunes_through_minimum_aligned_aged_step() -> None:
         ("stdout_stderr_samples", ", line", ("output",)),
     ):
         sql = (
-            f"INSERT INTO {table}(recv_ts_ns, timestamp_unix_ns{extra_columns}) "
+            f"INSERT INTO {table}(observed_timestamp_unix_ns, timestamp_unix_ns{extra_columns}) "
             f"VALUES (?, ?{', ?' * len(extra_values)});"
         )
         for step in (1, 2, 3):
-            recv_ts_ns = policy_watermark if step == 3 else cutoff - step
+            observed_timestamp_unix_ns = (
+                policy_watermark if step == 3 else cutoff - step
+            )
             conn.execute(
                 sql,
-                (recv_ts_ns, step * 100_000_000_000, *extra_values),
+                (
+                    observed_timestamp_unix_ns,
+                    step * 100_000_000_000,
+                    *extra_values,
+                ),
             )
 
     conn.execute(
-        "INSERT INTO runtime_environment(recv_ts_ns) VALUES (?);",
+        "INSERT INTO runtime_environment(observed_timestamp_unix_ns) VALUES (?);",
         (cutoff - 1,),
     )
 
@@ -145,12 +163,12 @@ def test_retention_prunes_through_minimum_aligned_aged_step() -> None:
     assert conn.execute(
         "SELECT COUNT(*) FROM runtime_environment;"
     ).fetchone() == (1,)
-    late_recv_ts_ns = policy_watermark + 100
+    late_observed_timestamp_unix_ns = policy_watermark + 100
     late_system_row = [None] * 14
-    late_system_row[0] = late_recv_ts_ns
+    late_system_row[0] = late_observed_timestamp_unix_ns
     late_system_row[7] = 100_000_000_000
     late_step_row = [None] * 12
-    late_step_row[0] = late_recv_ts_ns
+    late_step_row[0] = late_observed_timestamp_unix_ns
     late_step_row[8] = 100_000_000_000
     late_step_row[10] = 1
     late_step_row[11] = "{}"
@@ -171,8 +189,18 @@ def test_retention_prunes_through_minimum_aligned_aged_step() -> None:
         },
         stdout_stderr: {
             "stdout_stderr_samples": [
-                (late_recv_ts_ns, 0, 200_000_000_000, "late line"),
-                (late_recv_ts_ns, 0, 200_000_000_001, "fresh line"),
+                (
+                    late_observed_timestamp_unix_ns,
+                    0,
+                    200_000_000_000,
+                    "late line",
+                ),
+                (
+                    late_observed_timestamp_unix_ns,
+                    0,
+                    200_000_000_001,
+                    "fresh line",
+                ),
             ]
         },
     }
@@ -201,17 +229,17 @@ def test_retention_waits_until_step_memory_is_aligned() -> None:
             conn,
             table="step_time_samples",
             step=step,
-            recv_ts_ns=cutoff - step,
+            observed_timestamp_unix_ns=cutoff - step,
         )
     _insert_aligned_step(
         conn,
         table="step_memory_samples",
         step=1,
-        recv_ts_ns=cutoff - 1,
+        observed_timestamp_unix_ns=cutoff - 1,
         ranks=(0,),
     )
     conn.execute(
-        "INSERT INTO system_samples(recv_ts_ns, timestamp_unix_ns) VALUES (?, ?);",
+        "INSERT INTO system_samples(observed_timestamp_unix_ns, timestamp_unix_ns) VALUES (?, ?);",
         (policy_watermark, 200_000_000_000),
     )
 
@@ -237,7 +265,7 @@ def test_retention_uses_time_cutoff_when_no_step_history_exists() -> None:
     policy_watermark = 10_000_000_000_000
     cutoff = policy_watermark - int(30 * 60 * 1e9)
     conn.executemany(
-        "INSERT INTO system_samples(recv_ts_ns, timestamp_unix_ns) VALUES (?, ?);",
+        "INSERT INTO system_samples(observed_timestamp_unix_ns, timestamp_unix_ns) VALUES (?, ?);",
         [
             (cutoff - 1, cutoff - 1),
             (policy_watermark, policy_watermark),
@@ -251,7 +279,7 @@ def test_retention_uses_time_cutoff_when_no_step_history_exists() -> None:
     writer._prune_all_retained_rows(conn)
 
     assert conn.execute(
-        "SELECT recv_ts_ns FROM system_samples;"
+        "SELECT observed_timestamp_unix_ns FROM system_samples;"
     ).fetchall() == [(policy_watermark,)]
 
 
@@ -287,7 +315,9 @@ def test_system_projection_stores_global_and_local_rank_identity() -> None:
 
     envelope = normalize_telemetry_envelope(_system_payload())
     assert envelope is not None
-    rows = system_projection.build_rows(envelope, recv_ts_ns=999)
+    rows = system_projection.build_rows(
+        envelope, observed_timestamp_unix_ns=999
+    )
     system_projection.insert_rows(conn, rows)
 
     sample = conn.execute("""
@@ -319,7 +349,8 @@ def test_system_projection_stores_global_and_local_rank_identity() -> None:
     system_projection.insert_rows(
         conn,
         system_projection.build_rows(
-            normalize_telemetry_envelope(payload), recv_ts_ns=1000
+            normalize_telemetry_envelope(payload),
+            observed_timestamp_unix_ns=1000,
         ),
     )
     for table in ("system_samples", "system_gpu_samples"):

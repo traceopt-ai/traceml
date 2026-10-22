@@ -17,7 +17,7 @@ Storage model
 Stdout/stderr is intentionally stored as a very simple append-only stream:
 - one row per line
 - rank retained for filtering
-- receive timestamp retained for stable ordering
+- aggregator observation timestamp retained for stable ordering
 - source collection timestamp retained when available
 
 Expected payload shape
@@ -60,7 +60,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
     conn.execute("""
         CREATE TABLE IF NOT EXISTS stdout_stderr_samples (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            recv_ts_ns   INTEGER NOT NULL,
+            observed_timestamp_unix_ns   INTEGER NOT NULL,
             rank         INTEGER,
             timestamp_unix_ns INTEGER,
             line              TEXT NOT NULL
@@ -74,7 +74,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
 
 def build_rows(
     envelope: TelemetryEnvelope,
-    recv_ts_ns: int,
+    observed_timestamp_unix_ns: int,
 ) -> Dict[str, list[tuple]]:
     """
     Build SQLite projection rows from one decoded StdoutStderrSampler payload.
@@ -83,8 +83,8 @@ def build_rows(
     ----------
     envelope:
         Canonical telemetry envelope from the main SQLite writer.
-    recv_ts_ns:
-        Receive timestamp assigned by the main writer for this payload.
+    observed_timestamp_unix_ns:
+        Time the main writer observes this payload, in Unix nanoseconds.
 
     Returns
     -------
@@ -136,7 +136,7 @@ def build_rows(
 
             out["stdout_stderr_samples"].append(
                 (
-                    recv_ts_ns,
+                    observed_timestamp_unix_ns,
                     rank,
                     timestamp_unix_ns,
                     line,
@@ -157,7 +157,7 @@ def insert_rows(
         conn.executemany(
             """
             INSERT INTO stdout_stderr_samples(
-                recv_ts_ns,
+                observed_timestamp_unix_ns,
                 rank,
                 timestamp_unix_ns,
                 line

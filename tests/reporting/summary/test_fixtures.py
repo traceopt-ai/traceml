@@ -371,7 +371,7 @@ def test_summary_sections_cover_multi_rank_aligned_run(tmp_path: Path) -> None:
                 """
                 UPDATE system_gpu_samples
                 SET mem_used_bytes = ?
-                WHERE recv_ts_ns = ? AND node_rank = ?;
+                WHERE observed_timestamp_unix_ns = ? AND node_rank = ?;
                 """,
                 (gpu_mem_by_rank[rank], 10 + rank, rank),
             )

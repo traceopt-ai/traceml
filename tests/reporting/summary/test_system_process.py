@@ -49,7 +49,7 @@ def _seed_system_samples(conn) -> None:
                 "power_usage_w": 120.0,
             },
             {
-                "recv_ts_ns": 10,
+                "observed_timestamp_unix_ns": 10,
                 "gpu_idx": 1,
                 "util": 40.0,
                 "mem_used_bytes": 5.0,
@@ -89,7 +89,7 @@ def test_system_section_loader_and_builder_use_sqlite_fixture(tmp_path):
         _seed_system_samples(conn)
         conn.execute(
             "INSERT INTO system_samples("
-            "recv_ts_ns, global_rank, local_rank, world_size, "
+            "observed_timestamp_unix_ns, global_rank, local_rank, world_size, "
             "local_world_size, node_rank, hostname, timestamp_unix_ns"
             ") VALUES (11, 0, 0, 1, 1, 0, 'worker-0', 11000000000)"
         )
@@ -337,7 +337,7 @@ def test_process_loader_uses_selected_time_window(tmp_path):
             (boundary_unix_ns - 1,),
         )
         conn.execute(
-            "INSERT INTO process_samples(recv_ts_ns, global_rank, "
+            "INSERT INTO process_samples(observed_timestamp_unix_ns, global_rank, "
             "timestamp_unix_ns, cpu_percent) VALUES (3, 0, ?, 90.0)",
             (boundary_unix_ns + 1,),
         )

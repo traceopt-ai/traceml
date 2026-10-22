@@ -7,7 +7,7 @@
 """Which ranks are still sending Process data.
 
 Every rank's sampler thread writes a ``process_samples`` row on its own
-cadence. This module reads the newest arrival per rank once per tick and
+cadence. This module reads the newest observation per rank once per tick and
 applies the shared :class:`FreshnessPolicy`, so the terminal and the
 dashboard judge a rank's reporting status by one rule and one clock.
 
@@ -71,10 +71,10 @@ def _rank_id(row: Any) -> Optional[int]:
     return rank_id if rank_id is not None else _as_rank(row["rank"])
 
 
-def _arrival(row: Any) -> float:
-    """When the aggregator received a row, oldest when unreadable."""
-    recv = opt_float(row["recv_ts_ns"])
-    return recv if recv is not None else float("-inf")
+def _observation(row: Any) -> float:
+    """When the aggregator observed a row, oldest when unreadable."""
+    observed = opt_float(row["observed_timestamp_unix_ns"])
+    return observed if observed is not None else float("-inf")
 
 
 def _sample_order(row: Any) -> Tuple[float, int]:
@@ -101,11 +101,11 @@ def observed_cadence(by_rank: Dict[int, List[Any]]) -> Optional[float]:
     return best
 
 
-def newest_recv(rows: Sequence[Any]) -> float:
-    """The aggregator's newest arrival clock, the reference for age."""
+def newest_observation(rows: Sequence[Any]) -> float:
+    """The aggregator's newest observation clock, the reference for age."""
     stamps = [
         value / 1e9
-        for value in (opt_float(r["recv_ts_ns"]) for r in rows)
+        for value in (opt_float(r["observed_timestamp_unix_ns"]) for r in rows)
         if value is not None
     ]
     return max(stamps) if stamps else 0.0
@@ -127,8 +127,10 @@ class RankClock:
 
     def reporting_of(self, rank_id: int) -> RankReporting:
         """The last-seen clock and verdict for one rank."""
-        recv = opt_float(self.newest_by_rank[rank_id]["recv_ts_ns"])
-        last_seen = recv / 1e9 if recv is not None else None
+        observed = opt_float(
+            self.newest_by_rank[rank_id]["observed_timestamp_unix_ns"]
+        )
+        last_seen = observed / 1e9 if observed is not None else None
         age = self.policy.age_of(last_seen, now_s=self.now_s)
         return RankReporting(
             global_rank=rank_id,
@@ -157,7 +159,7 @@ def read_rank_clock(
 
     Two reads, on purpose. The windowed one carries each rank's recent
     history; the latest-row one carries every rank that has EVER
-    reported. Age is measured against the newest arrival across ranks,
+    reported. Age is measured against the newest observation across ranks,
     so a rank is stale when its peers keep reporting and it does not.
     """
     window_rows = db.fetch_recent_rank_window(
@@ -185,10 +187,10 @@ def read_rank_clock(
         if rank_id is None:
             continue
         # A row that fell back to its ``rank`` cell is the newest of its
-        # own group, not necessarily of that rank; the later arrival is
+        # own group, not necessarily of that rank; the later observation is
         # the rank's last word.
         held = newest_by_rank.get(rank_id)
-        if held is None or _arrival(row) > _arrival(held):
+        if held is None or _observation(row) > _observation(held):
             newest_by_rank[rank_id] = row
 
     policy = FreshnessPolicy.from_observed_cadence(
@@ -197,7 +199,7 @@ def read_rank_clock(
     )
     return RankClock(
         policy=policy,
-        now_s=newest_recv(list(newest_by_rank.values())),
+        now_s=newest_observation(list(newest_by_rank.values())),
         by_rank=by_rank,
         newest_by_rank=newest_by_rank,
     )
@@ -206,7 +208,7 @@ def read_rank_clock(
 __all__ = [
     "RECENT_WINDOW_S",
     "RankClock",
-    "newest_recv",
+    "newest_observation",
     "observed_cadence",
     "opt_float",
     "read_rank_clock",

@@ -23,7 +23,7 @@ def _create_step_memory_db(path: str) -> None:
         conn.execute("""
             CREATE TABLE step_memory_samples (
                 id                   INTEGER PRIMARY KEY AUTOINCREMENT,
-                recv_ts_ns           INTEGER NOT NULL,
+                observed_timestamp_unix_ns           INTEGER NOT NULL,
                 rank                 INTEGER,
                 global_rank          INTEGER,
                 local_rank           INTEGER,
@@ -92,7 +92,7 @@ def _create_step_memory_db(path: str) -> None:
         conn.executemany(
             """
             INSERT INTO step_memory_samples(
-                recv_ts_ns,
+                observed_timestamp_unix_ns,
                 rank,
                 global_rank,
                 local_rank,
@@ -259,7 +259,7 @@ def test_step_memory_loader_uses_latest_common_steps_per_global_rank(tmp_path):
         conn.executemany(
             """
             INSERT INTO step_memory_samples(
-                recv_ts_ns,
+                observed_timestamp_unix_ns,
                 rank,
                 global_rank,
                 local_rank,

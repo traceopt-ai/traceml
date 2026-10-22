@@ -103,9 +103,9 @@ timestamp bounds, and Step Memory uses the same inclusive step bounds. Without
 Step Time, the latest System/Process timestamp anchors a time-only window and
 the step bounds remain `null`.
 
-Each section reports its sample count and observed timestamp bounds. The same
-analysis bounds also appear in every section's `metadata`. All of these bounds
-are integer Unix nanoseconds.
+Each section reports its sample count and source-sample timestamp bounds. The
+same analysis bounds also appear in every section's `metadata`. All of these
+bounds are integer Unix nanoseconds.
 
 Retention advances through one shared frontier: the minimum of the latest
 rank-aligned Step Time step, latest rank-aligned Step Memory step, and the

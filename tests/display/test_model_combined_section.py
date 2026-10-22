@@ -662,7 +662,7 @@ def test_sqlite_window_has_one_share_across_live_and_summary_consumers(
         conn.execute("""
             CREATE TABLE step_time_samples (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                recv_ts_ns INTEGER NOT NULL,
+                observed_timestamp_unix_ns INTEGER NOT NULL,
                 rank INTEGER,
                 global_rank INTEGER,
                 local_rank INTEGER,
@@ -709,7 +709,7 @@ def test_sqlite_window_has_one_share_across_live_and_summary_consumers(
         conn.executemany(
             """
             INSERT INTO step_time_samples(
-                recv_ts_ns, rank, global_rank, local_rank, world_size,
+                observed_timestamp_unix_ns, rank, global_rank, local_rank, world_size,
                 local_world_size, node_rank, hostname, timestamp_unix_ns,
                 seq, step, events_json
             ) VALUES (?, 0, 0, 0, 1, 1, 0, 'worker-0', ?, ?, ?, ?);

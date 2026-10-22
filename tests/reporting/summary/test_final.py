@@ -277,12 +277,12 @@ def test_periodic_window_observes_nanosecond_step_memory(tmp_path) -> None:
     start_unix_ns = end_unix_ns - 1_000_000_000
     with summary_database(db_path) as conn:
         conn.execute(
-            "INSERT INTO process_samples(recv_ts_ns, timestamp_unix_ns) "
+            "INSERT INTO process_samples(observed_timestamp_unix_ns, timestamp_unix_ns) "
             "VALUES (1, ?), (2, ?);",
             (start_unix_ns, end_unix_ns),
         )
         conn.execute(
-            "INSERT INTO step_memory_samples(recv_ts_ns, timestamp_unix_ns) "
+            "INSERT INTO step_memory_samples(observed_timestamp_unix_ns, timestamp_unix_ns) "
             "VALUES (1, ?), (2, ?), (3, ?), (4, ?);",
             (start_unix_ns - 1, start_unix_ns, end_unix_ns, end_unix_ns + 1),
         )

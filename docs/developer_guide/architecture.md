@@ -27,7 +27,8 @@ Every raw telemetry stream stores source time as integer Unix nanoseconds in
 Runtime Environment keeps its publication time while queued, and stdout/stderr
 lines use the time their capture buffer is drained. Summary analysis bounds use
 the same unit; durations and chart coordinates remain in seconds. The Process
-and System panels use the separate aggregator receive clock for liveness.
+and System panels use `observed_timestamp_unix_ns`, assigned when the
+aggregator processes an envelope, for liveness.
 
 ## Layers
 

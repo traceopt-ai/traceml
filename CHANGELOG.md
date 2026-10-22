@@ -7,10 +7,11 @@ which carry the full historical notes for versions predating this file.
 
 ## [Unreleased]
 
-- **Breaking (raw telemetry and summary):** Raw source timestamps use integer
-  Unix nanoseconds in `timestamp_unix_ns`, including stdout/stderr capture.
-  Final-summary schema `2.0` replaces float-second bounds with integer Unix
-  nanoseconds:
+- **Breaking (raw telemetry and summary):** Raw telemetry uses integer Unix
+  nanoseconds. `timestamp_unix_ns` records the source measurement, including
+  stdout/stderr capture, and `observed_timestamp_unix_ns` records when the
+  aggregator processes an envelope. Final-summary schema `2.0` replaces
+  float-second bounds with integer Unix nanoseconds:
 
   - `analysis_window`: `start_ts_s` / `end_ts_s` become
     `start_time_unix_ns` / `end_time_unix_ns`.
