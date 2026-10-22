@@ -4,17 +4,20 @@
 # you may not use this file except in compliance with the License.
 # SPDX-License-Identifier: Apache-2.0
 
+import sqlite3
+from contextlib import closing
+
 from tests.sqlite_fixtures import (
     insert_process_sample,
     insert_system_sample,
     summary_database,
 )
-from traceml_ai.reporting.sections.process import ProcessSummarySection
-from traceml_ai.reporting.analysis_window import (
+from traceml_ai.measurements.window import (
     AnalysisWindow,
-    build_analysis_window_payload,
     resolve_analysis_window,
 )
+from traceml_ai.reporting.sections.process import ProcessSummarySection
+from traceml_ai.reporting.analysis_window import build_analysis_window_payload
 from traceml_ai.reporting.sections.process.loader import (
     load_process_section_data,
 )
@@ -49,7 +52,7 @@ def _seed_system_samples(conn) -> None:
                 "power_usage_w": 120.0,
             },
             {
-                "recv_ts_ns": 10,
+                "observed_timestamp_unix_ns": 10,
                 "gpu_idx": 1,
                 "util": 40.0,
                 "mem_used_bytes": 5.0,
@@ -89,7 +92,7 @@ def test_system_section_loader_and_builder_use_sqlite_fixture(tmp_path):
         _seed_system_samples(conn)
         conn.execute(
             "INSERT INTO system_samples("
-            "recv_ts_ns, global_rank, local_rank, world_size, "
+            "observed_timestamp_unix_ns, global_rank, local_rank, world_size, "
             "local_world_size, node_rank, hostname, timestamp_unix_ns"
             ") VALUES (11, 0, 0, 1, 1, 0, 'worker-0', 11000000000)"
         )
@@ -208,7 +211,8 @@ def test_system_loader_uses_selected_time_window(tmp_path):
             ),
         )
 
-    window = resolve_analysis_window(str(db_path), retention_s=1.0)
+    with closing(sqlite3.connect(db_path)) as connection:
+        window = resolve_analysis_window(connection, retention_s=1.0)
     assert window.end_time_unix_ns == round(timestamp_s * 1_000_000_000)
     data = load_system_section_data(str(db_path), analysis_window=window)
 
@@ -337,7 +341,7 @@ def test_process_loader_uses_selected_time_window(tmp_path):
             (boundary_unix_ns - 1,),
         )
         conn.execute(
-            "INSERT INTO process_samples(recv_ts_ns, global_rank, "
+            "INSERT INTO process_samples(observed_timestamp_unix_ns, global_rank, "
             "timestamp_unix_ns, cpu_percent) VALUES (3, 0, ?, 90.0)",
             (boundary_unix_ns + 1,),
         )

@@ -12,7 +12,7 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Dict, Optional
 
-from traceml_ai.reporting.analysis_window import AnalysisWindow
+from traceml_ai.measurements.window import AnalysisWindow
 from traceml_ai.reporting.sections.process.model import (
     PerRankProcessSummary,
     ProcessSummaryAgg,

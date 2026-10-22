@@ -40,7 +40,7 @@ def _run(db, *, ranks=2, samples=60, cadence_s=2.0, dies=None):
             if dies is not None and rank == dies[0] and seq > dies[1]:
                 continue
             db.insert(
-                recv_ts_ns=int((T0 + seq * cadence_s) * 1e9),
+                observed_timestamp_unix_ns=int((T0 + seq * cadence_s) * 1e9),
                 rank=rank,
                 global_rank=rank,
                 node_rank=0,
@@ -76,7 +76,7 @@ def test_cli_snapshot_names_the_rank_that_stopped(process_db):
     assert by_rank[0]["freshness"] == "fresh"
     assert by_rank[0]["age_s"] == pytest.approx(0.0)
     assert by_rank[1]["freshness"] == "stale"
-    # Seq 20 arrived at T0+40 s, the newest arrival is T0+120 s.
+    # Seq 20 was observed at T0+40 s; the newest observation is T0+120 s.
     assert by_rank[1]["age_s"] == pytest.approx(80.0)
     assert by_rank[1]["last_seen_s"] == pytest.approx(T0 + 40.0)
 
@@ -153,7 +153,7 @@ def test_held_figures_never_bring_back_the_status_they_were_read_with(
 
     for seq in range(21, 61):
         process_db.insert(
-            recv_ts_ns=int((T0 + seq * 2.0) * 1e9),
+            observed_timestamp_unix_ns=int((T0 + seq * 2.0) * 1e9),
             rank=0,
             global_rank=0,
             node_rank=0,
@@ -310,7 +310,7 @@ def test_an_older_row_with_a_garbage_global_rank_moves_no_verdict(
     """
     _run(process_db, dies=(1, 20))
     process_db.insert(
-        recv_ts_ns=int((T0 + 2.0) * 1e9),
+        observed_timestamp_unix_ns=int((T0 + 2.0) * 1e9),
         rank=0,
         global_rank="not-a-rank",
         seq=1,
@@ -344,7 +344,7 @@ def test_unparseable_global_rank_falls_back_to_the_rank_cell(process_db):
     """
     _run(process_db, ranks=3)
     process_db.insert(
-        recv_ts_ns=int((T0 + 40.0) * 1e9),
+        observed_timestamp_unix_ns=int((T0 + 40.0) * 1e9),
         rank=3,
         global_rank="garbage",
         seq=20,
@@ -352,7 +352,7 @@ def test_unparseable_global_rank_falls_back_to_the_rank_cell(process_db):
         cpu_percent=100.0,
     )
     process_db.insert(
-        recv_ts_ns=int((T0 + 120.0) * 1e9),
+        observed_timestamp_unix_ns=int((T0 + 120.0) * 1e9),
         rank=None,
         global_rank="junk",
         seq=60,
@@ -384,7 +384,7 @@ def test_a_fallen_back_row_joins_its_rank_window_in_sample_order(
     """
     _run(process_db)
     process_db.insert(
-        recv_ts_ns=int((T0 + 101.0) * 1e9),
+        observed_timestamp_unix_ns=int((T0 + 101.0) * 1e9),
         rank=0,
         global_rank="garbage",
         seq=50,

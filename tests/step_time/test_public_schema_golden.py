@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import difflib
 import json
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -35,7 +37,7 @@ from tests.step_time.scenarios import (
     ALL_SCENARIOS,
     create_step_time_database,
 )
-from traceml_ai.reporting.analysis_window import resolve_analysis_window
+from traceml_ai.measurements.window import resolve_analysis_window
 from traceml_ai.reporting.final import SCHEMA_VERSION
 from traceml_ai.reporting.sections.step_time import (
     STEP_TIME_METRIC_NAMES,
@@ -96,7 +98,8 @@ def build_snapshot(tmp_path: Path) -> dict[str, Any]:
     for scenario in ALL_SCENARIOS:
         db_path = tmp_path / f"{scenario.name}.db"
         create_step_time_database(db_path, scenario)
-        window = resolve_analysis_window(str(db_path))
+        with closing(sqlite3.connect(db_path)) as connection:
+            window = resolve_analysis_window(connection)
         section = StepTimeSummarySection(analysis_window=window)
         payload = section.build(str(db_path)).payload
         keys |= _key_paths(payload)

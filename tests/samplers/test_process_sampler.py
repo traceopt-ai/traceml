@@ -88,7 +88,8 @@ def test_source_timestamp_survives_wire_and_projection(monkeypatch) -> None:
     with sqlite3.connect(":memory:") as conn:
         projection.init_schema(conn)
         projection.insert_rows(
-            conn, projection.build_rows(envelope, recv_ts_ns=99)
+            conn,
+            projection.build_rows(envelope, observed_timestamp_unix_ns=99),
         )
         timestamps = conn.execute(
             "SELECT timestamp_unix_ns FROM process_samples ORDER BY id;"

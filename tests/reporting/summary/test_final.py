@@ -5,6 +5,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 
 import pytest
@@ -17,10 +19,10 @@ from tests.sqlite_fixtures import (
     summary_database,
 )
 from traceml_ai.core.summaries import SummaryResult
-from traceml_ai.reporting.analysis_window import (
-    build_analysis_window_payload,
+from traceml_ai.measurements.window import (
     resolve_analysis_window,
 )
+from traceml_ai.reporting.analysis_window import build_analysis_window_payload
 from traceml_ai.reporting.final import (
     FinalReportGenerator,
     build_summary_payload,
@@ -277,17 +279,18 @@ def test_periodic_window_observes_nanosecond_step_memory(tmp_path) -> None:
     start_unix_ns = end_unix_ns - 1_000_000_000
     with summary_database(db_path) as conn:
         conn.execute(
-            "INSERT INTO process_samples(recv_ts_ns, timestamp_unix_ns) "
+            "INSERT INTO process_samples(observed_timestamp_unix_ns, timestamp_unix_ns) "
             "VALUES (1, ?), (2, ?);",
             (start_unix_ns, end_unix_ns),
         )
         conn.execute(
-            "INSERT INTO step_memory_samples(recv_ts_ns, timestamp_unix_ns) "
+            "INSERT INTO step_memory_samples(observed_timestamp_unix_ns, timestamp_unix_ns) "
             "VALUES (1, ?), (2, ?), (3, ?), (4, ?);",
             (start_unix_ns - 1, start_unix_ns, end_unix_ns, end_unix_ns + 1),
         )
 
-    window = resolve_analysis_window(str(db_path), retention_s=1.0)
+    with closing(sqlite3.connect(db_path)) as connection:
+        window = resolve_analysis_window(connection, retention_s=1.0)
     assert window.start_time_unix_ns == start_unix_ns
     assert window.end_time_unix_ns == end_unix_ns
     assert window.duration_s == 1.0
@@ -315,7 +318,8 @@ def test_analysis_window_keeps_declared_rank_universe_after_pruning(
                 traced_step_time=10.0,
             )
 
-    window = resolve_analysis_window(str(db_path), retention_s=1800.0)
+    with closing(sqlite3.connect(db_path)) as connection:
+        window = resolve_analysis_window(connection, retention_s=1800.0)
 
     assert window.anchor is None
     assert window.start_step is None

@@ -54,7 +54,9 @@ def test_stdout_drain_time_survives_transport_and_projection(
         }
     )
     assert envelope is not None
-    rows = stdout_stderr.build_rows(envelope, recv_ts_ns=timestamp_unix_ns + 9)
+    rows = stdout_stderr.build_rows(
+        envelope, observed_timestamp_unix_ns=timestamp_unix_ns + 9
+    )
     with sqlite3.connect(":memory:") as conn:
         stdout_stderr.init_schema(conn)
         stdout_stderr.insert_rows(conn, rows)

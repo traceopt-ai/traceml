@@ -8,17 +8,21 @@
 
 from __future__ import annotations
 
+import sqlite3
 import sys
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from traceml_ai.core.summaries import SummaryResult
 from traceml_ai.loggers.error_log import get_error_logger
-from traceml_ai.reporting.analysis_window import (
+from traceml_ai.measurements.window import (
     AnalysisWindow,
-    build_analysis_window_payload,
     resolve_analysis_window,
+)
+from traceml_ai.reporting.analysis_window import (
+    build_analysis_window_payload,
 )
 from traceml_ai.reporting.primary_diagnosis import build_primary_diagnosis
 from traceml_ai.reporting.run_context import load_run_manifest_projection
@@ -413,10 +417,11 @@ def build_summary_payload(
     """
     active_generator = generator
     if active_generator is None:
-        analysis_window = resolve_analysis_window(
-            db_path,
-            retention_s=history_retention_s,
-        )
+        with closing(sqlite3.connect(db_path)) as connection:
+            analysis_window = resolve_analysis_window(
+                connection,
+                retention_s=history_retention_s,
+            )
         active_generator = build_final_report_generator(
             analysis_window=analysis_window,
         )
