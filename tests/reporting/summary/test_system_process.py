@@ -4,20 +4,21 @@
 # you may not use this file except in compliance with the License.
 # SPDX-License-Identifier: Apache-2.0
 
+import sqlite3
+from contextlib import closing
+
 from tests.sqlite_fixtures import (
     insert_process_sample,
     insert_system_sample,
     summary_database,
 )
-from traceml_ai.reporting.sections.process import ProcessSummarySection
-from traceml_ai.reporting.analysis_window import (
+from traceml_ai.measurements.process import read_process_measurements
+from traceml_ai.measurements.window import (
     AnalysisWindow,
-    build_analysis_window_payload,
     resolve_analysis_window,
 )
-from traceml_ai.reporting.sections.process.loader import (
-    load_process_section_data,
-)
+from traceml_ai.reporting.analysis_window import build_analysis_window_payload
+from traceml_ai.reporting.sections.process import ProcessSummarySection
 from traceml_ai.reporting.sections.system import SystemSummarySection
 from traceml_ai.reporting.sections.system.loader import (
     load_system_section_data,
@@ -49,7 +50,7 @@ def _seed_system_samples(conn) -> None:
                 "power_usage_w": 120.0,
             },
             {
-                "recv_ts_ns": 10,
+                "observed_timestamp_unix_ns": 10,
                 "gpu_idx": 1,
                 "util": 40.0,
                 "mem_used_bytes": 5.0,
@@ -89,7 +90,7 @@ def test_system_section_loader_and_builder_use_sqlite_fixture(tmp_path):
         _seed_system_samples(conn)
         conn.execute(
             "INSERT INTO system_samples("
-            "recv_ts_ns, global_rank, local_rank, world_size, "
+            "observed_timestamp_unix_ns, global_rank, local_rank, world_size, "
             "local_world_size, node_rank, hostname, timestamp_unix_ns"
             ") VALUES (11, 0, 0, 1, 1, 0, 'worker-0', 11000000000)"
         )
@@ -208,7 +209,8 @@ def test_system_loader_uses_selected_time_window(tmp_path):
             ),
         )
 
-    window = resolve_analysis_window(str(db_path), retention_s=1.0)
+    with closing(sqlite3.connect(db_path)) as connection:
+        window = resolve_analysis_window(connection, retention_s=1.0)
     assert window.end_time_unix_ns == round(timestamp_s * 1_000_000_000)
     data = load_system_section_data(str(db_path), analysis_window=window)
 
@@ -271,12 +273,13 @@ def test_system_loader_uses_selected_time_window_per_node(tmp_path):
     assert data.cluster.nodes["1"].per_gpu[0].util_peak_percent == 64.0
 
 
-def test_process_section_loader_and_builder_use_sqlite_fixture(tmp_path):
+def test_process_measurements_and_builder_use_sqlite_fixture(tmp_path):
     db_path = tmp_path / "process.db"
     with summary_database(db_path) as conn:
         _seed_process_samples(conn)
 
-    data = load_process_section_data(str(db_path))
+    with closing(sqlite3.connect(db_path)) as connection:
+        data = read_process_measurements(connection)
     result = ProcessSummarySection().build(str(db_path))
 
     assert data.aggregate.process_samples == 2
@@ -323,7 +326,7 @@ def test_process_section_loader_and_builder_use_sqlite_fixture(tmp_path):
     assert "takeaway" not in result.payload["global"]
 
 
-def test_process_loader_uses_selected_time_window(tmp_path):
+def test_process_measurements_use_selected_time_window(tmp_path):
     db_path = tmp_path / "process_latest.db"
     boundary_unix_ns = 1_792_336_915_368_049_000
     with summary_database(db_path) as conn:
@@ -337,7 +340,7 @@ def test_process_loader_uses_selected_time_window(tmp_path):
             (boundary_unix_ns - 1,),
         )
         conn.execute(
-            "INSERT INTO process_samples(recv_ts_ns, global_rank, "
+            "INSERT INTO process_samples(observed_timestamp_unix_ns, global_rank, "
             "timestamp_unix_ns, cpu_percent) VALUES (3, 0, ?, 90.0)",
             (boundary_unix_ns + 1,),
         )
@@ -347,10 +350,11 @@ def test_process_loader_uses_selected_time_window(tmp_path):
         start_time_unix_ns=boundary_unix_ns,
         end_time_unix_ns=boundary_unix_ns,
     )
-    data = load_process_section_data(
-        str(db_path),
-        analysis_window=window,
-    )
+    with closing(sqlite3.connect(db_path)) as connection:
+        data = read_process_measurements(
+            connection,
+            analysis_window=window,
+        )
 
     assert (
         build_analysis_window_payload(str(db_path), window)["sections"][
@@ -365,7 +369,7 @@ def test_process_loader_uses_selected_time_window(tmp_path):
     assert data.per_global_rank[0].gpu_mem_reserved_avg_bytes == 4000000000.0
 
 
-def test_process_loader_ignores_rows_without_global_rank(tmp_path):
+def test_process_measurements_ignore_rows_without_global_rank(tmp_path):
     db_path = tmp_path / "process_legacy_rank.db"
     with summary_database(db_path) as conn:
         _seed_process_samples(conn)
@@ -387,7 +391,8 @@ def test_process_loader_ignores_rows_without_global_rank(tmp_path):
             gpu_mem_total_bytes=10e9,
         )
 
-    data = load_process_section_data(str(db_path))
+    with closing(sqlite3.connect(db_path)) as connection:
+        data = read_process_measurements(connection)
 
     assert data.aggregate.process_samples == 2
     assert data.aggregate.distinct_global_ranks == 1

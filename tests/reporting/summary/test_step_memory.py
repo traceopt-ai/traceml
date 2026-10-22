@@ -7,7 +7,7 @@
 import sqlite3
 
 from traceml_ai.diagnostics.step_memory import SUMMARY_STEP_MEMORY_POLICY
-from traceml_ai.reporting.analysis_window import AnalysisWindow
+from traceml_ai.measurements.window import AnalysisWindow
 from traceml_ai.reporting.sections.step_memory import StepMemorySummarySection
 from traceml_ai.reporting.sections.step_memory.loader import (
     load_step_memory_section_data,
@@ -23,7 +23,7 @@ def _create_step_memory_db(path: str) -> None:
         conn.execute("""
             CREATE TABLE step_memory_samples (
                 id                   INTEGER PRIMARY KEY AUTOINCREMENT,
-                recv_ts_ns           INTEGER NOT NULL,
+                observed_timestamp_unix_ns           INTEGER NOT NULL,
                 rank                 INTEGER,
                 global_rank          INTEGER,
                 local_rank           INTEGER,
@@ -92,7 +92,7 @@ def _create_step_memory_db(path: str) -> None:
         conn.executemany(
             """
             INSERT INTO step_memory_samples(
-                recv_ts_ns,
+                observed_timestamp_unix_ns,
                 rank,
                 global_rank,
                 local_rank,
@@ -259,7 +259,7 @@ def test_step_memory_loader_uses_latest_common_steps_per_global_rank(tmp_path):
         conn.executemany(
             """
             INSERT INTO step_memory_samples(
-                recv_ts_ns,
+                observed_timestamp_unix_ns,
                 rank,
                 global_rank,
                 local_rank,

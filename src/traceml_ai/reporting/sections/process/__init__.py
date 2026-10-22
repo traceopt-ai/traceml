@@ -10,6 +10,8 @@ Final-report process section.
 
 from __future__ import annotations
 
+import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 from typing import ClassVar, Dict
 
@@ -20,17 +22,15 @@ from traceml_ai.diagnostics.process.context import (
     ProcessDiagnosisInput,
     ProcessRankDiagnosisInput,
 )
-from traceml_ai.reporting.analysis_window import AnalysisWindow
+from traceml_ai.measurements.process import (
+    PerRankProcessSummary,
+    ProcessMeasurements,
+    read_process_measurements,
+)
+from traceml_ai.measurements.window import AnalysisWindow
+from traceml_ai.reporting.analysis_window import analysis_window_metadata
 from traceml_ai.reporting.sections.base import BaseSummarySection
 from traceml_ai.reporting.sections.process.builder import build_process_payload
-from traceml_ai.reporting.sections.process.formatter import (
-    format_process_section_text,
-)
-from traceml_ai.reporting.sections.process.loader import (
-    ProcessSectionData,
-    load_process_section_data,
-)
-from traceml_ai.reporting.sections.process.model import PerRankProcessSummary
 from traceml_ai.reporting.summaries.summary_formatting import (
     duration_from_bounds,
 )
@@ -63,7 +63,7 @@ def _rank_diagnosis_inputs(
 @dataclass(frozen=True)
 class ProcessSummarySection(
     BaseSummarySection[
-        ProcessSectionData,
+        ProcessMeasurements,
         ProcessDiagnosisInput,
         DiagnosticResult[ProcessDiagnosis],
     ],
@@ -73,16 +73,17 @@ class ProcessSummarySection(
     name: ClassVar[str] = "process"
     analysis_window: AnalysisWindow | None = None
 
-    def load(self, db_path: str) -> ProcessSectionData:
+    def load(self, db_path: str) -> ProcessMeasurements:
         """Load process telemetry for the final report."""
-        return load_process_section_data(
-            db_path,
-            analysis_window=self.analysis_window,
-        )
+        with closing(sqlite3.connect(db_path)) as connection:
+            return read_process_measurements(
+                connection,
+                analysis_window=self.analysis_window,
+            )
 
     def to_diagnosis_input(
         self,
-        data: ProcessSectionData,
+        data: ProcessMeasurements,
     ) -> ProcessDiagnosisInput:
         """Adapt loaded process data to the diagnosis contract."""
         agg = data.aggregate
@@ -115,23 +116,23 @@ class ProcessSummarySection(
 
     def build_payload(
         self,
-        data: ProcessSectionData,
+        data: ProcessMeasurements,
         diagnosis_result: DiagnosticResult[ProcessDiagnosis],
     ) -> SummaryResult:
         """Assemble the Process summary payload and display text."""
         payload = build_process_payload(data, diagnosis_result)
         if self.analysis_window is not None:
-            payload["metadata"].update(self.analysis_window.metadata())
+            payload["metadata"].update(
+                analysis_window_metadata(self.analysis_window)
+            )
         return SummaryResult(
             section=self.name,
             payload=payload,
-            text=format_process_section_text(payload),
+            text=str(payload.get("card", "")),
         )
 
 
 __all__ = [
     "ProcessSummarySection",
     "build_process_payload",
-    "format_process_section_text",
-    "load_process_section_data",
 ]

@@ -1165,19 +1165,20 @@ def test_a_held_over_payload_carries_why_it_is_held(tmp_path: Path) -> None:
     assert held.rollups.status in panel["note"].text
 
 
-def _with_arrival_clock(path: Path) -> None:
-    """Give the rows a real arrival clock.
+def _with_observation_clock(path: Path) -> None:
+    """Give the rows a real observation clock.
 
-    The fixture writes `recv_ts_ns` as a synthetic row id, which is fine
+    The fixture writes `observed_timestamp_unix_ns` as a synthetic row id, which is fine
     for ordering and useless as a clock. Liveness is measured against the
-    AGGREGATOR's arrival time rather than the sampler's `timestamp_unix_ns`,
+    aggregator's observation time rather than the sampler's `timestamp_unix_ns`,
     because the sampler may be a different machine and a skewed remote
     clock would otherwise read as a dead node. Process measures age the
     same way.
     """
     with sqlite_database(path, init_summary_schema) as conn:
         conn.execute(
-            "UPDATE system_samples " "SET recv_ts_ns = timestamp_unix_ns"
+            "UPDATE system_samples "
+            "SET observed_timestamp_unix_ns = timestamp_unix_ns"
         )
         conn.commit()
 
@@ -1208,7 +1209,7 @@ def test_a_node_that_stopped_reporting_is_marked_stale(
     """
     db = tmp_path / "quiet.db"
     _write(db, lambda seq: (), gpu_available=False)
-    _with_arrival_clock(db)
+    _with_observation_clock(db)
 
     fresh = _payload_at(db, 1000.0 + 2.0 * (TICKS - 1) + 1.0)
     assert fresh.rollups.node_liveness is not None
@@ -1234,7 +1235,7 @@ def test_liveness_reads_the_shared_threshold_not_a_local_one(
 
     db = tmp_path / "threshold.db"
     _write(db, lambda seq: (), gpu_available=False)
-    _with_arrival_clock(db)
+    _with_observation_clock(db)
     newest = 1000.0 + 2.0 * (TICKS - 1)
 
     # Built through the same entry point production uses. Using
@@ -1258,7 +1259,7 @@ def test_liveness_uses_configured_cadence_before_it_can_observe_one(
     """A slow sampler is not stale while waiting for its second sample."""
     db = tmp_path / "first-sample.db"
     _write(db, lambda seq: (), gpu_available=False, ticks=1)
-    _with_arrival_clock(db)
+    _with_observation_clock(db)
 
     out = _payload_at(db, 1020.0, sampler_interval_s=10.0)
 
@@ -1285,7 +1286,7 @@ def test_one_stall_does_not_inflate_the_staleness_threshold(
     """
     db = tmp_path / "stalled.db"
     _write(db, lambda seq: (), gpu_available=False)
-    _with_arrival_clock(db)
+    _with_observation_clock(db)
     newest = 1000.0 + 2.0 * (TICKS - 1)
 
     # Push one sample two hours into the past, creating a huge gap.
@@ -1315,7 +1316,7 @@ def test_a_clock_that_moved_backwards_says_it_does_not_know(
     """
     db = tmp_path / "stepped.db"
     _write(db, lambda seq: (), gpu_available=False)
-    _with_arrival_clock(db)
+    _with_observation_clock(db)
     newest = 1000.0 + 2.0 * (TICKS - 1)
 
     stepped = _payload_at(db, newest - 600.0)

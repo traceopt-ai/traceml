@@ -19,7 +19,8 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 from traceml_ai.core.summaries import SummaryResult
-from traceml_ai.reporting.analysis_window import AnalysisWindow
+from traceml_ai.measurements.window import AnalysisWindow
+from traceml_ai.reporting.analysis_window import analysis_window_metadata
 from traceml_ai.reporting.sections.step_time.builder import (
     STEP_TIME_METRIC_NAMES,
     project_step_time_summary,
@@ -59,7 +60,9 @@ class StepTimeSummarySection:
 
         payload = project_step_time_summary(analysis)
         if self.analysis_window is not None:
-            payload["metadata"].update(self.analysis_window.metadata())
+            payload["metadata"].update(
+                analysis_window_metadata(self.analysis_window)
+            )
         return SummaryResult(
             section=self.name,
             payload=payload,

@@ -70,12 +70,12 @@ def test_runtime_environment_projection_inserts_identity_and_strategy() -> (
 
     rows = runtime_environment_projection.build_rows(
         _envelope(_runtime_environment_payload()),
-        recv_ts_ns=999,
+        observed_timestamp_unix_ns=999,
     )
     runtime_environment_projection.insert_rows(conn, rows)
 
     row = conn.execute("""
-        SELECT recv_ts_ns, rank, global_rank, local_rank, world_size,
+        SELECT observed_timestamp_unix_ns, rank, global_rank, local_rank, world_size,
                local_world_size, node_rank, hostname, pid, timestamp_unix_ns, seq,
                topology, distributed_initialized, distributed_backend,
                training_strategy, strategy_source, strategy_confidence
@@ -118,7 +118,7 @@ def test_runtime_environment_projection_inserts_identity_and_strategy() -> (
                     tables={"RuntimeEnvironmentTable": source_time_rows}
                 )
             ),
-            recv_ts_ns=1000,
+            observed_timestamp_unix_ns=1000,
         ),
     )
     assert conn.execute(
@@ -137,7 +137,7 @@ def test_runtime_environment_projection_inserts_identity_and_strategy() -> (
 def test_runtime_environment_projection_ignores_non_matching_sampler() -> None:
     rows = runtime_environment_projection.build_rows(
         _envelope(_runtime_environment_payload(sampler="ProcessSampler")),
-        recv_ts_ns=999,
+        observed_timestamp_unix_ns=999,
     )
 
     assert rows == {"runtime_environment": []}
@@ -150,7 +150,7 @@ def test_runtime_environment_projection_ignores_malformed_payload() -> None:
                 tables={"UnexpectedTable": [{"training_strategy": "ddp"}]}
             )
         ),
-        recv_ts_ns=999,
+        observed_timestamp_unix_ns=999,
     )
 
     assert rows == {"runtime_environment": []}

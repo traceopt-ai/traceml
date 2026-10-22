@@ -4,7 +4,7 @@
 # you may not use this file except in compliance with the License.
 # SPDX-License-Identifier: Apache-2.0
 
-"""SQLite loader for the final-report process section."""
+"""Read and reduce traced-process measurements."""
 
 from __future__ import annotations
 
@@ -12,27 +12,96 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Dict, Optional
 
-from traceml_ai.reporting.analysis_window import AnalysisWindow
-from traceml_ai.reporting.sections.process.model import (
-    PerRankProcessSummary,
-    ProcessSummaryAgg,
-)
+from traceml_ai.measurements.window import AnalysisWindow
+
+
+@dataclass
+class ProcessSummaryAgg:
+    """Process measurements aggregated across the selected ranks."""
+
+    # Sample timestamps are Unix seconds from the traced process.
+    first_ts: Optional[float] = None
+    last_ts: Optional[float] = None
+    process_samples: int = 0
+    distinct_global_ranks: int = 0
+
+    cpu_avg_percent: Optional[float] = None
+    cpu_peak_percent: Optional[float] = None
+    cpu_logical_core_count: Optional[int] = None
+
+    ram_avg_bytes: Optional[float] = None
+    ram_peak_bytes: Optional[float] = None
+    ram_total_bytes: Optional[float] = None
+
+    gpu_available: Optional[bool] = None
+    gpu_count: Optional[int] = None
+    gpu_mem_used_avg_bytes: Optional[float] = None
+    gpu_mem_used_peak_bytes: Optional[float] = None
+    gpu_mem_reserved_avg_bytes: Optional[float] = None
+    gpu_mem_reserved_peak_bytes: Optional[float] = None
+    gpu_mem_total_bytes: Optional[float] = None
+    gpu_mem_reserved_overhang_ratio: Optional[float] = None
+
+
+@dataclass
+class PerRankProcessSummary:
+    """Process measurements aggregated for one global rank."""
+
+    global_rank: int
+    local_rank: Optional[int] = None
+    world_size: Optional[int] = None
+    local_world_size: Optional[int] = None
+    node_rank: Optional[int] = None
+    hostname: Optional[str] = None
+
+    cpu_avg_percent: Optional[float] = None
+    cpu_peak_percent: Optional[float] = None
+    cpu_logical_core_count: Optional[int] = None
+
+    ram_avg_bytes: Optional[float] = None
+    ram_peak_bytes: Optional[float] = None
+    ram_total_bytes: Optional[float] = None
+
+    gpu_available: Optional[bool] = None
+    gpu_count: Optional[int] = None
+    gpu_mem_used_avg_bytes: Optional[float] = None
+    gpu_mem_used_peak_bytes: Optional[float] = None
+    gpu_mem_reserved_avg_bytes: Optional[float] = None
+    gpu_mem_reserved_peak_bytes: Optional[float] = None
+    gpu_mem_total_bytes: Optional[float] = None
+    gpu_mem_reserved_overhang_ratio: Optional[float] = None
 
 
 @dataclass(frozen=True)
-class ProcessSectionData:
-    """Loaded inputs for the process final-report section."""
+class ProcessMeasurements:
+    """Selected Process aggregates used by reporting and diagnosis."""
 
     aggregate: ProcessSummaryAgg
     per_global_rank: Dict[int, PerRankProcessSummary]
 
 
+def cpu_capacity_percent(
+    cpu_avg_percent: Optional[float],
+    cpu_logical_core_count: Optional[int],
+) -> Optional[float]:
+    """Return average CPU usage normalized by logical host core capacity."""
+    if (
+        cpu_avg_percent is None
+        or cpu_logical_core_count is None
+        or cpu_logical_core_count <= 0
+    ):
+        return None
+    return max(
+        0.0,
+        float(cpu_avg_percent)
+        / (100.0 * float(cpu_logical_core_count))
+        * 100.0,
+    )
+
+
 def _process_samples_cte(
     analysis_window: Optional[AnalysisWindow],
 ) -> tuple[str, tuple[int, ...]]:
-    """
-    Return the CTE used for process history with resolved global ranks.
-    """
     params: tuple[int, ...] = ()
     time_filter = ""
     if (
@@ -58,16 +127,13 @@ def _process_samples_cte(
     )
 
 
-def load_process_summary_aggregate(
-    conn: sqlite3.Connection,
+def _load_process_summary_aggregate(
+    connection: sqlite3.Connection,
     *,
-    analysis_window: Optional[AnalysisWindow] = None,
+    analysis_window: Optional[AnalysisWindow],
 ) -> ProcessSummaryAgg:
-    """Load aggregate process metrics from `process_samples`."""
     sample_cte, params = _process_samples_cte(analysis_window)
-
-    # Read window size, time bounds, and how many ranks are represented.
-    count_row = conn.execute(
+    count_row = connection.execute(
         sample_cte + """
         SELECT
             COUNT(*),
@@ -80,7 +146,6 @@ def load_process_summary_aggregate(
     ).fetchone()
 
     n_rows = int(count_row[0] or 0)
-    # Convert nullable SQLite scalars into typed summary fields.
     first_ts = (
         count_row[1] / 1_000_000_000 if count_row[1] is not None else None
     )
@@ -89,8 +154,7 @@ def load_process_summary_aggregate(
     )
     distinct_global_ranks = int(count_row[3] or 0)
 
-    # Compute aggregate CPU, RAM, and GPU process metrics over the same window.
-    row = conn.execute(
+    row = connection.execute(
         sample_cte + """
         SELECT
             AVG(cpu_percent),
@@ -114,7 +178,6 @@ def load_process_summary_aggregate(
         params,
     ).fetchone()
 
-    # Map the SQL aggregate row into the typed process summary model.
     return ProcessSummaryAgg(
         first_ts=first_ts,
         last_ts=last_ts,
@@ -142,14 +205,14 @@ def load_process_summary_aggregate(
     )
 
 
-def load_per_global_rank_process_summary(
-    conn: sqlite3.Connection,
+def _load_per_global_rank_process_summary(
+    connection: sqlite3.Connection,
     *,
-    analysis_window: Optional[AnalysisWindow] = None,
+    analysis_window: Optional[AnalysisWindow],
 ) -> Dict[int, PerRankProcessSummary]:
-    """Load per-global-rank process metrics from `process_samples`."""
     sample_cte, params = _process_samples_cte(analysis_window)
-    sql = sample_cte + """
+    rows = connection.execute(
+        sample_cte + """
         SELECT
             global_rank,
             MAX(local_rank),
@@ -187,10 +250,9 @@ def load_per_global_rank_process_summary(
         FROM selected_process_samples
         GROUP BY global_rank
         ORDER BY global_rank ASC;
-    """
-
-    # Build one typed process summary row for each observed global rank.
-    rows = conn.execute(sql, params).fetchall()
+        """,
+        params,
+    ).fetchall()
 
     out: Dict[int, PerRankProcessSummary] = {}
     for row in rows:
@@ -232,36 +294,28 @@ def load_per_global_rank_process_summary(
     return out
 
 
-def load_process_section_data(
-    db_path: str,
+def read_process_measurements(
+    connection: sqlite3.Connection,
     *,
     analysis_window: Optional[AnalysisWindow] = None,
-) -> ProcessSectionData:
-    """
-    Load bounded process-section data from the SQLite history database.
-    """
-    conn = sqlite3.connect(db_path)
-    try:
-        aggregate = load_process_summary_aggregate(
-            conn,
+) -> ProcessMeasurements:
+    """Read selected Process measurements from an existing connection."""
+    return ProcessMeasurements(
+        aggregate=_load_process_summary_aggregate(
+            connection,
             analysis_window=analysis_window,
-        )
-        per_global_rank = load_per_global_rank_process_summary(
-            conn,
+        ),
+        per_global_rank=_load_per_global_rank_process_summary(
+            connection,
             analysis_window=analysis_window,
-        )
-    finally:
-        conn.close()
-
-    return ProcessSectionData(
-        aggregate=aggregate,
-        per_global_rank=per_global_rank,
+        ),
     )
 
 
 __all__ = [
-    "ProcessSectionData",
-    "load_per_global_rank_process_summary",
-    "load_process_summary_aggregate",
-    "load_process_section_data",
+    "PerRankProcessSummary",
+    "ProcessMeasurements",
+    "ProcessSummaryAgg",
+    "cpu_capacity_percent",
+    "read_process_measurements",
 ]

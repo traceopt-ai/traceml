@@ -44,7 +44,9 @@ def _run(
             if dies is not None and rank == dies[0] and seq > dies[1]:
                 continue
             db.insert(
-                recv_ts_ns=int((1_700_000_000 + seq * cadence_s) * 1e9),
+                observed_timestamp_unix_ns=int(
+                    (1_700_000_000 + seq * cadence_s) * 1e9
+                ),
                 rank=rank,
                 global_rank=rank,
                 node_rank=0,
@@ -98,8 +100,8 @@ def test_an_unknown_age_is_counted_apart_from_live_and_stale(process_db):
     """The three states stay three; none of them absorbs another.
 
     `FreshnessPolicy.state_of` answers fresh / stale / unknown, and an
-    unknown age means a rank sent data with no usable arrival clock. Our
-    own writer cannot produce that (`recv_ts_ns` is `INTEGER NOT NULL`),
+    unknown age means a rank sent data with no usable observation clock. Our
+    own writer cannot produce that (`observed_timestamp_unix_ns` is `INTEGER NOT NULL`),
     so this is a guard rather than a live path, and it is asserted here
     rather than through the database for exactly that reason.
 
@@ -373,7 +375,9 @@ def test_an_even_run_leaves_the_rows_shut(process_db):
     for seq in range(1, 31):
         for rank in range(4):
             process_db.insert(
-                recv_ts_ns=int((1_700_000_000 + seq * 2) * 1e9),
+                observed_timestamp_unix_ns=int(
+                    (1_700_000_000 + seq * 2) * 1e9
+                ),
                 rank=rank,
                 global_rank=rank,
                 node_rank=0,
@@ -412,7 +416,7 @@ def test_the_recent_window_is_a_duration_not_a_sample_count(process_db):
     # 200 samples at 0.5 s: 100 s of history, of which 60 s is in window.
     for seq in range(1, 201):
         process_db.insert(
-            recv_ts_ns=int((1_700_000_000 + seq * 0.5) * 1e9),
+            observed_timestamp_unix_ns=int((1_700_000_000 + seq * 0.5) * 1e9),
             rank=0,
             global_rank=0,
             node_rank=0,
@@ -455,7 +459,7 @@ def test_the_rss_tile_shows_the_median_not_the_newest_sample(process_db):
         # Steady at 8 GB, then one teardown sample at 1 GB.
         used = 1.0 * GB if seq == 30 else 8.0 * GB
         process_db.insert(
-            recv_ts_ns=int((1_700_000_000 + seq * 2) * 1e9),
+            observed_timestamp_unix_ns=int((1_700_000_000 + seq * 2) * 1e9),
             rank=0,
             global_rank=0,
             node_rank=0,
@@ -486,7 +490,9 @@ def test_reserved_selects_on_each_rank_s_peak_not_its_newest(process_db):
             (1, 30.0 * GB if seq < 15 else 2.0 * GB),
         ):
             process_db.insert(
-                recv_ts_ns=int((1_700_000_000 + seq * 2) * 1e9),
+                observed_timestamp_unix_ns=int(
+                    (1_700_000_000 + seq * 2) * 1e9
+                ),
                 rank=rank,
                 global_rank=rank,
                 node_rank=0,
@@ -528,7 +534,9 @@ def test_allocated_and_reserved_come_from_the_same_rank_and_row(process_db):
                 2: (6.0 * GB, 2.0 * GB),
             }[rank]
             process_db.insert(
-                recv_ts_ns=int((1_700_000_000 + seq * 2) * 1e9),
+                observed_timestamp_unix_ns=int(
+                    (1_700_000_000 + seq * 2) * 1e9
+                ),
                 rank=rank,
                 global_rank=rank,
                 node_rank=0,
@@ -569,7 +577,9 @@ def test_the_total_sums_ranks_on_their_own_clocks(process_db):
     for seq in range(1, 21):
         for rank, offset, cpu in ((0, 0.0, 200.0), (1, 1.0, 400.0)):
             process_db.insert(
-                recv_ts_ns=int((1_700_000_000 + seq * 2 + offset) * 1e9),
+                observed_timestamp_unix_ns=int(
+                    (1_700_000_000 + seq * 2 + offset) * 1e9
+                ),
                 rank=rank,
                 global_rank=rank,
                 node_rank=0,
