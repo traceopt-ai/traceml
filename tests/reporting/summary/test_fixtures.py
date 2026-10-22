@@ -24,7 +24,7 @@ from tests.sqlite_fixtures import (
     insert_system_sample as _insert_system_sample,
     summary_database,
 )
-from traceml_ai.reporting.analysis_window import AnalysisWindow
+from traceml_ai.measurements.window import AnalysisWindow
 from traceml_ai.reporting.schema import BaseSectionPayload
 from traceml_ai.reporting.sections.process import ProcessSummarySection
 from traceml_ai.reporting.sections.step_memory import StepMemorySummarySection

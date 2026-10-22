@@ -20,7 +20,8 @@ from traceml_ai.diagnostics.process.context import (
     ProcessDiagnosisInput,
     ProcessRankDiagnosisInput,
 )
-from traceml_ai.reporting.analysis_window import AnalysisWindow
+from traceml_ai.measurements.window import AnalysisWindow
+from traceml_ai.reporting.analysis_window import analysis_window_metadata
 from traceml_ai.reporting.sections.base import BaseSummarySection
 from traceml_ai.reporting.sections.process.builder import build_process_payload
 from traceml_ai.reporting.sections.process.formatter import (
@@ -121,7 +122,9 @@ class ProcessSummarySection(
         """Assemble the Process summary payload and display text."""
         payload = build_process_payload(data, diagnosis_result)
         if self.analysis_window is not None:
-            payload["metadata"].update(self.analysis_window.metadata())
+            payload["metadata"].update(
+                analysis_window_metadata(self.analysis_window)
+            )
         return SummaryResult(
             section=self.name,
             payload=payload,
