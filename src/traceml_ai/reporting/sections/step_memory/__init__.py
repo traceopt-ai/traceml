@@ -21,7 +21,8 @@ from traceml_ai.diagnostics.step_memory import (
     StepMemoryDiagnosisInput,
     diagnose_step_memory_summary,
 )
-from traceml_ai.reporting.analysis_window import AnalysisWindow
+from traceml_ai.measurements.window import AnalysisWindow
+from traceml_ai.reporting.analysis_window import analysis_window_metadata
 from traceml_ai.reporting.sections.base import BaseSummarySection
 from traceml_ai.reporting.sections.step_memory.builder import (
     build_step_memory_section_payload,
@@ -101,7 +102,9 @@ class StepMemorySummarySection(
         """Assemble the Step Memory summary payload and display text."""
         payload = build_step_memory_section_payload(data, diagnosis_result)
         if self.analysis_window is not None:
-            payload["metadata"].update(self.analysis_window.metadata())
+            payload["metadata"].update(
+                analysis_window_metadata(self.analysis_window)
+            )
         return SummaryResult(
             section=self.name,
             payload=payload,
