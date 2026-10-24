@@ -110,6 +110,46 @@ def test_direct_runtime_settings_default_to_summary(
     assert settings.mode == "summary"
 
 
+@pytest.mark.parametrize("interval", [0.0, -1.0, float("nan"), float("inf")])
+def test_direct_runtime_settings_reject_invalid_interval(
+    initialization, monkeypatch, tmp_path, interval
+):
+    # init(interval=...) must reject what TRACEML_INTERVAL and traceml.yaml
+    # already reject; a zero interval spins the sampler and inf overflows.
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TRACEML_INTERVAL", raising=False)
+
+    with pytest.raises(ValueError, match="interval"):
+        initialization._resolve_runtime_settings(
+            ui_mode=None,
+            interval=interval,
+            logs_dir=None,
+            enable_logging=None,
+            session_id="direct-interval",
+            aggregator_host=None,
+            aggregator_port=None,
+        )
+
+
+def test_direct_runtime_settings_keep_a_valid_interval(
+    initialization, monkeypatch, tmp_path
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TRACEML_INTERVAL", raising=False)
+
+    settings = initialization._resolve_runtime_settings(
+        ui_mode=None,
+        interval=0.5,
+        logs_dir=None,
+        enable_logging=None,
+        session_id="direct-interval",
+        aggregator_host=None,
+        aggregator_port=None,
+    )
+
+    assert settings.sampler_interval_sec == 0.5
+
+
 def test_direct_runtime_settings_ignore_guard_semantics(
     initialization, monkeypatch, tmp_path
 ):
