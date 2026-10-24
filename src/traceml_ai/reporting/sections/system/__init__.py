@@ -10,6 +10,8 @@ Final-report system section.
 
 from __future__ import annotations
 
+import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 from typing import ClassVar, Dict, Optional
 
@@ -21,21 +23,16 @@ from traceml_ai.diagnostics.system.context import (
     SystemGpuDiagnosisInput,
     SystemNodeDiagnosisInput,
 )
+from traceml_ai.measurements.system import (
+    PerGPUSummary,
+    SystemMeasurements,
+    SystemNodeSummary,
+    read_system_measurements,
+)
 from traceml_ai.measurements.window import AnalysisWindow
 from traceml_ai.reporting.analysis_window import analysis_window_metadata
 from traceml_ai.reporting.sections.base import BaseSummarySection
 from traceml_ai.reporting.sections.system.builder import build_system_payload
-from traceml_ai.reporting.sections.system.formatter import (
-    format_system_section_text,
-)
-from traceml_ai.reporting.sections.system.loader import (
-    SystemSectionData,
-    load_system_section_data,
-)
-from traceml_ai.reporting.sections.system.model import (
-    PerGPUSummary,
-    SystemNodeSummary,
-)
 from traceml_ai.reporting.summaries.summary_formatting import (
     duration_from_bounds,
 )
@@ -94,7 +91,7 @@ def _node_diagnosis_input(
 @dataclass(frozen=True)
 class SystemSummarySection(
     BaseSummarySection[
-        SystemSectionData,
+        SystemMeasurements,
         SystemDiagnosisInput,
         DiagnosticResult[SystemDiagnosis],
     ],
@@ -105,17 +102,18 @@ class SystemSummarySection(
     node_rank: Optional[int] = None
     analysis_window: AnalysisWindow | None = None
 
-    def load(self, db_path: str) -> SystemSectionData:
+    def load(self, db_path: str) -> SystemMeasurements:
         """Load system telemetry for the final report."""
-        return load_system_section_data(
-            db_path,
-            node_rank=self.node_rank,
-            analysis_window=self.analysis_window,
-        )
+        with closing(sqlite3.connect(db_path)) as connection:
+            return read_system_measurements(
+                connection,
+                node_rank=self.node_rank,
+                analysis_window=self.analysis_window,
+            )
 
     def to_diagnosis_input(
         self,
-        data: SystemSectionData,
+        data: SystemMeasurements,
     ) -> SystemDiagnosisInput:
         """Adapt loaded system data to the diagnosis contract."""
         cluster = data.cluster
@@ -154,7 +152,7 @@ class SystemSummarySection(
 
     def build_payload(
         self,
-        data: SystemSectionData,
+        data: SystemMeasurements,
         diagnosis_result: DiagnosticResult[SystemDiagnosis],
     ) -> SummaryResult:
         """Assemble the System summary payload and display text."""
@@ -166,13 +164,11 @@ class SystemSummarySection(
         return SummaryResult(
             section=self.name,
             payload=payload,
-            text=format_system_section_text(payload),
+            text=str(payload.get("card", "")),
         )
 
 
 __all__ = [
     "SystemSummarySection",
     "build_system_payload",
-    "format_system_section_text",
-    "load_system_section_data",
 ]

@@ -13,6 +13,7 @@ from tests.sqlite_fixtures import (
     summary_database,
 )
 from traceml_ai.measurements.process import read_process_measurements
+from traceml_ai.measurements.system import read_system_measurements
 from traceml_ai.measurements.window import (
     AnalysisWindow,
     resolve_analysis_window,
@@ -20,9 +21,6 @@ from traceml_ai.measurements.window import (
 from traceml_ai.reporting.analysis_window import build_analysis_window_payload
 from traceml_ai.reporting.sections.process import ProcessSummarySection
 from traceml_ai.reporting.sections.system import SystemSummarySection
-from traceml_ai.reporting.sections.system.loader import (
-    load_system_section_data,
-)
 from traceml_ai.reporting.summaries.process import (
     generate_process_summary_card,
 )
@@ -84,7 +82,7 @@ def _seed_process_samples(conn) -> None:
         )
 
 
-def test_system_section_loader_and_builder_use_sqlite_fixture(tmp_path):
+def test_system_measurements_and_builder_use_sqlite_fixture(tmp_path):
     db_path = tmp_path / "system.db"
     with summary_database(db_path) as conn:
         _seed_system_samples(conn)
@@ -95,7 +93,8 @@ def test_system_section_loader_and_builder_use_sqlite_fixture(tmp_path):
             ") VALUES (11, 0, 0, 1, 1, 0, 'worker-0', 11000000000)"
         )
 
-    data = load_system_section_data(str(db_path))
+    with closing(sqlite3.connect(db_path)) as connection:
+        data = read_system_measurements(connection)
     result = SystemSummarySection().build(str(db_path))
 
     assert data.cluster.aggregate.system_samples == 2
@@ -182,7 +181,7 @@ def test_system_section_reports_scoped_multinode_primary_issue(tmp_path):
     assert payload["global"]["worst"]["gpu_temp_c"]["idx"] == "1"
 
 
-def test_system_loader_uses_selected_time_window(tmp_path):
+def test_system_measurements_use_selected_time_window(tmp_path):
     db_path = tmp_path / "system_latest.db"
     timestamp_s = 1_792_336_915.3680508
     with summary_database(db_path) as conn:
@@ -212,7 +211,11 @@ def test_system_loader_uses_selected_time_window(tmp_path):
     with closing(sqlite3.connect(db_path)) as connection:
         window = resolve_analysis_window(connection, retention_s=1.0)
     assert window.end_time_unix_ns == round(timestamp_s * 1_000_000_000)
-    data = load_system_section_data(str(db_path), analysis_window=window)
+    with closing(sqlite3.connect(db_path)) as connection:
+        data = read_system_measurements(
+            connection,
+            analysis_window=window,
+        )
 
     assert data.cluster.aggregate.system_samples == 1
     assert data.cluster.aggregate.cpu_avg_percent == 90.0
@@ -220,7 +223,7 @@ def test_system_loader_uses_selected_time_window(tmp_path):
     assert data.cluster.nodes["0"].per_gpu[0].util_peak_percent == 80.0
 
 
-def test_system_loader_uses_selected_time_window_per_node(tmp_path):
+def test_system_measurements_use_selected_time_window_per_node(tmp_path):
     db_path = tmp_path / "system_latest_per_node.db"
     with summary_database(db_path) as conn:
         _seed_system_samples(conn)
@@ -256,14 +259,15 @@ def test_system_loader_uses_selected_time_window_per_node(tmp_path):
                 )
                 row_id += 1
 
-    data = load_system_section_data(
-        str(db_path),
-        analysis_window=AnalysisWindow(
-            30.0,
-            start_time_unix_ns=12_000_000_000,
-            end_time_unix_ns=12_000_000_000,
-        ),
-    )
+    with closing(sqlite3.connect(db_path)) as connection:
+        data = read_system_measurements(
+            connection,
+            analysis_window=AnalysisWindow(
+                30.0,
+                start_time_unix_ns=12_000_000_000,
+                end_time_unix_ns=12_000_000_000,
+            ),
+        )
 
     assert data.cluster.aggregate.system_samples == 2
     assert set(data.cluster.nodes) == {"0", "1"}
