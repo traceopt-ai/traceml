@@ -125,7 +125,7 @@ class StepTimePipeline:
             snapshot = self.repository.load_summary(request)
             default_policy = SUMMARY_STEP_TIME_POLICY
 
-        return _analyze_snapshot(
+        return analyze_step_time_snapshot(
             request=request,
             snapshot=snapshot,
             analyzer=self.analyzer,
@@ -133,7 +133,7 @@ class StepTimePipeline:
         )
 
 
-def _analyze_snapshot(
+def analyze_step_time_snapshot(
     *,
     request: StepTimeLoadRequest,
     snapshot: StepTimeRepositorySnapshot,
@@ -199,7 +199,7 @@ class LiveStepTimeSession:
         self._last_observed: Optional[StepTimeAnalysis] = None
         self._last_good: Optional[StepTimeAnalysis] = None
         self._last_good_at: Optional[float] = None
-        self._empty_analysis = _analyze_snapshot(
+        self._empty_analysis = analyze_step_time_snapshot(
             request=self.request,
             snapshot=StepTimeRepositorySnapshot(),
             analyzer=self._analyzer,
@@ -274,4 +274,5 @@ __all__ = [
     "StepTimeAnalysis",
     "StepTimePipeline",
     "StepTimeProfile",
+    "analyze_step_time_snapshot",
 ]
