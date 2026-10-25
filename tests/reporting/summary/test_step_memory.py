@@ -7,7 +7,7 @@
 import sqlite3
 
 from traceml_ai.diagnostics.step_memory import SUMMARY_STEP_MEMORY_POLICY
-from traceml_ai.reporting.analysis_window import AnalysisWindow
+from traceml_ai.measurements.window import AnalysisWindow
 from traceml_ai.reporting.sections.step_memory import StepMemorySummarySection
 from traceml_ai.reporting.sections.step_memory.loader import (
     load_step_memory_section_data,

@@ -21,7 +21,8 @@ from traceml_ai.diagnostics.system.context import (
     SystemGpuDiagnosisInput,
     SystemNodeDiagnosisInput,
 )
-from traceml_ai.reporting.analysis_window import AnalysisWindow
+from traceml_ai.measurements.window import AnalysisWindow
+from traceml_ai.reporting.analysis_window import analysis_window_metadata
 from traceml_ai.reporting.sections.base import BaseSummarySection
 from traceml_ai.reporting.sections.system.builder import build_system_payload
 from traceml_ai.reporting.sections.system.formatter import (
@@ -159,7 +160,9 @@ class SystemSummarySection(
         """Assemble the System summary payload and display text."""
         payload = build_system_payload(data, diagnosis_result)
         if self.analysis_window is not None:
-            payload["metadata"].update(self.analysis_window.metadata())
+            payload["metadata"].update(
+                analysis_window_metadata(self.analysis_window)
+            )
         return SummaryResult(
             section=self.name,
             payload=payload,
