@@ -4,34 +4,185 @@
 # you may not use this file except in compliance with the License.
 # SPDX-License-Identifier: Apache-2.0
 
-"""SQLite loader for the final-report system section."""
+"""Read and reduce system measurements."""
 
 from __future__ import annotations
 
 import math
 import sqlite3
-from dataclasses import dataclass
-from typing import Dict, Optional
+from dataclasses import dataclass, field
+from typing import Dict, Iterable, Optional
 
 from traceml_ai.measurements.window import AnalysisWindow
-from traceml_ai.reporting.sections.system.model import (
-    PerGPUSummary,
-    SystemClusterSummary,
-    SystemNodeIdentity,
-    SystemNodeSummary,
-    SystemSummaryAgg,
-    average_optional,
-    max_int_optional,
-    max_optional,
-    table_has_column,
-)
+
+
+@dataclass
+class SystemSummaryAgg:
+    """System measurements aggregated across the selected samples.
+
+    CPU and RAM values come from `system_samples`; GPU rollups come from
+    `system_gpu_samples`. GPU fields remain optional for CPU-only runs.
+    """
+
+    # Sample timestamps are Unix seconds from the telemetry source.
+    first_ts: Optional[float] = None
+    last_ts: Optional[float] = None
+    system_samples: int = 0
+
+    cpu_avg_percent: Optional[float] = None
+    cpu_peak_percent: Optional[float] = None
+
+    ram_avg_bytes: Optional[float] = None
+    ram_peak_bytes: Optional[float] = None
+    ram_total_bytes: Optional[float] = None
+
+    gpu_available: Optional[bool] = None
+    gpu_count: Optional[int] = None
+
+    gpu_util_avg_percent: Optional[float] = None
+    gpu_util_peak_percent: Optional[float] = None
+
+    gpu_mem_avg_bytes: Optional[float] = None
+    gpu_mem_peak_bytes: Optional[float] = None
+
+    gpu_temp_avg_c: Optional[float] = None
+    gpu_temp_peak_c: Optional[float] = None
+
+    gpu_power_avg_w: Optional[float] = None
+    gpu_power_peak_w: Optional[float] = None
+
+
+@dataclass
+class PerGPUSummary:
+    """Measurements aggregated for one physical GPU."""
+
+    gpu_idx: int
+
+    util_avg_percent: Optional[float] = None
+    util_peak_percent: Optional[float] = None
+
+    mem_avg_bytes: Optional[float] = None
+    mem_peak_bytes: Optional[float] = None
+    mem_total_bytes: Optional[float] = None
+
+    temp_avg_c: Optional[float] = None
+    temp_peak_c: Optional[float] = None
+
+    power_avg_w: Optional[float] = None
+    power_peak_w: Optional[float] = None
+    power_limit_w: Optional[float] = None
 
 
 @dataclass(frozen=True)
-class SystemSectionData:
-    """Loaded inputs for the system final-report section."""
+class SystemNodeIdentity:
+    """Stable identity for one node-level SystemSampler source."""
+
+    label: str
+    node_rank: Optional[int]
+    hostname: Optional[str]
+    global_rank: Optional[int]
+    local_rank: Optional[int]
+    local_world_size: Optional[int]
+    world_size: Optional[int]
+
+
+@dataclass(frozen=True)
+class SystemNodeSummary:
+    """Aggregated System measurements for one node."""
+
+    identity: SystemNodeIdentity
+    aggregate: SystemSummaryAgg
+    per_gpu: Dict[int, PerGPUSummary] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class SystemClusterSummary:
+    """Cluster-shaped System measurements for single- and multi-node runs."""
+
+    aggregate: SystemSummaryAgg
+    nodes: Dict[str, SystemNodeSummary]
+    expected_nodes: int
+
+    @property
+    def observed_nodes(self) -> int:
+        """Number of nodes represented in the selected samples."""
+        return len(self.nodes)
+
+    @property
+    def partial(self) -> bool:
+        """Whether fewer nodes were observed than expected."""
+        return self.observed_nodes < self.expected_nodes
+
+    @property
+    def observed_gpus(self) -> int:
+        """Number of per-node GPUs represented in detailed GPU rows."""
+        return sum(len(node.per_gpu) for node in self.nodes.values())
+
+
+@dataclass(frozen=True)
+class SystemMeasurements:
+    """Selected System measurements used by reporting and diagnosis."""
 
     cluster: SystemClusterSummary
+
+
+def percent(
+    numerator: Optional[float],
+    denominator: Optional[float],
+) -> Optional[float]:
+    """Return ``numerator / denominator`` as a non-negative percentage."""
+    if numerator is None or denominator is None or float(denominator) <= 0.0:
+        return None
+    return max(0.0, float(numerator) / float(denominator) * 100.0)
+
+
+def node_gpu_mem_peak_percent(node: SystemNodeSummary) -> Optional[float]:
+    """Return the highest GPU memory pressure observed on one node."""
+    values = [
+        percent(gpu.mem_peak_bytes, gpu.mem_total_bytes)
+        for gpu in node.per_gpu.values()
+    ]
+    nums = [value for value in values if value is not None]
+    return max(nums) if nums else None
+
+
+def node_gpu_headroom_min_gb(node: SystemNodeSummary) -> Optional[float]:
+    """Return the smallest GPU memory headroom on one node, in GB."""
+    values = []
+    for gpu in node.per_gpu.values():
+        if gpu.mem_total_bytes is None or gpu.mem_peak_bytes is None:
+            continue
+        values.append(
+            max(0.0, float(gpu.mem_total_bytes) - float(gpu.mem_peak_bytes))
+            / 1_000_000_000.0
+        )
+    return min(values) if values else None
+
+
+def _average_optional(
+    values: Iterable[Optional[float]],
+) -> Optional[float]:
+    nums = [float(value) for value in values if value is not None]
+    return sum(nums) / len(nums) if nums else None
+
+
+def _max_optional(values: Iterable[Optional[float]]) -> Optional[float]:
+    nums = [float(value) for value in values if value is not None]
+    return max(nums) if nums else None
+
+
+def _max_int_optional(values: Iterable[Optional[int]]) -> Optional[int]:
+    nums = [int(value) for value in values if value is not None]
+    return max(nums) if nums else None
+
+
+def _table_has_column(
+    connection: sqlite3.Connection,
+    table_name: str,
+    column_name: str,
+) -> bool:
+    rows = connection.execute(f"PRAGMA table_info({table_name});").fetchall()
+    return any(str(row[1]) == column_name for row in rows)
 
 
 @dataclass(frozen=True)
@@ -107,18 +258,18 @@ def _node_identity(rows: list[_SampleRow]) -> SystemNodeIdentity:
 
 def _aggregate_sample_gpu_rows(rows: list[_GpuRow]) -> _SampleGpuRollup:
     return _SampleGpuRollup(
-        gpu_util_avg=average_optional(row.util for row in rows),
-        gpu_util_peak=max_optional(row.util for row in rows),
-        gpu_mem_used_avg_bytes=average_optional(
+        gpu_util_avg=_average_optional(row.util for row in rows),
+        gpu_util_peak=_max_optional(row.util for row in rows),
+        gpu_mem_used_avg_bytes=_average_optional(
             row.mem_used_bytes for row in rows
         ),
-        gpu_mem_used_peak_bytes=max_optional(
+        gpu_mem_used_peak_bytes=_max_optional(
             row.mem_used_bytes for row in rows
         ),
-        gpu_temp_avg_c=average_optional(row.temperature_c for row in rows),
-        gpu_temp_peak_c=max_optional(row.temperature_c for row in rows),
-        gpu_power_avg_w=average_optional(row.power_usage_w for row in rows),
-        gpu_power_peak_w=max_optional(row.power_usage_w for row in rows),
+        gpu_temp_avg_c=_average_optional(row.temperature_c for row in rows),
+        gpu_temp_peak_c=_max_optional(row.temperature_c for row in rows),
+        gpu_power_avg_w=_average_optional(row.power_usage_w for row in rows),
+        gpu_power_peak_w=_max_optional(row.power_usage_w for row in rows),
     )
 
 
@@ -152,37 +303,37 @@ def _aggregate_samples(
         first_ts=min(timestamps) / 1_000_000_000 if timestamps else None,
         last_ts=max(timestamps) / 1_000_000_000 if timestamps else None,
         system_samples=len(rows),
-        cpu_avg_percent=average_optional(row.cpu_percent for row in rows),
-        cpu_peak_percent=max_optional(row.cpu_percent for row in rows),
-        ram_avg_bytes=average_optional(row.ram_used_bytes for row in rows),
-        ram_peak_bytes=max_optional(row.ram_used_bytes for row in rows),
-        ram_total_bytes=max_optional(row.ram_total_bytes for row in rows),
+        cpu_avg_percent=_average_optional(row.cpu_percent for row in rows),
+        cpu_peak_percent=_max_optional(row.cpu_percent for row in rows),
+        ram_avg_bytes=_average_optional(row.ram_used_bytes for row in rows),
+        ram_peak_bytes=_max_optional(row.ram_used_bytes for row in rows),
+        ram_total_bytes=_max_optional(row.ram_total_bytes for row in rows),
         gpu_available=(
             any(bool(row.gpu_available) for row in rows) if rows else None
         ),
-        gpu_count=max_int_optional(row.gpu_count for row in rows),
-        gpu_util_avg_percent=average_optional(
+        gpu_count=_max_int_optional(row.gpu_count for row in rows),
+        gpu_util_avg_percent=_average_optional(
             rollup.gpu_util_avg for rollup in gpu_rollups
         ),
-        gpu_util_peak_percent=max_optional(
+        gpu_util_peak_percent=_max_optional(
             rollup.gpu_util_peak for rollup in gpu_rollups
         ),
-        gpu_mem_avg_bytes=average_optional(
+        gpu_mem_avg_bytes=_average_optional(
             rollup.gpu_mem_used_avg_bytes for rollup in gpu_rollups
         ),
-        gpu_mem_peak_bytes=max_optional(
+        gpu_mem_peak_bytes=_max_optional(
             rollup.gpu_mem_used_peak_bytes for rollup in gpu_rollups
         ),
-        gpu_temp_avg_c=average_optional(
+        gpu_temp_avg_c=_average_optional(
             rollup.gpu_temp_avg_c for rollup in gpu_rollups
         ),
-        gpu_temp_peak_c=max_optional(
+        gpu_temp_peak_c=_max_optional(
             rollup.gpu_temp_peak_c for rollup in gpu_rollups
         ),
-        gpu_power_avg_w=average_optional(
+        gpu_power_avg_w=_average_optional(
             rollup.gpu_power_avg_w for rollup in gpu_rollups
         ),
-        gpu_power_peak_w=max_optional(
+        gpu_power_peak_w=_max_optional(
             rollup.gpu_power_peak_w for rollup in gpu_rollups
         ),
     )
@@ -197,24 +348,26 @@ def _aggregate_gpu(rows: list[_GpuRow]) -> Dict[int, PerGPUSummary]:
     for gpu_idx, gpu_rows in sorted(grouped.items()):
         out[gpu_idx] = PerGPUSummary(
             gpu_idx=gpu_idx,
-            util_avg_percent=average_optional(row.util for row in gpu_rows),
-            util_peak_percent=max_optional(row.util for row in gpu_rows),
-            mem_avg_bytes=average_optional(
+            util_avg_percent=_average_optional(row.util for row in gpu_rows),
+            util_peak_percent=_max_optional(row.util for row in gpu_rows),
+            mem_avg_bytes=_average_optional(
                 row.mem_used_bytes for row in gpu_rows
             ),
-            mem_peak_bytes=max_optional(
+            mem_peak_bytes=_max_optional(
                 row.mem_used_bytes for row in gpu_rows
             ),
-            mem_total_bytes=max_optional(
+            mem_total_bytes=_max_optional(
                 row.mem_total_bytes for row in gpu_rows
             ),
-            temp_avg_c=average_optional(row.temperature_c for row in gpu_rows),
-            temp_peak_c=max_optional(row.temperature_c for row in gpu_rows),
-            power_avg_w=average_optional(
+            temp_avg_c=_average_optional(
+                row.temperature_c for row in gpu_rows
+            ),
+            temp_peak_c=_max_optional(row.temperature_c for row in gpu_rows),
+            power_avg_w=_average_optional(
                 row.power_usage_w for row in gpu_rows
             ),
-            power_peak_w=max_optional(row.power_usage_w for row in gpu_rows),
-            power_limit_w=max_optional(row.power_limit_w for row in gpu_rows),
+            power_peak_w=_max_optional(row.power_usage_w for row in gpu_rows),
+            power_limit_w=_max_optional(row.power_limit_w for row in gpu_rows),
         )
     return out
 
@@ -315,7 +468,7 @@ def _gpu_rows(
 ) -> list[_GpuRow]:
     power_limit_expr = (
         "g.power_limit_w"
-        if table_has_column(conn, "system_gpu_samples", "power_limit_w")
+        if _table_has_column(conn, "system_gpu_samples", "power_limit_w")
         else "NULL"
     )
     sample_cte, params = _system_samples_cte(
@@ -407,29 +560,31 @@ def _load_cluster_summary(
     )
 
 
-def load_system_section_data(
-    db_path: str,
+def read_system_measurements(
+    connection: sqlite3.Connection,
     *,
     node_rank: Optional[int] = None,
     analysis_window: Optional[AnalysisWindow] = None,
-) -> SystemSectionData:
-    """
-    Load bounded system-section data from the SQLite history database.
-    """
-    conn = sqlite3.connect(db_path)
-    try:
-        cluster = _load_cluster_summary(
-            conn,
+) -> SystemMeasurements:
+    """Read selected System measurements from an existing connection."""
+    return SystemMeasurements(
+        cluster=_load_cluster_summary(
+            connection,
             node_rank=node_rank,
             analysis_window=analysis_window,
         )
-    finally:
-        conn.close()
-
-    return SystemSectionData(cluster=cluster)
+    )
 
 
 __all__ = [
-    "SystemSectionData",
-    "load_system_section_data",
+    "PerGPUSummary",
+    "SystemClusterSummary",
+    "SystemMeasurements",
+    "SystemNodeIdentity",
+    "SystemNodeSummary",
+    "SystemSummaryAgg",
+    "node_gpu_headroom_min_gb",
+    "node_gpu_mem_peak_percent",
+    "percent",
+    "read_system_measurements",
 ]
