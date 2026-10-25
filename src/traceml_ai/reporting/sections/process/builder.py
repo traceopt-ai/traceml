@@ -13,6 +13,12 @@ from typing import Any, Dict, Iterable, Optional
 
 from traceml_ai.diagnostics.common import DiagnosticResult
 from traceml_ai.diagnostics.process import ProcessDiagnosis
+from traceml_ai.measurements.process import (
+    PerRankProcessSummary,
+    ProcessMeasurements,
+    ProcessSummaryAgg,
+    cpu_capacity_percent,
+)
 from traceml_ai.reporting.schema import (
     BaseGlobal,
     BaseGroups,
@@ -20,13 +26,6 @@ from traceml_ai.reporting.schema import (
     GlobalWindow,
     GroupRow,
     RankMetadata,
-)
-from traceml_ai.reporting.sections.process.loader import ProcessSectionData
-from traceml_ai.reporting.sections.process.model import (
-    PROCESS_METRIC_NAMES,
-    PerRankProcessSummary,
-    build_process_stats_line,
-    cpu_capacity_percent,
 )
 from traceml_ai.reporting.summaries.issue_summary import (
     diagnostic_result_to_json,
@@ -38,6 +37,58 @@ from traceml_ai.reporting.summaries.summary_formatting import (
     share_percent,
 )
 from traceml_ai.reporting.topology import topology_mode_from_identities
+
+PROCESS_METRIC_NAMES = [
+    "cpu_percent",
+    "cpu_capacity_percent",
+    "ram_bytes",
+    "ram_percent",
+    "gpu_mem_used_bytes",
+    "gpu_mem_reserved_bytes",
+    "gpu_mem_reserved_percent",
+    "gpu_mem_headroom_bytes",
+]
+
+
+def _format_percent_stat(
+    label: str,
+    value: Optional[float],
+) -> Optional[str]:
+    if value is None:
+        return None
+    return f"{label} {float(value):.0f}%"
+
+
+def _build_process_stats_line(
+    aggregate: ProcessSummaryAgg,
+    *,
+    ram_peak_gb: Optional[float],
+    ram_total_gb: Optional[float],
+    gpu_mem_used_peak_pct: Optional[float],
+    gpu_mem_reserved_peak_pct: Optional[float],
+) -> str:
+    gpu_pct = gpu_mem_reserved_peak_pct or gpu_mem_used_peak_pct
+    gpu_label = (
+        "GPU reserved peak"
+        if gpu_mem_reserved_peak_pct is not None
+        else "GPU used peak"
+    )
+    ram_stat = None
+    if ram_peak_gb is not None:
+        ram_stat = f"RSS peak {float(ram_peak_gb):.1f} GB"
+        if ram_total_gb is not None:
+            ram_stat = (
+                f"RSS peak {float(ram_peak_gb):.1f} / "
+                f"{float(ram_total_gb):.1f} GB"
+            )
+    parts = [
+        f"global ranks {aggregate.distinct_global_ranks}",
+        _format_percent_stat("CPU avg", aggregate.cpu_avg_percent),
+        ram_stat,
+        _format_percent_stat(gpu_label, gpu_pct),
+    ]
+    rendered = [part for part in parts if part is not None]
+    return " | ".join(rendered) if rendered else "unavailable"
 
 
 def _rank_point(
@@ -180,7 +231,7 @@ def _row_metric_points(
 
 
 def build_process_payload(
-    data: ProcessSectionData,
+    data: ProcessMeasurements,
     diagnosis_result: DiagnosticResult[ProcessDiagnosis],
 ) -> Dict[str, Any]:
     """
@@ -225,7 +276,7 @@ def build_process_payload(
         f"- Diagnosis: {primary_diagnosis.status}",
         (
             "- Stats: "
-            + build_process_stats_line(
+            + _build_process_stats_line(
                 agg,
                 ram_peak_gb=ram_peak_gb,
                 ram_total_gb=ram_total_gb,
