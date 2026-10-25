@@ -21,12 +21,14 @@ from traceml_ai.aggregator.display_drivers.nicegui_sections.step_memory_section 
     build_step_memory_section,
     update_step_memory_section,
 )
-from traceml_ai.renderers.step_memory.schema import (  # noqa: E402
+from traceml_ai.measurements.step_memory import (  # noqa: E402
     StepMemoryCombinedCoverage,
     StepMemoryCombinedMetric,
-    StepMemoryCombinedResult,
     StepMemoryCombinedSeries,
     StepMemoryCombinedSummary,
+)
+from traceml_ai.renderers.step_memory.schema import (  # noqa: E402
+    StepMemoryCombinedResult,
 )
 
 GB = 1e9

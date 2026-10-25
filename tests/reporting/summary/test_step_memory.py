@@ -5,13 +5,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import sqlite3
+from contextlib import closing
 
 from traceml_ai.diagnostics.step_memory import SUMMARY_STEP_MEMORY_POLICY
+from traceml_ai.measurements.step_memory import read_step_memory_measurements
 from traceml_ai.measurements.window import AnalysisWindow
 from traceml_ai.reporting.sections.step_memory import StepMemorySummarySection
-from traceml_ai.reporting.sections.step_memory.loader import (
-    load_step_memory_section_data,
-)
 from traceml_ai.reporting.summaries.step_memory import (
     generate_step_memory_summary_card,
 )
@@ -120,7 +119,8 @@ def test_step_memory_section_loader_and_builder_use_sqlite_fixture(tmp_path):
     db_path = tmp_path / "memory.db"
     _create_step_memory_db(str(db_path))
 
-    data = load_step_memory_section_data(str(db_path))
+    with closing(sqlite3.connect(db_path)) as connection:
+        data = read_step_memory_measurements(connection)
     result = StepMemorySummarySection().build(str(db_path))
 
     assert data.training_steps == 3
@@ -282,13 +282,17 @@ def test_step_memory_loader_uses_latest_common_steps_per_global_rank(tmp_path):
     finally:
         conn.close()
 
-    data = load_step_memory_section_data(
-        str(db_path),
-        start_step=2,
-        end_step=3,
-        start_time_unix_ns=0,
-        end_time_unix_ns=0,
-    )
+    with closing(sqlite3.connect(db_path)) as connection:
+        data = read_step_memory_measurements(
+            connection,
+            analysis_window=AnalysisWindow(
+                retention_s=1.0,
+                start_step=2,
+                end_step=3,
+                start_time_unix_ns=0,
+                end_time_unix_ns=0,
+            ),
+        )
 
     assert data.aligned_window.steps == (2, 3)
     assert data.aligned_window.global_ranks_seen == 2
@@ -301,11 +305,15 @@ def test_step_memory_loader_uses_latest_common_steps_per_global_rank(tmp_path):
         (2_000_000_001, 3_000_000_000, (3,)),
         (2_000_000_000, 2_999_999_999, (2,)),
     ):
-        bounded = load_step_memory_section_data(
-            str(db_path),
-            start_time_unix_ns=start_ns,
-            end_time_unix_ns=end_ns,
-        )
+        with closing(sqlite3.connect(db_path)) as connection:
+            bounded = read_step_memory_measurements(
+                connection,
+                analysis_window=AnalysisWindow(
+                    retention_s=1.0,
+                    start_time_unix_ns=start_ns,
+                    end_time_unix_ns=end_ns,
+                ),
+            )
         assert bounded.aligned_window.steps == expected_steps
         section = StepMemorySummarySection(
             analysis_window=AnalysisWindow(

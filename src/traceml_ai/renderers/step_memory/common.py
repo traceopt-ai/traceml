@@ -19,17 +19,18 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
+from traceml_ai.measurements.step_memory import (
+    StepMemoryCombinedCoverage,
+    StepMemoryCombinedMetric,
+    StepMemoryCombinedSeries,
+    StepMemoryCombinedSummary,
+    load_gpu_total_bytes,
+)
 from traceml_ai.renderers.process.reporting import read_rank_clock
 from traceml_ai.renderers.process.repository import ProcessRepository
 from traceml_ai.renderers.shared.freshness import RankReporting
 
-from .schema import (
-    StepMemoryCombinedCoverage,
-    StepMemoryCombinedMetric,
-    StepMemoryCombinedResult,
-    StepMemoryCombinedSeries,
-    StepMemoryCombinedSummary,
-)
+from .schema import StepMemoryCombinedResult
 
 _METRIC_TO_COLUMN = {
     "peak_allocated": "peak_alloc_bytes",
@@ -242,30 +243,6 @@ class StepMemoryMetricsDB:
             (int(start_step), int(end_step)),
         ).fetchone()
         return int(row[0] or 0) if row else 0
-
-
-def load_gpu_total_bytes(conn: sqlite3.Connection) -> Optional[float]:
-    """
-    Best-effort device total memory from process telemetry.
-
-    This is optional but useful for HIGH_PRESSURE diagnosis. Live renderers
-    and the final-summary loader share this one reader so both paths derive
-    device capacity identically.
-    """
-    try:
-        row = conn.execute(
-            "SELECT MAX(gpu_mem_total_bytes) FROM process_samples;"
-        ).fetchone()
-    except Exception:
-        return None
-
-    if not row or row[0] is None:
-        return None
-    try:
-        value = float(row[0])
-    except Exception:
-        return None
-    return value if value > 0.0 else None
 
 
 def build_step_memory_combined_result(
