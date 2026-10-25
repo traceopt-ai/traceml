@@ -49,12 +49,12 @@ def parse_history_retention(value: DurationValue) -> float:
     return seconds
 
 
-def retention_cutoff_recv_ts_ns(
-    watermark_recv_ts_ns: int,
+def retention_cutoff_observed_timestamp_unix_ns(
+    watermark_observed_timestamp_unix_ns: int,
     retention_s: DurationValue,
 ) -> int:
-    """Return the exclusive receive-time cutoff for one retention horizon."""
-    return int(watermark_recv_ts_ns) - int(
+    """Return the exclusive observation-time cutoff for one retention horizon."""
+    return int(watermark_observed_timestamp_unix_ns) - int(
         parse_history_retention(retention_s) * 1e9
     )
 
@@ -63,5 +63,5 @@ __all__ = [
     "DEFAULT_HISTORY_RETENTION_S",
     "DurationValue",
     "parse_history_retention",
-    "retention_cutoff_recv_ts_ns",
+    "retention_cutoff_observed_timestamp_unix_ns",
 ]

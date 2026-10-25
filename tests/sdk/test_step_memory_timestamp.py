@@ -85,7 +85,7 @@ def test_sampler_preserves_event_timestamp_through_wire_schema() -> None:
     with sqlite3.connect(":memory:") as conn:
         projection.init_schema(conn)
         projection.insert_rows(
-            conn, projection.build_rows(envelope, recv_ts_ns=1)
+            conn, projection.build_rows(envelope, observed_timestamp_unix_ns=1)
         )
         assert conn.execute(
             "SELECT timestamp_unix_ns, step, peak_alloc_bytes, "
@@ -113,7 +113,7 @@ def test_projection_accepts_only_canonical_source_time():
     with sqlite3.connect(":memory:") as conn:
         projection.init_schema(conn)
         projection.insert_rows(
-            conn, projection.build_rows(envelope, recv_ts_ns=1)
+            conn, projection.build_rows(envelope, observed_timestamp_unix_ns=1)
         )
         columns = {
             row[1]: row[2]

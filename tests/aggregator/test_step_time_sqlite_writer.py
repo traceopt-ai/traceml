@@ -110,7 +110,7 @@ def test_step_time_projection_accepts_only_canonical_source_time():
             "body": {"tables": {"StepTimeTable": inputs}},
         }
     )
-    rows = build_rows(envelope, recv_ts_ns=1)
+    rows = build_rows(envelope, observed_timestamp_unix_ns=1)
     with sqlite3.connect(":memory:") as conn:
         init_schema(conn)
         insert_rows(conn, rows)

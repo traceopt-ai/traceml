@@ -1150,7 +1150,7 @@ def test_the_card_renders_the_same_from_a_real_database(tmp_path):
     init_schema(conn)
     for seq in (1, 2):
         conn.execute(
-            "INSERT INTO process_samples (recv_ts_ns, rank, global_rank, "
+            "INSERT INTO process_samples (observed_timestamp_unix_ns, rank, global_rank, "
             "seq, timestamp_unix_ns, cpu_percent, cpu_logical_core_count, "
             "ram_used_bytes, ram_total_bytes, gpu_available, "
             "gpu_mem_used_bytes, gpu_mem_reserved_bytes, "

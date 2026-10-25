@@ -144,7 +144,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
     conn.execute("""
         CREATE TABLE IF NOT EXISTS step_time_samples (
             id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-            recv_ts_ns         INTEGER NOT NULL,
+            observed_timestamp_unix_ns         INTEGER NOT NULL,
             rank               INTEGER,
             global_rank        INTEGER,
             local_rank         INTEGER,
@@ -292,7 +292,7 @@ def _normalize_events(events_raw: Any) -> Dict[str, Dict[str, Dict[str, Any]]]:
 
 def build_rows(
     envelope: TelemetryEnvelope,
-    recv_ts_ns: int,
+    observed_timestamp_unix_ns: int,
 ) -> Dict[str, list[tuple]]:
     """
     Build SQLite projection rows from one decoded StepTimeSampler payload.
@@ -301,8 +301,8 @@ def build_rows(
     ----------
     envelope:
         Canonical telemetry envelope from the main SQLite writer.
-    recv_ts_ns:
-        Receive timestamp assigned by the main writer for this payload.
+    observed_timestamp_unix_ns:
+        Time the main writer observes this payload, in Unix nanoseconds.
 
     Returns
     -------
@@ -361,7 +361,7 @@ def build_rows(
 
             out["step_time_samples"].append(
                 (
-                    recv_ts_ns,
+                    observed_timestamp_unix_ns,
                     identity.rank,
                     identity.global_rank,
                     identity.local_rank,
@@ -397,7 +397,7 @@ def insert_rows(
         conn.executemany(
             """
             INSERT INTO step_time_samples(
-                recv_ts_ns,
+                observed_timestamp_unix_ns,
                 rank,
                 global_rank,
                 local_rank,
