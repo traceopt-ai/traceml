@@ -833,6 +833,18 @@ def test_compare_one_comparable_domain_and_one_missing_domain_is_not_equivalent(
     assert verdict["outcome"] != "equivalent"
 
 
+def test_step_memory_compare_carries_only_measured_metrics() -> None:
+    compare_payload = _build_compare(
+        _payload_with_sections(), _payload_with_sections()
+    )
+
+    # No summary field feeds a memory-trend delta, so none is emitted.
+    assert set(compare_payload["sections"]["step_memory"]["metrics"]) == {
+        "peak_reserved_bytes",
+        "memory_skew_pct",
+    }
+
+
 def test_compare_payload_has_section_based_json_and_table_text() -> None:
     lhs = _payload_with_sections(
         step_time=_step_time_section(
