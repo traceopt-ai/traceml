@@ -20,7 +20,7 @@ from traceml_ai.aggregator.display_drivers.nicegui_sections import (
 from traceml_ai.measurements.system import (
     PerGPUSummary,
     SystemNodeSummary,
-    node_gpu_headroom_min_gb,
+    node_gpu_headroom_min_bytes,
 )
 from traceml_ai.reporting.html.textutils import fmt_value
 from traceml_ai.reporting.summaries.summary_formatting import bytes_to_gb
@@ -59,7 +59,7 @@ def test_cli_formatters_label_binary_units() -> None:
     assert format_memory(CAPACITY) == (16.0, "GiB")
 
 
-def test_gpu_headroom_is_in_gibibytes() -> None:
+def test_gpu_headroom_stays_in_bytes() -> None:
     gpu = PerGPUSummary(
         gpu_idx=0,
         mem_total_bytes=float(CAPACITY),
@@ -68,7 +68,7 @@ def test_gpu_headroom_is_in_gibibytes() -> None:
     node = SystemNodeSummary.__new__(SystemNodeSummary)
     object.__setattr__(node, "per_gpu", {0: gpu})
 
-    assert node_gpu_headroom_min_gb(node) == pytest.approx(10.0)
+    assert node_gpu_headroom_min_bytes(node) == pytest.approx(10 * GIB)
 
 
 def test_card_switches_units_at_one_point() -> None:

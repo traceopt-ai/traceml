@@ -53,7 +53,7 @@ def gpu_reported(row: Any) -> bool:
 
     The current sampler writes ``None`` when NVML cannot read a device.
     Older traces may contain an all-zero placeholder for the same state;
-    neither form is a measurement of 0 W, 0 C, or 0 GB.
+    neither form is a measurement of 0 W, 0 C, or 0 GiB.
 
     Lives here rather than in one computer because BOTH System surfaces
     aggregate the same rows: the dashboard and the terminal card. When it

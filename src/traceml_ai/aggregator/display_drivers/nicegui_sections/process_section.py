@@ -627,8 +627,8 @@ def _tile_gb(
     """A byte level against the capacity it is measured out of.
 
     Every memory tile carries its denominator. A level without one cannot
-    be read: 14 GB is unremarkable on an 80 GB card and nearly fatal on a
-    16 GB one.
+    be read: 14 GiB is unremarkable on an 80 GiB card and nearly fatal on a
+    16 GiB one.
     """
     value, rest = format_gb_pair(
         rollup.now if rollup else None,
