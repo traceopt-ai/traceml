@@ -8,8 +8,9 @@
 
 The facade deliberately performs only orchestration. SQLite selection,
 analysis semantics, diagnosis rules, and presentation remain independently
-owned and testable. Live and summary are data profiles, not UI surfaces:
-terminal and dashboard both use the bounded live profile.
+owned and testable. Live sessions use the bounded live profile. Final
+reporting loads a summary snapshot inside its shared SQLite transaction and
+then reuses :func:`analyze_step_time_snapshot`.
 """
 
 from __future__ import annotations

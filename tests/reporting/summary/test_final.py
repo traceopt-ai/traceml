@@ -308,6 +308,8 @@ def test_final_summary_aligns_sections_to_step_derived_time_window(
     assert window["sections"]["step_memory"]["samples"] == 301
     assert window["sections"]["system"]["samples"] == 500
     assert window["sections"]["process"]["samples"] == 400
+    assert payload["step_time"]["metadata"]["samples"] == 301
+    assert payload["step_memory"]["metadata"]["samples"] == 301
     assert payload["duration_s"] is None
     for section in ("system", "process", "step_time", "step_memory"):
         observation = window["sections"][section]
@@ -407,10 +409,19 @@ def test_builtin_family_read_failure_keeps_sibling_results(
         fail_process_read,
     )
     monkeypatch.setattr(final_report.sqlite3, "connect", count_connect)
+    logged_errors = []
+    monkeypatch.setattr(
+        final_report,
+        "_log_final_report_error",
+        lambda message, error: logged_errors.append((message, error)),
+    )
 
     payload = build_summary_payload(str(db_path))
 
     assert connect_calls == 1
+    assert len(logged_errors) == 1
+    assert logged_errors[0][0] == "Final summary section failed: process"
+    assert str(logged_errors[0][1]) == "process read failed"
     assert payload["process"]["diagnosis"]["status"] == "NO DATA"
     assert payload["system"]["metadata"]["samples"] == 1
     assert payload["step_time"]["metadata"]["samples"] == 1

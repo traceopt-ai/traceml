@@ -52,11 +52,12 @@ and model-diagnostics composer. Add a new Step Time dashboard view by
 consuming that result; do not register another provider or add a presenter
 cache.
 
-Final-summary Step Time uses the same `StepTimePipeline` with the `summary`
-profile. `StepTimeSummarySection` runs it once and gives the completed
-`StepTimeAnalysis` to a pure reporting projector. The projector may map facts
-to stable JSON names, topology, and text, but it must not query SQLite,
-reanalyze ranks, or run diagnosis again.
+Final-summary Step Time loads its repository snapshot inside the report's
+shared SQLite transaction. After that transaction closes,
+`StepTimeSummarySection` runs the canonical analyzer and summary diagnosis,
+then gives the completed `StepTimeAnalysis` to a pure reporting projector.
+The projector may map facts to stable JSON names, topology, and text, but it
+must not query SQLite, reanalyze ranks, or run diagnosis again.
 
 The three core Step Time shapes are:
 
