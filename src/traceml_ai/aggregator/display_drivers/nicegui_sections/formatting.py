@@ -53,7 +53,7 @@ def format_gb_pair(used_bytes: Any, total_bytes: Any) -> Tuple[str, str]:
     """A level against its capacity: ``('6.3', '/ 16.1 GiB')``.
 
     A measured value never renders as "0.0": a trainer process holding
-    27 MB is a real reading, and printing it with one decimal makes it
+    27 MiB is a real reading, and printing it with one decimal makes it
     indistinguishable from the marker this module uses for absence.
     Sub-gigabyte levels keep two decimals instead.
     """

@@ -833,6 +833,22 @@ def test_compare_one_comparable_domain_and_one_missing_domain_is_not_equivalent(
     assert verdict["outcome"] != "equivalent"
 
 
+def test_compare_gb_rows_hold_and_label_gibibytes() -> None:
+    compare_payload = _build_compare(
+        _payload_with_sections(), _payload_with_sections()
+    )
+    text = build_compare_text(compare_payload)
+
+    process = compare_payload["sections"]["process"]["metrics"]
+    system = compare_payload["sections"]["system"]["metrics"]
+    # The fixture stores 2 GiB of process RSS and 4 GiB of host RAM.
+    assert process["rss_avg_gb"]["lhs"] == 2.0
+    assert system["ram_avg_gb"]["lhs"] == 4.0
+    assert "2.0 GiB" in text
+    assert "4.0 GiB" in text
+    assert " GB" not in text
+
+
 def test_compare_payload_has_section_based_json_and_table_text() -> None:
     lhs = _payload_with_sections(
         step_time=_step_time_section(

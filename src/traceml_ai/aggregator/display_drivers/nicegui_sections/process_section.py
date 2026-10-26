@@ -52,9 +52,9 @@ from .formatting import (
 
 _MONO = "font-family:var(--mono);"
 
-# The smallest range the memory graph draws, in GB. A steady trainer moves
-# by kilobytes, and an axis fitted to that printed "0.586 GB" on all three
-# ticks. A hundredth of a GB is below any movement worth reading here.
+# The smallest range the memory graph draws, in GiB. A steady trainer moves
+# by kilobytes, and an axis fitted to that printed "0.586 GiB" on all three
+# ticks. A hundredth of a GiB is below any movement worth reading here.
 _MEMORY_MIN_SPAN_GB = 0.01
 
 WAITING = "waiting for data"
@@ -710,8 +710,8 @@ def _update_tiles(
             f"Rank {mem_rank}" if mem_rank is not None else ""
         )
     else:
-        # The denominator as ``format_gb_pair`` writes it ("/ 24.0 GB"),
-        # so the host's RAM reads at the precision of every other GB here.
+        # The denominator as ``format_gb_pair`` writes it ("/ 24.0 GiB"),
+        # so the host's RAM reads at the precision of every other GiB here.
         panel["subs"]["rss"].text = (
             f"of {rest[2:]} host RAM" if rest.startswith("/ ") else ""
         )

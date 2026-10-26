@@ -69,3 +69,12 @@ def test_gpu_headroom_is_in_gibibytes() -> None:
     object.__setattr__(node, "per_gpu", {0: gpu})
 
     assert node_gpu_headroom_min_gb(node) == pytest.approx(10.0)
+
+
+def test_card_switches_units_at_one_point() -> None:
+    # 0.1 GiB is 107,374,182.4 bytes; both card paths switch there.
+    below, above = 107_374_182, 107_374_183
+    assert card.format_capacity(below).endswith(" MiB")
+    assert _bytes(below).endswith(" MiB")
+    assert card.format_capacity(above).endswith(" GiB")
+    assert _bytes(above).endswith(" GiB")
