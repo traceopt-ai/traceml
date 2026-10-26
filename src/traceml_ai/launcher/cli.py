@@ -58,7 +58,10 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         action="store_const",
         const=True,
         default=None,
-        help="Enable TraceML logging output.",
+        help=(
+            "Also write raw sampler records to .msgpack files; read them "
+            "with `traceml inspect`."
+        ),
     )
     parser.add_argument(
         "--logs-dir",
@@ -330,7 +333,10 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_const",
         const=True,
         default=None,
-        help="Enable TraceML logging output.",
+        help=(
+            "Also write raw sampler records to .msgpack files; read them "
+            "with `traceml inspect`."
+        ),
     )
     serve_parser.add_argument(
         "--history-retention",
@@ -428,7 +434,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     inspect_parser = sub.add_parser(
-        "inspect", help="Inspect binary .msgpack logs."
+        "inspect",
+        help=(
+            "Print the records in a .msgpack log written with "
+            "--enable-logging; exit 1 if the file ends in a cut-off frame."
+        ),
     )
     inspect_parser.add_argument("file", help="Path to a .msgpack file.")
 

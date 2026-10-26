@@ -1562,6 +1562,8 @@ def run_inspect(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
     decoder = MsgpackDecoder()
+    records = 0
+    truncated: Optional[str] = None
     with open(path, "rb") as f:
         try:
             while True:
@@ -1569,21 +1571,16 @@ def run_inspect(args: argparse.Namespace) -> None:
                 if not header:
                     break
                 if len(header) < 4:
-                    print(
-                        "[TraceML] WARNING: truncated frame header",
-                        file=sys.stderr,
-                    )
+                    truncated = "header"
                     break
                 length = struct.unpack("!I", header)[0]
                 payload = f.read(length)
                 if len(payload) < length:
-                    print(
-                        "[TraceML] WARNING: truncated frame payload",
-                        file=sys.stderr,
-                    )
+                    truncated = "payload"
                     break
                 record = decoder.decode(payload)
                 print(json.dumps(record, indent=2))
+                records += 1
         except Exception as exc:
             _log_launcher_exception(f"inspect failed for {path}", exc)
             print(
@@ -1591,6 +1588,15 @@ def run_inspect(args: argparse.Namespace) -> None:
                 file=sys.stderr,
             )
             raise SystemExit(1)
+    if truncated is not None:
+        # The complete records above are still printed; a cut-off frame,
+        # such as a process killed mid-write, fails the command.
+        print(
+            f"[TraceML] ERROR: truncated frame {truncated} after "
+            f"{records} records in {path.name}",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
 
 
 _CI_POLICY_EXIT_CODES = {

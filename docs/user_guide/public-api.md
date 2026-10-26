@@ -131,6 +131,18 @@ streams are pipes, so `isatty()` is false. TraceML does not replace Python's
 See [Training Crashes](training-crashes.md) for artifact paths and failure
 behavior.
 
+### Raw sampler logs
+
+`--enable-logging` also writes each rank's raw sampler records to
+length-prefixed MessagePack files, one per sampler table, at
+`rank_<N>/data/<Sampler>/<Table>.msgpack` under the logs directory. The files
+are append-only and grow for the whole run. Without `--enable-logging` no
+`.msgpack` files are written.
+
+`traceml inspect <file>` prints each record as JSON. If the file ends in a
+cut-off frame, for example because the process was killed while writing, it
+prints the complete records first and then exits with status 1.
+
 ### History and configuration
 
 `run`, `watch`, and `serve` accept `--history-retention DURATION`. The default
@@ -199,7 +211,7 @@ node-0 endpoint. Configure the expected world size to match your workers.
 | `--run-name` / `--session-id` | Shared run identity; choose a fresh name. |
 | `--history-retention` | History duration; default `30m`. |
 | `--interval` | Aggregator render interval in seconds. |
-| `--enable-logging` | Enable TraceML logging output. |
+| `--enable-logging` | Also write raw sampler records; see [Raw sampler logs](#raw-sampler-logs). |
 
 `serve` is the low-level entry point, so it has no flags for launching or
 wrapping training. Settings that belong to the aggregator still work through
