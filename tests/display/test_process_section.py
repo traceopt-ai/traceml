@@ -131,7 +131,7 @@ def _panel() -> dict:
         "subs": {k: _Text() for k in _TILES},
         "tile_tips": {k: _Text() for k in ("cpu", "rss")},
         "cpu_chart": _Chart("%"),
-        "rss_chart": _Chart(" GB"),
+        "rss_chart": _Chart(" GiB"),
         "cpu_label": _Text(),
         "rss_label": _Text(),
         "cpu_sub": _Text(),
@@ -451,8 +451,8 @@ def test_one_rank_reads_as_usage_not_as_a_comparison():
     assert panel["subs"]["cpu"].text == "of host CPU"
     assert panel["tile_labels"]["rss"].text == "Process memory"
     assert "2.5" in panel["tiles"]["rss"].content
-    assert "GB" in panel["tiles"]["rss"].content
-    assert panel["subs"]["rss"].text == "of 64.0 GB host RAM"
+    assert "GiB" in panel["tiles"]["rss"].content
+    assert panel["subs"]["rss"].text == "of 64.0 GiB host RAM"
 
 
 def test_many_ranks_name_the_rank_each_tile_selected():
@@ -809,7 +809,7 @@ def test_the_axes_carry_units_and_one_relative_clock():
     process_section.update_process_section(panel, _payload())
     cpu, rss = panel["cpu_chart"].options, panel["rss_chart"].options
     assert "%" in cpu["yAxis"]["axisLabel"][":formatter"]
-    assert "GB" in rss["yAxis"]["axisLabel"][":formatter"]
+    assert "GiB" in rss["yAxis"]["axisLabel"][":formatter"]
     assert "'Now'" in cpu["xAxis"]["axisLabel"][":formatter"]
     assert (
         cpu["xAxis"]["axisLabel"][":formatter"]
@@ -844,7 +844,7 @@ def test_the_hover_reads_at_the_tiles_precision():
     cpu = panel["cpu_chart"].options["tooltip"][":valueFormatter"]
     rss = panel["rss_chart"].options["tooltip"][":valueFormatter"]
     assert "toFixed(1)" in cpu and "%" in cpu
-    assert "GB" in rss and "Math.round" not in rss
+    assert "GiB" in rss and "Math.round" not in rss
 
 
 def test_the_aggregate_total_line_is_not_drawn():
@@ -986,9 +986,9 @@ def test_each_row_pairs_cuda_values_from_its_least_headroom_sample():
 
     html = process_section.rows_html((rank,), None)
 
-    assert "22.0 / 40.0 GB" in html
-    assert "30.0 / 40.0 GB" in html
-    assert html.index("30.0 / 40.0 GB") < html.index("22.0 / 40.0 GB")
+    assert "22.0 / 40.0 GiB" in html
+    assert "30.0 / 40.0 GiB" in html
+    assert html.index("30.0 / 40.0 GiB") < html.index("22.0 / 40.0 GiB")
 
 
 def test_a_stale_rank_is_dimmed_and_kept():
@@ -1185,7 +1185,7 @@ def test_the_card_renders_the_same_from_a_real_database(tmp_path):
     assert "R0" in panel["rows_html"].content
     assert panel["title"].text == "Trainer process"
     assert panel["context"].text == "Rank 0 · Trainer process only"
-    assert panel["subs"]["rss"].text == "of 16.0 GB host RAM"
+    assert panel["subs"]["rss"].text == "of 16.0 GiB host RAM"
 
 
 def test_every_class_the_card_emits_has_a_rule_behind_it():
@@ -1391,8 +1391,8 @@ def test_the_rss_row_shows_the_same_basis_as_the_rss_tile():
     """A reader who checks the tile against the rows must find it there.
 
     The tile names a rank at its median. The row used to show that rank's
-    newest sample, so on a finished run the tile said 2.1 GB and the row
-    it pointed at said 1.0 GB.
+    newest sample, so on a finished run the tile said 2.1 GiB and the row
+    it pointed at said 1.0 GiB.
     """
     ranks = (
         RankSnapshot(
@@ -1435,7 +1435,7 @@ def test_the_built_card_accepts_every_update(make):
 
 
 def test_both_graphs_give_their_tick_labels_the_same_room():
-    """A "30%" axis and a "1.111 GB" axis otherwise start at different x.
+    """A "30%" axis and a "1.111 GiB" axis otherwise start at different x.
 
     The two plots then disagree about where any moment is, which is the
     one thing two graphs sharing a time range must agree on.
@@ -1452,7 +1452,7 @@ def test_both_graphs_give_their_tick_labels_the_same_room():
     assert widths["cpu_chart"] == widths["rss_chart"]
     assert len(widths["cpu_chart"]) == 1
     yaxis = panel["rss_chart"].options["yAxis"]
-    widest = charting.value_axis_label(yaxis["max"], yaxis["interval"], " GB")
+    widest = charting.value_axis_label(yaxis["max"], yaxis["interval"], " GiB")
     assert int(widths["cpu_chart"][0]) == len(widest)
 
 

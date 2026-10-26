@@ -1,4 +1,4 @@
-"""Step Memory analysis — peak/worst-vs-median GB over steps (PR2 revamp).
+"""Step Memory analysis — peak/worst-vs-median GiB over steps (PR2 revamp).
 
 Reuses the original metric normalization + stats; renders with glass + ECharts.
 Renderer payload (metrics[].series + summary + coverage) is unchanged.
@@ -15,7 +15,7 @@ from traceml_ai.diagnostics.trends import compute_trend_pct
 
 from . import theme
 
-BYTES_PER_GB = 1e9
+BYTES_PER_GB = float(1024**3)
 
 
 def _safe_float(v: Any, default: float = 0.0) -> float:
@@ -104,7 +104,7 @@ def _mem_options() -> Dict[str, Any]:
                 "fontFamily": "Geist Mono",
                 "fontSize": 10,
                 "fontWeight": 600,
-                ":formatter": "p=>p.value.toFixed(2)+' GB'",
+                ":formatter": "p=>p.value.toFixed(2)+' GiB'",
             },
             "areaStyle": (
                 {
@@ -273,13 +273,13 @@ def update_step_memory_section(
         panel["win"].text = f"{len(view.steps)} aligned steps"
         k = panel["kpis"]
         k["peak"].content = theme.kval(
-            f"{view.worst.last / BYTES_PER_GB:.2f}", "GB"
+            f"{view.worst.last / BYTES_PER_GB:.2f}", "GiB"
         )
         k["p95"].content = theme.kval(
-            f"{view.worst.p95 / BYTES_PER_GB:.2f}", "GB"
+            f"{view.worst.p95 / BYTES_PER_GB:.2f}", "GiB"
         )
         k["avg"].content = theme.kval(
-            f"{view.worst.avg100 / BYTES_PER_GB:.2f}", "GB"
+            f"{view.worst.avg100 / BYTES_PER_GB:.2f}", "GiB"
         )
         k["trend"].content = theme.kval(f"{view.worst.trend:+.0f}", "%")
     except Exception:

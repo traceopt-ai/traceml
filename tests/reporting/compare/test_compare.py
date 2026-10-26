@@ -652,7 +652,7 @@ def test_compare_render_shows_unavailable_in_a_for_missing_numeric_fields() -> (
     assert "n/a" in text
     assert "no common comparison clock" in text
     assert "Peak reserved" in text
-    assert "194 MB" in text
+    assert "194 MiB" in text
 
 
 def test_compare_text_formatter_matches_public_wrapper() -> None:
@@ -833,6 +833,22 @@ def test_compare_one_comparable_domain_and_one_missing_domain_is_not_equivalent(
     assert verdict["outcome"] != "equivalent"
 
 
+def test_compare_gb_rows_hold_and_label_gibibytes() -> None:
+    compare_payload = _build_compare(
+        _payload_with_sections(), _payload_with_sections()
+    )
+    text = build_compare_text(compare_payload)
+
+    process = compare_payload["sections"]["process"]["metrics"]
+    system = compare_payload["sections"]["system"]["metrics"]
+    # The fixture stores 2 GiB of process RSS and 4 GiB of host RAM.
+    assert process["rss_avg_gb"]["lhs"] == 2.0
+    assert system["ram_avg_gb"]["lhs"] == 4.0
+    assert "2.0 GiB" in text
+    assert "4.0 GiB" in text
+    assert " GB" not in text
+
+
 def test_step_memory_compare_carries_only_measured_metrics() -> None:
     compare_payload = _build_compare(
         _payload_with_sections(), _payload_with_sections()
@@ -915,7 +931,7 @@ def test_compare_payload_has_section_based_json_and_table_text() -> None:
     assert "735.2 ms" in text
     assert "+114.1 ms (+18.4%)" in text
     assert "Peak reserved" in text
-    assert "+2.70 GB (+43.5%)" in text
+    assert "+2.70 GiB (+43.5%)" in text
 
 
 def test_compare_text_scales_a_memory_decrease_like_an_increase() -> None:
@@ -932,7 +948,7 @@ def test_compare_text_scales_a_memory_decrease_like_an_increase() -> None:
 
     text = build_compare_text(_build_compare(lhs, rhs))
 
-    assert "-2.70 GB (-30.3%)" in text
+    assert "-2.70 GiB (-30.3%)" in text
 
 
 def test_compare_warns_when_summary_schema_versions_differ() -> None:

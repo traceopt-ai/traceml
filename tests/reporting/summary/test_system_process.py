@@ -62,8 +62,8 @@ def _seed_system_samples(conn) -> None:
 
 def _seed_process_samples(conn) -> None:
     for row_id, ts, cpu, ram, used, reserved in (
-        (1, 10.0, 80.0, 4e9, 5e9, 6e9),
-        (2, 11.0, 40.0, 2e9, 3e9, 4e9),
+        (1, 10.0, 80.0, 4 * 1024**3, 5e9, 6e9),
+        (2, 11.0, 40.0, 2 * 1024**3, 3e9, 4e9),
     ):
         insert_process_sample(
             conn,
@@ -74,7 +74,7 @@ def _seed_process_samples(conn) -> None:
             gpu_count=1,
             cpu_percent=cpu,
             ram_used_bytes=ram,
-            ram_total_bytes=16e9,
+            ram_total_bytes=16 * 1024**3,
             gpu_device_index=0,
             gpu_mem_used_bytes=used,
             gpu_mem_reserved_bytes=reserved,
@@ -294,7 +294,7 @@ def test_process_measurements_and_builder_use_sqlite_fixture(tmp_path):
     assert "- Diagnosis: NORMAL" in result.text
     assert (
         "- Stats: global ranks 1 | CPU avg 60% | "
-        "RSS peak 4.0 / 16.0 GB | GPU reserved peak 60%"
+        "RSS peak 4.0 / 16.0 GiB | GPU reserved peak 60%"
     ) in result.text
     assert "- Takeaway:" not in result.text
     assert "- Issues:" not in result.text
@@ -368,7 +368,7 @@ def test_process_measurements_use_selected_time_window(tmp_path):
     )
     assert data.aggregate.process_samples == 1
     assert data.aggregate.cpu_avg_percent == 40.0
-    assert data.aggregate.ram_avg_bytes == 2000000000.0
+    assert data.aggregate.ram_avg_bytes == 2 * 1024**3
     assert data.per_global_rank[0].cpu_avg_percent == 40.0
     assert data.per_global_rank[0].gpu_mem_reserved_avg_bytes == 4000000000.0
 

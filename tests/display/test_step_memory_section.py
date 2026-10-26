@@ -31,14 +31,14 @@ from traceml_ai.renderers.step_memory.schema import (  # noqa: E402
     StepMemoryCombinedResult,
 )
 
-GB = 1e9
+GIB = float(1024**3)
 
 
 def _metric(
     name: str = "peak_allocated",
     *,
-    worst=(2.0 * GB, 2.5 * GB, 3.0 * GB),
-    median=(1.0 * GB, 1.0 * GB, 1.5 * GB),
+    worst=(2.0 * GIB, 2.5 * GIB, 3.0 * GIB),
+    median=(1.0 * GIB, 1.0 * GIB, 1.5 * GIB),
     world_size: int = 2,
 ) -> StepMemoryCombinedMetric:
     steps = [10, 11, 12]
@@ -130,8 +130,8 @@ def test_the_preferred_metric_wins_over_list_order() -> None:
     panel = _panel()
     reserved = _metric(
         "peak_reserved",
-        worst=(5.0 * GB, 5.0 * GB, 5.0 * GB),
-        median=(4.0 * GB, 4.0 * GB, 4.0 * GB),
+        worst=(5.0 * GIB, 5.0 * GIB, 5.0 * GIB),
+        median=(4.0 * GIB, 4.0 * GIB, 4.0 * GIB),
     )
     update_step_memory_section(panel, _result(reserved, _metric()))
 

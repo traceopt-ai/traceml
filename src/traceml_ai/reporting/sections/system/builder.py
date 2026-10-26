@@ -17,7 +17,7 @@ from traceml_ai.measurements.system import (
     SystemClusterSummary,
     SystemMeasurements,
     SystemNodeSummary,
-    node_gpu_headroom_min_gb,
+    node_gpu_headroom_min_bytes,
     node_gpu_mem_peak_percent,
     percent,
 )
@@ -48,11 +48,6 @@ SYSTEM_METRIC_NAMES = [
     "gpu_power_w",
     "gpu_headroom_bytes",
 ]
-
-
-def _node_headroom_min_bytes(node: SystemNodeSummary) -> Optional[float]:
-    value_gb = node_gpu_headroom_min_gb(node)
-    return None if value_gb is None else float(value_gb) * 1_000_000_000.0
 
 
 def _system_mode(cluster: SystemClusterSummary) -> str:
@@ -113,7 +108,7 @@ def _node_metric_values(node: SystemNodeSummary) -> Dict[str, Any]:
         "gpu_mem_percent": _gpu_mem_percent_from_summaries(per_gpu),
         "gpu_temp_c": agg.gpu_temp_avg_c,
         "gpu_power_w": agg.gpu_power_avg_w,
-        "gpu_headroom_bytes": _node_headroom_min_bytes(node),
+        "gpu_headroom_bytes": node_gpu_headroom_min_bytes(node),
     }
 
 

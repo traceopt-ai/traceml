@@ -75,11 +75,11 @@ def _build_process_stats_line(
     )
     ram_stat = None
     if ram_peak_gb is not None:
-        ram_stat = f"RSS peak {float(ram_peak_gb):.1f} GB"
+        ram_stat = f"RSS peak {float(ram_peak_gb):.1f} GiB"
         if ram_total_gb is not None:
             ram_stat = (
                 f"RSS peak {float(ram_peak_gb):.1f} / "
-                f"{float(ram_total_gb):.1f} GB"
+                f"{float(ram_total_gb):.1f} GiB"
             )
     parts = [
         f"global ranks {aggregate.distinct_global_ranks}",

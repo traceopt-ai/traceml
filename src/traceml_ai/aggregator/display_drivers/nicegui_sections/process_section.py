@@ -52,9 +52,9 @@ from .formatting import (
 
 _MONO = "font-family:var(--mono);"
 
-# The smallest range the memory graph draws, in GB. A steady trainer moves
-# by kilobytes, and an axis fitted to that printed "0.586 GB" on all three
-# ticks. A hundredth of a GB is below any movement worth reading here.
+# The smallest range the memory graph draws, in GiB. A steady trainer moves
+# by kilobytes, and an axis fitted to that printed "0.586 GiB" on all three
+# ticks. A hundredth of a GiB is below any movement worth reading here.
 _MEMORY_MIN_SPAN_GB = 0.01
 
 WAITING = "waiting for data"
@@ -170,7 +170,7 @@ def build_process_section() -> Dict[str, Any]:
         # one chart with two halves.
         for key, head, unit, margin in (
             ("cpu", "CPU usage", "%", "0"),
-            ("rss", "Process memory", " GB", "8px"),
+            ("rss", "Process memory", " GiB", "8px"),
         ):
             block = ui.element("div").style(
                 f"margin-top:{margin}; padding:8px 10px 4px; "
@@ -627,8 +627,8 @@ def _tile_gb(
     """A byte level against the capacity it is measured out of.
 
     Every memory tile carries its denominator. A level without one cannot
-    be read: 14 GB is unremarkable on an 80 GB card and nearly fatal on a
-    16 GB one.
+    be read: 14 GiB is unremarkable on an 80 GiB card and nearly fatal on a
+    16 GiB one.
     """
     value, rest = format_gb_pair(
         rollup.now if rollup else None,
@@ -703,15 +703,15 @@ def _update_tiles(
         rss.now if rss else None, rss.total if rss else None
     )
     panel["tiles"]["rss"].content = theme.kval(
-        used, " GB" if rss is not None else ""
+        used, " GiB" if rss is not None else ""
     )
     if many:
         panel["subs"]["rss"].text = (
             f"Rank {mem_rank}" if mem_rank is not None else ""
         )
     else:
-        # The denominator as ``format_gb_pair`` writes it ("/ 24.0 GB"),
-        # so the host's RAM reads at the precision of every other GB here.
+        # The denominator as ``format_gb_pair`` writes it ("/ 24.0 GiB"),
+        # so the host's RAM reads at the precision of every other GiB here.
         panel["subs"]["rss"].text = (
             f"of {rest[2:]} host RAM" if rest.startswith("/ ") else ""
         )
@@ -811,7 +811,7 @@ def update_process_section(panel: Dict[str, Any], data: Any) -> None:
                     bounds_of=_memory_bounds,
                     accent=theme.C_MEM,
                     highlight=mem_rank if many else None,
-                    unit=" GB",
+                    unit=" GiB",
                 ),
             ),
         )

@@ -146,15 +146,14 @@ def node_gpu_mem_peak_percent(node: SystemNodeSummary) -> Optional[float]:
     return max(nums) if nums else None
 
 
-def node_gpu_headroom_min_gb(node: SystemNodeSummary) -> Optional[float]:
-    """Return the smallest GPU memory headroom on one node, in GB."""
+def node_gpu_headroom_min_bytes(node: SystemNodeSummary) -> Optional[float]:
+    """Return the smallest GPU memory headroom on one node, in bytes."""
     values = []
     for gpu in node.per_gpu.values():
         if gpu.mem_total_bytes is None or gpu.mem_peak_bytes is None:
             continue
         values.append(
             max(0.0, float(gpu.mem_total_bytes) - float(gpu.mem_peak_bytes))
-            / 1_000_000_000.0
         )
     return min(values) if values else None
 
@@ -583,7 +582,7 @@ __all__ = [
     "SystemNodeIdentity",
     "SystemNodeSummary",
     "SystemSummaryAgg",
-    "node_gpu_headroom_min_gb",
+    "node_gpu_headroom_min_bytes",
     "node_gpu_mem_peak_percent",
     "percent",
     "read_system_measurements",

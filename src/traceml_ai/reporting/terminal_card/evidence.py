@@ -89,9 +89,10 @@ def _bytes(value: Any) -> Optional[str]:
         return None
     sign = "+" if numeric > 0.0 else ""
     magnitude = abs(numeric)
-    if magnitude < 100_000_000.0:
-        return f"{sign}{magnitude / 1e6:.1f} MB"
-    return f"{sign}{magnitude / 1e9:.1f} GB"
+    # Same switch point as format_capacity: below 0.1 GiB reads in MiB.
+    if magnitude < 0.1 * 1024**3:
+        return f"{sign}{magnitude / 1024**2:.1f} MiB"
+    return f"{sign}{magnitude / 1024**3:.1f} GiB"
 
 
 def _scope_text(

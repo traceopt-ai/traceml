@@ -34,7 +34,7 @@ from traceml_ai.renderers.system.dashboard_models import (
 )
 
 from . import charting, theme
-from .formatting import format_elapsed, format_window, gb_si
+from .formatting import format_elapsed, format_gb_pair, format_window, gb
 
 # Window-p95 GPU utilisation spread (max - min, percentage points) that
 # automatically opens the per-GPU rows.
@@ -73,23 +73,6 @@ def format_span(seconds: Optional[float]) -> str:
     if seconds < 90:
         return f"last {seconds:.0f} s"
     return f"last {seconds / 60.0:.0f} min"
-
-
-def format_gb_pair(used_bytes: Any, total_bytes: Any) -> Tuple[str, str]:
-    """A level against its capacity: ('6.3', '/ 16.1 GB').
-
-    Sub-gigabyte levels keep two decimals so small measurements retain
-    useful precision, matching the Process card's formatting rule.
-    """
-    used = gb_si(used_bytes) if used_bytes is not None else None
-    if used is None:
-        return (NA, "")
-    num = f"{used:.2f}" if 0 < used < 1 else f"{used:.1f}"
-    total = gb_si(total_bytes) if total_bytes is not None else None
-    if total is None or total <= 0:
-        return (num, "GB")
-    total_s = f"{total:.0f}" if total >= 100 else f"{total:.1f}"
-    return (num, f"/ {total_s} GB")
 
 
 def disclosure_text(
@@ -284,7 +267,7 @@ def rows_html(
     marked = odd_ones_out(roll) if roll.rows_over else set()
     head = (
         "<tr><th>gpu</th><th>util</th><th>power trend</th>"
-        "<th>mem GB</th><th>temp °C</th><th>W / limit</th></tr>"
+        "<th>mem GiB</th><th>temp °C</th><th>W / limit</th></tr>"
     )
     rows = []
     for g in gpus:
@@ -292,9 +275,9 @@ def rows_html(
         color = gpu_color(idx)
         used, total = g.mem_used, g.mem_total
         if used is not None and total:
-            mem = f"{gb_si(used):.2f} / {gb_si(total):.1f}"
+            mem = f"{gb(used):.2f} / {gb(total):.1f}"
         elif used is not None:
-            mem = f"{gb_si(used):.2f}"
+            mem = f"{gb(used):.2f}"
         else:
             mem = NA
         power, limit = g.power, g.power_limit

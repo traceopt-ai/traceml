@@ -7,6 +7,10 @@ which carry the full historical notes for versions predating this file.
 
 ## [Unreleased]
 
+- Memory byte counts now render consistently in binary units (`GiB`, `MiB`,
+  `KiB`, and `TiB`) across the dashboard, terminal, HTML, and comparison text.
+  Values on surfaces that previously used decimal `GB` read about 6.9% lower;
+  stored byte values and the legacy compare JSON keys remain unchanged.
 - **Breaking (raw telemetry and summary):** Raw telemetry uses integer Unix
   nanoseconds. `timestamp_unix_ns` records the source measurement, including
   stdout/stderr capture, and `observed_timestamp_unix_ns` records when the
