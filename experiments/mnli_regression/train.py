@@ -112,6 +112,7 @@ def main() -> None:
             data_seed=args.seed,
             fp16=True,
             bf16=False,
+            ddp_find_unused_parameters=False,
             dataloader_num_workers=args.num_workers,
             eval_strategy="epoch",
             save_strategy="no",
