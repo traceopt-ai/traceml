@@ -84,57 +84,93 @@ def _seed_process_samples(conn) -> None:
         )
 
 
-def _system_rows(conn, rows) -> None:
-    """Insert (global_rank, node_rank, world_size, local_world_size) rows."""
+def _system_rows(conn, rows, *, ts_values=(10.0, 11.0)) -> None:
+    """Insert rows of (global_rank, node_rank, world, local_world, host)."""
     row_id = 0
-    for global_rank, node_rank, world_size, local_world_size in rows:
-        for ts in (10.0, 11.0):
+    for global_rank, node_rank, world_size, local_world_size, host in rows:
+        for ts in ts_values:
             row_id += 1
             insert_system_sample(
                 conn,
                 row_id=row_id,
                 rank=global_rank,
                 ts=ts,
-                gpu_available=False,
-                gpu_count=0,
+                gpu_available=True,
+                gpu_count=1,
                 node_rank=node_rank,
                 global_rank=global_rank,
                 world_size=world_size,
                 local_world_size=local_world_size,
-                hostname="host-a",
+                hostname=host,
+                gpu_samples=(
+                    {
+                        "gpu_idx": 0,
+                        "util": 50.0,
+                        "mem_used_bytes": 1.0,
+                        "mem_total_bytes": 2.0,
+                    },
+                ),
             )
 
 
-def test_rows_without_node_rank_are_one_unknown_node(tmp_path):
-    # Two ranks on one host, each reporting world size 1 and no node rank.
+def test_rows_without_node_rank_stay_one_node_per_host(tmp_path):
     db_path = tmp_path / "system.db"
     with summary_database(db_path) as conn:
-        _system_rows(conn, [(0, None, 1, 1), (1, None, 1, 1)])
+        _system_rows(
+            conn,
+            [
+                (0, None, 1, 1, "host-a"),
+                (1, None, 1, 1, "host-a"),
+                (2, None, 1, 1, "host-b"),
+            ],
+        )
 
     result = SystemSummarySection().build(str(db_path))
 
-    # A global rank is not a node rank, so it must not label a node.
-    assert list(result.payload["groups"]["rows"]) == ["unknown"]
-    assert result.payload["metadata"]["nodes_observed"] == 1
-    assert result.payload["metadata"]["mode"] == "single_node"
+    # A global rank is not a node rank, so it no longer labels a node, and
+    # different hosts are not merged into one.
+    rows = result.payload["groups"]["rows"]
+    assert sorted(rows) == ["unknown@host-a", "unknown@host-b"]
+    assert all(row["identity"]["node_rank"] is None for row in rows.values())
+    assert result.payload["metadata"]["nodes_observed"] == 2
+    assert result.payload["metadata"]["gpus_observed"] == 2
+
+
+def test_multi_node_card_marks_a_node_without_a_rank():
+    from traceml_ai.reporting.sections.system.builder import _fmt_node_idx
+
+    assert _fmt_node_idx("3") == "n3"
+    assert _fmt_node_idx("unknown@host-b") == "n?"
+    assert _fmt_node_idx(None) == "n/a"
 
 
 @pytest.mark.parametrize(
     ("rows", "mode"),
     [
-        pytest.param([(0, 0, 4, 4)], "single_node", id="one_node"),
+        pytest.param([(0, 0, 4, 4, "a")], "single_node", id="one_node"),
         pytest.param(
-            [(0, 0, 8, 4), (4, 1, 8, 4)], "multi_node", id="two_node_ranks"
+            [(0, 0, 8, 4, "a"), (4, 1, 8, 4, "b")],
+            "multi_node",
+            id="two_node_ranks",
         ),
         # The second node never reported, but the world size says it exists.
-        pytest.param([(0, 0, 8, 4)], "multi_node", id="silent_second_node"),
         pytest.param(
-            [(0, None, 8, 4)], "multi_node", id="no_node_rank_wider_world"
+            [(0, 0, 8, 4, "a")], "multi_node", id="silent_second_node"
         ),
         pytest.param(
-            [(0, None, 1, 1), (1, None, 1, 1)],
+            [(0, None, 8, 4, "a")],
+            "multi_node",
+            id="no_node_rank_wider_world",
+        ),
+        pytest.param(
+            [(0, None, 1, 1, "a"), (1, None, 1, 1, "a")],
             "single_node",
             id="no_node_rank_two_ranks",
+        ),
+        pytest.param(
+            [(rank, None, 8, 8, "a") for rank in range(8)],
+            "single_node",
+            id="one_host_eight_ranks",
         ),
     ],
 )
@@ -146,6 +182,25 @@ def test_system_mode_follows_the_shared_identity_rule(tmp_path, rows, mode):
     result = SystemSummarySection().build(str(db_path))
 
     assert result.payload["metadata"]["mode"] == mode
+
+
+def test_topology_reads_every_sample_not_only_the_last(tmp_path):
+    # The node's later sample lost its world sizes; the earlier one says
+    # the world is twice the local world, so a second node exists.
+    db_path = tmp_path / "system.db"
+    with summary_database(db_path) as conn:
+        _system_rows(conn, [(0, 0, 8, 4, "a")], ts_values=(10.0,))
+        conn.execute(
+            "INSERT INTO system_samples("
+            "observed_timestamp_unix_ns, global_rank, local_rank, "
+            "world_size, local_world_size, node_rank, hostname, "
+            "timestamp_unix_ns) VALUES (99, 0, 0, NULL, NULL, 0, 'a', "
+            "11000000000)"
+        )
+
+    result = SystemSummarySection().build(str(db_path))
+
+    assert result.payload["metadata"]["mode"] == "multi_node"
 
 
 def test_system_measurements_and_builder_use_sqlite_fixture(tmp_path):
