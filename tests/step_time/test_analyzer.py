@@ -359,6 +359,42 @@ def test_cpu_clock_when_input_wait_exists_without_gpu_time(
     assert window.clock == "cpu"
 
 
+def test_an_input_wait_entry_with_no_duration_counts_as_absent() -> None:
+    # The decoder keeps an event whose durations were all invalid as an
+    # entry with both clocks None; that is still no measured input wait.
+    rows = []
+    for step in (1, 2):
+        row = _row(step, 0, step, _NO_INPUT)
+        metrics = dict(row.metrics)
+        metrics["input_wait"] = StepTimeClockValues(None, None)
+        rows.append(row._replace(metrics=metrics))
+    snapshot = StepTimeRepositorySnapshot(
+        rows=tuple(rows), global_ranks=(0,), training_strategy="ddp"
+    )
+
+    window = StepTimeAnalyzer().analyze(snapshot, window_size=2)
+
+    assert window.clock == "gpu"
+    assert window.rank(0).average.input_wait_ms is None
+
+
+def test_cpu_clock_without_input_wait_when_traced_time_lacks_gpu() -> None:
+    rows = []
+    for rank in (0, 1):
+        for step in (1, 2):
+            row = _row(len(rows) + 1, rank, step, _NO_INPUT)
+            if rank == 1:
+                metrics = dict(row.metrics)
+                metrics["traced_step_time"] = StepTimeClockValues(190.0, None)
+                row = row._replace(metrics=metrics)
+            rows.append(row)
+    snapshot = StepTimeRepositorySnapshot(
+        rows=tuple(rows), global_ranks=(0, 1), training_strategy="ddp"
+    )
+
+    assert StepTimeAnalyzer().analyze(snapshot, window_size=2).clock == "cpu"
+
+
 def test_cpu_clock_when_a_present_phase_lacks_gpu_time() -> None:
     rows = []
     for step in (1, 2):

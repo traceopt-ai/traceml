@@ -263,13 +263,14 @@ def _clock_value(
 def _row_supports_gpu(
     row: StepTimeSourceRow,
     required: Sequence[str],
+    ignored: Sequence[str] = (),
 ) -> bool:
     for metric in required:
         values = row.metrics.get(metric)
         if values is None or values.gpu_ms is None:
             return False
     for metric in SELECTED_METRICS:
-        if metric in required:
+        if metric in required or metric in ignored:
             continue
         values = row.metrics.get(metric)
         if values is not None and values.gpu_ms is None:
@@ -300,13 +301,13 @@ def _select_clock(
     rows = [
         row_index[(int(rank), int(step))] for rank in ranks for step in steps
     ]
-    required = (
-        _REQUIRED_GPU_METRICS
-        if any(_measured(row, INPUT_WAIT_KEY) for row in rows)
-        else (TRACED_STEP_TIME_KEY,)
-    )
+    if any(_measured(row, INPUT_WAIT_KEY) for row in rows):
+        required, ignored = _REQUIRED_GPU_METRICS, ()
+    else:
+        # An input-wait entry with no valid duration is still no input wait.
+        required, ignored = (TRACED_STEP_TIME_KEY,), (INPUT_WAIT_KEY,)
     for row in rows:
-        if not _row_supports_gpu(row, required):
+        if not _row_supports_gpu(row, required, ignored):
             return "cpu"
     return "gpu"
 
