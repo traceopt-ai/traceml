@@ -563,7 +563,9 @@ def _load_cluster_summary(
         aggregate=_aggregate_samples(samples, gpu_rollups_by_key),
         nodes=nodes,
         expected_nodes=_expected_nodes(samples),
-        sample_identities=tuple(_node_identity([row]) for row in samples),
+        sample_identities=tuple(
+            dict.fromkeys(_node_identity([row]) for row in samples)
+        ),
     )
 
 

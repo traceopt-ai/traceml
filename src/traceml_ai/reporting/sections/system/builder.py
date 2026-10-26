@@ -53,8 +53,11 @@ SYSTEM_METRIC_NAMES = [
 
 def _system_mode(cluster: SystemClusterSummary) -> str:
     """Return the topology mode by the rule every other section uses."""
+    identities = cluster.sample_identities or tuple(
+        node.identity for node in cluster.nodes.values()
+    )
     return topology_mode_from_identities(
-        cluster.sample_identities,
+        identities,
         has_data=cluster.observed_nodes > 0,
     )
 
@@ -227,7 +230,10 @@ def _fmt_node_idx(value: Any) -> str:
     if value is None:
         return "n/a"
     # A node without a node rank has a non-numeric label.
-    return f"n{value}" if str(value).isdigit() else "n?"
+    try:
+        return f"n{int(value)}"
+    except (TypeError, ValueError):
+        return "n?"
 
 
 def _card_stats(

@@ -140,6 +140,7 @@ def test_multi_node_card_marks_a_node_without_a_rank():
     from traceml_ai.reporting.sections.system.builder import _fmt_node_idx
 
     assert _fmt_node_idx("3") == "n3"
+    assert _fmt_node_idx("-1") == "n-1"
     assert _fmt_node_idx("unknown@host-b") == "n?"
     assert _fmt_node_idx(None) == "n/a"
 
