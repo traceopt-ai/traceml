@@ -36,6 +36,7 @@ from traceml_ai.reporting.summaries.summary_formatting import (
     duration_from_bounds,
     format_optional,
 )
+from traceml_ai.reporting.topology import topology_mode_from_identities
 
 SYSTEM_METRIC_NAMES = [
     "cpu_percent",
@@ -51,12 +52,11 @@ SYSTEM_METRIC_NAMES = [
 
 
 def _system_mode(cluster: SystemClusterSummary) -> str:
-    """Return the topology mode represented by the System summary."""
-    if cluster.observed_nodes <= 0:
-        return "no_data"
-    if cluster.expected_nodes <= 1 and cluster.observed_nodes <= 1:
-        return "single_node"
-    return "multi_node"
+    """Return the topology mode by the rule every other section uses."""
+    return topology_mode_from_identities(
+        (node.identity for node in cluster.nodes.values()),
+        has_data=cluster.observed_nodes > 0,
+    )
 
 
 def _gpu_mem_percent_from_summaries(

@@ -7,6 +7,8 @@
 import sqlite3
 from contextlib import closing
 
+import pytest
+
 from tests.sqlite_fixtures import (
     insert_process_sample,
     insert_system_sample,
@@ -80,6 +82,70 @@ def _seed_process_samples(conn) -> None:
             gpu_mem_reserved_bytes=reserved,
             gpu_mem_total_bytes=10e9,
         )
+
+
+def _system_rows(conn, rows) -> None:
+    """Insert (global_rank, node_rank, world_size, local_world_size) rows."""
+    row_id = 0
+    for global_rank, node_rank, world_size, local_world_size in rows:
+        for ts in (10.0, 11.0):
+            row_id += 1
+            insert_system_sample(
+                conn,
+                row_id=row_id,
+                rank=global_rank,
+                ts=ts,
+                gpu_available=False,
+                gpu_count=0,
+                node_rank=node_rank,
+                global_rank=global_rank,
+                world_size=world_size,
+                local_world_size=local_world_size,
+                hostname="host-a",
+            )
+
+
+def test_rows_without_node_rank_are_one_unknown_node(tmp_path):
+    # Two ranks on one host, each reporting world size 1 and no node rank.
+    db_path = tmp_path / "system.db"
+    with summary_database(db_path) as conn:
+        _system_rows(conn, [(0, None, 1, 1), (1, None, 1, 1)])
+
+    result = SystemSummarySection().build(str(db_path))
+
+    # A global rank is not a node rank, so it must not label a node.
+    assert list(result.payload["groups"]["rows"]) == ["unknown"]
+    assert result.payload["metadata"]["nodes_observed"] == 1
+    assert result.payload["metadata"]["mode"] == "single_node"
+
+
+@pytest.mark.parametrize(
+    ("rows", "mode"),
+    [
+        pytest.param([(0, 0, 4, 4)], "single_node", id="one_node"),
+        pytest.param(
+            [(0, 0, 8, 4), (4, 1, 8, 4)], "multi_node", id="two_node_ranks"
+        ),
+        # The second node never reported, but the world size says it exists.
+        pytest.param([(0, 0, 8, 4)], "multi_node", id="silent_second_node"),
+        pytest.param(
+            [(0, None, 8, 4)], "multi_node", id="no_node_rank_wider_world"
+        ),
+        pytest.param(
+            [(0, None, 1, 1), (1, None, 1, 1)],
+            "single_node",
+            id="no_node_rank_two_ranks",
+        ),
+    ],
+)
+def test_system_mode_follows_the_shared_identity_rule(tmp_path, rows, mode):
+    db_path = tmp_path / "system.db"
+    with summary_database(db_path) as conn:
+        _system_rows(conn, rows)
+
+    result = SystemSummarySection().build(str(db_path))
+
+    assert result.payload["metadata"]["mode"] == mode
 
 
 def test_system_measurements_and_builder_use_sqlite_fixture(tmp_path):

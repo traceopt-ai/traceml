@@ -237,9 +237,10 @@ def _sample_key(row: _SampleRow | _GpuRow) -> _SampleKey:
 
 
 def _node_label(row: _SampleRow) -> str:
+    # A global rank is not a node rank; a row without one stays unknown.
     if row.node_rank is not None:
         return str(int(row.node_rank))
-    return str(int(row.global_rank or 0))
+    return "unknown"
 
 
 def _node_identity(rows: list[_SampleRow]) -> SystemNodeIdentity:
