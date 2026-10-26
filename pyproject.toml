@@ -107,6 +107,8 @@ docs = [
     "mkdocs>=1.6",
     "mkdocs-material>=9.5",
     "mkdocstrings[python]>=0.26",
+    # mkdocstrings 1.0.6 does not support pymdown-extensions 12.2 yet.
+    "pymdown-extensions<12.2",
     "mkdocs-autorefs>=1.2",
     "mkdocs-include-markdown-plugin>=7.0",
 ]
