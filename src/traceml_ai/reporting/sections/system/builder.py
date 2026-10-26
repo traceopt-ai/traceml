@@ -52,7 +52,7 @@ SYSTEM_METRIC_NAMES = [
 
 def _node_headroom_min_bytes(node: SystemNodeSummary) -> Optional[float]:
     value_gb = node_gpu_headroom_min_gb(node)
-    return None if value_gb is None else float(value_gb) * 1_000_000_000.0
+    return None if value_gb is None else float(value_gb) * 1024**3
 
 
 def _system_mode(cluster: SystemClusterSummary) -> str:

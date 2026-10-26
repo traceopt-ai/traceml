@@ -17,21 +17,21 @@ def fmt_ratio(x):
 
 def fmt_mem_new(num_bytes: Any) -> str:
     """
-    Format a byte value into a human-friendly string (KB, MB, GB).
-    Always uses binary units (1 KB = 1024 B).
+    Format a byte value into a human-friendly string (KiB, MiB, GiB).
+    Always uses binary units (1 KiB = 1024 B).
     """
     try:
         v = float(num_bytes)
     except (TypeError, ValueError):
         return "N/A"
 
-    units = ["B", "KB", "MB", "GB", "TB"]
+    units = ["B", "KiB", "MiB", "GiB", "TiB"]
     idx = 0
     while abs(v) >= 1024 and idx < len(units) - 1:
         v /= 1024.0
         idx += 1
 
-    if abs(v) >= 100 or idx == 0:  # e.g. 123 MB → "123 MB"
+    if abs(v) >= 100 or idx == 0:  # e.g. 123 MiB → "123 MiB"
         return f"{v:.0f} {units[idx]}"
     elif abs(v) >= 10:
         return f"{v:.1f} {units[idx]}"
@@ -64,7 +64,7 @@ def fmt_time_ms(v: float) -> str:
     return f"{minutes:.2f} min"
 
 
-_MEMORY_UNITS = ["B", "KB", "MB", "GB", "TB"]
+_MEMORY_UNITS = ["B", "KiB", "MiB", "GiB", "TiB"]
 
 
 def format_memory(num_bytes: Any) -> Tuple[float, str]:

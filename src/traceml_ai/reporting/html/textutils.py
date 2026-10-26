@@ -80,7 +80,7 @@ def fmt_value(name: str, value: Any) -> str:
     """
     Format a metric value, resolving the unit from the metric-name suffix.
 
-    Parity with the text card: bytes use decimal GB (``bytes_to_gb``, 1e9)
+    Parity with the text card: bytes use GiB (``bytes_to_gb``, 1024**3)
     and milliseconds use one decimal. Non-numeric values are escaped as text.
     """
     if not isinstance(value, (int, float)) or isinstance(value, bool):
@@ -90,8 +90,8 @@ def fmt_value(name: str, value: Any) -> str:
     if name.endswith("_bytes"):
         gb = bytes_to_gb(value) or 0.0
         if gb >= 1.0:
-            return f"{gb:,.2f}&thinsp;GB"
-        return f"{value / 1e6:,.0f}&thinsp;MB"
+            return f"{gb:,.2f}&thinsp;GiB"
+        return f"{value / 1024**2:,.0f}&thinsp;MiB"
     if name.endswith("_percent"):
         return f"{value:,.1f}%"
     if name.endswith("_c"):

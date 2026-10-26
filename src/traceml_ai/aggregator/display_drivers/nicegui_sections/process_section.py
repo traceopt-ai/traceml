@@ -170,7 +170,7 @@ def build_process_section() -> Dict[str, Any]:
         # one chart with two halves.
         for key, head, unit, margin in (
             ("cpu", "CPU usage", "%", "0"),
-            ("rss", "Process memory", " GB", "8px"),
+            ("rss", "Process memory", " GiB", "8px"),
         ):
             block = ui.element("div").style(
                 f"margin-top:{margin}; padding:8px 10px 4px; "
@@ -703,7 +703,7 @@ def _update_tiles(
         rss.now if rss else None, rss.total if rss else None
     )
     panel["tiles"]["rss"].content = theme.kval(
-        used, " GB" if rss is not None else ""
+        used, " GiB" if rss is not None else ""
     )
     if many:
         panel["subs"]["rss"].text = (
@@ -811,7 +811,7 @@ def update_process_section(panel: Dict[str, Any], data: Any) -> None:
                     bounds_of=_memory_bounds,
                     accent=theme.C_MEM,
                     highlight=mem_rank if many else None,
-                    unit=" GB",
+                    unit=" GiB",
                 ),
             ),
         )
