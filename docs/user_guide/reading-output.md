@@ -210,8 +210,11 @@ a specific diagnosis.
 
 TraceML uses one selected clock for an aligned analysis window. It selects GPU
 only when every required timing signal is complete on GPU for every included
-rank and step; otherwise it uses CPU. The selected clock is shown as
-`diagnosis_clock` in JSON and in the live-output footer.
+rank and step; otherwise it uses CPU. Input Wait is required unless no rank
+measures it at all, as in a loop with no DataLoader. Such a window can still
+use GPU time for its phases, and Step Time stays unavailable because Input
+Wait is absent. The selected clock is shown as `diagnosis_clock` in JSON and
+in the live-output footer.
 
 ```text
 Step Time = Input Wait + Traced Step Time

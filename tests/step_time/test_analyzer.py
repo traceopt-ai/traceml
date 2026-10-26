@@ -300,6 +300,101 @@ def test_cpu_fallback_and_strategy_specific_straggler_cohorts() -> None:
     assert partial_values.traced_step_time_gpu_ms == 95.0
 
 
+_NO_INPUT = {
+    metric: value
+    for metric, value in _COMPLETE.items()
+    if metric != "input_wait"
+}
+
+
+def test_gpu_clock_when_no_row_has_input_wait() -> None:
+    # A loop with no DataLoader: every phase and the traced envelope carry
+    # GPU times, and no row on any rank carries input wait on either clock.
+    window = StepTimeAnalyzer().analyze(
+        _snapshot({0: _NO_INPUT, 1: _NO_INPUT}),
+        window_size=2,
+    )
+
+    assert window.clock == "gpu"
+    average = window.rank(0).average
+    assert average.forward_ms == 30.0
+    assert average.optimizer_step_ms == 10.0
+    assert average.h2d_ms == 5.0
+    assert average.traced_step_time_ms == 95.0
+    # Input wait stays absent, never 0.0, so outer Step Time stays unknown.
+    assert average.input_wait_ms is None
+    assert average.step_time_ms is None
+
+
+@pytest.mark.parametrize(
+    "rank1_input_wait",
+    [
+        pytest.param(
+            StepTimeClockValues(cpu_ms=5.0, gpu_ms=None), id="cpu_only"
+        ),
+        pytest.param(None, id="missing_on_one_rank"),
+    ],
+)
+def test_cpu_clock_when_input_wait_exists_without_gpu_time(
+    rank1_input_wait,
+) -> None:
+    rows = []
+    for rank in (0, 1):
+        for step in (1, 2):
+            row = _row(len(rows) + 1, rank, step, _NO_INPUT)
+            metrics = dict(row.metrics)
+            if rank == 0:
+                metrics["input_wait"] = StepTimeClockValues(10.0, 5.0)
+            elif rank1_input_wait is not None:
+                metrics["input_wait"] = rank1_input_wait
+            rows.append(row._replace(metrics=metrics))
+    snapshot = StepTimeRepositorySnapshot(
+        rows=tuple(rows), global_ranks=(0, 1), training_strategy="ddp"
+    )
+
+    window = StepTimeAnalyzer().analyze(snapshot, window_size=2)
+
+    # Input wait is measured somewhere, so it is not absent: without a GPU
+    # value on every row the window keeps the CPU clock.
+    assert window.clock == "cpu"
+
+
+def test_cpu_clock_when_a_present_phase_lacks_gpu_time() -> None:
+    rows = []
+    for step in (1, 2):
+        row = _row(step, 0, step, _NO_INPUT)
+        metrics = dict(row.metrics)
+        if step == 2:
+            metrics["forward"] = StepTimeClockValues(60.0, None)
+        rows.append(row._replace(metrics=metrics))
+    snapshot = StepTimeRepositorySnapshot(
+        rows=tuple(rows), global_ranks=(0,), training_strategy="ddp"
+    )
+
+    assert StepTimeAnalyzer().analyze(snapshot, window_size=2).clock == "cpu"
+
+
+def test_occurrence_phases_keep_their_rule_without_input_wait() -> None:
+    rows = []
+    for step in (1, 2):
+        values = dict(_NO_INPUT)
+        if step == 2:
+            del values["optimizer_step"]
+            del values["h2d"]
+        rows.append(_row(step, 0, step, values))
+    snapshot = StepTimeRepositorySnapshot(
+        rows=tuple(rows), global_ranks=(0,), training_strategy="ddp"
+    )
+
+    window = StepTimeAnalyzer().analyze(snapshot, window_size=2)
+
+    assert window.clock == "gpu"
+    steps = window.rank(0).steps
+    assert steps[0].values.optimizer_step_ms == 10.0
+    assert steps[1].values.optimizer_step_ms == 0.0
+    assert steps[1].values.h2d_ms == 0.0
+
+
 @pytest.mark.parametrize(
     ("profiles", "median", "representative", "worst"),
     [
