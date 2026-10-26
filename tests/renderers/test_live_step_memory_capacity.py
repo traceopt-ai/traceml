@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any, Dict, Mapping, Optional
 
 from rich.console import Console
+
 from tests.sqlite_fixtures import (
     init_summary_schema,
     insert_process_sample,
@@ -19,7 +20,6 @@ from tests.sqlite_fixtures import (
     sqlite_database,
 )
 from tests.step_time.factories import live_result_from_window
-
 from traceml_ai.renderers.model_diagnostics.renderer import (
     ModelDiagnosticsRenderer,
 )
@@ -195,7 +195,9 @@ def test_well_under_capacity_stays_quiet(tmp_path) -> None:
 def test_live_and_summary_share_one_capacity_reader() -> None:
     # A second, independently written capacity query is how the two paths
     # would drift apart. Pin them to one function object.
+    from traceml_ai.measurements import step_memory as measurements
     from traceml_ai.renderers.step_memory import common as live_common
-    from traceml_ai.reporting.sections.step_memory import loader as summary
 
-    assert summary.load_gpu_total_bytes is live_common.load_gpu_total_bytes
+    assert (
+        live_common.load_gpu_total_bytes is measurements.load_gpu_total_bytes
+    )

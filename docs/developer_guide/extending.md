@@ -154,19 +154,22 @@ Current sections:
 - `step_time`
 - `step_memory`
 
-Most sections use some variation of this shape:
+Numeric measurement types, SQLite reads, and reductions live under
+`src/traceml_ai/measurements/`. System, Process, and Step Memory expose a
+`read_<domain>_measurements(connection, *, analysis_window=...)` function that
+uses a caller-owned SQLite connection.
+
+Final-report sections keep diagnosis adaptation and public projection under
+`src/traceml_ai/reporting/sections/<domain>/`:
 
 ```text
-loader.py     read SQLite / section inputs
-builder.py    build JSON payload and card text
-formatter.py  render section text
-model.py      section-local data helpers
+__init__.py  adapt measurements, run diagnosis, and orchestrate the section
+builder.py   build the public JSON payload and card text
 ```
 
-Do not add empty layers merely to match that filename list. Step Time already
-loads, analyzes, and diagnoses through `StepTimePipeline`, so its reporting
-section contains only orchestration and a pure projector. It has no parallel
-loader model and no second statistics implementation.
+Do not add extra loader, model, or formatter modules without a distinct owner
+or behavior. Step Time reuses its existing repository and analyzer instead of
+duplicating them under `measurements/` or `reporting/`.
 
 Register sections through `src/traceml_ai/reporting/final.py`. Keep the aggregator
 as a caller only; report assembly belongs in `reporting`.
