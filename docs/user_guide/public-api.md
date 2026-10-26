@@ -198,6 +198,23 @@ node-0 endpoint. Configure the expected world size to match your workers.
 | `--logs-dir` | Session log directory. |
 | `--run-name` / `--session-id` | Shared run identity; choose a fresh name. |
 | `--history-retention` | History duration; default `30m`. |
+| `--interval` | Aggregator render interval in seconds. |
+| `--enable-logging` | Enable TraceML logging output. |
+
+`serve` is the low-level entry point, so it has no flags for launching or
+wrapping training. Settings that belong to the aggregator still work through
+`traceml.yaml` or environment variables:
+
+| `run` / `watch` flag | With `serve` |
+| --- | --- |
+| `--dashboard-port` | `dashboard_port` or `TRACEML_DASHBOARD_PORT` |
+| `--no-dashboard-auto-open` | `dashboard_auto_open: false` or `TRACEML_DASHBOARD_AUTO_OPEN=0` |
+| `--finalize-timeout-sec` | `finalize_timeout_sec` or `TRACEML_FINALIZE_TIMEOUT_SEC` |
+| `--no-history` | `history_enabled: false` or `TRACEML_HISTORY_ENABLED=0` |
+| `--html-report` | Not available; run `traceml view <summary.json> --html` afterwards. |
+| `--disable-traceml`, `--trace-max-steps` | Set `TRACEML_DISABLED=1` or `TRACEML_TRACE_MAX_STEPS` in the training process. |
+| `--args`, `--master-addr`, `--master-port`, `--node-rank` | Not applicable; pass them to your own `torchrun`. |
+| `--save-training-output`, `--no-save-training-output`, `--on-missing-aggregator` | Not applicable; training output stays with your terminal, and `traceml.init()` handles a missing aggregator as described below. |
 
 An existing run folder is not overwritten. Telemetry with a different
 explicit worker session ID is ignored. Workers that generate their own ID,
