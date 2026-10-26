@@ -359,6 +359,35 @@ def test_cpu_clock_when_input_wait_exists_without_gpu_time(
     assert window.clock == "cpu"
 
 
+@pytest.mark.parametrize(
+    ("input_wait", "clock", "input_wait_ms", "step_time_ms"),
+    [
+        # A measured zero on both clocks is input wait, not its absence.
+        (StepTimeClockValues(0.0, 0.0), "gpu", 0.0, 95.0),
+        # Measured on CPU only: the window cannot use GPU time.
+        (StepTimeClockValues(0.0, None), "cpu", 0.0, 190.0),
+    ],
+)
+def test_a_measured_zero_input_wait_is_not_absent(
+    input_wait, clock, input_wait_ms, step_time_ms
+) -> None:
+    rows = []
+    for step in (1, 2):
+        row = _row(step, 0, step, _NO_INPUT)
+        metrics = dict(row.metrics)
+        metrics["input_wait"] = input_wait
+        rows.append(row._replace(metrics=metrics))
+    snapshot = StepTimeRepositorySnapshot(
+        rows=tuple(rows), global_ranks=(0,), training_strategy="ddp"
+    )
+
+    window = StepTimeAnalyzer().analyze(snapshot, window_size=2)
+
+    assert window.clock == clock
+    assert window.rank(0).average.input_wait_ms == input_wait_ms
+    assert window.rank(0).average.step_time_ms == step_time_ms
+
+
 def test_an_input_wait_entry_with_no_duration_counts_as_absent() -> None:
     # The decoder keeps an event whose durations were all invalid as an
     # entry with both clocks None; that is still no measured input wait.

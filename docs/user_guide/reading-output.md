@@ -244,6 +244,7 @@ Examples:
 | GPU complete | GPU Step Time and GPU Traced Step Time | GPU timing is used consistently for phases and shares. |
 | GPU incomplete | CPU Step Time and CPU Traced Step Time | CPU is selected; unavailable GPU aggregates remain `null`. |
 | Partial GPU evidence | CPU selected values plus optional GPU aggregates | Do not replace missing GPU values with zero or mix clocks. |
+| GPU complete, no Input Wait anywhere | GPU Traced Step Time and phases; Step Time `null` | No rank measured Input Wait, as with no DataLoader; it stays absent, never zero. |
 
 The raw `_traceml_internal:step_time` event is an internal persisted telemetry
 key. After SQLite normalization, user-facing output calls that inner metric

@@ -305,7 +305,10 @@ def _select_clock(
         required, ignored = _REQUIRED_GPU_METRICS, ()
     else:
         # An input-wait entry with no valid duration is still no input wait.
-        required, ignored = (TRACED_STEP_TIME_KEY,), (INPUT_WAIT_KEY,)
+        required = tuple(
+            m for m in _REQUIRED_GPU_METRICS if m != INPUT_WAIT_KEY
+        )
+        ignored = (INPUT_WAIT_KEY,)
     for row in rows:
         if not _row_supports_gpu(row, required, ignored):
             return "cpu"

@@ -489,7 +489,8 @@ Metric suffixes are units:
 
 Step Time uses one selected clock per aligned window. GPU timing is used when
 the window has complete GPU event timings; otherwise explicit CPU timing is
-used. `input_wait_ms`, `step_time_ms`, and `traced_step_time_ms` expose
+used. A window where no rank measures input wait can still use GPU timing;
+its `input_wait_ms` and `step_time_ms` are then `null`. `input_wait_ms`, `step_time_ms`, and `traced_step_time_ms` expose
 selected-clock values. The four explicit aggregate fields preserve both clocks:
 
 ```text
