@@ -10,6 +10,8 @@ Final-report step-memory section.
 
 from __future__ import annotations
 
+import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 from typing import ClassVar
 
@@ -21,25 +23,22 @@ from traceml_ai.diagnostics.step_memory import (
     StepMemoryDiagnosisInput,
     diagnose_step_memory_summary,
 )
+from traceml_ai.measurements.step_memory import (
+    StepMemoryMeasurements,
+    read_step_memory_measurements,
+)
 from traceml_ai.measurements.window import AnalysisWindow
 from traceml_ai.reporting.analysis_window import analysis_window_metadata
 from traceml_ai.reporting.sections.base import BaseSummarySection
 from traceml_ai.reporting.sections.step_memory.builder import (
     build_step_memory_section_payload,
 )
-from traceml_ai.reporting.sections.step_memory.formatter import (
-    format_step_memory_section_text,
-)
-from traceml_ai.reporting.sections.step_memory.loader import (
-    StepMemorySectionData,
-    load_step_memory_section_data,
-)
 
 
 @dataclass(frozen=True)
 class StepMemorySummarySection(
     BaseSummarySection[
-        StepMemorySectionData,
+        StepMemoryMeasurements,
         StepMemoryDiagnosisInput,
         DiagnosticResult[StepMemoryDiagnosis],
     ],
@@ -49,35 +48,17 @@ class StepMemorySummarySection(
     name: ClassVar[str] = "step_memory"
     analysis_window: AnalysisWindow | None = None
 
-    def load(self, db_path: str) -> StepMemorySectionData:
+    def load(self, db_path: str) -> StepMemoryMeasurements:
         """Load aligned Step Memory telemetry for the final report."""
-        return load_step_memory_section_data(
-            db_path,
-            start_step=(
-                self.analysis_window.start_step
-                if self.analysis_window is not None
-                else None
-            ),
-            end_step=(
-                self.analysis_window.end_step
-                if self.analysis_window is not None
-                else None
-            ),
-            start_time_unix_ns=(
-                self.analysis_window.start_time_unix_ns
-                if self.analysis_window is not None
-                else None
-            ),
-            end_time_unix_ns=(
-                self.analysis_window.end_time_unix_ns
-                if self.analysis_window is not None
-                else None
-            ),
-        )
+        with closing(sqlite3.connect(db_path)) as connection:
+            return read_step_memory_measurements(
+                connection,
+                analysis_window=self.analysis_window,
+            )
 
     def to_diagnosis_input(
         self,
-        data: StepMemorySectionData,
+        data: StepMemoryMeasurements,
     ) -> StepMemoryDiagnosisInput:
         """Adapt aligned Step Memory metrics to the diagnosis contract."""
         return StepMemoryDiagnosisInput(
@@ -96,7 +77,7 @@ class StepMemorySummarySection(
 
     def build_payload(
         self,
-        data: StepMemorySectionData,
+        data: StepMemoryMeasurements,
         diagnosis_result: DiagnosticResult[StepMemoryDiagnosis],
     ) -> SummaryResult:
         """Assemble the Step Memory summary payload and display text."""
@@ -108,13 +89,11 @@ class StepMemorySummarySection(
         return SummaryResult(
             section=self.name,
             payload=payload,
-            text=format_step_memory_section_text(payload),
+            text=str(payload.get("card", "")),
         )
 
 
 __all__ = [
     "StepMemorySummarySection",
     "build_step_memory_section_payload",
-    "format_step_memory_section_text",
-    "load_step_memory_section_data",
 ]

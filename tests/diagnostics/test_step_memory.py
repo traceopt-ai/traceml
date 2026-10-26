@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from traceml_ai.diagnostics.common import DiagnosticIssue
 from traceml_ai.diagnostics.step_memory import (
     build_step_memory_summary_diagnosis_result,
 )
@@ -14,8 +15,7 @@ from traceml_ai.diagnostics.step_memory.rules import (
     ImbalanceRule,
     sort_step_memory_summary_issues,
 )
-from traceml_ai.diagnostics.common import DiagnosticIssue
-from traceml_ai.renderers.step_memory.schema import (
+from traceml_ai.measurements.step_memory import (
     StepMemoryCombinedCoverage,
     StepMemoryCombinedMetric,
     StepMemoryCombinedSeries,

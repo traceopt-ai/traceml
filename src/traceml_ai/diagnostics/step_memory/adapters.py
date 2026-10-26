@@ -17,7 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, Optional, Sequence
 
-from traceml_ai.renderers.step_memory.schema import StepMemoryCombinedMetric
+from traceml_ai.measurements.step_memory import StepMemoryCombinedMetric
 
 from .policy import (
     DEFAULT_STEP_MEMORY_THRESHOLDS,

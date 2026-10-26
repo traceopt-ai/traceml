@@ -95,7 +95,7 @@ flowchart LR
     DB[(step_time_samples)]
     CLS["CLI LiveStepTimeSession<br/>calls StepTimePipeline"]
     DLS["Dashboard LiveStepTimeSession<br/>one refresh per tick"]
-    SPS["Summary StepTimePipeline<br/>summary profile"]
+    SPS["Summary shared transaction<br/>load_summary + analyze snapshot"]
     RESULT["StepTimeAnalysis<br/>snapshot + window + diagnosis"]
     CLI["Pure Rich CLI presenter"]
     HERO["Dashboard hero presenter"]
@@ -114,20 +114,22 @@ The repository has two selection profiles. Terminal and dashboard share an
 index-bounded live tail; final summary uses a metadata-complete query. Both
 return `StepTimeRepositorySnapshot` and feed `StepTimeAnalyzer`.
 
-`StepTimePipeline.run(request)` is the application facade for that shared
-path. It selects one of the two data profiles, invokes the analyzer once, and
-passes the resulting `StepTimeWindow` directly to diagnosis.
+`StepTimePipeline.run(request)` is the live application facade. Final reporting
+loads the summary snapshot inside its report-wide SQLite transaction, then
+calls `analyze_step_time_snapshot()` after the transaction closes. Both paths
+invoke the same analyzer once and pass its `StepTimeWindow` directly to
+diagnosis.
 
 `LiveStepTimeSession` is the sole live orchestration boundary. It owns
 last-good state, monotonic expiry, and cursor-based analysis reuse. The CLI
 injects one session into a pure Rich presenter. The dashboard driver owns one
 session and fans its analyzed result to the hero and diagnostics composer.
 
-`StepTimeSummarySection` runs the same pipeline once with the `summary`
-profile, then passes the completed `StepTimeAnalysis` to a pure reporting
-projector. The projector owns public JSON names, topology, rank identities,
-and card text; it does not load SQLite, align steps, calculate domain
-statistics, or diagnose.
+`StepTimeSummarySection` receives the repository snapshot from the shared
+report read, runs the canonical analyzer and summary diagnosis, then passes
+the completed `StepTimeAnalysis` to a pure reporting projector. The projector
+owns public JSON names, topology, rank identities, and card text; it does not
+load SQLite, align steps, calculate domain statistics, or diagnose.
 
 Dashboard presenters do not load or diagnose Step Time. The driver refreshes
 once, then passes the completed result to the two local presenters.
@@ -140,7 +142,8 @@ once, then passes the completed result to the two local presenters.
 | Event-to-metric names | `step_time/model.py` | a persisted event receives a canonical metric name |
 | Common-step alignment and analysis | `step_time/analysis.py` | clock, sparse-signal, derivation, cohort, or statistics semantics change |
 | SQLite selection and row decoding | `step_time/sqlite.py` | live-tail or summary selection, identity, progress, or clock normalization changes |
-| Load/analyze/diagnose orchestration | `step_time/pipeline.py` | application flow or live/summary data-profile selection changes |
+| Live load/analyze/diagnose orchestration | `step_time/pipeline.py` | live application flow or data-profile selection changes |
+| Final-summary read orchestration | `reporting/final.py` | the shared report transaction or measurement read changes |
 | Live caching and freshness | `step_time/pipeline.py` | cursor reuse, last-good bridging, or monotonic expiry changes |
 | Diagnosis thresholds and priority | `diagnostics/step_time/` | a rule, policy, attribution, or issue order changes |
 | Live CLI presentation | `renderers/step_time/renderer.py` | terminal labels or layout change |
@@ -168,8 +171,8 @@ Continue into only the surface being changed:
 - diagnosis rules: `diagnostics/step_time/api.py`, `context.py`, and
   `rules.py`.
 
-Built-in surfaces use the central pipeline and typed facts; they do not use
-utility loaders or rank-map adapters.
+Built-in surfaces use the canonical repository, analyzer, and typed facts;
+they do not use utility loaders or rank-map adapters.
 
 ## Data-shape budget
 
