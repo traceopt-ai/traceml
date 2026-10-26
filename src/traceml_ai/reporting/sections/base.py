@@ -34,7 +34,10 @@ class BaseSummarySection(
 
     def build(self, db_path: str) -> SummaryResult:
         """Build the section for a telemetry database."""
-        data = self.load(db_path)
+        return self.build_from_data(self.load(db_path))
+
+    def build_from_data(self, data: LoadedDataT) -> SummaryResult:
+        """Build the section from measurements already read by the caller."""
         diagnosis_input = self.to_diagnosis_input(data)
         diagnosis_result = self.diagnose(diagnosis_input)
         return self.build_payload(data, diagnosis_result)

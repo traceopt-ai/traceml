@@ -39,10 +39,18 @@ def build_analysis_window_payload(
 ) -> dict[str, Any]:
     """Build public window metadata and per-section observations."""
     with closing(sqlite3.connect(db_path)) as conn:
-        sections = {
-            section: _section_observation(conn, section, table, window)
-            for section, table in _SECTION_TABLES.items()
-        }
+        return build_analysis_window_payload_from_connection(conn, window)
+
+
+def build_analysis_window_payload_from_connection(
+    connection: sqlite3.Connection,
+    window: AnalysisWindow,
+) -> dict[str, Any]:
+    """Build public window metadata through a caller-owned connection."""
+    sections = {
+        section: _section_observation(connection, section, table, window)
+        for section, table in _SECTION_TABLES.items()
+    }
     return {
         "anchor": window.anchor,
         "retention_s": window.retention_s,
@@ -106,4 +114,5 @@ def _empty_observation() -> dict[str, Any]:
 __all__ = [
     "analysis_window_metadata",
     "build_analysis_window_payload",
+    "build_analysis_window_payload_from_connection",
 ]
