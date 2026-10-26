@@ -334,8 +334,8 @@ def build_parser() -> argparse.ArgumentParser:
         const=True,
         default=None,
         help=(
-            "Also write raw sampler records to .msgpack files; read them "
-            "with `traceml inspect`."
+            "Has no effect here: raw sampler logs are written by the "
+            "training processes, so set TRACEML_ENABLE_LOGGING=1 there."
         ),
     )
     serve_parser.add_argument(
@@ -436,7 +436,7 @@ def build_parser() -> argparse.ArgumentParser:
     inspect_parser = sub.add_parser(
         "inspect",
         help=(
-            "Print the records in a .msgpack log written with "
+            "Print the records in a .msgpack log, such as one written with "
             "--enable-logging; exit 1 if the file ends in a cut-off frame."
         ),
     )

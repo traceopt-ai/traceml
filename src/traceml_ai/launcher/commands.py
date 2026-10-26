@@ -1593,7 +1593,7 @@ def run_inspect(args: argparse.Namespace) -> None:
         # such as a process killed mid-write, fails the command.
         print(
             f"[TraceML] ERROR: truncated frame {truncated} after "
-            f"{records} records in {path.name}",
+            f"{records} records in {path}",
             file=sys.stderr,
         )
         raise SystemExit(1)

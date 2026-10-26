@@ -207,3 +207,35 @@ class TestCliInspect:
         assert exit_info.value.code == 1
         assert '"step": 2' in captured.out
         assert f"{message} after 2 records" in captured.err
+
+    def test_inspect_exits_nonzero_when_the_first_frame_is_cut(
+        self, tmp_path, capsys
+    ):
+        from traceml_ai.launcher.commands import run_inspect
+
+        path = tmp_path / "data.msgpack"
+        path.write_bytes(b"\x00\x01")
+        args = MagicMock()
+        args.file = str(path)
+
+        with pytest.raises(SystemExit) as exit_info:
+            run_inspect(args)
+
+        assert exit_info.value.code == 1
+        assert "truncated frame header after 0 records" in (
+            capsys.readouterr().err
+        )
+
+    def test_inspect_accepts_an_empty_file(self, tmp_path, capsys):
+        from traceml_ai.launcher.commands import run_inspect
+
+        path = tmp_path / "data.msgpack"
+        path.write_bytes(b"")
+        args = MagicMock()
+        args.file = str(path)
+
+        run_inspect(args)
+
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err == ""
