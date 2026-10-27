@@ -38,6 +38,7 @@ from traceml_ai.runtime.settings import (
     DEFAULT_FINALIZE_TIMEOUT_SEC,
     DEFAULT_INTERVAL_SEC,
     DEFAULT_UI_MODE,
+    LAUNCHER_STDIN_WATCH_ENV,
     AggregatorTransportSettings,
     TraceMLSettings,
 )
@@ -164,10 +165,64 @@ def _restore_signal_handlers(previous: Optional[dict[int, Any]]) -> None:
             pass
 
 
+def _install_launcher_watchdog(
+    fd: int,
+    stop_event: threading.Event,
+    logger: Any,
+) -> None:
+    """
+    Stop the aggregator once the launcher that started it is gone.
+
+    The ``traceml run`` launcher keeps the write end of the pipe behind
+    ``fd`` open for its whole life and never writes to it. The OS closes
+    that end however the launcher exits, including SIGKILL, so a read that
+    returns EOF or fails means nobody will ever send this process SIGTERM.
+    Without this, the aggregator outlives a killed launcher and waits
+    forever.
+
+    The thread reads the raw fd, not ``sys.stdin.buffer``: a daemon thread
+    parked inside a buffered read holds its lock, and interpreter shutdown
+    then aborts with "could not acquire lock for <stdin>".
+    """
+
+    def _watch() -> None:
+        try:
+            while os.read(fd, 4096):
+                pass
+        except Exception:
+            pass
+        if stop_event.is_set():
+            return
+        try:
+            logger.info("[TraceML] Launcher exited; stopping aggregator")
+            print(
+                "[TraceML] Launcher exited; stopping aggregator.",
+                file=sys.stderr,
+                flush=True,
+            )
+        except Exception:
+            pass
+        # The launcher was the only reader of this process's stderr pipe,
+        # so every later write there would raise BrokenPipeError and end
+        # the shutdown with a traceback instead of exit code 0.
+        try:
+            sys.stderr = open(os.devnull, "w", encoding="utf-8")
+        except OSError:
+            pass
+        stop_event.set()
+
+    threading.Thread(
+        target=_watch,
+        name="TraceMLLauncherWatchdog",
+        daemon=True,
+    ).start()
+
+
 def run_aggregator(
     settings: TraceMLSettings,
     *,
     logger: Optional[Any] = None,
+    launcher_fd: Optional[int] = None,
 ) -> int:
     """
     Own one aggregator lifecycle until a shutdown signal, then exit cleanly.
@@ -178,9 +233,13 @@ def run_aggregator(
 
     - starts only the aggregator (never a user training script)
     - prints the reachable endpoint
-    - blocks until SIGINT/SIGTERM
+    - blocks until SIGINT/SIGTERM, or until ``launcher_fd`` reaches EOF
+      when the launcher that started it passes one
     - shuts down cleanly, finalizing the configured export and analysis
     - logs fatal errors to its structured process-owned log
+
+    ``traceml serve`` passes no ``launcher_fd``: it is meant to outlive
+    any training script.
 
     Returns a process exit code (0 on clean shutdown, 1 on fatal error).
     """
@@ -204,6 +263,8 @@ def run_aggregator(
 
     stop_event = threading.Event()
     previous_handlers = _install_signal_handlers(stop_event)
+    if launcher_fd is not None:
+        _install_launcher_watchdog(launcher_fd, stop_event, logger)
 
     handle = None
     err: Optional[BaseException] = None
@@ -332,7 +393,33 @@ def main() -> None:
         ),
     )
 
-    raise SystemExit(run_aggregator(settings, logger=logger))
+    raise SystemExit(
+        run_aggregator(
+            settings,
+            logger=logger,
+            launcher_fd=_launcher_fd(),
+        )
+    )
+
+
+def _launcher_fd() -> Optional[int]:
+    """
+    Return the pipe the ``traceml run`` launcher holds open, if any.
+
+    Only an aggregator started with the marker watches stdin. The launcher
+    sets it in the aggregator's environment alone, never in its own or the
+    training processes', so a hand-started aggregator does not watch unless
+    the marker was set by hand.
+    """
+    if os.environ.get(LAUNCHER_STDIN_WATCH_ENV) != "1":
+        return None
+    stdin = sys.stdin
+    try:
+        if stdin is None or stdin.isatty():
+            return None
+        return stdin.fileno()
+    except (OSError, ValueError):
+        return None
 
 
 if __name__ == "__main__":
