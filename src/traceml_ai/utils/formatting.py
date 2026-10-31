@@ -27,7 +27,7 @@ def fmt_mem_new(num_bytes: Any) -> str:
 
     units = ["B", "KiB", "MiB", "GiB", "TiB"]
     idx = 0
-    while abs(v) >= 1024 and idx < len(units) - 1:
+    while round(abs(v)) >= 1024 and idx < len(units) - 1:
         v /= 1024.0
         idx += 1
 
