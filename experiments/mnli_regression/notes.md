@@ -230,21 +230,40 @@ the observed 112.7 ms increase.
 
 AWS artifact: `/home/ec2-user/traceml/compare/gpu-topology.txt`.
 
-### Next run
+### 2026-10-26 — Disable unused-parameter discovery
 
-1. Preserve the smoke run's AWS artifacts; record instance type and region.
-   The AWS checkout commit is still unknown. A local commit must not be
-   substituted without confirming the AWS code matches it.
-2. Record the machine's GPU interconnect topology, then test the existing DDP
-   warning's explicit recommendation: disable unused-parameter discovery for
-   BERT, where the run reported that no unused parameters were found.
-3. Repeat the four-GPU 10% fixed pilot with only that DDP setting changed.
+The fixed four-GPU workload was repeated with
+`ddp_find_unused_parameters=False` as
+`mnli-fixed-ddp-no-unused-pilot-2`. TraceML compared it with
+`mnli-fixed-pilot-1` and returned `EQUIVALENT`.
 
-For each run, append its exact command, run name/artifact path, outcome,
-training loss and validation accuracy, timing/coverage findings, and any errors
-or environment changes. Record conclusions only after examining the results.
+| Measurement | Default DDP | Discovery disabled | Delta |
+| --- | ---: | ---: | ---: |
+| GPU Step Time | 189.5 ms | 189.7 ms | +0.2 ms (+0.1%) |
+| Compute | 176.2 ms | 176.5 ms | +0.3 ms (+0.2%) |
+| Input Wait | 0.2 ms | 0.2 ms | effectively zero |
+| Peak reserved | 2.79 GiB | 2.77 GiB | -17.6 MiB (-0.6%) |
+| GPU utilization | 96.5% | 96.4% | effectively unchanged |
 
-Status: both four-GPU variants, their formal comparison, and the matching
-one-GPU control completed. The collator pair is equivalent. Four-GPU scaling
-is 1.70× with a much larger backward interval. DDP attribution/optimization,
-raw-artifact inspection, and multi-node testing remain undone.
+Conclusion: unused-parameter discovery was unnecessary for this model but did
+not explain the four-GPU backward inflation. The changing high-power label is
+threshold noise relative to otherwise stable system measurements. A longer
+repeat of this configuration would add duration without improving attribution.
+
+AWS comparison artifacts:
+`/home/ec2-user/traceml/compare/mnli-ddp-unused-search.{json,txt}`.
+
+Current experiment conclusion: the collator fix and the DDP discovery setting
+are both equivalent in this workload. The reproducible finding is poor
+single-node scaling (1.70× throughput from four GPUs) localized to the measured
+backward interval on a PHB topology. TraceML cannot yet separate backward
+compute, rank waiting, and collective communication, so root cause remains
+unresolved rather than proven.
+
+### Status
+
+Experiment 1 is complete. Preserve the AWS summaries, comparisons, topology,
+training histories, and telemetry before terminating ephemeral storage. The
+next useful work is a separately scoped distributed-communication measurement,
+not a longer repeat of this workload. The AWS checkout commit, instance type,
+and region remain unrecorded in these notes.
