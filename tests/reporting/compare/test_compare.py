@@ -951,6 +951,24 @@ def test_compare_text_scales_a_memory_decrease_like_an_increase() -> None:
     assert "-2.70 GiB (-30.3%)" in text
 
 
+def test_compare_text_rolls_memory_over_to_the_next_unit() -> None:
+    lhs = _payload_with_sections(
+        step_memory=_step_memory_section(
+            worst_peak_bytes=1023.8 * 1024.0 * 1024.0,
+        ),
+    )
+    rhs = _payload_with_sections(
+        step_memory=_step_memory_section(
+            worst_peak_bytes=1536.0 * 1024.0 * 1024.0,
+        ),
+    )
+
+    text = build_compare_text(_build_compare(lhs, rhs))
+
+    assert "1.00 GiB" in text
+    assert "1024 MiB" not in text
+
+
 def test_compare_warns_when_summary_schema_versions_differ() -> None:
     lhs = _payload_with_sections()
     rhs = _payload_with_sections()
