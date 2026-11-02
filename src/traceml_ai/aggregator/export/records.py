@@ -14,6 +14,9 @@ SQLite cannot disagree about a value. Missing values stay ``None``.
 
 The one exception to "row with names" is step time, which carries the
 decoded ``events`` map in place of the ``events_json`` text.
+
+The field contract is documented in
+``docs/developer_guide/export-records.md``.
 """
 
 from __future__ import annotations

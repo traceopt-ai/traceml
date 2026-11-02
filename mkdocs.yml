@@ -114,5 +114,6 @@ nav:
       - Architecture: developer_guide/architecture.md
       - Step Time Pipeline Contract: developer_guide/step-time-pipeline-contract.md
       - Rank Straggler Policy: developer_guide/rank-straggler-policy.md
+      - Export Records: developer_guide/export-records.md
       - Extending TraceML: developer_guide/extending.md
       - Contributing: developer_guide/contributing.md

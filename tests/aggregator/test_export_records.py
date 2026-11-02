@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import re
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -43,6 +45,12 @@ from traceml_ai.telemetry.envelope import (
 
 OBSERVED = 1_800_000_000_000_000_000
 TS = 1_700_000_000_123_456_789
+DOC = (
+    Path(__file__).resolve().parents[2]
+    / "docs"
+    / "developer_guide"
+    / "export-records.md"
+)
 
 EVENTS = {
     "_traceml_internal:forward_time": {
@@ -371,3 +379,12 @@ def test_columns_match_ddl(cls):
         "events_json" if name == "events" else name for name in cls.COLUMNS
     ]
     assert columns == _ddl_columns(cls)
+
+
+@pytest.mark.parametrize("cls", RECORD_TYPES, ids=lambda c: c.STREAM)
+def test_doc_table_lists_record_fields(cls):
+    text = DOC.read_text(encoding="utf-8")
+    section = text.split(f"### {cls.__name__}\n", 1)[1].split("\n#", 1)[0]
+    documented = re.findall(r"^\| `(\w+)` \|", section, flags=re.M)
+
+    assert documented == [f.name for f in dataclasses.fields(cls)]
