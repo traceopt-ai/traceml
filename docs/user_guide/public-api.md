@@ -133,11 +133,14 @@ behavior.
 
 ### Raw sampler logs
 
-`--enable-logging` makes each training rank also write its raw sampler
-records to length-prefixed MessagePack files, one per sampler table, at
-`rank_<N>/data/<Sampler>/<Table>.msgpack` inside a session folder under the
-logs directory. The files are append-only and grow for the whole run. The same
-setting comes from `enable_logging: true` in `traceml.yaml` or
+`--enable-logging` enables best-effort raw logs from the sampler writers in
+each training rank. Each sampler appends length-prefixed MessagePack records
+to `rank_<N>/data/<Sampler>/<Table>.msgpack` inside a generated session folder
+under the logs directory. Writers flush periodically, so short runs may
+produce no file, final records may be absent, and the generated folder may
+differ from the run's session folder. These limitations are tracked in
+[#580](https://github.com/traceopt-ai/traceml/issues/580). The same setting
+comes from `enable_logging: true` in `traceml.yaml` or
 `TRACEML_ENABLE_LOGGING=1`; when it is off, no `.msgpack` files are written.
 
 The training processes write these files, so with `traceml serve` the flag
