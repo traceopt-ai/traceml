@@ -1,4 +1,5 @@
 import threading
+import time
 
 from traceml_ai.core import Registry
 from traceml_ai.runtime.runtime import TraceMLRuntime
@@ -319,9 +320,11 @@ def _stopped_runtime(samplers, interval_sec: float) -> TraceMLRuntime:
     return runtime
 
 
-def test_normal_stop_ticks_pending_drain_sampler_once() -> None:
+def test_normal_stop_ticks_pending_drain_sampler_until_clear() -> None:
+    periodic = _FakeSampler()
+    periodic.sampler_name = "PeriodicSampler"
     drain = _ClearsOnSecondSampleSampler()
-    runtime = _stopped_runtime([drain], interval_sec=0.05)
+    runtime = _stopped_runtime([periodic, drain], interval_sec=0.05)
 
     configure_trace_recording()
     assert (
@@ -329,8 +332,40 @@ def test_normal_stop_ticks_pending_drain_sampler_once() -> None:
     )
     runtime._sampler_loop()
 
-    assert drain.sample_idx == 1
+    assert drain.sample_idx == 2
+    assert not drain.has_pending_recording_data()
+    assert periodic.sample_idx == 1
+    assert runtime._publisher.published == [
+        ("PeriodicSampler", "PendingDrainSampler"),
+        ("PendingDrainSampler",),
+    ]
+
+    configure_trace_recording()
+
+
+def test_normal_stop_drain_is_bounded_and_never_synchronizes(
+    monkeypatch,
+) -> None:
+    sync_calls: list[object] = []
+    monkeypatch.setattr(
+        process_sampler.torch.cuda,
+        "synchronize",
+        lambda *args, **kwargs: sync_calls.append(args),
+    )
+    interval_sec = 0.05
+    bound_sec = min(2.0, 2 * interval_sec)
+    drain = _PendingDrainSampler()
+    runtime = _stopped_runtime([drain], interval_sec=interval_sec)
+
+    configure_trace_recording()
+    started = time.monotonic()
+    runtime._sampler_loop()
+    elapsed = time.monotonic() - started
+
+    assert bound_sec <= elapsed < bound_sec + 0.25
+    assert drain.sample_idx > 1
     assert drain.has_pending_recording_data()
+    assert sync_calls == []
 
     configure_trace_recording()
 

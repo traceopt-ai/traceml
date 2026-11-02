@@ -7,6 +7,7 @@
 """Per-rank TraceML runtime agent."""
 
 import threading
+import time
 from typing import Any, Callable, List, Optional
 
 from traceml_ai.loggers.error_log import get_error_logger, setup_error_logger
@@ -26,6 +27,11 @@ from traceml_ai.telemetry.control import build_rank_finished_payload
 from traceml_ai.transport.tcp_transport import TCPClient, TCPConfig
 
 from .settings import TraceMLSettings
+
+# At a normal stop, queue-backed samplers are ticked again while they still
+# hold unresolved data, for at most this long or two sampler intervals.
+_STOP_DRAIN_MAX_SEC = 2.0
+_STOP_DRAIN_POLL_SEC = 0.02
 
 
 def _safe(logger, label: str, fn: Callable[[], Any]) -> Any:
@@ -148,13 +154,17 @@ class TraceMLRuntime:
 
         self._publisher.publish(target_samplers)
 
-    def _drain_recording_samplers(self) -> None:
-        """Drain queue-backed samplers after recording has stopped."""
-        drain_samplers = [
+    def _recording_drain_samplers(self) -> List[BaseSampler]:
+        """Return the samplers marked for a final recording drain."""
+        return [
             sampler
             for sampler in self._samplers
             if bool(getattr(sampler, "drain_on_recording_stop", False))
         ]
+
+    def _drain_recording_samplers(self) -> None:
+        """Drain queue-backed samplers after recording has stopped."""
+        drain_samplers = self._recording_drain_samplers()
         if drain_samplers:
             self._tick(drain_samplers)
         pending = any(
@@ -163,6 +173,29 @@ class TraceMLRuntime:
         )
         if not pending:
             mark_trace_recording_drained()
+
+    def _drain_pending_on_stop(self) -> None:
+        """
+        Tick drain samplers until their pending data is sent, within a bound.
+
+        Runs after the stop event is set, so it sleeps instead of waiting on
+        the event. Resolution stays polling; nothing here blocks on CUDA.
+        The bound keeps the drain inside the join timeout in `stop()`.
+        """
+        drain_samplers = self._recording_drain_samplers()
+        bound_sec = min(
+            _STOP_DRAIN_MAX_SEC,
+            2.0 * float(self._settings.sampler_interval_sec),
+        )
+        deadline = time.monotonic() + bound_sec
+        while any(
+            bool(sampler.has_pending_recording_data())
+            for sampler in drain_samplers
+        ):
+            if time.monotonic() >= deadline:
+                return
+            time.sleep(_STOP_DRAIN_POLL_SEC)
+            self._tick(drain_samplers)
 
     def _sampler_loop(self) -> None:
         """Sampler loop (all ranks)."""
@@ -188,8 +221,10 @@ class TraceMLRuntime:
         status = get_trace_recording_state().status
         if status == TraceMLRecordingStatus.RECORDING:
             self._tick()
+            self._drain_pending_on_stop()
         elif status == TraceMLRecordingStatus.DRAINING:
             self._drain_recording_samplers()
+            self._drain_pending_on_stop()
 
     def start(self) -> None:
         """Start the exporter, then the sampler thread."""
