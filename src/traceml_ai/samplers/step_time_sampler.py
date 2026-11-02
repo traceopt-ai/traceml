@@ -79,11 +79,11 @@ class StepTimeSampler(BaseSampler):
         """
         Build a single per-step payload containing all aggregated event timings.
         """
-        sum_ms: Dict[Tuple[str, str, bool], float] = defaultdict(float)
-        sum_cpu_ms: Dict[Tuple[str, str, bool], float] = defaultdict(float)
-        sum_gpu_ms: Dict[Tuple[str, str, bool], float] = defaultdict(float)
-        has_gpu_ms: Dict[Tuple[str, str, bool], bool] = defaultdict(bool)
-        n_calls: Dict[Tuple[str, str, bool], int] = defaultdict(int)
+        sum_cpu_ms: Dict[Tuple[str, str], float] = defaultdict(float)
+        sum_gpu_ms: Dict[Tuple[str, str], float] = defaultdict(float)
+        has_gpu_ms: Dict[Tuple[str, str], bool] = defaultdict(bool)
+        n_gpu_clock: Dict[Tuple[str, str], int] = defaultdict(int)
+        n_calls: Dict[Tuple[str, str], int] = defaultdict(int)
 
         ts_max = 0.0
 
@@ -91,31 +91,33 @@ class StepTimeSampler(BaseSampler):
             ts_max = float(max(ts_max, float(evt.cpu_end)))
 
             has_gpu_timing = evt.gpu_time_ms is not None
-            duration_uses_gpu = self._duration_uses_gpu(evt)
             cpu_ms = float(self._cpu_duration_ms(evt))
             gpu_ms = float(evt.gpu_time_ms) if has_gpu_timing else None
-            duration_ms = float(gpu_ms) if duration_uses_gpu else float(cpu_ms)
 
-            key = (str(evt.name), str(evt.device), bool(duration_uses_gpu))
-            sum_ms[key] += duration_ms
+            key = (str(evt.name), str(evt.device))
             sum_cpu_ms[key] += cpu_ms
             if gpu_ms is not None:
                 sum_gpu_ms[key] += gpu_ms
                 has_gpu_ms[key] = True
+            if self._duration_uses_gpu(evt):
+                n_gpu_clock[key] += 1
             n_calls[key] += 1
 
         events: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(dict)
-        for (name, device, is_gpu), total_ms in sum_ms.items():
+        for (name, device), count in n_calls.items():
+            key = (name, device)
+            # One CPU-clock call makes the whole entry CPU-clock.
+            is_gpu = n_gpu_clock[key] == count
             events[name][device] = {
                 "is_gpu": bool(is_gpu),
-                "duration_ms": float(total_ms),
-                "cpu_ms": float(sum_cpu_ms[(name, device, is_gpu)]),
-                "gpu_ms": (
-                    float(sum_gpu_ms[(name, device, is_gpu)])
-                    if has_gpu_ms[(name, device, is_gpu)]
-                    else None
+                "duration_ms": float(
+                    sum_gpu_ms[key] if is_gpu else sum_cpu_ms[key]
                 ),
-                "n_calls": int(n_calls[(name, device, is_gpu)]),
+                "cpu_ms": float(sum_cpu_ms[key]),
+                "gpu_ms": (
+                    float(sum_gpu_ms[key]) if has_gpu_ms[key] else None
+                ),
+                "n_calls": int(count),
             }
 
         return int(round(ts_max * 1_000_000_000)), dict(events)

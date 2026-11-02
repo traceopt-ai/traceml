@@ -168,12 +168,76 @@ def test_step_time_sampler_mixed_clock_calls_share_one_device_entry() -> None:
 
     stats = payload["_test_mixed"]["cuda:0"]
 
-    # Today the CPU-only call's entry replaces the GPU-timed call's entry.
+    # Both calls count; one CPU-clock call keeps the entry on the CPU clock.
     assert stats["is_gpu"] is False
-    assert stats["duration_ms"] == pytest.approx(3.0)
-    assert stats["cpu_ms"] == pytest.approx(3.0)
-    assert stats["gpu_ms"] is None
-    assert stats["n_calls"] == 1
+    assert stats["duration_ms"] == pytest.approx(5.0)
+    assert stats["cpu_ms"] == pytest.approx(5.0)
+    assert stats["gpu_ms"] == pytest.approx(5.0)
+    assert stats["n_calls"] == 2
+
+
+def test_step_time_sampler_all_gpu_clock_calls_keep_gpu_entry() -> None:
+    payload = _payload_for(
+        TimeEvent(
+            name="_test_gpu",
+            device="cuda:0",
+            cpu_start=1.0,
+            cpu_end=1.002,
+            gpu_time_ms=5.0,
+            resolved=True,
+        ),
+        TimeEvent(
+            name="_test_gpu",
+            device="cuda:0",
+            cpu_start=2.0,
+            cpu_end=2.003,
+            gpu_time_ms=7.0,
+            resolved=True,
+        ),
+    )
+
+    assert payload == {
+        "_test_gpu": {
+            "cuda:0": {
+                "is_gpu": True,
+                "duration_ms": pytest.approx(12.0),
+                "cpu_ms": pytest.approx(5.0),
+                "gpu_ms": pytest.approx(12.0),
+                "n_calls": 2,
+            }
+        }
+    }
+
+
+def test_step_time_sampler_all_cpu_clock_calls_keep_cpu_entry() -> None:
+    payload = _payload_for(
+        TimeEvent(
+            name="_test_cpu",
+            device="cuda:0",
+            cpu_start=1.0,
+            cpu_end=1.002,
+            resolved=True,
+        ),
+        TimeEvent(
+            name="_test_cpu",
+            device="cuda:0",
+            cpu_start=2.0,
+            cpu_end=2.003,
+            resolved=True,
+        ),
+    )
+
+    assert payload == {
+        "_test_cpu": {
+            "cuda:0": {
+                "is_gpu": False,
+                "duration_ms": pytest.approx(5.0),
+                "cpu_ms": pytest.approx(5.0),
+                "gpu_ms": None,
+                "n_calls": 2,
+            }
+        }
+    }
 
 
 def test_sampler_sums_segmented_step_time_and_h2d_once() -> None:
