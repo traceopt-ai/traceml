@@ -146,25 +146,28 @@ def test_step_time_sampler_aggregates_repeated_event_clocks() -> None:
     assert stats["n_calls"] == 2
 
 
-def test_step_time_sampler_mixed_clock_calls_share_one_device_entry() -> None:
-    payload = _payload_for(
-        TimeEvent(
-            name="_test_mixed",
-            device="cuda:0",
-            cpu_start=1.0,
-            cpu_end=1.002,
-            gpu_time_ms=5.0,
-            resolved=True,
-        ),
-        TimeEvent(
-            name="_test_mixed",
-            device="cuda:0",
-            cpu_start=2.0,
-            cpu_end=2.003,
-            gpu_time_ms=None,
-            resolved=True,
-        ),
+@pytest.mark.parametrize("gpu_first", [True, False])
+def test_step_time_sampler_mixed_clock_calls_share_one_device_entry(
+    gpu_first: bool,
+) -> None:
+    gpu_call = TimeEvent(
+        name="_test_mixed",
+        device="cuda:0",
+        cpu_start=1.0,
+        cpu_end=1.002,
+        gpu_time_ms=5.0,
+        resolved=True,
     )
+    cpu_call = TimeEvent(
+        name="_test_mixed",
+        device="cuda:0",
+        cpu_start=2.0,
+        cpu_end=2.003,
+        gpu_time_ms=None,
+        resolved=True,
+    )
+    calls = (gpu_call, cpu_call) if gpu_first else (cpu_call, gpu_call)
+    payload = _payload_for(*calls)
 
     stats = payload["_test_mixed"]["cuda:0"]
 
