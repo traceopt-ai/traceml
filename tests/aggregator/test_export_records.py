@@ -47,6 +47,15 @@ EVENTS = {
     }
 }
 
+IDENTITY = {
+    "rank": 3,
+    "global_rank": 3,
+    "local_rank": 1,
+    "world_size": 8,
+    "local_world_size": 4,
+    "node_rank": 1,
+}
+
 # (record, writer, sampler, table, row, expected record count)
 CASES = [
     (
@@ -78,10 +87,11 @@ CASES = [
 def _payload(sampler: str, table: str, row: dict) -> dict:
     return build_telemetry_envelope(
         identity=SenderIdentity(
-            global_rank=1,
+            global_rank=3,
             local_rank=1,
-            world_size=2,
-            local_world_size=2,
+            world_size=8,
+            local_world_size=4,
+            node_rank=1,
             hostname="host-a",
             pid=4242,
         ),
@@ -123,7 +133,9 @@ def test_record_equals_writer_row(case):
             "schema_version": 1,
             **expected,
         }
-        assert expected.get("global_rank", expected.get("rank")) == 1
+        for name, value in IDENTITY.items():
+            if name in expected:
+                assert getattr(record, name) == value, name
         assert expected["observed_timestamp_unix_ns"] == OBSERVED
         assert expected["timestamp_unix_ns"] == TS
 
@@ -140,6 +152,68 @@ def test_step_time_without_integer_timestamp_is_none():
     assert record.timestamp_unix_ns is None
     assert record.to_dict()["timestamp_unix_ns"] is None
     assert record.events == {}
+
+
+def _step_time_row(events_json):
+    payload = _payload(*CASES[0][2:5])
+    (row,) = step_time.build_rows(
+        envelope=normalize_telemetry_envelope(payload),
+        observed_timestamp_unix_ns=OBSERVED,
+    )[StepTimeRecord.TABLE]
+    return payload, row[:-1] + (events_json,)
+
+
+def _serve_rows(monkeypatch, row):
+    monkeypatch.setattr(
+        step_time,
+        "build_rows",
+        lambda **_: {StepTimeRecord.TABLE: [row]},
+    )
+
+
+@pytest.mark.parametrize("text", [None, ""])
+def test_step_time_absent_events_text_is_empty_map(text, monkeypatch):
+    payload, row = _step_time_row(text)
+
+    assert StepTimeRecord.from_row(row).events == {}
+    assert StepTimeRecord.from_row(list(row)).events == {}
+    _serve_rows(monkeypatch, row)
+    batch = records_from_payload(payload)
+    assert [r.events for r in batch.records] == [{}]
+    assert batch.skipped == 0
+
+
+@pytest.mark.parametrize("text", ["null", "[]"])
+def test_step_time_non_object_events_text_is_skipped(text, monkeypatch):
+    payload, row = _step_time_row(text)
+
+    with pytest.raises(ValueError):
+        StepTimeRecord.from_row(row)
+    _serve_rows(monkeypatch, row)
+    batch = records_from_payload(payload)
+    assert batch.records == []
+    assert batch.skipped == 1
+
+
+def test_adversarial_items_are_skipped_not_raised():
+    batch = records_from_payload(
+        [None, 42, ["nested"], {"meta": {"sampler": None}}]
+    )
+
+    assert isinstance(batch, export_records.RecordBatch)
+    assert batch.records == []
+    assert batch.skipped == 4
+
+
+def test_raising_writer_counts_once_and_loses_its_envelope(monkeypatch):
+    def boom(**_):
+        raise RuntimeError("projection failed")
+
+    monkeypatch.setattr(step_time, "build_rows", boom)
+    batch = records_from_payload([_payload(*case[2:5]) for case in CASES[:2]])
+
+    assert [type(r) for r in batch.records] == [StepMemoryRecord]
+    assert batch.skipped == 1
 
 
 def test_list_batch_yields_records_for_every_envelope():

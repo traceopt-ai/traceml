@@ -101,7 +101,12 @@ class StepTimeRecord(_Record):
     @classmethod
     def _decode(cls, row: tuple) -> tuple:
         """Replace the trailing ``events_json`` text with its decoded map."""
-        return row[:-1] + (json.loads(row[-1]),)
+        row = tuple(row)
+        text = row[-1]
+        events = {} if text is None or text == "" else json.loads(text)
+        if not isinstance(events, dict):
+            raise ValueError(f"{cls.TABLE} events_json is not an object")
+        return row[:-1] + (events,)
 
 
 @_record("step_memory", "step_memory_samples")
@@ -164,35 +169,38 @@ def records_from_payload(
     skipped = 0
 
     for item in items:
-        envelope = normalize_telemetry_envelope(item)
-        if envelope is None:
-            skipped += 1
-            continue
-        observed = (
-            observed_timestamp_unix_ns
-            if observed_timestamp_unix_ns is not None
-            else time.time_ns()
-        )
-        for writer in _WRITERS:
-            if not writer.accepts_sampler(envelope.meta.sampler):
-                continue
-            try:
-                rows_by_table = writer.build_rows(
-                    envelope=envelope,
-                    observed_timestamp_unix_ns=observed,
-                )
-            except Exception:
+        try:
+            envelope = normalize_telemetry_envelope(item)
+            if envelope is None:
                 skipped += 1
                 continue
-            for table, rows in rows_by_table.items():
-                cls = _RECORD_BY_TABLE.get(table)
-                if cls is None:
-                    skipped += len(rows)
+            observed = (
+                observed_timestamp_unix_ns
+                if observed_timestamp_unix_ns is not None
+                else time.time_ns()
+            )
+            for writer in _WRITERS:
+                if not writer.accepts_sampler(envelope.meta.sampler):
                     continue
-                for row in rows:
-                    try:
-                        records.append(cls.from_row(row))
-                    except Exception:
-                        skipped += 1
+                try:
+                    rows_by_table = writer.build_rows(
+                        envelope=envelope,
+                        observed_timestamp_unix_ns=observed,
+                    )
+                except Exception:
+                    skipped += 1
+                    continue
+                for table, rows in rows_by_table.items():
+                    cls = _RECORD_BY_TABLE.get(table)
+                    if cls is None:
+                        skipped += len(rows)
+                        continue
+                    for row in rows:
+                        try:
+                            records.append(cls.from_row(row))
+                        except Exception:
+                            skipped += 1
+        except Exception:
+            skipped += 1
 
     return RecordBatch(records=records, skipped=skipped)
