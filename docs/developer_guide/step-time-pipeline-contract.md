@@ -229,7 +229,7 @@ contract does not load the analyzer or NumPy.
 |---|---|
 | Common window | Only the latest bounded set of completed step ids shared across the participating ranks is analyzed. |
 | Expected ranks | The window retains the persisted global-rank universe even when a rank lacks a metric. |
-| Selected clock | One clock, CPU or GPU, is selected for the entire window. Phase values are never mixed across clocks. |
+| Selected clock | One clock, CPU or GPU, is selected for the entire window. Phase values are never mixed across clocks. Input Wait is ignored for clock selection only when unmeasured across the entire window. |
 | Required metrics | Input Wait, forward, backward, and Traced Step Time must be measured on every aligned step for a rank. Partial presence makes that metric unavailable for the rank. |
 | Occurrence-driven metrics | H2D and optimizer may legitimately occur on only some steps. Once observed, absent steps contribute zero work. An entirely absent H2D means no observed transfers, not incomplete instrumentation. |
 | Missing versus zero | An unavailable metric is absent from the sparse rank row and projects to `null`. A measured `0.0` remains present and projects to `0.0`. |

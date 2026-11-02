@@ -7,6 +7,9 @@ which carry the full historical notes for versions predating this file.
 
 ## [Unreleased]
 
+- Step Time now uses complete GPU phase timing when Input Wait is absent from
+  the entire analysis window. Input Wait and outer Step Time remain unavailable
+  rather than being treated as zero.
 - Memory byte counts now render consistently in binary units (`GiB`, `MiB`,
   `KiB`, and `TiB`) across the dashboard, terminal, HTML, and comparison text.
   Values on surfaces that previously used decimal `GB` read about 6.9% lower;

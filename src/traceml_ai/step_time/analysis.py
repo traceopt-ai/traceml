@@ -260,13 +260,17 @@ def _clock_value(
     return float(value) if value is not None else None
 
 
-def _row_supports_gpu(row: StepTimeSourceRow) -> bool:
-    for metric in _REQUIRED_GPU_METRICS:
+def _row_supports_gpu(
+    row: StepTimeSourceRow,
+    required: Sequence[str],
+    ignored: Sequence[str] = (),
+) -> bool:
+    for metric in required:
         values = row.metrics.get(metric)
         if values is None or values.gpu_ms is None:
             return False
     for metric in SELECTED_METRICS:
-        if metric in _REQUIRED_GPU_METRICS:
+        if metric in required or metric in ignored:
             continue
         values = row.metrics.get(metric)
         if values is not None and values.gpu_ms is None:
@@ -274,15 +278,40 @@ def _row_supports_gpu(row: StepTimeSourceRow) -> bool:
     return True
 
 
+def _measured(row: StepTimeSourceRow, metric: str) -> bool:
+    values = row.metrics.get(metric)
+    return values is not None and (
+        values.cpu_ms is not None or values.gpu_ms is not None
+    )
+
+
 def _select_clock(
     row_index: _RowIndex,
     ranks: Sequence[int],
     steps: Sequence[int],
 ) -> DiagnosisClock:
-    for rank in ranks:
-        for step in steps:
-            if not _row_supports_gpu(row_index[(int(rank), int(step))]):
-                return "cpu"
+    """Return one clock for the whole window.
+
+    GPU needs a GPU value on every row for each required metric, and on any
+    row where another selected metric appears. Input wait is required unless
+    no row in the window measures it at all, as in a loop with no
+    DataLoader: then the phases can still use GPU time, and Step Time stays
+    unavailable because input wait is absent, never zero.
+    """
+    rows = [
+        row_index[(int(rank), int(step))] for rank in ranks for step in steps
+    ]
+    if any(_measured(row, INPUT_WAIT_KEY) for row in rows):
+        required, ignored = _REQUIRED_GPU_METRICS, ()
+    else:
+        # An input-wait entry with no valid duration is still no input wait.
+        required = tuple(
+            m for m in _REQUIRED_GPU_METRICS if m != INPUT_WAIT_KEY
+        )
+        ignored = (INPUT_WAIT_KEY,)
+    for row in rows:
+        if not _row_supports_gpu(row, required, ignored):
+            return "cpu"
     return "gpu"
 
 
