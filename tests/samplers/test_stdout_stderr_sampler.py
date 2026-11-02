@@ -23,7 +23,7 @@ def test_stdout_drain_time_survives_transport_and_projection(
     timestamp_unix_ns = 1_700_000_000_000_000_001
     records = []
     sampler = StdoutStderrSampler.__new__(StdoutStderrSampler)
-    sampler._ctx = SimpleNamespace(local_rank=0)
+    sampler._ctx = SimpleNamespace(identity=SimpleNamespace(local_rank=0))
     sampler._add_record = records.append
     sampler.log_path = tmp_path / "stdout_stderr.log"
     monkeypatch.setattr(

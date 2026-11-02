@@ -54,7 +54,7 @@ def _optional_bool_int(value: Any) -> Optional[int]:
 class RuntimeEnvironmentPayloadIdentity:
     """Distributed identity stored with runtime environment telemetry."""
 
-    rank: Optional[int]
+    legacy_rank: Optional[int]
     global_rank: Optional[int]
     local_rank: Optional[int]
     world_size: Optional[int]
@@ -68,9 +68,10 @@ def _payload_identity(
     meta: TelemetryMeta,
 ) -> RuntimeEnvironmentPayloadIdentity:
     """Return storage identity for one RuntimeEnvironmentSampler payload."""
+    global_rank = _optional_int(meta.global_rank)
     return RuntimeEnvironmentPayloadIdentity(
-        rank=_optional_int(meta.rank),
-        global_rank=_optional_int(meta.global_rank),
+        legacy_rank=global_rank,
+        global_rank=global_rank,
         local_rank=_optional_int(meta.local_rank),
         world_size=_optional_int(meta.world_size),
         local_world_size=_optional_int(meta.local_world_size),
@@ -148,7 +149,7 @@ def build_rows(
         out["runtime_environment"].append(
             (
                 observed_timestamp_unix_ns,
-                identity.rank,
+                identity.legacy_rank,
                 identity.global_rank,
                 identity.local_rank,
                 identity.world_size,

@@ -33,10 +33,12 @@ class TelemetryMeta:
     """Stable metadata carried once per sampler payload.
 
     ``session_id``, ``run_nonce`` and ``session_source`` are the optional run
-    stamp. Payloads from ranks that predate it carry ``None``.
+    stamp. Payloads from ranks that predate it carry ``None``. Legacy ``rank``
+    is used only when ``global_rank`` is absent or unusable. This fallback
+    cannot reconstruct global identity from a legacy local-rank value.
+    Newly serialized metadata uses explicit identity fields.
     """
 
-    rank: Optional[int]
     global_rank: Optional[int]
     local_rank: Optional[int]
     world_size: Optional[int]
@@ -53,12 +55,11 @@ class TelemetryMeta:
     def from_mapping(cls, data: Mapping[str, Any]) -> "TelemetryMeta":
         """Create metadata from a transport mapping using best-effort coercion."""
         global_rank = _optional_int(data.get("global_rank"))
-        rank = global_rank
-        if rank is None:
-            rank = _optional_int(data.get("rank"))
+        if global_rank is None:
+            # Use legacy input only when no usable explicit global rank exists.
+            global_rank = _optional_int(data.get("rank"))
 
         return cls(
-            rank=rank,
             global_rank=global_rank,
             local_rank=_optional_int(data.get("local_rank")),
             world_size=_optional_int(data.get("world_size")),
@@ -75,7 +76,6 @@ class TelemetryMeta:
     def to_dict(self) -> dict[str, Any]:
         """Return a MessagePack/JSON-friendly metadata dictionary."""
         return {
-            "rank": self.rank,
             "global_rank": self.global_rank,
             "local_rank": self.local_rank,
             "world_size": self.world_size,

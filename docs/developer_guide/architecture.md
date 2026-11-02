@@ -39,7 +39,7 @@ aggregator processes an envelope, for liveness.
 | Aggregator | `src/traceml_ai/aggregator/` | TCP server, unified store, display orchestration |
 | Samplers | `src/traceml_ai/samplers/` | Periodic telemetry collection (timing, memory, system) |
 | Database | `src/traceml_ai/database/` | Bounded in-memory tables and SQLite-backed history |
-| Transport | `src/traceml_ai/transport/` | TCP bidirectional + DDP rank detection |
+| Transport | `src/traceml_ai/transport/` | TCP client/server transport |
 | Step Time domain | `src/traceml_ai/step_time/` | Shared contracts and set-based SQLite source repository |
 | Renderers | `src/traceml_ai/renderers/` | Transform stored data into Rich/Plotly output |
 | Display drivers | `src/traceml_ai/aggregator/display_drivers/` | CLI vs NiceGUI output medium |
@@ -109,7 +109,7 @@ Architectural risks and known structural debt. Day-to-day bugs live in the issue
 | Launcher | The `traceml run` process: writes the run manifests, injects the `TRACEML_*` env vars, and spawns the aggregator and the training ranks. |
 | Aggregator | The out-of-process server that ingests telemetry over TCP, persists to SQLite, drives the display, and writes the final summary. |
 | Runtime | The per-rank, in-process agent that installs the patches and runs one sampler thread. |
-| Rank / local_rank / global_rank / world_size | Process indices under `torchrun`. Identities differ by layer: the runtime identity uses `local_rank`, the sender uses `global_rank`, and the wire envelope prefers `global_rank`. |
+| global_rank / local_rank / node_rank / world_size | Explicit process placement under distributed launchers. `global_rank` is the run-scoped process identity used by telemetry and reporting, `local_rank` is the process index on one node, and `node_rank` identifies that node within the run. User-facing “Rank” labels mean `global_rank`; legacy incoming `rank` metadata is normalized to `global_rank`. |
 | Sampler | A periodic collector (timing, memory, system, process) that appends rows to the in-memory database. |
 | Renderer | Transforms stored rows into CLI (Rich) or web (NiceGUI / Plotly) output and feeds the diagnosis engine. |
 | Hook / patch / decorator | The mechanisms that capture phase boundaries: monkeypatches on torch internals plus the user-facing `trace_step`. |

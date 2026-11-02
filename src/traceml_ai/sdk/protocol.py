@@ -31,6 +31,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from traceml_ai.runtime.identity import resolve_runtime_identity
 from traceml_ai.runtime.settings import DEFAULT_UI_MODE
 
 
@@ -57,8 +58,9 @@ class FinalSummaryRequest:
     request_id: str
     created_at: str
     pid: int
-    rank: int
+    global_rank: int
     local_rank: int
+    node_rank: int
 
 
 @dataclass(frozen=True)
@@ -92,13 +94,10 @@ def make_request_id() -> str:
 
 def is_primary_rank() -> bool:
     """
-    Return True when the current process is rank 0 or rank is unset.
+    Return True when the current process has global rank 0.
     """
-    rank = os.environ.get("RANK", "").strip()
-    if not rank:
-        return True
     try:
-        return int(rank) == 0
+        return resolve_runtime_identity().global_rank == 0
     except Exception:
         return False
 
@@ -195,25 +194,15 @@ def build_final_summary_request() -> FinalSummaryRequest:
     """
     Build a final-summary request payload from the current process context.
     """
-    rank = 0
-    local_rank = 0
-
-    try:
-        rank = int(os.environ.get("RANK", "0"))
-    except Exception:
-        rank = 0
-
-    try:
-        local_rank = int(os.environ.get("LOCAL_RANK", "0"))
-    except Exception:
-        local_rank = 0
+    identity = resolve_runtime_identity()
 
     return FinalSummaryRequest(
         request_id=make_request_id(),
         created_at=utc_now_iso(),
         pid=os.getpid(),
-        rank=rank,
-        local_rank=local_rank,
+        global_rank=identity.global_rank,
+        local_rank=identity.local_rank,
+        node_rank=identity.node_rank,
     )
 
 

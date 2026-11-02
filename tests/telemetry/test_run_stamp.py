@@ -32,6 +32,8 @@ def test_identity_emits_stamp_fields():
 
     fields = identity.to_payload_fields()
 
+    assert "rank" not in fields
+    assert fields["global_rank"] == 1
     assert fields["session_id"] == "run-a"
     assert fields["run_nonce"] == "n1"
 
@@ -58,11 +60,17 @@ def test_envelope_meta_carries_stamp():
     assert (meta.session_id, meta.run_nonce) == ("run-a", "n1")
 
 
-def test_meta_from_old_rank_has_no_stamp():
-    meta = TelemetryMeta.from_mapping({"global_rank": 0, "sampler": "X"})
+def test_meta_legacy_rank_fallback_and_explicit_precedence():
+    for fields, expected in (
+        ({"rank": 4, "sampler": "X"}, 4),
+        ({"rank": 7, "global_rank": 3}, 3),
+        ({"rank": 7, "global_rank": "bad"}, 7),
+    ):
+        meta = TelemetryMeta.from_mapping(fields)
 
-    assert meta.session_id is None
-    assert meta.run_nonce is None
+        assert meta.global_rank == expected
+        assert meta.session_id is None
+        assert meta.run_nonce is None
 
 
 def test_rank_finished_payload_carries_stamp():

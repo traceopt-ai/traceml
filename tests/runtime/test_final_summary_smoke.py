@@ -326,6 +326,7 @@ guard:
         encoding="utf-8",
     )
     env = os.environ.copy()
+    env["TRACEML_INTERVAL"] = "0.01"
     env["OMP_NUM_THREADS"] = "1"
     env["PYTHONPATH"] = os.pathsep.join(
         part for part in (str(SRC_DIR), env.get("PYTHONPATH", "")) if part
@@ -350,7 +351,7 @@ guard:
         "--nnodes",
         "2",
         "--nproc-per-node",
-        "1",
+        "2",
         "--master-addr",
         "127.0.0.1",
         "--master-port",
@@ -424,13 +425,31 @@ guard:
     payload = json.loads(
         (session_root / "final_summary.json").read_text(encoding="utf-8")
     )
+    step_rows = payload["step_time"]["groups"]["rows"]
+    assert set(step_rows) == {"0", "1", "2", "3"}
+    assert {
+        int(global_rank): (
+            row["identity"]["global_rank"],
+            row["identity"]["local_rank"],
+            row["identity"]["node_rank"],
+        )
+        for global_rank, row in step_rows.items()
+    } == {
+        0: (0, 0, 0),
+        1: (1, 1, 0),
+        2: (2, 0, 1),
+        3: (3, 1, 1),
+    }
+    assert payload["step_time"]["metadata"]["global_ranks_seen"] == 4
+    assert set(payload["system"]["groups"]["rows"]) == {"0", "1"}
+    assert payload["system"]["metadata"]["nodes_observed"] == 2
     assert payload["run_context"] == {
         "run": {"status": "completed", "profile": "run"},
         "declaration": manifest["guard"]["contract"],
         "execution": {
             "expected_nodes": 2,
-            "processes_per_node": 1,
-            "expected_world_size": 2,
+            "processes_per_node": 2,
+            "expected_world_size": 4,
             "launcher_completion": {
                 "status": "completed",
                 "nodes_observed": 2,
