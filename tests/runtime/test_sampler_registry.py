@@ -1,3 +1,5 @@
+import threading
+
 from traceml_ai.core import Registry
 from traceml_ai.runtime.runtime import TraceMLRuntime
 from traceml_ai.runtime.sampler_registry import (
@@ -6,6 +8,7 @@ from traceml_ai.runtime.sampler_registry import (
     build_samplers,
     select_sampler_specs,
 )
+from traceml_ai.runtime.settings import TraceMLSettings
 from traceml_ai.runtime.state import (
     TraceMLRecordingStatus,
     configure_trace_recording,
@@ -294,6 +297,40 @@ def test_runtime_recording_drain_waits_for_pending_timing_data() -> None:
     assert (
         get_trace_recording_state().status == TraceMLRecordingStatus.COMPLETE
     )
+
+    configure_trace_recording()
+
+
+class _ClearsOnSecondSampleSampler(_PendingDrainSampler):
+    def sample(self) -> None:
+        super().sample()
+        if self.sample_idx >= 2:
+            self.pending = False
+
+
+def _stopped_runtime(samplers, interval_sec: float) -> TraceMLRuntime:
+    runtime = TraceMLRuntime.__new__(TraceMLRuntime)
+    runtime._samplers = samplers
+    runtime._publisher = _FakePublisher()
+    runtime._logger = _FakeLogger()
+    runtime._settings = TraceMLSettings(sampler_interval_sec=interval_sec)
+    runtime._stop_event = threading.Event()
+    runtime._stop_event.set()
+    return runtime
+
+
+def test_normal_stop_ticks_pending_drain_sampler_once() -> None:
+    drain = _ClearsOnSecondSampleSampler()
+    runtime = _stopped_runtime([drain], interval_sec=0.05)
+
+    configure_trace_recording()
+    assert (
+        get_trace_recording_state().status == TraceMLRecordingStatus.RECORDING
+    )
+    runtime._sampler_loop()
+
+    assert drain.sample_idx == 1
+    assert drain.has_pending_recording_data()
 
     configure_trace_recording()
 
