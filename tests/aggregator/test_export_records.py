@@ -299,6 +299,35 @@ def test_raising_writer_counts_once_and_loses_its_envelope(monkeypatch):
     assert batch.skipped == 1
 
 
+@pytest.mark.parametrize(
+    "cpu, cpu_percent",
+    [({"cpu": 0.0}, 0.0), ({}, None)],
+    ids=["measured_zero", "missing"],
+)
+def test_system_cpu_keeps_zero_and_missing(cpu, cpu_percent):
+    payload = _payload(
+        "SystemSampler",
+        "SystemTable",
+        {"seq": 1, "timestamp_unix_ns": TS, **cpu},
+    )
+
+    (record,) = [
+        r
+        for r in records_from_payload(payload).records
+        if type(r) is SystemRecord
+    ]
+    assert record.cpu_percent == cpu_percent
+
+
+def test_step_memory_keeps_measured_zero():
+    row = dict(CASES[1][4], peak_alloc=0.0)
+    payload = _payload("StepMemorySampler", "step_memory", row)
+
+    (record,) = records_from_payload(payload).records
+
+    assert record.peak_alloc_bytes == 0.0
+
+
 def test_list_batch_yields_records_for_every_envelope():
     batch = records_from_payload(
         [_payload(*case[2:5]) for case in CASES] + ["not an envelope"]
