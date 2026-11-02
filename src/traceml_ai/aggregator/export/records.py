@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-Typed export records, one per SQLite table the aggregator writes.
+Typed export records, one per projection table the aggregator writes.
 
 A record is the table's row with names: its fields are the table's columns
 in DDL order, minus the autoincrement ``id``. Records are built by the same
