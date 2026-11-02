@@ -51,13 +51,18 @@ class SamplerSpec:
         profile: str,
         mode: str,
         local_rank: int,
+        world_size: int = 1,
     ) -> bool:
         """Return True when this sampler should run for the rank context."""
         if self.profiles is not None and profile not in self.profiles:
             return False
         if self.modes is not None and mode not in self.modes:
             return False
-        if self.node_leader_only and int(local_rank) != 0:
+        if (
+            self.node_leader_only
+            and int(world_size) > 1
+            and int(local_rank) != 0
+        ):
             return False
         return True
 
@@ -113,6 +118,7 @@ def select_sampler_specs(
     profile: str,
     mode: str,
     local_rank: int,
+    world_size: int = 1,
     registry: Registry[SamplerSpec] = DEFAULT_SAMPLER_REGISTRY,
 ) -> tuple[SamplerSpec, ...]:
     """Select sampler specs without instantiating sampler classes."""
@@ -125,6 +131,7 @@ def select_sampler_specs(
             profile=normalized_profile,
             mode=normalized_mode,
             local_rank=int(local_rank),
+            world_size=int(world_size),
         )
     )
 
@@ -134,6 +141,7 @@ def build_samplers(
     profile: str,
     mode: str,
     local_rank: int,
+    world_size: int = 1,
     registry: Registry[SamplerSpec] = DEFAULT_SAMPLER_REGISTRY,
     logger=None,
 ) -> list[BaseSampler]:
@@ -144,6 +152,7 @@ def build_samplers(
         profile=profile,
         mode=mode,
         local_rank=local_rank,
+        world_size=world_size,
         registry=registry,
     ):
         try:

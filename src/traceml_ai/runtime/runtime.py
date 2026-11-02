@@ -119,6 +119,7 @@ class TraceMLRuntime:
             profile=self.profile,
             mode=self.mode,
             local_rank=self.local_rank,
+            world_size=self.world_size,
             logger=self._logger,
         )
 

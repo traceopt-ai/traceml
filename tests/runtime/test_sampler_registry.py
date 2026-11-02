@@ -64,6 +64,7 @@ def _selected_keys(
     profile: str,
     mode: str,
     local_rank: int = 0,
+    world_size: int = 1,
 ) -> tuple[str, ...]:
     return tuple(
         spec.key
@@ -71,6 +72,7 @@ def _selected_keys(
             profile=profile,
             mode=mode,
             local_rank=local_rank,
+            world_size=world_size,
         )
     )
 
@@ -110,17 +112,21 @@ def test_default_registry_has_no_deep_or_layer_samplers() -> None:
     assert not any(key.startswith("layer_") for key in all_keys)
 
 
-def test_nonzero_local_rank_skips_node_leader_system_sampler() -> None:
-    assert _selected_keys(
-        profile="run",
-        mode="cli",
-        local_rank=1,
-    ) == (
-        "runtime_environment",
-        "process",
-        "step_time",
-        "step_memory",
-    )
+def test_nonzero_local_rank_skips_system_only_when_distributed() -> None:
+    for world_size, system_enabled in ((1, True), (4, False)):
+        selected = _selected_keys(
+            profile="run",
+            mode="cli",
+            local_rank=1,
+            world_size=world_size,
+        )
+        assert ("system" in selected) is system_enabled
+        assert tuple(key for key in selected if key != "system") == (
+            "runtime_environment",
+            "process",
+            "step_time",
+            "step_memory",
+        )
 
 
 def test_local_rank_zero_keeps_node_leader_system_sampler() -> None:
