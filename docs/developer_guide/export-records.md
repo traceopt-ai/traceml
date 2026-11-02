@@ -1,12 +1,12 @@
 # Export Records
 
 This page is the contract for TraceML's structured export records.
-An export record is one row of a table the aggregator writes to SQLite, given names and types.
+An export record is one row of a projection table the aggregator writes to SQLite, given names and types.
 The records live in `traceml_ai.aggregator.export`.
 
 ## What a record is
 
-Each SQLite table the aggregator writes has one frozen dataclass.
+Each projection table the aggregator writes to SQLite has one frozen dataclass.
 Its fields are the table's columns in table order, minus the autoincrement `id`.
 The record is built by the same projection code that builds the SQLite row, so the two cannot disagree about a value.
 
@@ -26,9 +26,21 @@ A missing value is `None`, never `0`.
 `StepTimeRecord` is the one record that differs from its row.
 It carries the decoded `events` map in place of the `events_json` text.
 
-`records_from_payload(payload)` takes one admitted telemetry payload, a dict or a list of dicts, and returns a `RecordBatch` of `records` and `skipped`.
-`skipped` counts inputs that could not be read: an item that is not a telemetry envelope, a projection that raised, or a row that does not fit its record.
-It never raises.
+`records_from_payload(payload, *, observed_timestamp_unix_ns=None)` takes one admitted telemetry payload, a dict or a list of dicts.
+It returns a `RecordBatch` of `records` and `skipped`, and it never raises.
+When `observed_timestamp_unix_ns` is given, every envelope in the payload gets that value.
+Otherwise each envelope is stamped with `time.time_ns()` when its records are built.
+
+`skipped` counts three kinds of unit, not rows.
+
+- An item that does not normalise to a telemetry envelope counts once.
+  So does an item that fails in any other way.
+- A projection that raises counts once.
+  That envelope loses all of its rows for the tables that projection writes, however many there would have been.
+- A row that does not fit its record counts once.
+
+A table that a projection writes but that has no record is skipped, and each of its rows counts once.
+No projection table lacks a record today, and a test keeps it that way.
 
 ## Common fields
 
@@ -36,7 +48,7 @@ Most records start with the same identity and time fields.
 
 | Field | Type | Unit | `None` means |
 |---|---|---|---|
-| `observed_timestamp_unix_ns` | int | ns since Unix epoch | never `None`; time the aggregator received the payload |
+| `observed_timestamp_unix_ns` | int | ns since Unix epoch | never `None`; when the record was built, once per envelope |
 | `rank` | int | | legacy alias of `global_rank`, same value |
 | `global_rank` | int | | the rank sent no usable global rank |
 | `local_rank` | int | | the rank sent no local rank |
@@ -48,7 +60,9 @@ Most records start with the same identity and time fields.
 | `seq` | int | | the row had no sample counter |
 
 `timestamp_unix_ns` is when the rank measured the row.
-`observed_timestamp_unix_ns` is when the aggregator received it.
+`observed_timestamp_unix_ns` is stamped when the record is built, once per envelope.
+The SQLite writer stamps its rows the same way.
+The two stamps are taken separately, so the export value and the SQLite value for one row differ by the drain latency.
 `seq` is the sampler's tick counter on that rank, so it can repeat within a rank.
 
 ## Ordering and duplicates
@@ -215,5 +229,5 @@ def forward_cpu_ms(payload):
     for record in records_from_payload(payload).records:
         if isinstance(record, StepTimeRecord):
             for stats in record.events.get(FORWARD, {}).values():
-                yield record.global_rank, record.step, stats["cpu_ms"]
+                yield record.global_rank, record.step, stats.get("cpu_ms")
 ```
