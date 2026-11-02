@@ -24,10 +24,18 @@ import time
 from dataclasses import dataclass
 from typing import Any, ClassVar, Dict, List, NamedTuple, Optional, Tuple
 
+from traceml_ai.aggregator.sqlite_writers import process as process_writer
+from traceml_ai.aggregator.sqlite_writers import (
+    runtime_environment as runtime_environment_writer,
+)
+from traceml_ai.aggregator.sqlite_writers import (
+    stdout_stderr as stdout_stderr_writer,
+)
 from traceml_ai.aggregator.sqlite_writers import (
     step_memory as step_memory_writer,
 )
 from traceml_ai.aggregator.sqlite_writers import step_time as step_time_writer
+from traceml_ai.aggregator.sqlite_writers import system as system_writer
 from traceml_ai.telemetry.envelope import normalize_telemetry_envelope
 
 SCHEMA_VERSION = 1
@@ -129,17 +137,127 @@ class StepMemoryRecord(_Record):
     peak_reserved_bytes: Optional[float]
 
 
+@_record("system", "system_samples")
+class SystemRecord(_Record):
+    """One host-level system snapshot."""
+
+    observed_timestamp_unix_ns: int
+    global_rank: Optional[int]
+    local_rank: Optional[int]
+    world_size: Optional[int]
+    local_world_size: Optional[int]
+    node_rank: Optional[int]
+    hostname: Optional[str]
+    timestamp_unix_ns: Optional[int]
+    seq: Optional[int]
+    cpu_percent: Optional[float]
+    ram_used_bytes: Optional[float]
+    ram_total_bytes: Optional[float]
+    gpu_available: Optional[int]
+    gpu_count: Optional[int]
+
+
+@_record("system_gpu", "system_gpu_samples")
+class SystemGpuRecord(_Record):
+    """One GPU within a system snapshot."""
+
+    observed_timestamp_unix_ns: int
+    global_rank: Optional[int]
+    local_rank: Optional[int]
+    world_size: Optional[int]
+    local_world_size: Optional[int]
+    node_rank: Optional[int]
+    hostname: Optional[str]
+    timestamp_unix_ns: Optional[int]
+    seq: Optional[int]
+    gpu_idx: int
+    util: Optional[float]
+    mem_used_bytes: Optional[float]
+    mem_total_bytes: Optional[float]
+    temperature_c: Optional[float]
+    power_usage_w: Optional[float]
+    power_limit_w: Optional[float]
+
+
+@_record("process", "process_samples")
+class ProcessRecord(_Record):
+    """One training-process snapshot for one rank."""
+
+    observed_timestamp_unix_ns: int
+    rank: Optional[int]
+    global_rank: Optional[int]
+    local_rank: Optional[int]
+    world_size: Optional[int]
+    local_world_size: Optional[int]
+    node_rank: Optional[int]
+    hostname: Optional[str]
+    timestamp_unix_ns: Optional[int]
+    seq: Optional[int]
+    cpu_percent: Optional[float]
+    cpu_logical_core_count: Optional[int]
+    ram_used_bytes: Optional[float]
+    ram_total_bytes: Optional[float]
+    gpu_available: Optional[int]
+    gpu_count: Optional[int]
+    gpu_device_index: Optional[int]
+    gpu_mem_used_bytes: Optional[float]
+    gpu_mem_reserved_bytes: Optional[float]
+    gpu_mem_total_bytes: Optional[float]
+
+
+@_record("runtime_environment", "runtime_environment")
+class RuntimeEnvironmentRecord(_Record):
+    """One rank's runtime and distributed-training environment."""
+
+    observed_timestamp_unix_ns: int
+    rank: Optional[int]
+    global_rank: Optional[int]
+    local_rank: Optional[int]
+    world_size: Optional[int]
+    local_world_size: Optional[int]
+    node_rank: Optional[int]
+    hostname: Optional[str]
+    pid: Optional[int]
+    timestamp_unix_ns: Optional[int]
+    seq: Optional[int]
+    topology: Optional[str]
+    distributed_initialized: Optional[int]
+    distributed_backend: Optional[str]
+    training_strategy: Optional[str]
+    strategy_source: Optional[str]
+    strategy_confidence: Optional[str]
+
+
+@_record("stdout_stderr", "stdout_stderr_samples")
+class StdoutStderrRecord(_Record):
+    """One captured stdout or stderr line."""
+
+    observed_timestamp_unix_ns: int
+    rank: Optional[int]
+    timestamp_unix_ns: Optional[int]
+    line: str
+
+
 RECORD_TYPES = (
     StepTimeRecord,
     StepMemoryRecord,
+    SystemRecord,
+    SystemGpuRecord,
+    ProcessRecord,
+    RuntimeEnvironmentRecord,
+    StdoutStderrRecord,
 )
 
 _RECORD_BY_TABLE = {cls.TABLE: cls for cls in RECORD_TYPES}
 
-# The step writers from the SQLite writer's projection list.
+# Same writers as the SQLite writer's projection list.
 _WRITERS = (
+    runtime_environment_writer,
+    system_writer,
+    process_writer,
     step_time_writer,
     step_memory_writer,
+    stdout_stderr_writer,
 )
 
 

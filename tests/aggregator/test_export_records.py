@@ -18,13 +18,22 @@ from traceml_ai.aggregator import sqlite_writer
 from traceml_ai.aggregator.export import records as export_records
 from traceml_ai.aggregator.export.records import (
     RECORD_TYPES,
+    ProcessRecord,
+    RuntimeEnvironmentRecord,
+    StdoutStderrRecord,
     StepMemoryRecord,
     StepTimeRecord,
+    SystemGpuRecord,
+    SystemRecord,
     records_from_payload,
 )
 from traceml_ai.aggregator.sqlite_writers import (
+    process,
+    runtime_environment,
+    stdout_stderr,
     step_memory,
     step_time,
+    system,
 )
 from traceml_ai.runtime.sender import SenderIdentity
 from traceml_ai.telemetry.envelope import (
@@ -46,6 +55,7 @@ EVENTS = {
         }
     }
 }
+GPU = [50.0, 1.0e9, 8.0e9, 60.0, 100.0, 300.0]
 
 IDENTITY = {
     "rank": 3,
@@ -79,6 +89,79 @@ CASES = [
             "peak_alloc": 1024.0,
             "peak_resv": 2048.0,
         },
+        1,
+    ),
+    (
+        SystemRecord,
+        system,
+        "SystemSampler",
+        "SystemTable",
+        {
+            "seq": 1,
+            "timestamp_unix_ns": TS,
+            "cpu": 12.5,
+            "ram_used": 1.0e9,
+            "ram_total": 2.0e9,
+            "gpu_available": True,
+            "gpu_count": 2,
+            "gpus": [GPU, GPU],
+        },
+        1,
+    ),
+    (
+        SystemGpuRecord,
+        system,
+        "SystemSampler",
+        "SystemTable",
+        {"seq": 1, "timestamp_unix_ns": TS, "gpus": [GPU, GPU]},
+        2,
+    ),
+    (
+        ProcessRecord,
+        process,
+        "ProcessSampler",
+        "ProcessTable",
+        {
+            "seq": 1,
+            "timestamp_unix_ns": TS,
+            "cpu": 150.0,
+            "cpu_cores": 8,
+            "ram_used": 1.0e9,
+            "ram_total": 2.0e9,
+            "gpu_available": True,
+            "gpu_count": 1,
+            "gpu": {
+                "device": 0,
+                "mem_used": 1.0,
+                "mem_reserved": 2.0,
+                "mem_total": 3.0,
+            },
+        },
+        1,
+    ),
+    (
+        RuntimeEnvironmentRecord,
+        runtime_environment,
+        "RuntimeEnvironmentSampler",
+        "RuntimeEnvironmentTable",
+        {
+            "seq": 1,
+            "timestamp_unix_ns": TS,
+            "topology": "single_node",
+            "distributed_initialized": True,
+            "distributed_backend": "nccl",
+            "training_strategy": "ddp",
+            "strategy_source": "torch",
+            "strategy_confidence": "high",
+        },
+        1,
+    ),
+    (
+        StdoutStderrRecord,
+        stdout_stderr,
+        "Stdout/Stderr",
+        "stdout_stderr",
+        {"timestamp_unix_ns": TS, "line": "loss=1.0"},
         1,
     ),
 ]
@@ -235,8 +318,8 @@ def test_unknown_sampler_yields_nothing():
     assert batch.skipped == 0
 
 
-def test_writers_are_sqlite_projection_writers():
-    assert set(export_records._WRITERS) <= set(
+def test_writers_match_the_sqlite_projection_writers():
+    assert set(export_records._WRITERS) == set(
         sqlite_writer._PROJECTION_WRITERS
     )
     tables = set()
