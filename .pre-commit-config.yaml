@@ -35,7 +35,7 @@ repos:
         files: ^(src/|dev/|docs/)
 
   - repo: https://github.com/psf/black
-    rev: 26.5.1
+    rev: 26.10.1
     hooks:
       - id: black-jupyter
 
