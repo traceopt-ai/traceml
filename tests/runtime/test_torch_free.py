@@ -105,7 +105,7 @@ def test_watch_profile_does_not_import_torch_backed_samplers():
         "import sys; "
         "import traceml_ai.runtime.sampler_registry as reg; "
         "specs = reg.select_sampler_specs("
-        "profile='watch', mode='summary', is_ddp=False, local_rank=0); "
+        "profile='watch', mode='summary', local_rank=0); "
         "assert 'traceml_ai.utils.timing' not in sys.modules, "
         "'watch imported the timing module'; "
         "print('KEYS', sorted(s.key for s in specs))"

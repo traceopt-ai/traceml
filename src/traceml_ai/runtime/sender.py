@@ -22,7 +22,7 @@ class SenderIdentity:
     """
     Runtime identity attached to outbound sampler payloads.
 
-    ``global_rank`` is the stable cross-job worker identity used by storage and
+    ``global_rank`` is the run-scoped process identity used by storage and
     aggregation. ``local_rank`` and ``local_world_size`` describe node-local
     placement, which is useful for device mapping and multi-node debugging.
 
@@ -44,15 +44,9 @@ class SenderIdentity:
     run_nonce: str = ""
     session_source: str = ""
 
-    @property
-    def rank(self) -> int:
-        """Compatibility rank used by existing aggregator/storage code."""
-        return self.global_rank
-
     def to_payload_fields(self) -> Dict[str, Any]:
         """Return flat identity fields for the current transport envelope."""
         return {
-            "rank": self.rank,
             "global_rank": self.global_rank,
             "local_rank": self.local_rank,
             "world_size": self.world_size,

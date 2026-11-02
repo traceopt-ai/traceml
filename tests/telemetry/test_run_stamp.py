@@ -32,6 +32,8 @@ def test_identity_emits_stamp_fields():
 
     fields = identity.to_payload_fields()
 
+    assert "rank" not in fields
+    assert fields["global_rank"] == 1
     assert fields["session_id"] == "run-a"
     assert fields["run_nonce"] == "n1"
 
@@ -59,8 +61,9 @@ def test_envelope_meta_carries_stamp():
 
 
 def test_meta_from_old_rank_has_no_stamp():
-    meta = TelemetryMeta.from_mapping({"global_rank": 0, "sampler": "X"})
+    meta = TelemetryMeta.from_mapping({"rank": 4, "sampler": "X"})
 
+    assert meta.global_rank == 4
     assert meta.session_id is None
     assert meta.run_nonce is None
 

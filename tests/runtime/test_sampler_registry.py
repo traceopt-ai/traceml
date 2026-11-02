@@ -1,11 +1,11 @@
 from traceml_ai.core import Registry
+from traceml_ai.runtime.runtime import TraceMLRuntime
 from traceml_ai.runtime.sampler_registry import (
     DEFAULT_SAMPLER_REGISTRY,
     SamplerSpec,
     build_samplers,
     select_sampler_specs,
 )
-from traceml_ai.runtime.runtime import TraceMLRuntime
 from traceml_ai.runtime.state import (
     TraceMLRecordingStatus,
     configure_trace_recording,
@@ -63,7 +63,6 @@ def _selected_keys(
     *,
     profile: str,
     mode: str,
-    is_ddp: bool = False,
     local_rank: int = 0,
 ) -> tuple[str, ...]:
     return tuple(
@@ -71,7 +70,6 @@ def _selected_keys(
         for spec in select_sampler_specs(
             profile=profile,
             mode=mode,
-            is_ddp=is_ddp,
             local_rank=local_rank,
         )
     )
@@ -112,11 +110,10 @@ def test_default_registry_has_no_deep_or_layer_samplers() -> None:
     assert not any(key.startswith("layer_") for key in all_keys)
 
 
-def test_ddp_nonzero_rank_skips_rank_zero_only_system_sampler() -> None:
+def test_nonzero_local_rank_skips_node_leader_system_sampler() -> None:
     assert _selected_keys(
         profile="run",
         mode="cli",
-        is_ddp=True,
         local_rank=1,
     ) == (
         "runtime_environment",
@@ -126,11 +123,10 @@ def test_ddp_nonzero_rank_skips_rank_zero_only_system_sampler() -> None:
     )
 
 
-def test_ddp_rank_zero_keeps_rank_zero_only_system_sampler() -> None:
+def test_local_rank_zero_keeps_node_leader_system_sampler() -> None:
     assert _selected_keys(
         profile="run",
         mode="cli",
-        is_ddp=True,
         local_rank=0,
     ) == (
         "system",
@@ -187,7 +183,6 @@ def test_custom_registry_filters_by_profile_mode_and_preserves_order() -> None:
     selected = select_sampler_specs(
         profile="run",
         mode="dashboard",
-        is_ddp=False,
         local_rank=0,
         registry=registry,
     )
@@ -214,7 +209,6 @@ def test_build_samplers_logs_and_skips_constructor_failures() -> None:
     samplers = build_samplers(
         profile="run",
         mode="cli",
-        is_ddp=False,
         local_rank=0,
         registry=registry,
         logger=logger,
@@ -232,7 +226,6 @@ def test_queue_backed_samplers_are_marked_for_final_recording_drain() -> None:
         for spec in select_sampler_specs(
             profile="run",
             mode="summary",
-            is_ddp=False,
             local_rank=0,
         )
     }
@@ -376,7 +369,6 @@ def test_build_samplers_continues_after_constructor_failure() -> None:
     samplers = build_samplers(
         profile="run",
         mode="cli",
-        is_ddp=False,
         local_rank=0,
         registry=registry,
         logger=logger,

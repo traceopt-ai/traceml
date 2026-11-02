@@ -41,13 +41,13 @@ class StdoutStderrSampler(BaseSampler):
         self.max_cache_lines = max_cache_lines
         self._ctx = resolve_runtime_context()
 
-        if self._ctx.local_rank != 0:
+        if self._ctx.identity.local_rank != 0:
             self.sender = None
 
         logs_dir = ensure_session_dir(
             logs_dir=self._ctx.logs_dir,
             session_id=self._ctx.session_id,
-            rank=self._ctx.global_rank,
+            global_rank=self._ctx.identity.global_rank,
         )
         self.log_path = Path(logs_dir) / log_filename
         self.log_path.write_text(
@@ -69,7 +69,7 @@ class StdoutStderrSampler(BaseSampler):
         if not lines:
             return
 
-        if self._ctx.local_rank == 0:
+        if self._ctx.identity.local_rank == 0:
             for line in lines:
                 self._add_record(
                     {

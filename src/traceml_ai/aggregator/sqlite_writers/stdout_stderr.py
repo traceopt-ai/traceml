@@ -106,7 +106,9 @@ def build_rows(
     if not accepts_sampler(sampler):
         return out
 
-    rank = envelope.meta.rank
+    # The table keeps its legacy column name, but the value is canonical global
+    # rank after envelope normalization.
+    rank = envelope.meta.global_rank
 
     tables = envelope.tables
     if not isinstance(tables, dict):

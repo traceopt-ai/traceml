@@ -62,7 +62,6 @@ class TraceMLRuntime:
         # telemetry rank. Sampler selection still needs local rank, while
         # outbound payloads must identify the worker by global rank.
         self.identity = resolve_runtime_identity()
-        self.is_ddp = self.identity.is_distributed
         self.local_rank = self.identity.local_rank
         self.global_rank = self.identity.global_rank
         self.world_size = self.identity.world_size
@@ -107,7 +106,7 @@ class TraceMLRuntime:
         # Sampler thread (per-rank)
         self._sampler_thread = threading.Thread(
             target=self._sampler_loop,
-            name=f"TraceMLSampler(rank={self.local_rank})",
+            name=f"TraceMLSampler(local_rank={self.local_rank})",
             daemon=True,
         )
 
@@ -119,7 +118,6 @@ class TraceMLRuntime:
         return build_samplers(
             profile=self.profile,
             mode=self.mode,
-            is_ddp=self.is_ddp,
             local_rank=self.local_rank,
             logger=self._logger,
         )

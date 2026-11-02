@@ -63,7 +63,7 @@ def _optional_str(value: Any) -> Optional[str]:
 class StepMemoryPayloadIdentity:
     """Distributed identity stored with projected step-memory telemetry."""
 
-    rank: Optional[int]
+    legacy_rank: Optional[int]
     global_rank: Optional[int]
     local_rank: Optional[int]
     world_size: Optional[int]
@@ -75,11 +75,9 @@ class StepMemoryPayloadIdentity:
 def _payload_identity(meta: TelemetryMeta) -> StepMemoryPayloadIdentity:
     """Return storage identity for one StepMemorySampler payload."""
     global_rank = _optional_int(meta.global_rank)
-    legacy_rank = _optional_int(meta.rank)
-    rank = global_rank if global_rank is not None else legacy_rank
 
     return StepMemoryPayloadIdentity(
-        rank=rank,
+        legacy_rank=global_rank,
         global_rank=global_rank,
         local_rank=_optional_int(meta.local_rank),
         world_size=_optional_int(meta.world_size),
@@ -250,7 +248,7 @@ def build_rows(
             out["step_memory_samples"].append(
                 (
                     observed_timestamp_unix_ns,
-                    identity.rank,
+                    identity.legacy_rank,
                     identity.global_rank,
                     identity.local_rank,
                     identity.world_size,

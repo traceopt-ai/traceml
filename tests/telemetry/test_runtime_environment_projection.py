@@ -13,7 +13,6 @@ def _runtime_environment_payload(
 ) -> dict:
     return {
         "rank": 5,
-        "global_rank": 5,
         "local_rank": 1,
         "world_size": 8,
         "local_world_size": 4,
