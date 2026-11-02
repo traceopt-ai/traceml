@@ -146,6 +146,36 @@ def test_step_time_sampler_aggregates_repeated_event_clocks() -> None:
     assert stats["n_calls"] == 2
 
 
+def test_step_time_sampler_mixed_clock_calls_share_one_device_entry() -> None:
+    payload = _payload_for(
+        TimeEvent(
+            name="_test_mixed",
+            device="cuda:0",
+            cpu_start=1.0,
+            cpu_end=1.002,
+            gpu_time_ms=5.0,
+            resolved=True,
+        ),
+        TimeEvent(
+            name="_test_mixed",
+            device="cuda:0",
+            cpu_start=2.0,
+            cpu_end=2.003,
+            gpu_time_ms=None,
+            resolved=True,
+        ),
+    )
+
+    stats = payload["_test_mixed"]["cuda:0"]
+
+    # Today the CPU-only call's entry replaces the GPU-timed call's entry.
+    assert stats["is_gpu"] is False
+    assert stats["duration_ms"] == pytest.approx(3.0)
+    assert stats["cpu_ms"] == pytest.approx(3.0)
+    assert stats["gpu_ms"] is None
+    assert stats["n_calls"] == 1
+
+
 def test_sampler_sums_segmented_step_time_and_h2d_once() -> None:
     """Pre-step H2D segments combine with, but do not duplicate, step time."""
     payload = _payload_for(
