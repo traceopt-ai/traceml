@@ -131,6 +131,29 @@ streams are pipes, so `isatty()` is false. TraceML does not replace Python's
 See [Training Crashes](training-crashes.md) for artifact paths and failure
 behavior.
 
+### Raw sampler logs
+
+`--enable-logging` enables best-effort raw logs from the sampler writers in
+each training rank. Each sampler appends length-prefixed MessagePack records
+to `rank_<N>/data/<Sampler>/<Table>.msgpack` inside a generated session folder
+under the logs directory. Writers flush periodically, so short runs may
+produce no file, final records may be absent, and the generated folder may
+differ from the run's session folder. These limitations are tracked in
+[#580](https://github.com/traceopt-ai/traceml/issues/580). The same setting
+comes from `enable_logging: true` in `traceml.yaml` or
+`TRACEML_ENABLE_LOGGING=1`; when it is off, no `.msgpack` files are written.
+
+The training processes write these files, so with `traceml serve` the flag
+does not reach them. Set `TRACEML_ENABLE_LOGGING=1` in the training
+environment or pass `enable_logging=True` to `traceml.init()` instead.
+
+`traceml inspect <file>` prints each record as JSON. If the file ends in a
+cut-off frame, for example because the process was killed while writing, it
+prints the complete records first and then exits with status 1. A file that
+is still being written can end mid-frame too, so inspect it after the run
+finishes. A file that ends exactly between two records reads as complete, so
+a run killed between writes still exits 0.
+
 ### History and configuration
 
 `run`, `watch`, and `serve` accept `--history-retention DURATION`. The default
@@ -199,7 +222,7 @@ node-0 endpoint. Configure the expected world size to match your workers.
 | `--run-name` / `--session-id` | Shared run identity; choose a fresh name. |
 | `--history-retention` | History duration; default `30m`. |
 | `--interval` | Aggregator render interval in seconds. |
-| `--enable-logging` | Enable TraceML logging output. |
+| `--enable-logging` | Does not reach the training processes; see [Raw sampler logs](#raw-sampler-logs). |
 
 `serve` is the low-level entry point, so it has no flags for launching or
 wrapping training. Settings that belong to the aggregator still work through

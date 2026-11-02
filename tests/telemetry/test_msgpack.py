@@ -176,3 +176,66 @@ class TestCliInspect:
         assert len(full_docs) == 2
         assert full_docs[0]["step"] == 1
         assert full_docs[1]["step"] == 2
+
+    @pytest.mark.parametrize(
+        ("tail", "message"),
+        [
+            # A header that claims 100 bytes, followed by 5.
+            (struct.pack("!I", 100) + b"\x00" * 5, "truncated frame payload"),
+            # Two bytes of a four-byte header.
+            (b"\x00\x01", "truncated frame header"),
+        ],
+    )
+    def test_inspect_exits_nonzero_on_a_truncated_frame(
+        self, tmp_path, capsys, tail, message
+    ):
+        """Complete records still print; the cut-off frame fails the run."""
+        from traceml_ai.launcher.commands import run_inspect
+
+        path = tmp_path / "data.msgpack"
+        write_framed_records(path, [{"step": 1}, {"step": 2}])
+        with open(path, "ab") as f:
+            f.write(tail)
+
+        args = MagicMock()
+        args.file = str(path)
+
+        with pytest.raises(SystemExit) as exit_info:
+            run_inspect(args)
+
+        captured = capsys.readouterr()
+        assert exit_info.value.code == 1
+        assert '"step": 2' in captured.out
+        assert f"{message} after 2 records" in captured.err
+
+    def test_inspect_exits_nonzero_when_the_first_frame_is_cut(
+        self, tmp_path, capsys
+    ):
+        from traceml_ai.launcher.commands import run_inspect
+
+        path = tmp_path / "data.msgpack"
+        path.write_bytes(b"\x00\x01")
+        args = MagicMock()
+        args.file = str(path)
+
+        with pytest.raises(SystemExit) as exit_info:
+            run_inspect(args)
+
+        assert exit_info.value.code == 1
+        assert "truncated frame header after 0 records" in (
+            capsys.readouterr().err
+        )
+
+    def test_inspect_accepts_an_empty_file(self, tmp_path, capsys):
+        from traceml_ai.launcher.commands import run_inspect
+
+        path = tmp_path / "data.msgpack"
+        path.write_bytes(b"")
+        args = MagicMock()
+        args.file = str(path)
+
+        run_inspect(args)
+
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err == ""
