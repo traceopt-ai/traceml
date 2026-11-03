@@ -98,7 +98,6 @@ class ExportWorker:
         self._deadline: Optional[float] = None
         self._opened = False
         self._closed = False
-        self._thread_done = False
 
         self._written = 0
         self._dropped = 0
@@ -241,8 +240,6 @@ class ExportWorker:
             self._log_error(f"[TraceML] export worker loop failed: {exc!r}")
         finally:
             self._close_exporter()
-            with self._lock:
-                self._thread_done = True
 
     def _before_deadline(self) -> bool:
         """True while the stop deadline has not passed."""
