@@ -75,6 +75,7 @@ def _make_aggregator(
     agg._drain_lock = threading.Lock()
     agg._tcp_server = tcp_server
     agg._sqlite_writer = writer
+    agg._export_worker = None
     return agg
 
 

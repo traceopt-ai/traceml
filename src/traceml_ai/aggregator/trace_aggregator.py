@@ -17,6 +17,12 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 from traceml_ai.aggregator.display_drivers.base import BaseDisplayDriver
 from traceml_ai.aggregator.display_drivers.cli import CLIDisplayDriver
 from traceml_ai.aggregator.display_drivers.summary import SummaryDisplayDriver
+from traceml_ai.aggregator.export import (
+    Exporter,
+    ExportStats,
+    ExportWorker,
+    JsonExporter,
+)
 from traceml_ai.aggregator.sqlite_writer import (
     SQLiteWriterConfig,
     SQLiteWriterSimple,
@@ -44,6 +50,10 @@ _SQLITE_FINALIZE_BUDGET_FRACTION = 0.25
 _SQLITE_FINALIZE_BUDGET_MIN_SEC = 5.0
 _SQLITE_FINALIZE_BUDGET_MAX_SEC = 60.0
 _SQLITE_FINALIZE_TINY_FLOOR_SEC = 0.001
+_EXPORT_INTERVAL_SEC = 1.0
+_EXPORT_STOP_BUDGET_FRACTION = 0.1
+_EXPORT_STOP_BUDGET_MIN_SEC = 0.5
+_EXPORT_STOP_BUDGET_MAX_SEC = 2.0
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -93,6 +103,26 @@ def _resolve_display_driver(mode: str) -> Type[BaseDisplayDriver]:
             f"[TraceML] Unknown display mode: {mode!r}. Supported: {supported}"
         )
     return driver_cls
+
+
+_EXPORTERS = ("jsonl",)
+
+
+def _resolve_exporter(
+    settings: TraceMLSettings, session_root: Path
+) -> Optional[Exporter]:
+    """Return the export sink ``settings.exporter`` names, or None if off."""
+    name = str(settings.exporter or "")
+    if not name:
+        return None
+    if name == "jsonl":
+        return JsonExporter(
+            session_root / "aggregator" / "export",
+            include_hostname=bool(settings.exporter_hostname),
+        )
+    raise ValueError(
+        f"[TraceML] Unknown exporter: {name!r}. Supported: {list(_EXPORTERS)}"
+    )
 
 
 class TraceMLAggregator:
@@ -145,6 +175,17 @@ class TraceMLAggregator:
             settings.session_id or "default"
         )
 
+        # Optional structured export of admitted telemetry. An unknown name
+        # raises here, at aggregator startup, never mid-run.
+        self._export_worker: Optional[ExportWorker] = None
+        export_sink = _resolve_exporter(settings, session_root)
+        if export_sink is not None:
+            self._export_worker = ExportWorker(
+                export_sink,
+                interval_sec=_EXPORT_INTERVAL_SEC,
+                logger=self._logger,
+            )
+
         self._summary_service = FinalSummaryService(
             logger=self._logger,
             session_root=session_root,
@@ -177,7 +218,7 @@ class TraceMLAggregator:
 
         Start order matters:
         1. TCP server must start first so workers can connect.
-        2. SQLite writer starts before ingestion begins.
+        2. SQLite writer and export worker start before ingestion begins.
         3. Display driver starts before periodic ticks.
         4. Aggregator loop thread starts last.
 
@@ -186,6 +227,8 @@ class TraceMLAggregator:
         """
         self._tcp_server.start()
         self._sqlite_writer.start()
+        if self._export_worker is not None:
+            self._export_worker.start()
         self._display_driver.start()
 
         self._thread.start()
@@ -208,7 +251,10 @@ class TraceMLAggregator:
         -----
         End-of-run finalization keeps the TCP server open briefly so late
         multi-node telemetry can arrive, closes SQLite before summary generation,
-        and treats a missing summary as an error in summary mode.
+        and treats a missing summary as an error in summary mode. The export
+        worker, when configured, gets its own slice of the timeout after the
+        TCP server stops and before SQLite closes; export losses are reported
+        as a warning and never fail the run.
         """
         deadline = time.monotonic() + max(0.0, float(timeout_sec))
         session_root = Path(str(self._settings.logs_dir)).resolve() / str(
@@ -220,6 +266,7 @@ class TraceMLAggregator:
 
         warning_payload: Optional[dict[str, Any]] = None
         finalize_payload: Optional[dict[str, Any]] = None
+        export_stats: Optional[ExportStats] = None
 
         self._stop_event.set()
         if self._thread.is_alive():
@@ -238,9 +285,17 @@ class TraceMLAggregator:
 
         try:
             sqlite_finalize_budget = self._sqlite_finalize_budget(remaining())
-            settle_budget = max(0.0, remaining() - sqlite_finalize_budget)
+            export_worker = self._export_worker
+            export_budget = (
+                self._export_stop_budget(timeout_sec)
+                if export_worker is not None
+                else 0.0
+            )
+            settle_budget = max(
+                0.0, remaining() - sqlite_finalize_budget - export_budget
+            )
             try:
-                if self._settings.history_enabled:
+                if self._settings.history_enabled or export_worker is not None:
                     warning_payload = self._settle_end_of_run_telemetry(
                         settle_budget
                     )
@@ -250,6 +305,13 @@ class TraceMLAggregator:
                     self._tcp_server.stop,
                 )
             finally:
+                # Close the export files even when the final drain raised.
+                if export_worker is not None:
+                    export_stats = _safe(
+                        self._logger,
+                        "ExportWorker.stop failed",
+                        lambda: export_worker.stop(timeout_sec=export_budget),
+                    )
                 # Report dropped senders even when the final drain raised.
                 self._warn_foreign_senders()
             finalize_result = self._sqlite_writer.finalize(
@@ -264,6 +326,10 @@ class TraceMLAggregator:
             warning_payload = self._add_sqlite_finalize_warning(
                 warning_payload,
                 finalize_payload,
+            )
+            warning_payload = self._add_export_warning(
+                warning_payload,
+                export_stats,
             )
 
             if (
@@ -358,6 +424,9 @@ class TraceMLAggregator:
                     "expected_world_size": self._expected_world_size,
                     "sqlite_finalize": finalize_payload,
                     "writer": self._sqlite_writer.stats(),
+                    "export": (
+                        export_stats.to_dict() if export_stats else None
+                    ),
                 },
             )
             if self._settings.mode == "summary":
@@ -366,10 +435,10 @@ class TraceMLAggregator:
 
     def _drain_tcp(self) -> None:
         """
-        Drain pending TCP messages and ingest them into SQLite history.
+        Drain pending TCP messages into SQLite history and the export worker.
 
         Each message is expected to be a telemetry row or batch compatible with
-        ``SQLiteWriterSimple.ingest()``.
+        ``SQLiteWriterSimple.ingest()``. Only admitted payloads reach either.
         """
         with self._drain_lock:
             for msg in self._tcp_server.poll():
@@ -379,6 +448,14 @@ class TraceMLAggregator:
                     except Exception:
                         self._logger.exception(
                             "[TraceML] SQLiteWriter.ingest failed"
+                        )
+                    if self._export_worker is None:
+                        continue
+                    try:
+                        self._export_worker.submit(payload)
+                    except Exception:
+                        self._logger.exception(
+                            "[TraceML] ExportWorker.submit failed"
                         )
 
     @staticmethod
@@ -405,6 +482,42 @@ class TraceMLAggregator:
                 total * _SQLITE_FINALIZE_BUDGET_FRACTION,
             ),
         )
+
+    @staticmethod
+    def _export_stop_budget(timeout_sec: float) -> float:
+        """Reserve a small slice of the end-of-run timeout for export."""
+        return min(
+            _EXPORT_STOP_BUDGET_MAX_SEC,
+            max(
+                _EXPORT_STOP_BUDGET_MIN_SEC,
+                _EXPORT_STOP_BUDGET_FRACTION * max(0.0, float(timeout_sec)),
+            ),
+        )
+
+    @staticmethod
+    def _add_export_warning(
+        warning_payload: Optional[dict[str, Any]],
+        export_stats: Optional[ExportStats],
+    ) -> Optional[dict[str, Any]]:
+        """Attach export losses to the warning artifact."""
+        if export_stats is None or not (
+            export_stats.dropped_batches
+            or export_stats.failed_records
+            or export_stats.exporter_failed
+        ):
+            return warning_payload
+
+        if warning_payload is None:
+            warning_payload = {
+                "status": "warning",
+                "completed_at": utc_now_iso(),
+                "message": (
+                    "Telemetry export did not write every admitted record; "
+                    "SQLite history and the summary are unaffected."
+                ),
+            }
+        warning_payload["export"] = export_stats.to_dict()
+        return warning_payload
 
     @staticmethod
     def _add_sqlite_finalize_warning(
