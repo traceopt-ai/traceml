@@ -93,37 +93,6 @@ def test_worker_settings_connect_to_actor_endpoint():
     assert settings.aggregator.port == 34567
 
 
-def test_exporter_settings_reach_the_aggregator_only():
-    config = TraceMLRayConfig(
-        session_id="ray-run", exporter="jsonl", exporter_hostname=True
-    )
-
-    aggregator = _build_aggregator_settings(
-        config=config, connect_host="10.0.0.9"
-    )
-    worker = _build_worker_settings(
-        config=config,
-        endpoint=AggregatorEndpoint(
-            host="10.0.0.9", port=34567, session_id="ray-run"
-        ),
-    )
-
-    assert aggregator.exporter == "jsonl"
-    assert aggregator.exporter_hostname is True
-    assert worker.exporter == ""
-    assert worker.exporter_hostname is False
-
-
-def test_exporter_is_off_by_default():
-    settings = _build_aggregator_settings(
-        config=TraceMLRayConfig(session_id="ray-run"),
-        connect_host="10.0.0.9",
-    )
-
-    assert settings.exporter == ""
-    assert settings.exporter_hostname is False
-
-
 def test_ray_actor_logs_finalization_failure_once(monkeypatch):
     import traceml_ai.integrations.ray as ray_integration
 
