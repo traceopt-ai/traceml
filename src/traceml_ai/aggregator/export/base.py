@@ -10,11 +10,7 @@ from __future__ import annotations
 
 from typing import Protocol, Sequence
 
-from traceml_ai.aggregator.export.records import _Record
-
-# The base class of every export record (``StepTimeRecord`` and the ones
-# that follow): each has a ``STREAM`` name and a ``to_dict()``.
-Record = _Record
+from traceml_ai.aggregator.export.records import Record
 
 
 class Exporter(Protocol):
@@ -23,8 +19,9 @@ class Exporter(Protocol):
 
     The export worker calls these from one thread at a time: ``open`` once
     before the first write, ``write`` then ``flush`` per tick, and ``close``
-    once at the end or after a failed ``write`` or ``flush``. A method may
-    raise; the worker logs the failure and stops using the exporter.
+    once at the end, or after a failed ``write`` or ``flush``. ``close`` is
+    not called when ``open`` raised. A method may raise; the worker logs
+    the failure and stops using the exporter.
     """
 
     def open(self) -> None:
@@ -34,7 +31,10 @@ class Exporter(Protocol):
         """Accept one tick's records, in order."""
 
     def flush(self) -> None:
-        """Push accepted records to durable storage."""
+        """
+        Hand accepted records to the sink's storage layer (for a file, the
+        OS buffers); crash durability is the sink's own policy.
+        """
 
     def close(self, *, dropped_batches: int = 0) -> None:
         """

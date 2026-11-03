@@ -56,17 +56,42 @@ def test_one_file_per_stream(tmp_path) -> None:
     assert sorted(p.name for p in tmp_path.iterdir()) == ["step_time.jsonl"]
 
 
-def test_existing_file_refuses_to_overwrite(tmp_path) -> None:
-    path = tmp_path / "step_time.jsonl"
-    path.write_text("from an earlier run\n")
+def test_open_creates_each_stream_file_empty(tmp_path) -> None:
     exporter = JsonExporter(tmp_path)
     exporter.open()
 
+    path = tmp_path / "step_time.jsonl"
+    assert path.exists()
+    assert path.read_text() == ""
+    exporter.close()
+
+
+def test_existing_file_is_refused_at_open(tmp_path) -> None:
+    path = tmp_path / "step_time.jsonl"
+    path.write_text("from an earlier run\n")
+    exporter = JsonExporter(tmp_path)
+
     with pytest.raises(FileExistsError) as info:
-        exporter.write([_record()])
+        exporter.open()
 
     assert str(path) in str(info.value)
     assert path.read_text() == "from an earlier run\n"
+
+
+def test_zero_records_leaves_only_the_closing_line(tmp_path) -> None:
+    exporter = JsonExporter(tmp_path)
+    exporter.open()
+    exporter.close()
+
+    assert _lines(tmp_path / "step_time.jsonl") == [
+        {
+            "stream": "step_time",
+            "closing": True,
+            "schema_version": 1,
+            "written_records": 0,
+            "dropped_batches": 0,
+        }
+    ]
 
 
 def test_data_lines_carry_the_record(tmp_path) -> None:
@@ -127,6 +152,70 @@ def test_nan_raises_value_error(tmp_path) -> None:
         exporter.write([bad])
 
 
+def test_nan_in_a_batch_writes_no_line_of_it(tmp_path) -> None:
+    exporter = JsonExporter(tmp_path)
+    exporter.open()
+    bad = dataclasses.replace(
+        _record(2),
+        events={"x": {"cuda:0": {"duration_ms": float("nan")}}},
+    )
+
+    with pytest.raises(ValueError):
+        exporter.write([_record(1), bad])
+    exporter.close()
+
+    lines = _lines(tmp_path / "step_time.jsonl")
+    assert len(lines) == 1
+    assert lines[0]["closing"] is True
+    assert lines[0]["written_records"] == 0
+
+
+def test_write_after_close_raises(tmp_path) -> None:
+    exporter = JsonExporter(tmp_path)
+    exporter.open()
+    exporter.close()
+
+    with pytest.raises(RuntimeError, match="JsonExporter is closed"):
+        exporter.write([_record()])
+
+
+def test_open_after_close_raises(tmp_path) -> None:
+    exporter = JsonExporter(tmp_path)
+    exporter.open()
+    exporter.close()
+
+    with pytest.raises(RuntimeError, match="JsonExporter is closed"):
+        exporter.open()
+
+
+def test_write_before_open_raises_value_error(tmp_path) -> None:
+    exporter = JsonExporter(tmp_path)
+
+    with pytest.raises(ValueError):
+        exporter.write([_record()])
+
+
+def test_failed_os_write_gets_no_closing_line(tmp_path, monkeypatch) -> None:
+    exporter = JsonExporter(tmp_path)
+    exporter.open()
+    exporter.write([_record(1)])
+    exporter.flush()
+    handle = exporter._files["step_time"]
+
+    def broken_write(text):
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(handle, "write", broken_write)
+    with pytest.raises(OSError):
+        exporter.write([_record(2)])
+    exporter.close(dropped_batches=1)
+
+    assert handle.closed
+    lines = _lines(tmp_path / "step_time.jsonl")
+    assert [line["step"] for line in lines] == [1]
+    assert all("closing" not in line for line in lines)
+
+
 def test_closing_line_is_last_and_carries_counts(tmp_path) -> None:
     exporter = JsonExporter(tmp_path)
     exporter.open()
@@ -163,6 +252,5 @@ def test_open_creates_a_missing_nested_directory(tmp_path) -> None:
     exporter.open()
 
     assert directory.is_dir()
-    exporter.write([_record()])
-    exporter.close()
     assert (directory / "step_time.jsonl").exists()
+    exporter.close()

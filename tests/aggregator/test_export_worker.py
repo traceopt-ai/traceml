@@ -8,9 +8,12 @@
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 
+from traceml_ai.aggregator.export import worker as worker_module
+from traceml_ai.aggregator.export.json_exporter import JsonExporter
 from traceml_ai.aggregator.export.worker import ExportStats, ExportWorker
 from traceml_ai.runtime.sender import SenderIdentity
 from traceml_ai.telemetry.envelope import build_telemetry_envelope
@@ -29,7 +32,10 @@ EVENTS = {
 }
 
 
-def _payload(step: int = 7) -> dict:
+NAN_EVENTS = {"x": {"cuda:0": {"duration_ms": float("nan")}}}
+
+
+def _payload(step: int = 7, events: dict = EVENTS) -> dict:
     """One step-time envelope that builds exactly one record."""
     return build_telemetry_envelope(
         identity=SenderIdentity(
@@ -48,7 +54,7 @@ def _payload(step: int = 7) -> dict:
                     "seq": step,
                     "timestamp_unix_ns": TS,
                     "step": step,
-                    "events": EVENTS,
+                    "events": events,
                 }
             ]
         },
@@ -133,6 +139,18 @@ class _FailingOpenExporter(_RecordingExporter):
     def open(self) -> None:
         super().open()
         raise OSError("read-only file system")
+
+
+class _FailingFlushExporter(_RecordingExporter):
+    def flush(self) -> None:
+        super().flush()
+        raise OSError("flush failed")
+
+
+class _FailingCloseExporter(_RecordingExporter):
+    def close(self, *, dropped_batches: int = 0) -> None:
+        super().close(dropped_batches=dropped_batches)
+        raise OSError("close failed")
 
 
 def _wait_until(pred, timeout: float = 2.0, interval: float = 0.01) -> bool:
@@ -231,28 +249,42 @@ def test_stop_is_bounded_with_a_slow_exporter() -> None:
     stats = worker.stop(timeout_sec=0.5)
     elapsed = time.monotonic() - start
 
-    assert elapsed < 0.5 + delay + 0.15
-    assert stats.dropped_batches >= 1
-    assert stats.written_records + stats.dropped_batches == 6
-    assert stats.written_records == len(exporter.snapshot())
-    assert exporter.close_dropped == [stats.dropped_batches]
+    # Write 0 ends before the deadline, write 1 is in flight at it, and
+    # the four payloads behind it are dropped.
+    assert elapsed < 0.5 + 0.15
+    assert stats.written_records == 1
+    assert stats.dropped_batches == 4
     assert sum("[TraceML]" in e and "dropped" in e for e in logger.errors)
 
+    assert _wait_until(lambda: exporter.close_calls == 1)
+    final = worker.stats()
+    assert final.written_records == 2
+    assert final.dropped_batches == 4
+    assert len(exporter.snapshot()) == 2
+    assert exporter.close_dropped == [4]
 
-def test_stop_does_not_close_an_exporter_mid_write() -> None:
+
+def test_stop_returns_at_the_join_while_a_write_runs() -> None:
     exporter = _SlowExporter(1.0)
     worker = ExportWorker(exporter, interval_sec=0.01, logger=_FakeLogger())
     worker.start()
     worker.submit(_payload(1))
     assert _wait_until(lambda: exporter.write_calls == 1)
+    worker.submit(_payload(2))
 
     start = time.monotonic()
-    worker.stop(timeout_sec=0.2)
+    stats = worker.stop(timeout_sec=0.2)
     elapsed = time.monotonic() - start
 
-    assert elapsed < 0.2 + 0.15
+    assert elapsed < 0.35
+    assert stats.written_records == 0
+    assert stats.dropped_batches == 1
     assert exporter.close_calls == 0
+
     assert _wait_until(lambda: exporter.close_calls == 1)
+    assert worker.stats().written_records == 1
+    assert exporter.close_dropped == [worker.stats().dropped_batches]
+    assert exporter.close_dropped == [1]
     assert exporter.closed_during_write is False
     assert len(exporter.snapshot()) == 1
 
@@ -310,6 +342,19 @@ def test_submit_after_stop_counts_a_drop() -> None:
     assert exporter.write_calls == 0
 
 
+def test_second_stop_reports_a_drop_after_the_first() -> None:
+    exporter = _RecordingExporter()
+    worker = ExportWorker(exporter, interval_sec=60.0, logger=_FakeLogger())
+    worker.start()
+    first = worker.stop()
+    worker.submit(_payload(1))
+    second = worker.stop()
+
+    assert first.dropped_batches == 0
+    assert second.dropped_batches == 1
+    assert exporter.close_calls == 1
+
+
 def test_stop_twice_is_safe() -> None:
     exporter = _RecordingExporter()
     worker = ExportWorker(exporter, interval_sec=60.0, logger=_FakeLogger())
@@ -338,6 +383,127 @@ def test_raising_open_is_logged_once_and_marks_failed() -> None:
     assert stats.exporter_failed is True
     assert stats.failed_records == 1
     assert exporter.write_calls == 0
+    assert exporter.close_calls == 0
     assert len(logger.errors) == 1
     assert logger.errors[0].startswith("[TraceML]")
     assert "_FailingOpenExporter" in logger.errors[0]
+
+
+def test_stop_without_start_drops_the_queue_and_calls_nothing() -> None:
+    exporter = _RecordingExporter()
+    worker = ExportWorker(exporter, logger=_FakeLogger())
+    worker.submit(_payload(1))
+    worker.submit(_payload(2))
+    stats = worker.stop()
+
+    assert stats.dropped_batches == 2
+    assert exporter.open_calls == 0
+    assert exporter.write_calls == 0
+    assert exporter.close_calls == 0
+
+
+def test_interval_is_floored_and_non_finite_falls_back() -> None:
+    exporter = _RecordingExporter()
+    assert ExportWorker(exporter, interval_sec=0)._interval_sec == 0.01
+    assert ExportWorker(exporter, interval_sec=-5)._interval_sec == 0.01
+    nan = ExportWorker(exporter, interval_sec=float("nan"))
+    assert nan._interval_sec == 1.0
+    inf = ExportWorker(exporter, interval_sec=float("inf"))
+    assert inf._interval_sec == 1.0
+
+
+def test_raising_flush_keeps_records_written() -> None:
+    logger = _FakeLogger()
+    exporter = _FailingFlushExporter()
+    worker = ExportWorker(exporter, interval_sec=0.01, logger=logger)
+    # Queued before the thread starts, so the first tick takes all three.
+    for step in (1, 2, 3):
+        worker.submit(_payload(step))
+    worker.start()
+    assert _wait_until(lambda: worker.stats().exporter_failed)
+    stats = worker.stop()
+
+    assert exporter.write_calls == 1
+    assert stats.written_records == 3
+    assert stats.failed_records == 0
+    assert stats.exporter_failed is True
+    assert exporter.close_calls == 1
+    assert len(logger.errors) == 1
+    assert logger.errors[0].startswith("[TraceML]")
+    assert "flush" in logger.errors[0]
+
+
+def test_raising_close_is_logged_and_stop_returns() -> None:
+    logger = _FakeLogger()
+    exporter = _FailingCloseExporter()
+    worker = ExportWorker(exporter, interval_sec=60.0, logger=logger)
+    worker.start()
+    worker.submit(_payload(1))
+    stats = worker.stop(timeout_sec=1.0)
+
+    assert stats.written_records == 1
+    assert exporter.close_calls == 1
+    assert len(logger.errors) == 1
+    assert logger.errors[0].startswith("[TraceML]")
+    assert "close failed" in logger.errors[0]
+
+
+def test_raising_conversion_skips_the_whole_list(monkeypatch) -> None:
+    def boom(payload):
+        raise RuntimeError("bad payload")
+
+    monkeypatch.setattr(worker_module, "records_from_payload", boom)
+    exporter = _RecordingExporter()
+    worker = ExportWorker(exporter, interval_sec=60.0, logger=_FakeLogger())
+    worker.start()
+    worker.submit([_payload(1), _payload(2), _payload(3)])
+    worker.submit(_payload(4))
+    stats = worker.stop()
+
+    assert stats.skipped_items == 4
+    assert stats.written_records == 0
+    assert exporter.write_calls == 0
+
+
+def _jsonl(path) -> list:
+    return [json.loads(line) for line in path.read_text().splitlines()]
+
+
+def test_json_exporter_nan_mid_batch_fails_the_whole_batch(tmp_path) -> None:
+    logger = _FakeLogger()
+    worker = ExportWorker(
+        JsonExporter(tmp_path), interval_sec=0.01, logger=logger
+    )
+    # Queued before the thread starts, so the first tick takes both.
+    worker.submit(_payload(1))
+    worker.submit(_payload(2, events=NAN_EVENTS))
+    worker.start()
+    assert _wait_until(lambda: worker.stats().exporter_failed)
+    stats = worker.stop()
+
+    assert stats.failed_records == 2
+    assert stats.written_records == 0
+    assert stats.exporter_failed is True
+    lines = _jsonl(tmp_path / "step_time.jsonl")
+    data = [line for line in lines if "closing" not in line]
+    # ``write`` refused the batch before any OS write, so the closing
+    # line is there and matches the data lines on disk.
+    assert data == []
+    assert lines[-1]["closing"] is True
+    assert lines[-1]["written_records"] == len(data)
+    assert len(logger.errors) == 1
+    assert logger.errors[0].startswith("[TraceML]")
+
+
+def test_json_exporter_hostname_through_the_worker(tmp_path) -> None:
+    exporter = JsonExporter(tmp_path, include_hostname=True)
+    worker = ExportWorker(exporter, interval_sec=60.0, logger=_FakeLogger())
+    worker.start()
+    worker.submit(_payload(1))
+    stats = worker.stop()
+
+    lines = _jsonl(tmp_path / "step_time.jsonl")
+    assert stats.written_records == 1
+    assert lines[0]["hostname"] == "host-a"
+    assert lines[-1]["closing"] is True
+    assert lines[-1]["written_records"] == 1
