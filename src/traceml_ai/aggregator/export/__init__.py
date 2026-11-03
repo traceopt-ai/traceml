@@ -7,6 +7,7 @@
 """Structured export of aggregator telemetry."""
 
 from traceml_ai.aggregator.export.base import Exporter
+from traceml_ai.aggregator.export.json_exporter import JsonExporter
 from traceml_ai.aggregator.export.records import (
     RECORD_TYPES,
     SCHEMA_VERSION,
@@ -22,6 +23,7 @@ __all__ = [
     "ExportStats",
     "ExportWorker",
     "Exporter",
+    "JsonExporter",
     "RecordBatch",
     "StepTimeRecord",
     "records_from_payload",
