@@ -1,6 +1,7 @@
 """Shared AST/path/value helpers for static training-script analysis."""
 
 import ast
+import math
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -135,6 +136,16 @@ def safe_float(val) -> Optional[float]:
         return float(val)
     except (TypeError, ValueError):
         return None
+
+
+def safe_step_interval(val) -> Optional[float]:
+    """Best-effort step interval that keeps a fractional ratio."""
+    number = safe_float(val)
+    if number is None or not math.isfinite(number):
+        return None
+    if number.is_integer():
+        return int(number)
+    return number
 
 
 def enclosing_function_name(
