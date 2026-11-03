@@ -73,7 +73,12 @@ class ExportStats:
 
 
 class ExportWorker:
-    """Bounded queue drained to one exporter on a fixed tick."""
+    """
+    Bounded queue drained to one exporter on a fixed tick.
+
+    ``start()`` and ``stop()`` are not safe to call concurrently; the
+    aggregator calls them in sequence on one thread.
+    """
 
     def __init__(
         self,

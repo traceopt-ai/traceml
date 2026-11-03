@@ -816,6 +816,18 @@ class _FakeExportWorker:
         self.stop_timeouts.append(timeout_sec)
         return self._stats
 
+    def stats(self):
+        return self._stats
+
+
+class _LateFailureExportWorker(_FakeExportWorker):
+    """``stop`` returns clean counts; a call still running fails later."""
+
+    def stop(self, timeout_sec):
+        clean = super().stop(timeout_sec)
+        self._stats = _export_stats(failed_records=1, exporter_failed=True)
+        return clean
+
 
 def _export_aggregator(monkeypatch, tmp_path, *, stats=None, worker=True):
     """An aggregator whose settle, TCP stop and finalize log their order."""
@@ -855,7 +867,34 @@ def test_export_worker_stops_after_tcp_and_before_sqlite_finalize(
     agg.stop(timeout_sec=10.0)
 
     assert calls == ["settle", "tcp_stop", "export_stop", "sqlite_finalize"]
-    assert agg._export_worker.stop_timeouts == [1.0]
+    assert agg._export_worker.stop_timeouts == [pytest.approx(1.0, abs=0.01)]
+
+
+@pytest.mark.parametrize(
+    ("left", "expected"),
+    [(0.0, 0.0), (0.1, 0.1), (0.5, 0.5), (10.0, 1.0), (40.0, 2.0)],
+)
+def test_export_stop_budget_is_a_slice_of_the_time_left(left, expected):
+    assert TraceMLAggregator._export_stop_budget(left) == pytest.approx(
+        expected
+    )
+
+
+def test_zero_timeout_gives_export_no_time(monkeypatch, tmp_path):
+    agg, _, _ = _export_aggregator(monkeypatch, tmp_path)
+
+    agg.stop(timeout_sec=0.0)
+
+    assert agg._export_worker.stop_timeouts == [0.0]
+
+
+def test_small_timeout_never_gives_export_more_than_it(monkeypatch, tmp_path):
+    agg, _, _ = _export_aggregator(monkeypatch, tmp_path)
+
+    agg.stop(timeout_sec=0.1)
+
+    (budget,) = agg._export_worker.stop_timeouts
+    assert 0.0 <= budget <= 0.1
 
 
 def test_export_budget_leaves_the_sqlite_budget_unchanged(
@@ -931,6 +970,66 @@ def test_dropped_export_batches_join_an_existing_warning(
     warning = json.loads(_warning_path(tmp_path).read_text(encoding="utf-8"))
     assert warning["missing_ranks"] == [1]
     assert warning["export"]["dropped_batches"] == 2
+
+
+def test_skipped_export_items_alone_write_a_warning(monkeypatch, tmp_path):
+    stats = _export_stats(written_records=0, skipped_items=2)
+    agg, _, _ = _export_aggregator(monkeypatch, tmp_path, stats=stats)
+
+    agg.stop(timeout_sec=10.0)
+
+    warning = json.loads(_warning_path(tmp_path).read_text(encoding="utf-8"))
+    assert warning["reason"] == "export_incomplete"
+    assert warning["message"] == (
+        "Telemetry export did not write every admitted record."
+    )
+    assert "SQLite" not in warning["message"]
+    assert warning["export"] == {
+        "written_records": 0,
+        "dropped_batches": 0,
+        "failed_records": 0,
+        "skipped_items": 2,
+        "exporter_failed": False,
+    }
+
+
+def test_export_stats_are_read_again_after_sqlite_finalize(
+    monkeypatch, tmp_path
+):
+    agg, calls, _ = _export_aggregator(monkeypatch, tmp_path)
+    agg._export_worker = _LateFailureExportWorker(calls, _export_stats())
+
+    agg.stop(timeout_sec=10.0)
+
+    warning = json.loads(_warning_path(tmp_path).read_text(encoding="utf-8"))
+    assert warning["reason"] == "export_incomplete"
+    assert warning["export"]["failed_records"] == 1
+    assert warning["export"]["exporter_failed"] is True
+
+
+def test_error_artifact_reads_the_export_stats_again(monkeypatch, tmp_path):
+    agg, calls, _ = _export_aggregator(monkeypatch, tmp_path)
+    agg._export_worker = _LateFailureExportWorker(calls, _export_stats())
+    agg._sqlite_writer.result = SQLiteFinalizeResult(
+        ok=False,
+        elapsed_sec=0.0,
+        enqueued=1,
+        written=0,
+        dropped=0,
+        queue_size=1,
+        checkpoint_ok=False,
+        error="boom",
+    )
+
+    with pytest.raises(TraceMLFinalizationError):
+        agg.stop(timeout_sec=10.0)
+
+    error = json.loads(
+        (
+            tmp_path / "run" / "aggregator" / "finalization_error.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert error["export"]["exporter_failed"] is True
 
 
 def test_clean_export_writes_no_export_warning(monkeypatch, tmp_path):

@@ -540,6 +540,21 @@ def _require_positive_interval(args: argparse.Namespace) -> None:
         )
 
 
+_KNOWN_EXPORTERS = ("jsonl",)
+
+
+def _require_known_exporter(args: argparse.Namespace) -> None:
+    exporter = getattr(args, "exporter", None)
+    if exporter is None:
+        return
+    name = str(exporter).strip()
+    if name and name not in _KNOWN_EXPORTERS:
+        raise SystemExit(
+            f"[TraceML] Unknown exporter: {name!r}. "
+            f"Supported: {list(_KNOWN_EXPORTERS)}"
+        )
+
+
 def validate_launch_args(args: argparse.Namespace) -> None:
     """Validate cross-argument constraints for TraceML launch commands."""
     if _disable_traceml_requested(args, os.environ):
@@ -586,6 +601,7 @@ def validate_launch_args(args: argparse.Namespace) -> None:
             "Remove --no-history to enable HTML report generation."
         )
     _require_positive_interval(args)
+    _require_known_exporter(args)
     finalize_timeout_sec = getattr(args, "finalize_timeout_sec", None)
     if finalize_timeout_sec is not None:
         from traceml_ai.config.yaml_loader import is_finite_positive
@@ -809,7 +825,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     env["TRACEML_HTML_REPORT"] = (
         "1" if getattr(args, "html_report", False) else "0"
     )
-    env["TRACEML_EXPORTER"] = str(cfg["exporter"])
+    env["TRACEML_EXPORTER"] = str(cfg["exporter"]).strip()
     env["TRACEML_EXPORTER_HOSTNAME"] = "1" if cfg["exporter_hostname"] else "0"
     env["NODE_RANK"] = str(torchrun_cfg.node_rank)
 
@@ -1550,6 +1566,7 @@ def run_serve(args: argparse.Namespace) -> None:
     cleanly, and preserves final-summary behavior.
     """
     _require_positive_interval(args)
+    _require_known_exporter(args)
     try:
         settings = _resolve_serve_settings(args)
     except ValueError as exc:

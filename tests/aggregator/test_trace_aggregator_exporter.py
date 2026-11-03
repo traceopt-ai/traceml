@@ -111,6 +111,12 @@ def test_resolve_exporter_builds_jsonl_under_the_session(tmp_path):
     assert sink._include_hostname is False
 
 
+def test_resolve_exporter_strips_the_name(tmp_path):
+    sink = _resolve_exporter(_settings(tmp_path, " jsonl "), tmp_path)
+
+    assert isinstance(sink, JsonExporter)
+
+
 def test_resolve_exporter_passes_the_hostname_opt_in(tmp_path):
     settings = _settings(tmp_path, "jsonl", exporter_hostname=True)
 
@@ -187,6 +193,26 @@ def test_jsonl_exporter_writes_admitted_step_time(tmp_path):
     assert not (
         tmp_path / "logs" / "run" / "aggregator" / "finalization_warning.json"
     ).exists()
+
+
+def test_jsonl_exporter_keeps_the_hostname_when_asked(tmp_path):
+    agg = TraceMLAggregator(
+        logger=_Logger(),
+        stop_event=threading.Event(),
+        settings=_settings(tmp_path, "jsonl", exporter_hostname=True),
+    )
+    agg._tcp_server = _TCP([[_step_time_payload(), _rank_finished()]])
+    agg._export_worker.start()
+
+    agg._drain_tcp()
+    agg.stop(timeout_sec=5.0)
+
+    path = tmp_path / "logs" / "run" / "aggregator" / "export"
+    data = json.loads(
+        (path / "step_time.jsonl").read_text(encoding="utf-8").splitlines()[0]
+    )
+    assert data["stream"] == "step_time"
+    assert data["hostname"] == "host-a"
 
 
 def test_no_exporter_leaves_no_export_directory(tmp_path):

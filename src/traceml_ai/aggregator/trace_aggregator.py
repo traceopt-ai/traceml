@@ -112,7 +112,7 @@ def _resolve_exporter(
     settings: TraceMLSettings, session_root: Path
 ) -> Optional[Exporter]:
     """Return the export sink ``settings.exporter`` names, or None if off."""
-    name = str(settings.exporter or "")
+    name = str(settings.exporter or "").strip()
     if not name:
         return None
     if name == "jsonl":
@@ -254,7 +254,9 @@ class TraceMLAggregator:
         and treats a missing summary as an error in summary mode. The export
         worker, when configured, gets its own slice of the timeout after the
         TCP server stops and before SQLite closes; export losses are reported
-        as a warning and never fail the run.
+        as a warning and never fail the run. The export counts are read again
+        after SQLite finalize, so an exporter call that was still running at
+        the export deadline is counted when it has finished by then.
         """
         deadline = time.monotonic() + max(0.0, float(timeout_sec))
         session_root = Path(str(self._settings.logs_dir)).resolve() / str(
@@ -267,6 +269,15 @@ class TraceMLAggregator:
         warning_payload: Optional[dict[str, Any]] = None
         finalize_payload: Optional[dict[str, Any]] = None
         export_stats: Optional[ExportStats] = None
+        export_worker = self._export_worker
+
+        def latest_export_stats() -> Optional[ExportStats]:
+            if export_worker is None:
+                return export_stats
+            fresh = _safe(
+                self._logger, "ExportWorker.stats failed", export_worker.stats
+            )
+            return fresh if fresh is not None else export_stats
 
         self._stop_event.set()
         if self._thread.is_alive():
@@ -285,9 +296,8 @@ class TraceMLAggregator:
 
         try:
             sqlite_finalize_budget = self._sqlite_finalize_budget(remaining())
-            export_worker = self._export_worker
             export_budget = (
-                self._export_stop_budget(timeout_sec)
+                self._export_stop_budget(remaining())
                 if export_worker is not None
                 else 0.0
             )
@@ -327,6 +337,7 @@ class TraceMLAggregator:
                 warning_payload,
                 finalize_payload,
             )
+            export_stats = latest_export_stats()
             warning_payload = self._add_export_warning(
                 warning_payload,
                 export_stats,
@@ -413,6 +424,7 @@ class TraceMLAggregator:
                 )
 
         except Exception as exc:
+            export_stats = latest_export_stats()
             self._write_finalization_artifact(
                 session_root,
                 "finalization_error.json",
@@ -485,14 +497,24 @@ class TraceMLAggregator:
 
     @staticmethod
     def _export_stop_budget(timeout_sec: float) -> float:
-        """Reserve a small slice of the end-of-run timeout for export."""
-        return min(
+        """
+        Reserve a small slice of the end-of-run time left for export.
+
+        ``timeout_sec`` is the time left, not the original timeout. The slice
+        never reaches past that deadline, so a small timeout cannot let
+        export outrank SQLite.
+        """
+        total = max(0.0, float(timeout_sec))
+        if total <= 0.0:
+            return 0.0
+        budget = min(
             _EXPORT_STOP_BUDGET_MAX_SEC,
             max(
-                _EXPORT_STOP_BUDGET_MIN_SEC,
-                _EXPORT_STOP_BUDGET_FRACTION * max(0.0, float(timeout_sec)),
+                min(_EXPORT_STOP_BUDGET_MIN_SEC, total),
+                _EXPORT_STOP_BUDGET_FRACTION * total,
             ),
         )
+        return min(budget, total)
 
     @staticmethod
     def _add_export_warning(
@@ -503,6 +525,7 @@ class TraceMLAggregator:
         if export_stats is None or not (
             export_stats.dropped_batches
             or export_stats.failed_records
+            or export_stats.skipped_items
             or export_stats.exporter_failed
         ):
             return warning_payload
@@ -511,9 +534,9 @@ class TraceMLAggregator:
             warning_payload = {
                 "status": "warning",
                 "completed_at": utc_now_iso(),
+                "reason": "export_incomplete",
                 "message": (
-                    "Telemetry export did not write every admitted record; "
-                    "SQLite history and the summary are unaffected."
+                    "Telemetry export did not write every admitted record."
                 ),
             }
         warning_payload["export"] = export_stats.to_dict()
