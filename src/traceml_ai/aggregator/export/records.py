@@ -26,7 +26,7 @@ import dataclasses
 import json
 import time
 from dataclasses import dataclass
-from typing import Any, ClassVar, Dict, List, NamedTuple, Optional, Tuple
+from typing import Any, ClassVar, Dict, List, Optional, Tuple
 
 from traceml_ai.aggregator.sqlite_writers import step_time as step_time_writer
 from traceml_ai.telemetry.envelope import normalize_telemetry_envelope
@@ -119,7 +119,8 @@ _RECORD_BY_TABLE = {cls.TABLE: cls for cls in RECORD_TYPES}
 _WRITERS = (step_time_writer,)
 
 
-class RecordBatch(NamedTuple):
+@dataclass(frozen=True)
+class RecordBatch:
     """Records built from one payload, and the malformed inputs skipped."""
 
     records: List[_Record]
