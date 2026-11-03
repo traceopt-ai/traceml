@@ -165,6 +165,3 @@ class JsonExporter:
                     error = error or exc
         if error is not None:
             raise error
-
-
-__all__ = ["JsonExporter"]
