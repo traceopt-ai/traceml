@@ -81,7 +81,7 @@ class StepTimeSampler(BaseSampler):
         """
         sum_cpu_ms: Dict[Tuple[str, str], float] = defaultdict(float)
         sum_gpu_ms: Dict[Tuple[str, str], float] = defaultdict(float)
-        has_gpu_ms: Dict[Tuple[str, str], bool] = defaultdict(bool)
+        n_gpu_ms: Dict[Tuple[str, str], int] = defaultdict(int)
         n_gpu_clock: Dict[Tuple[str, str], int] = defaultdict(int)
         n_calls: Dict[Tuple[str, str], int] = defaultdict(int)
 
@@ -98,7 +98,7 @@ class StepTimeSampler(BaseSampler):
             sum_cpu_ms[key] += cpu_ms
             if gpu_ms is not None:
                 sum_gpu_ms[key] += gpu_ms
-                has_gpu_ms[key] = True
+                n_gpu_ms[key] += 1
             if self._duration_uses_gpu(evt):
                 n_gpu_clock[key] += 1
             n_calls[key] += 1
@@ -108,15 +108,16 @@ class StepTimeSampler(BaseSampler):
             key = (name, device)
             # One CPU-clock call makes the whole entry CPU-clock.
             is_gpu = n_gpu_clock[key] == count
+            # A clock total is complete only when every call measured
+            # it; a partial sum is reported as None, never as a number.
+            gpu_complete = n_gpu_ms[key] == count
             events[name][device] = {
                 "is_gpu": bool(is_gpu),
                 "duration_ms": float(
                     sum_gpu_ms[key] if is_gpu else sum_cpu_ms[key]
                 ),
                 "cpu_ms": float(sum_cpu_ms[key]),
-                "gpu_ms": (
-                    float(sum_gpu_ms[key]) if has_gpu_ms[key] else None
-                ),
+                "gpu_ms": (float(sum_gpu_ms[key]) if gpu_complete else None),
                 "n_calls": int(count),
             }
 

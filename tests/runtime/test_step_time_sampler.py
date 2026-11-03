@@ -172,11 +172,12 @@ def test_step_time_sampler_mixed_clock_calls_share_one_device_entry(
     stats = payload["_test_mixed"]["cuda:0"]
 
     # Both calls count; one CPU-clock call keeps the entry on the CPU clock.
-    # The sums differ (CPU 5.0, GPU 50.0) so the duration's source shows.
+    # The GPU clock was measured for one of two calls, so its total is
+    # None: a partial sum (50.0) must never read as the entry's GPU time.
     assert stats["is_gpu"] is False
     assert stats["duration_ms"] == pytest.approx(5.0)
     assert stats["cpu_ms"] == pytest.approx(5.0)
-    assert stats["gpu_ms"] == pytest.approx(50.0)
+    assert stats["gpu_ms"] is None
     assert stats["n_calls"] == 2
 
 
@@ -208,15 +209,16 @@ def test_step_time_sampler_keeps_measured_zero_gpu_time() -> None:
         ),
     )
 
-    # A measured zero is a value, never None, on both clocks.
+    # A measured zero is a value, never None, when every call measured it.
     all_gpu = payload["_test_zero"]["cuda:0"]
     assert all_gpu["is_gpu"] is True
     assert all_gpu["duration_ms"] == 0.0
     assert all_gpu["gpu_ms"] == 0.0
 
+    # Beside a call with no GPU clock the zero is a partial total: None.
     mixed = payload["_test_zero_mixed"]["cuda:0"]
     assert mixed["is_gpu"] is False
-    assert mixed["gpu_ms"] == 0.0
+    assert mixed["gpu_ms"] is None
     assert mixed["duration_ms"] == pytest.approx(5.0)
 
 
