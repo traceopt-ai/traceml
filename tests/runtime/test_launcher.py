@@ -867,6 +867,88 @@ def test_run_rejects_non_positive_interval_env_before_launch(
         replacement.assert_not_called()
 
 
+class _AggregatorEnvCaptured(Exception):
+    pass
+
+
+def _aggregator_env(monkeypatch, tmp_path, *flags: str) -> dict:
+    """Launch up to the aggregator spawn and return the env it gets."""
+    monkeypatch.chdir(tmp_path)
+    for var in ("TRACEML_EXPORTER", "TRACEML_EXPORTER_HOSTNAME"):
+        monkeypatch.delenv(var, raising=False)
+    script = tmp_path / "train.py"
+    script.write_text("print('unused')\n", encoding="utf-8")
+    observed: dict = {}
+
+    def _start_aggregator(*, env, cwd):
+        observed.update(env)
+        raise _AggregatorEnvCaptured()
+
+    replacements = {
+        "install_shutdown_handlers": Mock(),
+        "ensure_aggregator_port_free": Mock(),
+        "start_aggregator_process": _start_aggregator,
+        "start_training_process": Mock(side_effect=AssertionError("train")),
+        "write_code_manifest": Mock(return_value=None),
+        "write_run_manifest": Mock(return_value=tmp_path / "manifest.json"),
+        "update_run_manifest": Mock(),
+    }
+    for name, replacement in replacements.items():
+        monkeypatch.setattr(launcher_commands, name, replacement)
+    args = build_parser().parse_args(
+        [
+            "run",
+            str(script),
+            "--logs-dir",
+            str(tmp_path / "logs"),
+            "--run-name",
+            "exporter-env",
+            *flags,
+        ]
+    )
+
+    with pytest.raises(_AggregatorEnvCaptured):
+        launch_process(str(script), args)
+    return observed
+
+
+def test_run_passes_exporter_flags_to_the_aggregator_env(
+    monkeypatch, tmp_path
+) -> None:
+    env = _aggregator_env(
+        monkeypatch, tmp_path, "--exporter", "jsonl", "--exporter-hostname"
+    )
+
+    assert env["TRACEML_EXPORTER"] == "jsonl"
+    assert env["TRACEML_EXPORTER_HOSTNAME"] == "1"
+
+
+def test_run_exporter_env_defaults_off(monkeypatch, tmp_path) -> None:
+    env = _aggregator_env(monkeypatch, tmp_path)
+
+    assert env["TRACEML_EXPORTER"] == ""
+    assert env["TRACEML_EXPORTER_HOSTNAME"] == "0"
+
+
+def test_serve_resolves_exporter_flags(monkeypatch, tmp_path) -> None:
+    monkeypatch.chdir(tmp_path)
+    for var in ("TRACEML_EXPORTER", "TRACEML_EXPORTER_HOSTNAME"):
+        monkeypatch.delenv(var, raising=False)
+    parser = build_parser()
+
+    flagged = _resolve_serve_settings(
+        parser.parse_args(
+            ["serve", "--exporter", "jsonl", "--exporter-hostname"]
+        )
+    )
+    default = _resolve_serve_settings(parser.parse_args(["serve"]))
+
+    assert flagged.exporter == "jsonl"
+    assert flagged.exporter_hostname is True
+    assert default.exporter == ""
+    assert default.exporter_hostname is False
+
+
 @pytest.mark.parametrize("value", ["0", "-1", "nan", "inf"])
 def test_validate_rejects_non_finite_or_non_positive_finalize_timeout(
     value: str,

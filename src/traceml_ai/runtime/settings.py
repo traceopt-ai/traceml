@@ -103,6 +103,9 @@ class TraceMLSettings:
       payload whose `session_source` is "generated" is admitted.
     - `session_source` is what a rank stamps: "explicit" when its session id
       was given to it, "generated" when it made one up.
+    - `exporter` names the structured export sink for admitted telemetry
+      ("" = off, "jsonl" = JSON Lines under `aggregator/export/`).
+    - `exporter_hostname` keeps the hostname on every exported line.
     """
 
     profile: str = "run"
@@ -126,3 +129,5 @@ class TraceMLSettings:
     enforce_session_id: bool = False
     admit_generated_session_id: bool = False
     session_source: str = ""
+    exporter: str = ""
+    exporter_hostname: bool = False

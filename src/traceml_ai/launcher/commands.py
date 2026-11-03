@@ -682,6 +682,8 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         "dashboard_auto_open": (
             False if args.no_dashboard_auto_open else None
         ),
+        "exporter": getattr(args, "exporter", None),
+        "exporter_hostname": getattr(args, "exporter_hostname", None),
     }
 
     try:
@@ -807,6 +809,8 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     env["TRACEML_HTML_REPORT"] = (
         "1" if getattr(args, "html_report", False) else "0"
     )
+    env["TRACEML_EXPORTER"] = str(cfg["exporter"])
+    env["TRACEML_EXPORTER_HOSTNAME"] = "1" if cfg["exporter_hostname"] else "0"
     env["NODE_RANK"] = str(torchrun_cfg.node_rank)
 
     env.update(launch_context.to_env())
@@ -1472,6 +1476,8 @@ def _resolve_serve_settings(args: argparse.Namespace):
         "enable_logging": args.enable_logging,
         "logs_dir": args.logs_dir,
         "history_retention": getattr(args, "history_retention", None),
+        "exporter": getattr(args, "exporter", None),
+        "exporter_hostname": getattr(args, "exporter_hostname", None),
     }
     cfg = resolve_config(
         cli_overrides=cli_overrides,
@@ -1519,6 +1525,8 @@ def _resolve_serve_settings(args: argparse.Namespace):
         dashboard_port=int(cfg["dashboard_port"]),
         dashboard_auto_open=bool(cfg["dashboard_auto_open"]),
         finalize_timeout_sec=float(cfg["finalize_timeout_sec"]),
+        exporter=str(cfg["exporter"]),
+        exporter_hostname=bool(cfg["exporter_hostname"]),
         session_id=run_identity.session_id,
         # With --run-name/--session-id, drop ranks that name a different run
         # explicitly. A plain `python train.py` makes up its own id and is

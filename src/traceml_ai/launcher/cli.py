@@ -132,6 +132,23 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--exporter",
+        type=str,
+        default=None,
+        help=(
+            "Write admitted telemetry as JSON Lines under "
+            "<logs-dir>/<run-name>/aggregator/export/. Supported: jsonl. "
+            "Default: off."
+        ),
+    )
+    parser.add_argument(
+        "--exporter-hostname",
+        action="store_const",
+        const=True,
+        default=None,
+        help="Include the hostname on every exported line. Default: off.",
+    )
+    parser.add_argument(
         "--trace-max-steps",
         type=int,
         default=None,
@@ -344,6 +361,23 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="DURATION",
         help="Raw telemetry analysis history. Default: 30m.",
+    )
+    serve_parser.add_argument(
+        "--exporter",
+        type=str,
+        default=None,
+        help=(
+            "Write admitted telemetry as JSON Lines under "
+            "<logs-dir>/<run-name>/aggregator/export/. Supported: jsonl. "
+            "Default: off."
+        ),
+    )
+    serve_parser.add_argument(
+        "--exporter-hostname",
+        action="store_const",
+        const=True,
+        default=None,
+        help="Include the hostname on every exported line. Default: off.",
     )
     serve_parser.add_argument(
         "--aggregator-host",
