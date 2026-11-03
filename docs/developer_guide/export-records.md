@@ -6,24 +6,21 @@ The records live in `traceml_ai.aggregator.export`.
 
 ## What a record is
 
-Each projection table the aggregator writes to SQLite has one frozen dataclass.
+A record is a frozen dataclass for one projection table the aggregator writes to SQLite.
 Its fields are the table's columns in table order, minus the autoincrement `id`.
 The record is built by the same projection code that builds the SQLite row, so the two cannot disagree about a value.
 
 | Record | `STREAM` | SQLite table |
 |---|---|---|
 | `StepTimeRecord` | `step_time` | `step_time_samples` |
-| `StepMemoryRecord` | `step_memory` | `step_memory_samples` |
-| `SystemRecord` | `system` | `system_samples` |
-| `SystemGpuRecord` | `system_gpu` | `system_gpu_samples` |
-| `ProcessRecord` | `process` | `process_samples` |
-| `RuntimeEnvironmentRecord` | `runtime_environment` | `runtime_environment` |
-| `StdoutStderrRecord` | `stdout_stderr` | `stdout_stderr_samples` |
+
+Step time is the only stream with a record so far.
+The other streams (step memory, system, process, runtime environment, stdout/stderr) will get records in a follow-up.
 
 Every record class carries `STREAM`, `SCHEMA_VERSION` (currently `1`) and `COLUMNS`, its field names in order.
 `to_dict()` returns `stream`, `schema_version` and then every field.
 A missing value is `None`, never `0`.
-`StepTimeRecord` is the one record that differs from its row.
+`StepTimeRecord` differs from its row in one field.
 It carries the decoded `events` map in place of the `events_json` text.
 
 `records_from_payload(payload, *, observed_timestamp_unix_ns=None)` takes one admitted telemetry payload, a dict or a list of dicts.
@@ -40,11 +37,11 @@ Otherwise each envelope is stamped with `time.time_ns()` when its records are bu
 - A row that does not fit its record counts once.
 
 A table that a projection writes but that has no record is skipped, and each of its rows counts once.
-No projection table lacks a record today, and a test keeps it that way.
+Every table the step-time projection writes has a record, and a test keeps it that way.
 
 ## Common fields
 
-Most records start with the same identity and time fields.
+A record starts with these identity and time fields.
 
 | Field | Type | Unit | `None` means |
 |---|---|---|---|
@@ -98,123 +95,6 @@ Each value is `None` when the rank did not send it.
 `cpu_ms` is CPU wall time and `gpu_ms` is CUDA event time, each summed over the step's calls.
 `gpu_ms` is `None` when no GPU timing was recorded.
 `duration_ms` is the legacy effective duration, and `is_gpu` says whether GPU time backs it.
-
-### StepMemoryRecord
-
-| Field | Type | Unit | `None` means |
-|---|---|---|---|
-| `observed_timestamp_unix_ns` | int | ns | see common fields |
-| `rank` | int | | see common fields |
-| `global_rank` | int | | see common fields |
-| `local_rank` | int | | see common fields |
-| `world_size` | int | | see common fields |
-| `local_world_size` | int | | see common fields |
-| `node_rank` | int | | see common fields |
-| `hostname` | str | | see common fields |
-| `timestamp_unix_ns` | int | ns | see common fields |
-| `seq` | int | | see common fields |
-| `device` | str | | the row named no device |
-| `step` | int | | the row had no integer step |
-| `peak_alloc_bytes` | float | bytes | not measured |
-| `peak_reserved_bytes` | float | bytes | not measured |
-
-### SystemRecord
-
-| Field | Type | Unit | `None` means |
-|---|---|---|---|
-| `observed_timestamp_unix_ns` | int | ns | see common fields |
-| `global_rank` | int | | see common fields |
-| `local_rank` | int | | see common fields |
-| `world_size` | int | | see common fields |
-| `local_world_size` | int | | see common fields |
-| `node_rank` | int | | see common fields |
-| `hostname` | str | | see common fields |
-| `timestamp_unix_ns` | int | ns | see common fields |
-| `seq` | int | | see common fields |
-| `cpu_percent` | float | percent of the host, 0 to 100 | not measured |
-| `ram_used_bytes` | float | bytes | not measured |
-| `ram_total_bytes` | float | bytes | not measured |
-| `gpu_available` | int | 1 or 0 | not reported |
-| `gpu_count` | int | | not reported |
-
-### SystemGpuRecord
-
-One record per GPU in a system snapshot.
-
-| Field | Type | Unit | `None` means |
-|---|---|---|---|
-| `observed_timestamp_unix_ns` | int | ns | see common fields |
-| `global_rank` | int | | see common fields |
-| `local_rank` | int | | see common fields |
-| `world_size` | int | | see common fields |
-| `local_world_size` | int | | see common fields |
-| `node_rank` | int | | see common fields |
-| `hostname` | str | | see common fields |
-| `timestamp_unix_ns` | int | ns | see common fields |
-| `seq` | int | | see common fields |
-| `gpu_idx` | int | | never `None`; GPU index on the host |
-| `util` | float | percent, 0 to 100 | not measured |
-| `mem_used_bytes` | float | bytes | not measured |
-| `mem_total_bytes` | float | bytes | not measured |
-| `temperature_c` | float | degrees Celsius | not measured |
-| `power_usage_w` | float | watts | not measured |
-| `power_limit_w` | float | watts | not measured |
-
-### ProcessRecord
-
-| Field | Type | Unit | `None` means |
-|---|---|---|---|
-| `observed_timestamp_unix_ns` | int | ns | see common fields |
-| `rank` | int | | see common fields |
-| `global_rank` | int | | see common fields |
-| `local_rank` | int | | see common fields |
-| `world_size` | int | | see common fields |
-| `local_world_size` | int | | see common fields |
-| `node_rank` | int | | see common fields |
-| `hostname` | str | | see common fields |
-| `timestamp_unix_ns` | int | ns | see common fields |
-| `seq` | int | | see common fields |
-| `cpu_percent` | float | percent of one core, can exceed 100 | not measured |
-| `cpu_logical_core_count` | int | | not reported |
-| `ram_used_bytes` | float | bytes, resident set size | not measured |
-| `ram_total_bytes` | float | bytes | not measured |
-| `gpu_available` | int | 1 or 0 | not reported |
-| `gpu_count` | int | | not reported |
-| `gpu_device_index` | int | | the process reported no GPU |
-| `gpu_mem_used_bytes` | float | bytes | not measured |
-| `gpu_mem_reserved_bytes` | float | bytes | not measured |
-| `gpu_mem_total_bytes` | float | bytes | not measured |
-
-### RuntimeEnvironmentRecord
-
-| Field | Type | Unit | `None` means |
-|---|---|---|---|
-| `observed_timestamp_unix_ns` | int | ns | see common fields |
-| `rank` | int | | see common fields |
-| `global_rank` | int | | see common fields |
-| `local_rank` | int | | see common fields |
-| `world_size` | int | | see common fields |
-| `local_world_size` | int | | see common fields |
-| `node_rank` | int | | see common fields |
-| `hostname` | str | | see common fields |
-| `pid` | int | | the rank sent no process id |
-| `timestamp_unix_ns` | int | ns | see common fields |
-| `seq` | int | | see common fields |
-| `topology` | str | | not reported |
-| `distributed_initialized` | int | 1 or 0 | not reported |
-| `distributed_backend` | str | | not reported |
-| `training_strategy` | str | | not reported |
-| `strategy_source` | str | | not reported |
-| `strategy_confidence` | str | | not reported |
-
-### StdoutStderrRecord
-
-| Field | Type | Unit | `None` means |
-|---|---|---|---|
-| `observed_timestamp_unix_ns` | int | ns | see common fields |
-| `rank` | int | | the payload had no global rank |
-| `timestamp_unix_ns` | int | ns | see common fields |
-| `line` | str | | never `None`; empty lines are not recorded |
 
 ## A custom consumer
 

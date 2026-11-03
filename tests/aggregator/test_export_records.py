@@ -20,23 +20,10 @@ from traceml_ai.aggregator import sqlite_writer
 from traceml_ai.aggregator.export import records as export_records
 from traceml_ai.aggregator.export.records import (
     RECORD_TYPES,
-    ProcessRecord,
-    RuntimeEnvironmentRecord,
-    StdoutStderrRecord,
-    StepMemoryRecord,
     StepTimeRecord,
-    SystemGpuRecord,
-    SystemRecord,
     records_from_payload,
 )
-from traceml_ai.aggregator.sqlite_writers import (
-    process,
-    runtime_environment,
-    stdout_stderr,
-    step_memory,
-    step_time,
-    system,
-)
+from traceml_ai.aggregator.sqlite_writers import step_time
 from traceml_ai.runtime.sender import SenderIdentity
 from traceml_ai.telemetry.envelope import (
     build_telemetry_envelope,
@@ -52,8 +39,9 @@ DOC = (
     / "export-records.md"
 )
 
+FORWARD = "_traceml_internal:forward_time"
 EVENTS = {
-    "_traceml_internal:forward_time": {
+    FORWARD: {
         "cuda:0": {
             "is_gpu": True,
             "duration_ms": 9.0,
@@ -63,7 +51,6 @@ EVENTS = {
         }
     }
 }
-GPU = [50.0, 1.0e9, 8.0e9, 60.0, 100.0, 300.0]
 
 IDENTITY = {
     "rank": 3,
@@ -82,94 +69,6 @@ CASES = [
         "StepTimeSampler",
         "StepTimeTable",
         {"seq": 3, "timestamp_unix_ns": TS, "step": 7, "events": EVENTS},
-        1,
-    ),
-    (
-        StepMemoryRecord,
-        step_memory,
-        "StepMemorySampler",
-        "step_memory",
-        {
-            "seq": 3,
-            "timestamp_unix_ns": TS,
-            "device": "cuda:0",
-            "step": 7,
-            "peak_alloc": 1024.0,
-            "peak_resv": 2048.0,
-        },
-        1,
-    ),
-    (
-        SystemRecord,
-        system,
-        "SystemSampler",
-        "SystemTable",
-        {
-            "seq": 1,
-            "timestamp_unix_ns": TS,
-            "cpu": 12.5,
-            "ram_used": 1.0e9,
-            "ram_total": 2.0e9,
-            "gpu_available": True,
-            "gpu_count": 2,
-            "gpus": [GPU, GPU],
-        },
-        1,
-    ),
-    (
-        SystemGpuRecord,
-        system,
-        "SystemSampler",
-        "SystemTable",
-        {"seq": 1, "timestamp_unix_ns": TS, "gpus": [GPU, GPU]},
-        2,
-    ),
-    (
-        ProcessRecord,
-        process,
-        "ProcessSampler",
-        "ProcessTable",
-        {
-            "seq": 1,
-            "timestamp_unix_ns": TS,
-            "cpu": 150.0,
-            "cpu_cores": 8,
-            "ram_used": 1.0e9,
-            "ram_total": 2.0e9,
-            "gpu_available": True,
-            "gpu_count": 1,
-            "gpu": {
-                "device": 0,
-                "mem_used": 1.0,
-                "mem_reserved": 2.0,
-                "mem_total": 3.0,
-            },
-        },
-        1,
-    ),
-    (
-        RuntimeEnvironmentRecord,
-        runtime_environment,
-        "RuntimeEnvironmentSampler",
-        "RuntimeEnvironmentTable",
-        {
-            "seq": 1,
-            "timestamp_unix_ns": TS,
-            "topology": "single_node",
-            "distributed_initialized": True,
-            "distributed_backend": "nccl",
-            "training_strategy": "ddp",
-            "strategy_source": "torch",
-            "strategy_confidence": "high",
-        },
-        1,
-    ),
-    (
-        StdoutStderrRecord,
-        stdout_stderr,
-        "Stdout/Stderr",
-        "stdout_stderr",
-        {"timestamp_unix_ns": TS, "line": "loss=1.0"},
         1,
     ),
 ]
@@ -254,6 +153,10 @@ def _step_time_row(events_json):
     return payload, row[:-1] + (events_json,)
 
 
+def _step_payload(step: int) -> dict:
+    return _payload(*CASES[0][2:4], dict(CASES[0][4], step=step))
+
+
 def _serve_rows(monkeypatch, row):
     monkeypatch.setattr(
         step_time,
@@ -297,52 +200,51 @@ def test_adversarial_items_are_skipped_not_raised():
 
 
 def test_raising_writer_counts_once_and_loses_its_envelope(monkeypatch):
-    def boom(**_):
-        raise RuntimeError("projection failed")
+    build_rows = step_time.build_rows
+    failing = _step_payload(7)
+    failing["body"]["tables"]["StepTimeTable"].append(
+        dict(CASES[0][4], step=8)
+    )
 
-    monkeypatch.setattr(step_time, "build_rows", boom)
-    batch = records_from_payload([_payload(*case[2:5]) for case in CASES[:2]])
+    def boom_on_two_rows(**kwargs):
+        if len(kwargs["envelope"].tables["StepTimeTable"]) == 2:
+            raise RuntimeError("projection failed")
+        return build_rows(**kwargs)
 
-    assert [type(r) for r in batch.records] == [StepMemoryRecord]
+    monkeypatch.setattr(step_time, "build_rows", boom_on_two_rows)
+    batch = records_from_payload([failing, _step_payload(9)])
+
+    assert [r.step for r in batch.records] == [9]
     assert batch.skipped == 1
 
 
 @pytest.mark.parametrize(
-    "cpu, cpu_percent",
-    [({"cpu": 0.0}, 0.0), ({}, None)],
+    "gpu, gpu_ms",
+    [({"gpu_ms": 0.0}, 0.0), ({}, None)],
     ids=["measured_zero", "missing"],
 )
-def test_system_cpu_keeps_zero_and_missing(cpu, cpu_percent):
+def test_step_time_gpu_ms_keeps_zero_and_missing(gpu, gpu_ms):
+    stats = {"is_gpu": True, "duration_ms": 0.0, "cpu_ms": 3.0, **gpu}
     payload = _payload(
-        "SystemSampler",
-        "SystemTable",
-        {"seq": 1, "timestamp_unix_ns": TS, **cpu},
+        "StepTimeSampler",
+        "StepTimeTable",
+        dict(CASES[0][4], events={FORWARD: {"cuda:0": stats}}),
     )
-
-    (record,) = [
-        r
-        for r in records_from_payload(payload).records
-        if type(r) is SystemRecord
-    ]
-    assert record.cpu_percent == cpu_percent
-
-
-def test_step_memory_keeps_measured_zero():
-    row = dict(CASES[1][4], peak_alloc=0.0)
-    payload = _payload("StepMemorySampler", "step_memory", row)
 
     (record,) = records_from_payload(payload).records
 
-    assert record.peak_alloc_bytes == 0.0
+    assert record.events[FORWARD]["cuda:0"]["gpu_ms"] == gpu_ms
 
 
 def test_list_batch_yields_records_for_every_envelope():
     batch = records_from_payload(
-        [_payload(*case[2:5]) for case in CASES] + ["not an envelope"]
+        [_step_payload(7), _step_payload(8), "not an envelope"]
     )
 
-    streams = {r.STREAM for r in batch.records}
-    assert streams == {cls.STREAM for cls in RECORD_TYPES}
+    assert [(r.STREAM, r.step) for r in batch.records] == [
+        ("step_time", 7),
+        ("step_time", 8),
+    ]
     assert batch.skipped == 1
 
 
@@ -355,8 +257,11 @@ def test_unknown_sampler_yields_nothing():
     assert batch.skipped == 0
 
 
-def test_writers_match_the_sqlite_projection_writers():
-    assert set(export_records._WRITERS) == set(
+def test_export_writers_are_the_step_time_writer_only():
+    # Deliberately a subset of the SQLite projection writers: the other
+    # streams get records in a follow-up.
+    assert export_records._WRITERS == (step_time,)
+    assert set(export_records._WRITERS) < set(
         sqlite_writer._PROJECTION_WRITERS
     )
     tables = set()
