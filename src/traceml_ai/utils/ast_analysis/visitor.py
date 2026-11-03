@@ -17,6 +17,7 @@ from traceml_ai.utils.ast_analysis.helpers import (
     phase_hint_for_node,
     safe_float,
     safe_int,
+    safe_step_interval,
 )
 from traceml_ai.utils.ast_analysis.models import (
     DataLoaderFinding,
@@ -481,9 +482,11 @@ class PatternVisitor(ast.NodeVisitor):
                 learning_rate=safe_float(kw_const(node, "learning_rate")),
                 weight_decay=safe_float(kw_const(node, "weight_decay")),
                 optim=kw_const(node, "optim"),
-                logging_steps=safe_int(kw_const(node, "logging_steps")),
-                save_steps=safe_int(kw_const(node, "save_steps")),
-                eval_steps=safe_int(kw_const(node, "eval_steps")),
+                logging_steps=safe_step_interval(
+                    kw_const(node, "logging_steps")
+                ),
+                save_steps=safe_step_interval(kw_const(node, "save_steps")),
+                eval_steps=safe_step_interval(kw_const(node, "eval_steps")),
                 max_steps=safe_int(kw_const(node, "max_steps")),
                 num_train_epochs=safe_float(
                     kw_const(node, "num_train_epochs")
