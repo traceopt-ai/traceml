@@ -18,6 +18,7 @@ from traceml_ai.aggregator.display_drivers.base import BaseDisplayDriver
 from traceml_ai.aggregator.display_drivers.cli import CLIDisplayDriver
 from traceml_ai.aggregator.display_drivers.summary import SummaryDisplayDriver
 from traceml_ai.aggregator.export import (
+    EXPORTER_NAMES,
     Exporter,
     ExportStats,
     ExportWorker,
@@ -105,9 +106,6 @@ def _resolve_display_driver(mode: str) -> Type[BaseDisplayDriver]:
     return driver_cls
 
 
-_EXPORTERS = ("jsonl",)
-
-
 def _resolve_exporter(
     settings: TraceMLSettings, session_root: Path
 ) -> Optional[Exporter]:
@@ -121,7 +119,8 @@ def _resolve_exporter(
             include_hostname=bool(settings.exporter_hostname),
         )
     raise ValueError(
-        f"[TraceML] Unknown exporter: {name!r}. Supported: {list(_EXPORTERS)}"
+        f"[TraceML] Unknown exporter: {name!r}. "
+        f"Supported: {list(EXPORTER_NAMES)}"
     )
 
 

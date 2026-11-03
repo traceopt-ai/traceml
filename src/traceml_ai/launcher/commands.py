@@ -20,6 +20,7 @@ import time
 from pathlib import Path
 from typing import Any, BinaryIO, Callable, Iterable, Mapping, Optional
 
+from traceml_ai.aggregator.export import EXPORTER_NAMES
 from traceml_ai.launcher.launch_config import (
     TORCH_LAUNCHER_REQUIRED,
     AggregatorLaunchConfig,
@@ -540,18 +541,15 @@ def _require_positive_interval(args: argparse.Namespace) -> None:
         )
 
 
-_KNOWN_EXPORTERS = ("jsonl",)
-
-
 def _require_known_exporter(args: argparse.Namespace) -> None:
     exporter = getattr(args, "exporter", None)
     if exporter is None:
         return
     name = str(exporter).strip()
-    if name and name not in _KNOWN_EXPORTERS:
+    if name and name not in EXPORTER_NAMES:
         raise SystemExit(
             f"[TraceML] Unknown exporter: {name!r}. "
-            f"Supported: {list(_KNOWN_EXPORTERS)}"
+            f"Supported: {list(EXPORTER_NAMES)}"
         )
 
 

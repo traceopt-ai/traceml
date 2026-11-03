@@ -18,7 +18,12 @@ from traceml_ai.aggregator.export.records import (
 )
 from traceml_ai.aggregator.export.worker import ExportStats, ExportWorker
 
+# Values the ``exporter`` setting accepts; the launcher validates against
+# this before any process starts and the aggregator resolves from it.
+EXPORTER_NAMES = ("jsonl",)
+
 __all__ = [
+    "EXPORTER_NAMES",
     "RECORD_TYPES",
     "SCHEMA_VERSION",
     "ExportStats",
