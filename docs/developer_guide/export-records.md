@@ -8,7 +8,7 @@ The records live in `traceml_ai.aggregator.export`.
 
 A record is a frozen dataclass for one projection table the aggregator writes to SQLite.
 Its fields are the table's columns in table order, minus the autoincrement `id`.
-The record is built by the same projection code that builds the SQLite row, so the two cannot disagree about a value.
+The record uses the same projection code as the SQLite row, so their projected fields stay aligned.
 
 | Record | `STREAM` | SQLite table |
 |---|---|---|
@@ -19,7 +19,7 @@ The other streams (step memory, system, process, runtime environment, stdout/std
 
 Every record class carries `STREAM`, `SCHEMA_VERSION` (currently `1`) and `COLUMNS`, its field names in order.
 `to_dict()` returns `stream`, `schema_version` and then every field.
-A missing value is `None`, never `0`.
+An unavailable value remains `None`; a measured zero remains `0`.
 `StepTimeRecord` differs from its row in one field.
 It carries the decoded `events` map in place of the `events_json` text.
 
@@ -59,13 +59,13 @@ A record starts with these identity and time fields.
 `timestamp_unix_ns` is when the rank measured the row.
 `observed_timestamp_unix_ns` is stamped when the record is built, once per envelope.
 The SQLite writer stamps its rows the same way.
-The two stamps are taken separately, so the export value and the SQLite value for one row differ by the drain latency.
+The two stamps are taken separately, so they are not guaranteed to be equal.
 `seq` is the sampler's tick counter on that rank, so it can repeat within a rank.
 
 ## Ordering and duplicates
 
-Records come out in payload order.
-Within one rank, step records arrive in step order.
+Records preserve payload order and are not sorted by this mapper.
+The StepTime sampler emits steps in order within one rank.
 Records from different ranks interleave.
 The key of a step record is `(global_rank, step)`.
 Duplicate rows are passed through, not removed, so a consumer that needs one row per step keys on `(global_rank, step)`.
@@ -96,7 +96,9 @@ Each value is `None` when the rank did not send it.
 `gpu_ms` is `None` when no GPU timing was recorded.
 `duration_ms` is the legacy effective duration, and `is_gpu` says whether GPU time backs it.
 
-## A custom consumer
+## Internal mapping example
+
+This example uses the internal payload mapper; the custom-exporter interface is defined separately.
 
 ```python
 from traceml_ai.aggregator.export import StepTimeRecord, records_from_payload
