@@ -114,6 +114,8 @@ That is `exporter: "my_exporters:make_exporter"` in `traceml.yaml`, `--exporter 
 The launcher checks only that both sides of the colon are non-empty.
 It never imports the module.
 The aggregator process imports the module, reads the attribute and calls it as `factory(context)`.
+The factory runs on the aggregator's main thread at startup, before the worker thread exists.
+Create connections, clients and files in `open`, not in the factory, so they belong to the thread that uses them.
 The training ranks never import it.
 Install the module, or put its directory on `PYTHONPATH`.
 `traceml run` starts the aggregator as a separate script, so the working directory is not on its import path.
