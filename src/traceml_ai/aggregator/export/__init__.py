@@ -14,9 +14,15 @@ from traceml_ai.aggregator.export.json_exporter import JsonExporter
 from traceml_ai.aggregator.export.records import (
     RECORD_TYPES,
     SCHEMA_VERSION,
+    ProcessRecord,
     Record,
     RecordBatch,
+    RuntimeEnvironmentRecord,
+    StdoutStderrRecord,
+    StepMemoryRecord,
     StepTimeRecord,
+    SystemGpuRecord,
+    SystemRecord,
     records_from_payload,
 )
 from traceml_ai.aggregator.export.worker import ExportStats, ExportWorker
@@ -53,9 +59,15 @@ __all__ = [
     "Exporter",
     "ExporterContext",
     "JsonExporter",
+    "ProcessRecord",
     "Record",
     "RecordBatch",
+    "RuntimeEnvironmentRecord",
+    "StdoutStderrRecord",
+    "StepMemoryRecord",
     "StepTimeRecord",
+    "SystemGpuRecord",
+    "SystemRecord",
     "parse_exporter_factory",
     "records_from_payload",
 ]
