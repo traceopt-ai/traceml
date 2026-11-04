@@ -1004,8 +1004,20 @@ def test_run_rejects_an_unknown_exporter_before_launch(
         replacement.assert_not_called()
 
 
-@pytest.mark.parametrize("value", [":make", "mod:", ":", " mod : "])
-def test_run_rejects_a_factory_value_with_an_empty_side(
+@pytest.mark.parametrize(
+    "value",
+    [
+        ":make",
+        "mod:",
+        ":",
+        " mod : ",
+        "a:b:c",
+        "my mod:fac",
+        "1mod:make",
+        "mod:1make",
+    ],
+)
+def test_run_rejects_a_malformed_factory_value(
     monkeypatch, tmp_path, value: str
 ) -> None:
     with pytest.raises(SystemExit) as exc:
@@ -1026,6 +1038,27 @@ def test_run_passes_a_factory_value_without_importing_it(
 
     assert env["TRACEML_EXPORTER"] == "mod:make"
     assert "mod" not in sys.modules
+
+
+def test_run_passes_a_dotted_factory_module(monkeypatch, tmp_path) -> None:
+    env = _aggregator_env(
+        monkeypatch, tmp_path, "--exporter", "pkg.sub_mod:make_exporter"
+    )
+
+    assert env["TRACEML_EXPORTER"] == "pkg.sub_mod:make_exporter"
+    assert "pkg" not in sys.modules
+
+
+def test_run_checks_a_factory_value_from_the_environment(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setenv("TRACEML_EXPORTER", "my_exporters:make")
+    env = _aggregator_env(monkeypatch, tmp_path, clear_exporter_env=False)
+    assert env["TRACEML_EXPORTER"] == "my_exporters:make"
+
+    monkeypatch.setenv("TRACEML_EXPORTER", "my_exporters:1make")
+    with pytest.raises(SystemExit, match="'my_exporters:1make'"):
+        _aggregator_env(monkeypatch, tmp_path, clear_exporter_env=False)
 
 
 def test_run_strips_the_exporter_name(monkeypatch, tmp_path) -> None:
@@ -1097,6 +1130,44 @@ def test_serve_rejects_an_unknown_exporter_from_yaml(
         run_serve(args)
 
     run_aggregator.assert_not_called()
+
+
+def test_serve_accepts_a_factory_exporter(monkeypatch, tmp_path) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TRACEML_EXPORTER", raising=False)
+    run_aggregator = Mock(return_value=0)
+    monkeypatch.setattr(
+        "traceml_ai.aggregator.aggregator_main.run_aggregator",
+        run_aggregator,
+    )
+    from traceml_ai.launcher.commands import run_serve
+
+    args = build_parser().parse_args(
+        ["serve", "--exporter", "my_exporters:make"]
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        run_serve(args)
+
+    assert exc.value.code == 0
+    (settings,) = run_aggregator.call_args.args
+    assert settings.exporter == "my_exporters:make"
+    assert "my_exporters" not in sys.modules
+
+
+def test_serve_accepts_a_factory_exporter_from_yaml(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TRACEML_EXPORTER", raising=False)
+    (tmp_path / "traceml.yaml").write_text(
+        'exporter: " my_exporters:make "\n', encoding="utf-8"
+    )
+
+    settings = _resolve_serve_settings(build_parser().parse_args(["serve"]))
+
+    assert settings.exporter == "my_exporters:make"
+    assert "my_exporters" not in sys.modules
 
 
 @pytest.mark.parametrize("value", ["0", "-1", "nan", "inf"])

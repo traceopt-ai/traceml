@@ -446,6 +446,19 @@ def test_resolve_config_exporter_cli_beats_env() -> None:
     assert result["exporter_hostname"] is True
 
 
+def test_resolve_config_keeps_a_factory_exporter_from_env() -> None:
+    env = {"TRACEML_EXPORTER": "my_exporters:make"}
+    result = resolve_config(_no_cli(), env, _no_yaml(), _defaults())
+    assert result["exporter"] == "my_exporters:make"
+
+
+def test_load_yaml_config_keeps_a_factory_exporter(tmp_path: Path) -> None:
+    p = _write(tmp_path, 'exporter: "my_exporters:make"\n')
+    yaml = load_yaml_config(p)
+    result = resolve_config(_no_cli(), _no_env(), yaml, _defaults())
+    assert result["exporter"] == "my_exporters:make"
+
+
 def test_load_yaml_config_rejects_non_bool_exporter_hostname(
     tmp_path: Path,
 ) -> None:

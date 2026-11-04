@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import threading
 from pathlib import Path
 
@@ -21,6 +22,7 @@ from traceml_ai.aggregator.export import (
 )
 from traceml_ai.aggregator.trace_aggregator import (
     TraceMLAggregator,
+    _FailedExporter,
     _resolve_exporter,
 )
 from traceml_ai.runtime.sender import SenderIdentity
@@ -52,6 +54,9 @@ class _Logger:
 class _TCP:
     def __init__(self, messages):
         self._messages = list(messages)
+
+    def start(self):
+        return None
 
     def poll(self):
         while self._messages:
@@ -102,6 +107,14 @@ def none_factory(context):
     return None
 
 
+def exiting_factory(context):
+    sys.exit(4)
+
+
+def int_factory(context):
+    return 42
+
+
 @pytest.fixture(autouse=True)
 def _clear_made():
     _MADE.clear()
@@ -148,42 +161,23 @@ def _rank_finished() -> dict:
     )
 
 
-def _run(
-    tmp_path: Path, exporter: str, logger: _Logger, *, fail_finalize: bool
-) -> Path:
-    """
-    Run one aggregator over one step and return its aggregator dir.
-
-    ``fail_finalize`` makes the SQLite finalize raise, so ``stop`` writes
-    ``finalization_error.json``, which always carries the export stats.
-    """
-    agg = TraceMLAggregator(
-        logger=logger,
-        stop_event=threading.Event(),
-        settings=_settings(tmp_path, exporter, mode="cli"),
-    )
-    agg._tcp_server = _TCP([[_step_time_payload(), _rank_finished()]])
-    if agg._export_worker is not None:
-        agg._export_worker.start()
-    if fail_finalize:
-
-        def finalize(timeout_sec):
-            raise RuntimeError("finalize broke")
-
-        agg._sqlite_writer.finalize = finalize
-
-    agg._drain_tcp()
-    agg.stop(timeout_sec=5.0)
-    return tmp_path / "logs" / "run" / "aggregator"
+def _open_failure(sink) -> str:
+    """Return the message ``open`` raises; the other calls are inert."""
+    assert isinstance(sink, _FailedExporter)
+    assert sink.write([object()]) is None
+    assert sink.flush() is None
+    assert sink.close(dropped_batches=3) is None
+    with pytest.raises(RuntimeError) as exc:
+        sink.open()
+    return str(exc.value)
 
 
 def test_factory_receives_the_context(tmp_path):
     settings = _settings(
         tmp_path, f"{__name__}:make_exporter", exporter_hostname=True
     )
-    logger = _Logger()
 
-    sink = _resolve_exporter(settings, tmp_path / "run", logger)
+    sink = _resolve_exporter(settings, tmp_path / "run")
 
     assert sink is _MADE[0]
     assert sink.context == ExporterContext(
@@ -191,14 +185,13 @@ def test_factory_receives_the_context(tmp_path):
         export_dir=tmp_path / "run" / "aggregator" / "export",
         include_hostname=True,
     )
-    assert logger.errors == []
     assert not (tmp_path / "run").exists()
 
 
 def test_factory_value_is_stripped(tmp_path):
     settings = _settings(tmp_path, f" {__name__} : make_exporter ")
 
-    sink = _resolve_exporter(settings, tmp_path, _Logger())
+    sink = _resolve_exporter(settings, tmp_path)
 
     assert sink is _MADE[0]
     assert sink.context.include_hostname is False
@@ -226,7 +219,9 @@ def test_factory_exporter_receives_the_worker_records(tmp_path):
     assert record.step == 1
     assert exporter.calls[3] == ("close", 0)
     assert logger.errors == []
-    assert not (tmp_path / "logs" / "run" / "aggregator" / "export").exists()
+    export_dir = tmp_path / "logs" / "run" / "aggregator" / "export"
+    assert exporter.context.export_dir == export_dir.resolve()
+    assert not export_dir.exists()
 
 
 @pytest.mark.parametrize(
@@ -235,54 +230,126 @@ def test_factory_exporter_receives_the_worker_records(tmp_path):
         ("no_such_module_xyz:make", "ModuleNotFoundError"),
         (f"{__name__}:no_such_attr", "AttributeError"),
         (f"{__name__}:raising_factory", "factory broke"),
-        (f"{__name__}:none_factory", "returned None"),
-        ("mod:", "module:factory"),
+        (f"{__name__}:none_factory", "factory returned None"),
+        (f"{__name__}:exiting_factory", "SystemExit(4)"),
+        ("mod:", "is not of the form 'module:factory'"),
+        ("a:b:c", "is not of the form 'module:factory'"),
     ],
 )
-def test_failed_factory_is_logged_once_and_disables_export(
+def test_failed_factory_gives_an_exporter_whose_open_raises(
     tmp_path, value, failure
 ):
+    sink = _resolve_exporter(_settings(tmp_path, value), tmp_path)
+
+    message = _open_failure(sink)
+    assert message.startswith(f"[TraceML] Exporter {value!r} ")
+    assert failure in message
+
+
+def test_module_that_exits_on_import_does_not_stop_the_aggregator(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "traceml_exiting_exporter.py").write_text(
+        "import sys\nsys.exit(3)\n", encoding="utf-8"
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    value = "traceml_exiting_exporter:make"
+
+    sink = _resolve_exporter(_settings(tmp_path, value), tmp_path)
+
+    message = _open_failure(sink)
+    assert message.startswith(f"[TraceML] Exporter {value!r} could not be")
+    assert "SystemExit(3)" in message
+    assert "traceml_exiting_exporter" not in sys.modules
+
+
+def _run_summary(tmp_path: Path, exporter: str, logger: _Logger) -> Path:
+    """Run a started summary-mode aggregator over one step; return its dir."""
+    agg = TraceMLAggregator(
+        logger=logger,
+        stop_event=threading.Event(),
+        settings=_settings(
+            tmp_path,
+            exporter,
+            history_enabled=True,
+            db_path=str(tmp_path / "telemetry.db"),
+        ),
+    )
+    agg._tcp_server = _TCP([[_step_time_payload(), _rank_finished()]])
+    agg.start()
+    agg.stop(timeout_sec=10.0)
+    return tmp_path / "logs" / "run"
+
+
+@pytest.mark.parametrize(
+    "value, logged",
+    [
+        ("no_such_module_xyz:make", "no_such_module_xyz:make"),
+        (f"{__name__}:no_such_attr", f"{__name__}:no_such_attr"),
+        (f"{__name__}:raising_factory", f"{__name__}:raising_factory"),
+        (f"{__name__}:none_factory", f"{__name__}:none_factory"),
+        # Not an exporter: the worker's first ``open`` call fails.
+        (f"{__name__}:int_factory", "int.open failed"),
+    ],
+)
+def test_failed_factory_run_records_the_loss(tmp_path, value, logged):
     logger = _Logger()
 
-    sink = _resolve_exporter(_settings(tmp_path, value), tmp_path, logger)
+    session_root = _run_summary(tmp_path, value, logger)
 
-    assert sink is None
     (message,) = logger.errors
     assert message.startswith("[TraceML] ")
-    assert repr(value) in message
-    assert failure in message
-    assert "export is disabled" in message
+    assert "export disabled" in message
+    assert logged in message
+    aggregator_dir = session_root / "aggregator"
+    assert not (aggregator_dir / "export").exists()
+    summary = json.loads((session_root / "final_summary.json").read_text())
+    assert "export" not in summary
+    warning = json.loads(
+        (aggregator_dir / "finalization_warning.json").read_text()
+    )
+    assert warning["reason"] == "export_incomplete"
+    assert warning["export"] == {
+        "written_records": 0,
+        "dropped_batches": 0,
+        "failed_records": 1,
+        "skipped_items": 0,
+        "exporter_failed": True,
+    }
 
 
 @pytest.mark.parametrize(
     "value",
-    [
-        "no_such_module_xyz:make",
-        f"{__name__}:no_such_attr",
-        f"{__name__}:raising_factory",
-        f"{__name__}:none_factory",
-    ],
+    ["no_such_module_xyz:make", f"{__name__}:raising_factory"],
 )
-@pytest.mark.parametrize("fail_finalize", [False, True])
-def test_failed_factory_run_matches_a_run_without_export(
-    tmp_path, value, fail_finalize
-):
+def test_failed_factory_is_in_the_error_artifact(tmp_path, value):
     logger = _Logger()
+    agg = TraceMLAggregator(
+        logger=logger,
+        stop_event=threading.Event(),
+        settings=_settings(tmp_path, value, mode="cli"),
+    )
+    agg._tcp_server = _TCP([[_step_time_payload(), _rank_finished()]])
+    agg._export_worker.start()
 
-    aggregator_dir = _run(
-        tmp_path / "factory", value, logger, fail_finalize=fail_finalize
-    )
-    baseline_dir = _run(
-        tmp_path / "off", "", _Logger(), fail_finalize=fail_finalize
-    )
+    def finalize(timeout_sec):
+        raise RuntimeError("finalize broke")
+
+    agg._sqlite_writer.finalize = finalize
+
+    agg._drain_tcp()
+    agg.stop(timeout_sec=5.0)
 
     (message,) = logger.errors
-    assert message.startswith("[TraceML] ")
+    assert value in message
+    aggregator_dir = tmp_path / "logs" / "run" / "aggregator"
     assert not (aggregator_dir / "export").exists()
-    artifacts = sorted(p.name for p in aggregator_dir.glob("finalization_*"))
-    baseline = sorted(p.name for p in baseline_dir.glob("finalization_*"))
-    assert artifacts == baseline
-    assert artifacts == (["finalization_error.json"] if fail_finalize else [])
-    for name in artifacts:
-        data = json.loads((aggregator_dir / name).read_text())
-        assert data["export"] is None
+    assert sorted(p.name for p in aggregator_dir.glob("finalization_*")) == [
+        "finalization_error.json"
+    ]
+    error = json.loads(
+        (aggregator_dir / "finalization_error.json").read_text()
+    )
+    assert error["export"]["exporter_failed"] is True
+    assert error["export"]["failed_records"] == 1
+    assert error["export"]["written_records"] == 0

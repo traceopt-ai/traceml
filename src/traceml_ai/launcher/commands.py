@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 from typing import Any, BinaryIO, Callable, Iterable, Mapping, Optional
 
-from traceml_ai.aggregator.export import EXPORTER_NAMES
+from traceml_ai.aggregator.export import EXPORTER_NAMES, parse_exporter_factory
 from traceml_ai.launcher.launch_config import (
     TORCH_LAUNCHER_REQUIRED,
     AggregatorLaunchConfig,
@@ -547,8 +547,7 @@ def _require_known_exporter(exporter: object) -> str:
     if not name or name in EXPORTER_NAMES:
         return name
     # A ``module:factory`` value is imported by the aggregator, never here.
-    module_name, colon, attr = name.partition(":")
-    if colon and module_name.strip() and attr.strip():
+    if parse_exporter_factory(name) is not None:
         return name
     raise SystemExit(
         f"[TraceML] Unknown exporter: {name!r}. "
