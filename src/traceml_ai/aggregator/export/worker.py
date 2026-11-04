@@ -52,7 +52,7 @@ class ExportStats:
         A payload whose conversion raised counts its length when it is a
         list, else one.
     exporter_failed:
-        True once ``open``, ``write`` or ``flush`` has raised.
+        True once ``open``, ``write``, ``flush`` or ``close`` has raised.
     """
 
     written_records: int
@@ -328,6 +328,8 @@ class ExportWorker:
         try:
             self._exporter.close(dropped_batches=dropped)
         except Exception as exc:
+            with self._lock:
+                self._failed = True
             self._log_error(f"[TraceML] {self._name}.close failed: {exc!r}")
 
     def _log_error(self, msg: str) -> None:

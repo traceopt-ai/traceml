@@ -450,6 +450,7 @@ def test_raising_close_is_logged_and_stop_returns() -> None:
     stats = worker.stop(timeout_sec=1.0)
 
     assert stats.written_records == 1
+    assert stats.exporter_failed is True
     assert exporter.close_calls == 1
     assert len(logger.errors) == 1
     assert logger.errors[0].startswith("[TraceML]")
