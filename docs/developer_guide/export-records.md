@@ -97,9 +97,72 @@ Each value is `None` when the rank did not send it.
 `gpu_ms` is `None` when no GPU timing was recorded.
 `duration_ms` is the legacy effective duration, and `is_gpu` says whether GPU time backs it.
 
+## Custom exporters
+
+A custom exporter receives the same records as the built-in `jsonl` exporter.
+It implements the `Exporter` interface from `traceml_ai.aggregator.export`: `open()`, `write(records)`, `flush()` and `close(*, dropped_batches=0)`.
+The export worker calls all four from its own background thread, and the calls never overlap.
+It calls `open` once, then `write` and `flush` once per tick, then `close` once.
+`close` is not called when `open` raised.
+`dropped_batches` is the number of payload batches the worker never handed to `write`.
+A method may raise.
+The worker then logs the failure, stops using the exporter, and records the loss in `finalization_warning.json`.
+
+Set the `exporter` setting to `module:factory` to use one.
+The value works in each place `jsonl` does.
+That is `exporter: "my_exporters:make_exporter"` in `traceml.yaml`, `--exporter my_exporters:make_exporter` on `traceml run` and `traceml serve`, or `TRACEML_EXPORTER=my_exporters:make_exporter`.
+The launcher checks only that both sides of the colon are non-empty.
+It never imports the module.
+The aggregator process imports the module, reads the attribute and calls it as `factory(context)`.
+The training ranks never import it.
+Install the module, or put its directory on `PYTHONPATH`.
+`traceml run` starts the aggregator as a separate script, so the working directory is not on its import path.
+
+`context` is an `ExporterContext` with three fields.
+
+- `session_root` is the run's folder, `<logs-dir>/<run-name>`.
+- `export_dir` is `session_root / "aggregator" / "export"`, where `jsonl` writes. TraceML does not create it for a factory.
+- `include_hostname` is the `exporter_hostname` setting.
+
+A factory failure never fails the run.
+An import error, a missing attribute, an exception from the factory, or a factory that returns `None` is logged once with the `[TraceML]` prefix.
+The run then continues without export, exactly as with no exporter set.
+`final_summary.json` is the same either way.
+
+This factory returns an exporter that appends every record as one JSON line to one file.
+
+```python
+import json
+
+
+class OneFileExporter:
+    def __init__(self, path):
+        self._path = path
+        self._file = None
+
+    def open(self):
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._file = open(self._path, "a", encoding="utf-8")
+
+    def write(self, records):
+        for record in records:
+            self._file.write(json.dumps(record.to_dict()) + "\n")
+
+    def flush(self):
+        self._file.flush()
+
+    def close(self, *, dropped_batches=0):
+        self._file.close()
+
+
+def make_exporter(context):
+    return OneFileExporter(context.export_dir / "records.jsonl")
+```
+
 ## Internal mapping example
 
-This example uses the internal payload mapper; the custom-exporter interface is defined separately.
+This example uses the internal payload mapper.
+A custom exporter does not need it; see [Custom exporters](#custom-exporters).
 
 ```python
 from traceml_ai.aggregator.export import StepTimeRecord, records_from_payload
