@@ -36,7 +36,7 @@ SCHEMA_VERSION = 1
 StepEvents = Dict[str, Dict[str, Dict[str, Any]]]
 
 
-class _Record:
+class Record:
     """Behaviour shared by every export record."""
 
     STREAM: ClassVar[str]
@@ -50,7 +50,7 @@ class _Record:
         return row
 
     @classmethod
-    def from_row(cls, row: tuple) -> "_Record":
+    def from_row(cls, row: tuple) -> "Record":
         """Build a record from one ``build_rows`` tuple of its table."""
         if len(row) != len(cls.COLUMNS):
             raise ValueError(
@@ -83,7 +83,7 @@ def _record(stream: str, table: str):
 
 
 @_record("step_time", "step_time_samples")
-class StepTimeRecord(_Record):
+class StepTimeRecord(Record):
     """One step's timing events for one rank."""
 
     observed_timestamp_unix_ns: int
@@ -123,7 +123,7 @@ _WRITERS = (step_time_writer,)
 class RecordBatch:
     """Records built from one payload, and the malformed inputs skipped."""
 
-    records: List[_Record]
+    records: List[Record]
     skipped: int
 
 
@@ -142,7 +142,7 @@ def records_from_payload(
     does not fit its record are skipped and counted; nothing raises.
     """
     items = payload if isinstance(payload, list) else [payload]
-    records: List[_Record] = []
+    records: List[Record] = []
     skipped = 0
 
     for item in items:
