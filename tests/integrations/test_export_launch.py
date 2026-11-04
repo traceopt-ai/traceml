@@ -87,6 +87,12 @@ def test_two_rank_run_exports_step_time_jsonl(tmp_path):
 
     for line in data:
         assert "hostname" not in line
+        assert line["rank"] == line["global_rank"]
+        assert line["world_size"] == 2
+        assert line["local_world_size"] == 2
+        assert line["node_rank"] == 0
+        assert isinstance(line["observed_timestamp_unix_ns"], int)
+        assert isinstance(line["timestamp_unix_ns"], int)
         events = line["events"]
         for devices in events.values():
             for value in devices.values():

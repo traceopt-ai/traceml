@@ -3,7 +3,7 @@
 ## What it is
 
 With the `exporter` setting on, the aggregator writes every admitted step-time record to a JSON Lines file while the run is going.
-There is one line per rank per step.
+There is one line for every step each rank reports.
 The file sits beside the SQLite store under the run's `aggregator/` folder.
 A background worker writes it, so the run never waits on the file.
 Step time is the only stream so far.
@@ -35,21 +35,24 @@ TraceMLRayConfig(exporter="jsonl")
 The launcher resolves the setting like every other one.
 A CLI flag beats the `TRACEML_*` environment variable, which beats `traceml.yaml`.
 With Ray, the fields on `TraceMLRayConfig` set it.
+Ray reads no environment variable and no `traceml.yaml` for it, so `exporter=""` means off.
 
 Lines carry no hostname by default, because the file may be uploaded elsewhere.
 To add `hostname` to every line, use `--exporter-hostname`, `exporter_hostname: true` in YAML, `TRACEML_EXPORTER_HOSTNAME=1`, or `TraceMLRayConfig(exporter_hostname=True)`.
+With the switch on, a rank that sent no hostname gives `"hostname": null`.
 
 ## The files
 
 The step-time file is `<logs-dir>/<run-name>/aggregator/export/step_time.jsonl`.
-There is one file for the whole job, however many ranks and nodes it has.
+On Ray the run folder is named by `session_id`.
+There is one file for the whole job, however many ranks and nodes it has, because one aggregator serves the job.
 Each line carries `global_rank`, `local_rank`, `node_rank` and `step`.
 Key a consumer on `(global_rank, step)`.
 
 The file is created when the aggregator starts.
 A run that records no steps still leaves a file, holding only its closing line.
 An existing file is never overwritten or appended to.
-If the run folder already has one, export stays off for that run and the loss is reported as below.
+If the run folder already has one, export stays off for that run and the loss is reported as below, with `exporter_failed` true.
 
 These two lines come from a two-rank CPU run of four steps.
 The first is a data line and the second is the closing line:
@@ -73,6 +76,7 @@ If export is the only problem, the file also says `"reason": "export_incomplete"
 If another warning already started the file, the `export` block is added to it.
 
 The closing line's `written_records` and `dropped_batches` are the same counts for that file.
+`failed_records` and `skipped_items` appear only in the warning file, so read it when you need every count.
 A file without a closing line means a write to it failed or the aggregator did not finish.
 
 ## Field reference
