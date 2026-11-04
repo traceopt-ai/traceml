@@ -544,12 +544,16 @@ def _require_positive_interval(args: argparse.Namespace) -> None:
 def _require_known_exporter(exporter: object) -> str:
     """Return a normalized supported exporter name, or exit clearly."""
     name = str(exporter or "").strip()
-    if name and name not in EXPORTER_NAMES:
-        raise SystemExit(
-            f"[TraceML] Unknown exporter: {name!r}. "
-            f"Supported: {list(EXPORTER_NAMES)}"
-        )
-    return name
+    if not name or name in EXPORTER_NAMES:
+        return name
+    # A ``module:factory`` value is imported by the aggregator, never here.
+    module_name, colon, attr = name.partition(":")
+    if colon and module_name.strip() and attr.strip():
+        return name
+    raise SystemExit(
+        f"[TraceML] Unknown exporter: {name!r}. "
+        f"Supported: {list(EXPORTER_NAMES)} or 'module:factory'"
+    )
 
 
 def validate_launch_args(args: argparse.Namespace) -> None:

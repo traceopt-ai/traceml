@@ -997,10 +997,35 @@ def test_run_rejects_an_unknown_exporter_before_launch(
         cli.main()
 
     assert str(exc.value) == (
-        "[TraceML] Unknown exporter: 'unsupported'. Supported: ['jsonl']"
+        "[TraceML] Unknown exporter: 'unsupported'. "
+        "Supported: ['jsonl'] or 'module:factory'"
     )
     for replacement in forbidden.values():
         replacement.assert_not_called()
+
+
+@pytest.mark.parametrize("value", [":make", "mod:", ":", " mod : "])
+def test_run_rejects_a_factory_value_with_an_empty_side(
+    monkeypatch, tmp_path, value: str
+) -> None:
+    with pytest.raises(SystemExit) as exc:
+        _aggregator_env(monkeypatch, tmp_path, "--exporter", value)
+
+    assert str(exc.value) == (
+        f"[TraceML] Unknown exporter: {value.strip()!r}. "
+        "Supported: ['jsonl'] or 'module:factory'"
+    )
+
+
+def test_run_passes_a_factory_value_without_importing_it(
+    monkeypatch, tmp_path
+) -> None:
+    assert "mod" not in sys.modules
+
+    env = _aggregator_env(monkeypatch, tmp_path, "--exporter", " mod:make ")
+
+    assert env["TRACEML_EXPORTER"] == "mod:make"
+    assert "mod" not in sys.modules
 
 
 def test_run_strips_the_exporter_name(monkeypatch, tmp_path) -> None:

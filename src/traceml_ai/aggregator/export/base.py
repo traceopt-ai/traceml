@@ -4,13 +4,31 @@
 # you may not use this file except in compliance with the License.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The interface an export sink implements."""
+"""The interface an export sink implements, and what its factory gets."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol, Sequence
 
 from traceml_ai.aggregator.export.records import Record
+
+
+@dataclass(frozen=True)
+class ExporterContext:
+    """
+    What the aggregator passes to an exporter factory.
+
+    ``session_root`` is the run's folder, ``<logs-dir>/<run-name>``.
+    ``export_dir`` is ``session_root / "aggregator" / "export"``, where the
+    JSON Lines exporter writes; it is not created for a factory.
+    ``include_hostname`` is the ``exporter_hostname`` setting.
+    """
+
+    session_root: Path
+    export_dir: Path
+    include_hostname: bool
 
 
 class Exporter(Protocol):

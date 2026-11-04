@@ -6,6 +6,7 @@
 
 """Out-of-process telemetry server and display driver host."""
 
+import importlib
 import logging
 import sys
 import threading
@@ -20,6 +21,7 @@ from traceml_ai.aggregator.display_drivers.summary import SummaryDisplayDriver
 from traceml_ai.aggregator.export import (
     EXPORTER_NAMES,
     Exporter,
+    ExporterContext,
     ExportStats,
     ExportWorker,
     JsonExporter,
@@ -110,17 +112,63 @@ def _resolve_display_driver(mode: str) -> Type[BaseDisplayDriver]:
     return driver_cls
 
 
-def _resolve_exporter(
-    settings: TraceMLSettings, session_root: Path
+def _load_exporter_factory(
+    value: str, context: ExporterContext, logger: Any
 ) -> Optional[Exporter]:
-    """Return the export sink ``settings.exporter`` names, or None if off."""
+    """
+    Import ``module:attr`` and return ``attr(context)``, or None.
+
+    Every failure is logged once and gives None, so the run continues
+    without export.
+    """
+
+    def disabled(failure: str) -> None:
+        logger.error(
+            f"[TraceML] Exporter {value!r} {failure}; "
+            "export is disabled for this run."
+        )
+        return None
+
+    module_name, _, attr = value.partition(":")
+    module_name, attr = module_name.strip(), attr.strip()
+    if not module_name or not attr:
+        return disabled("is not of the form 'module:factory'")
+    try:
+        factory = getattr(importlib.import_module(module_name), attr)
+    except Exception as exc:
+        return disabled(f"could not be loaded: {exc!r}")
+    try:
+        exporter = factory(context)
+    except Exception as exc:
+        return disabled(f"factory raised {exc!r}")
+    if exporter is None:
+        return disabled("factory returned None")
+    return exporter
+
+
+def _resolve_exporter(
+    settings: TraceMLSettings, session_root: Path, logger: Any
+) -> Optional[Exporter]:
+    """
+    Return the export sink ``settings.exporter`` names, or None if off.
+
+    A value with a colon names a factory, imported here in the aggregator
+    process and called with an ``ExporterContext``; a factory that fails is
+    logged and gives None. An unknown plain name raises.
+    """
     name = str(settings.exporter or "").strip()
     if not name:
         return None
+    context = ExporterContext(
+        session_root=session_root,
+        export_dir=session_root / "aggregator" / "export",
+        include_hostname=bool(settings.exporter_hostname),
+    )
+    if ":" in name:
+        return _load_exporter_factory(name, context, logger)
     if name == "jsonl":
         return JsonExporter(
-            session_root / "aggregator" / "export",
-            include_hostname=bool(settings.exporter_hostname),
+            context.export_dir, include_hostname=context.include_hostname
         )
     raise ValueError(
         f"[TraceML] Unknown exporter: {name!r}. "
@@ -187,9 +235,10 @@ class TraceMLAggregator:
         )
 
         # Optional structured export of admitted telemetry. An unknown name
-        # raises here, at aggregator startup, never mid-run.
+        # raises here, at aggregator startup, never mid-run; a failed factory
+        # is logged and the run continues without export.
         self._export_worker: Optional[ExportWorker] = None
-        export_sink = _resolve_exporter(settings, session_root)
+        export_sink = _resolve_exporter(settings, session_root, self._logger)
         if export_sink is not None:
             self._export_worker = ExportWorker(
                 export_sink,

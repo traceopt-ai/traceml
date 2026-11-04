@@ -33,8 +33,9 @@ def _add_exporter_args(parser: argparse.ArgumentParser) -> None:
         default=None,
         help=(
             "Write live step-time records to "
-            "<logs-dir>/<run-name>/aggregator/export/step_time.jsonl. "
-            "Supported: jsonl. Default: off."
+            "<logs-dir>/<run-name>/aggregator/export/step_time.jsonl "
+            "(jsonl), or load a custom exporter from module:factory in the "
+            "aggregator process. Default: off."
         ),
     )
     parser.add_argument(
