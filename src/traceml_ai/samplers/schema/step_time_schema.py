@@ -23,8 +23,8 @@ Aggregation rules (produced by sampler)
 ---------------------------------------
 - Events are grouped by (event_name, device).
 - cpu_ms is SUM'ed across repeated occurrences within a step.
-- gpu_ms is SUM'ed across repeated GPU-timed occurrences within a step; it is
-  null when no GPU event timing was recorded.
+- gpu_ms is SUM'ed only when every repeated occurrence recorded GPU timing;
+  it is null when any occurrence lacks it. A measured 0.0 remains 0.0.
 - duration_ms remains the compatibility/effective duration and is SUM'ed across
   repeated occurrences within a step (e.g., gradient accumulation regions).
 - n_calls counts how many occurrences were aggregated.
