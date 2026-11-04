@@ -17,11 +17,12 @@ class Exporter(Protocol):
     """
     A sink for export records.
 
-    The export worker calls these from one thread at a time: ``open`` once
-    before the first write, ``write`` then ``flush`` per tick, and ``close``
-    once at the end, or after a failed ``write`` or ``flush``. ``close`` is
-    not called when ``open`` raised. A method may raise; the worker logs
-    the failure and stops using the exporter.
+    The export worker calls the complete lifecycle from its background
+    thread: ``open`` once before the first write, ``write`` then ``flush``
+    per tick, and ``close`` once at the end, or after a failed ``write`` or
+    ``flush``. Calls never overlap. ``close`` is not called when ``open``
+    raised. A method may raise; the worker logs the failure and stops using
+    the exporter.
     """
 
     def open(self) -> None:

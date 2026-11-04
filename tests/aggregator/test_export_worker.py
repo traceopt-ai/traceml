@@ -83,15 +83,18 @@ class _RecordingExporter:
         self.flush_calls = 0
         self.close_calls = 0
         self.close_dropped: list[int] = []
+        self.call_threads: list[int] = []
         self.in_write = False
         self.closed_during_write = False
 
     def open(self) -> None:
         with self._lock:
+            self.call_threads.append(threading.get_ident())
             self.open_calls += 1
 
     def write(self, records) -> None:
         with self._lock:
+            self.call_threads.append(threading.get_ident())
             self.write_calls += 1
             self.in_write = True
         try:
@@ -106,10 +109,12 @@ class _RecordingExporter:
 
     def flush(self) -> None:
         with self._lock:
+            self.call_threads.append(threading.get_ident())
             self.flush_calls += 1
 
     def close(self, *, dropped_batches: int = 0) -> None:
         with self._lock:
+            self.call_threads.append(threading.get_ident())
             self.close_calls += 1
             self.close_dropped.append(dropped_batches)
             if self.in_write:
@@ -163,6 +168,7 @@ def _wait_until(pred, timeout: float = 2.0, interval: float = 0.01) -> bool:
 
 
 def test_records_reach_the_exporter_within_one_tick() -> None:
+    caller_thread = threading.get_ident()
     exporter = _RecordingExporter()
     worker = ExportWorker(exporter, interval_sec=0.05, logger=_FakeLogger())
     worker.start()
@@ -177,6 +183,8 @@ def test_records_reach_the_exporter_within_one_tick() -> None:
     assert exporter.open_calls == 1
     assert exporter.flush_calls >= 1
     assert exporter.close_calls == 1
+    assert len(set(exporter.call_threads)) == 1
+    assert exporter.call_threads[0] != caller_thread
     assert stats == ExportStats(
         written_records=2,
         dropped_batches=0,
@@ -374,7 +382,7 @@ def test_raising_open_is_logged_once_and_marks_failed() -> None:
     worker = ExportWorker(exporter, interval_sec=0.05, logger=logger)
     worker.start()
     try:
-        assert worker.stats().exporter_failed is True
+        assert _wait_until(lambda: worker.stats().exporter_failed)
         worker.submit(_payload(1))
         assert _wait_until(lambda: worker.stats().failed_records == 1)
     finally:

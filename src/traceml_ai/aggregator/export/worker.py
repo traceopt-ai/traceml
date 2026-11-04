@@ -10,7 +10,7 @@ Background worker that moves admitted payloads to an exporter.
 ``submit`` puts a payload on a bounded queue and never blocks. One daemon
 thread wakes every ``interval_sec``, turns everything queued into export
 records and hands them to the exporter in one ``write`` and ``flush``.
-Every exporter call after ``open`` runs on that thread, so no two overlap.
+The complete exporter lifecycle runs on that thread, so no two calls overlap.
 A failing exporter is closed and abandoned; the counts keep going.
 """
 
@@ -106,24 +106,11 @@ class ExportWorker:
         self._failed = False
 
     def start(self) -> None:
-        """Open the exporter and start the worker thread (idempotent)."""
+        """Start the worker thread (idempotent)."""
         with self._lock:
             if self._started or self._stopping:
                 return
             self._started = True
-        try:
-            self._exporter.open()
-            opened = True
-        except Exception as exc:
-            opened = False
-            self._log_error(
-                f"[TraceML] {self._name}.open failed, export disabled: "
-                f"{exc!r}"
-            )
-        with self._lock:
-            self._opened = opened
-            if not opened:
-                self._failed = True
         # Held across ``Thread.start`` (which returns once the thread runs)
         # so ``stop`` sees either no thread or one it can join.
         start_error: Optional[Exception] = None
@@ -194,10 +181,8 @@ class ExportWorker:
         self._stop_event.set()
 
         if not thread_started:
-            # No thread will ever run: drop what is queued. The exporter
-            # was opened only if the thread failed to start after ``open``.
+            # No thread will ever run, so the exporter was never opened.
             self._clear_queue()
-            self._close_exporter()
             return self.stats()
 
         self._thread.join(timeout=max(0.0, self._deadline - time.monotonic()))
@@ -221,6 +206,9 @@ class ExportWorker:
         )
 
     def _run(self) -> None:
+        # Keep the complete lifecycle on this thread. Custom exporters may
+        # create thread-affine clients or other resources in ``open``.
+        self._open_exporter()
         try:
             while not self._stop_event.wait(self._interval_sec):
                 self._export(self._drain())
@@ -240,6 +228,21 @@ class ExportWorker:
             self._log_error(f"[TraceML] export worker loop failed: {exc!r}")
         finally:
             self._close_exporter()
+
+    def _open_exporter(self) -> None:
+        """Open the exporter, disabling it if setup fails."""
+        try:
+            self._exporter.open()
+        except Exception as exc:
+            with self._lock:
+                self._failed = True
+            self._log_error(
+                f"[TraceML] {self._name}.open failed, export disabled: "
+                f"{exc!r}"
+            )
+            return
+        with self._lock:
+            self._opened = True
 
     def _before_deadline(self) -> bool:
         """True while the stop deadline has not passed."""
