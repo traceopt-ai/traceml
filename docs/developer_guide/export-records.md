@@ -20,6 +20,7 @@ The other streams (step memory, system, process, runtime environment, stdout/std
 
 Every record class carries `STREAM`, `SCHEMA_VERSION` (currently `1`) and `COLUMNS`, its field names in order.
 `to_dict()` returns `stream`, `schema_version` and then every field.
+The JSON Lines exporter drops `hostname` from each line unless `exporter_hostname` is on; with it on, a rank that sent no hostname gives `null`.
 An unavailable value remains `None`; a measured zero remains `0`.
 `StepTimeRecord` differs from its row in one field.
 It carries the decoded `events` map in place of the `events_json` text.
@@ -94,7 +95,7 @@ Do not key on `seq`.
 `events[name][device]` is a map of `is_gpu` (bool), `duration_ms`, `cpu_ms`, `gpu_ms` (float, milliseconds) and `n_calls` (int).
 Each value is `None` when the rank did not send it.
 `cpu_ms` is CPU wall time and `gpu_ms` is CUDA event time, each summed over the step's calls.
-`gpu_ms` is `None` when no GPU timing was recorded.
+`gpu_ms` is `None` unless every call of that phase in the step measured the GPU clock; a measured zero stays `0.0`.
 `duration_ms` is the legacy effective duration, and `is_gpu` says whether GPU time backs it.
 
 ## Custom exporters
@@ -111,7 +112,7 @@ The worker then logs the failure, stops using the exporter, and records the loss
 Set the `exporter` setting to `module:factory` to use one.
 The value works in each place `jsonl` does.
 That is `exporter: "my_exporters:make_exporter"` in `traceml.yaml`, `--exporter my_exporters:make_exporter` on `traceml run` and `traceml serve`, or `TRACEML_EXPORTER=my_exporters:make_exporter`.
-The launcher checks only that both sides of the colon are non-empty.
+The launcher checks only the form of the value: a dotted module path, a colon, and one identifier.
 It never imports the module.
 The aggregator process imports the module, reads the attribute and calls it as `factory(context)`.
 The factory runs on the aggregator's main thread at startup, before the worker thread exists.
@@ -127,9 +128,14 @@ Install the module, or put its directory on `PYTHONPATH`.
 - `include_hostname` is the `exporter_hostname` setting.
 
 A factory failure never fails the run.
-An import error, a missing attribute, an exception from the factory, or a factory that returns `None` is logged once with the `[TraceML]` prefix.
-The run then continues without export, exactly as with no exporter set.
-`final_summary.json` is the same either way.
+The failures are an import error, a missing attribute, an exception or `SystemExit` from the module or the factory, and a factory that returns `None`.
+Each one is treated like an exporter whose `open` raised.
+The worker logs it once with the `[TraceML]` prefix, naming the value and the failure.
+The run continues, and `final_summary.json` is unchanged.
+`finalization_warning.json` records the loss.
+Its `export` block has `exporter_failed` set to `true`, and `failed_records` equals the records admitted.
+TraceML does not check the returned object up front.
+If it lacks one of the four methods, export fails when the worker first calls that method, and the loss is recorded the same way.
 
 This factory returns an exporter that appends every record as one JSON line to one file.
 
