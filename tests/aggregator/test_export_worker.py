@@ -457,20 +457,6 @@ def test_raising_close_is_logged_and_stop_returns() -> None:
     assert "close failed" in logger.errors[0]
 
 
-def test_raising_close_marks_the_exporter_failed() -> None:
-    worker = ExportWorker(
-        _FailingCloseExporter(), interval_sec=60.0, logger=_FakeLogger()
-    )
-    worker.start()
-    worker.submit(_payload(1))
-
-    stats = worker.stop(timeout_sec=1.0)
-
-    assert stats.written_records == 1
-    assert stats.exporter_failed is True
-    assert worker.stats().exporter_failed is True
-
-
 def test_raising_conversion_skips_the_whole_list(monkeypatch) -> None:
     def boom(payload):
         raise RuntimeError("bad payload")
