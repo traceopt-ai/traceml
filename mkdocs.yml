@@ -102,6 +102,7 @@ nav:
           - DeepSpeed: user_guide/integrations/deepspeed.md
           - W&B / MLflow: user_guide/integrations/wandb-mlflow.md
       - Reading Output: user_guide/reading-output.md
+      - Live Export: user_guide/live-export.md
       - Compare Runs: user_guide/compare.md
       - Regression Guard: user_guide/regression-guard.md
       - Distributed Training: user_guide/distributed-training.md

@@ -3,6 +3,7 @@
 This page is the contract for TraceML's structured export records.
 An export record is one row of a projection table the aggregator writes to SQLite, given names and types.
 The records live in `traceml_ai.aggregator.export`.
+To switch export on and read the files, see [Live Export](../user_guide/live-export.md).
 
 ## What a record is
 
