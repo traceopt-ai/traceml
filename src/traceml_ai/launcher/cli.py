@@ -32,10 +32,10 @@ def _add_exporter_args(parser: argparse.ArgumentParser) -> None:
         type=str,
         default=None,
         help=(
-            "Write live step-time records to "
-            "<logs-dir>/<run-name>/aggregator/export/step_time.jsonl "
-            "(jsonl), or load a custom exporter from module:factory in the "
-            "aggregator process. Default: off."
+            "Write live telemetry records as JSON Lines, one file per "
+            "stream, under <logs-dir>/<run-name>/aggregator/export/ "
+            "(jsonl), or load a custom exporter from module:factory in "
+            "the aggregator process. Default: off."
         ),
     )
     parser.add_argument(
@@ -43,10 +43,7 @@ def _add_exporter_args(parser: argparse.ArgumentParser) -> None:
         action="store_const",
         const=True,
         default=None,
-        help=(
-            "Include the hostname in every exported step-time record. "
-            "Default: off."
-        ),
+        help="Include the hostname in every exported record. Default: off.",
     )
 
 
