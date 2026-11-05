@@ -59,3 +59,43 @@ def test_launcher_aggregator_enforces_session_and_run_nonce(
 def test_read_traceml_env_run_nonce_defaults_to_empty(monkeypatch) -> None:
     monkeypatch.delenv("TRACEML_RUN_NONCE", raising=False)
     assert read_traceml_env()["run_nonce"] == ""
+
+
+def test_read_traceml_env_exporter_from_env(monkeypatch) -> None:
+    monkeypatch.setenv("TRACEML_EXPORTER", "jsonl")
+    monkeypatch.setenv("TRACEML_EXPORTER_HOSTNAME", "1")
+    cfg = read_traceml_env()
+    assert cfg["exporter"] == "jsonl"
+    assert cfg["exporter_hostname"] is True
+
+
+def test_read_traceml_env_exporter_defaults_off(monkeypatch) -> None:
+    monkeypatch.delenv("TRACEML_EXPORTER", raising=False)
+    monkeypatch.delenv("TRACEML_EXPORTER_HOSTNAME", raising=False)
+    cfg = read_traceml_env()
+    assert cfg["exporter"] == ""
+    assert cfg["exporter_hostname"] is False
+
+
+def test_aggregator_main_passes_exporter_settings(monkeypatch) -> None:
+    from traceml_ai.aggregator import aggregator_main
+
+    monkeypatch.setenv("TRACEML_EXPORTER", "jsonl")
+    monkeypatch.setenv("TRACEML_EXPORTER_HOSTNAME", "1")
+    captured = {}
+
+    def _run(settings, *, logger=None):
+        captured["settings"] = settings
+        return 0
+
+    monkeypatch.setattr(
+        aggregator_main, "setup_error_logger", lambda **_: None
+    )
+    monkeypatch.setattr(aggregator_main, "run_aggregator", _run)
+    try:
+        aggregator_main.main()
+    except SystemExit as exc:
+        assert exc.code == 0
+
+    assert captured["settings"].exporter == "jsonl"
+    assert captured["settings"].exporter_hostname is True

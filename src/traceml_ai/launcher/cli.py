@@ -25,6 +25,30 @@ from traceml_ai.runtime.settings import (
 from traceml_ai.telemetry.retention import parse_history_retention
 
 
+def _add_exporter_args(parser: argparse.ArgumentParser) -> None:
+    """Add structured step-time export arguments."""
+    parser.add_argument(
+        "--exporter",
+        type=str,
+        default=None,
+        help=(
+            "Write live step-time records to "
+            "<logs-dir>/<run-name>/aggregator/export/step_time.jsonl. "
+            "Supported: jsonl. Default: off."
+        ),
+    )
+    parser.add_argument(
+        "--exporter-hostname",
+        action="store_const",
+        const=True,
+        default=None,
+        help=(
+            "Include the hostname in every exported step-time record. "
+            "Default: off."
+        ),
+    )
+
+
 def _add_launch_args(parser: argparse.ArgumentParser) -> None:
     """Add shared launch arguments for TraceML run commands."""
     parser.add_argument(
@@ -268,6 +292,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run a script with TraceML bottleneck instrumentation.",
     )
     _add_launch_args(run_parser)
+    _add_exporter_args(run_parser)
 
     serve_parser = sub.add_parser(
         "serve",
@@ -345,6 +370,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="DURATION",
         help="Raw telemetry analysis history. Default: 30m.",
     )
+    _add_exporter_args(serve_parser)
     serve_parser.add_argument(
         "--aggregator-host",
         type=str,

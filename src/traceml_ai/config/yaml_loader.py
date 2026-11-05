@@ -53,6 +53,8 @@ YAML_KEY_SCHEMA: dict[str, tuple[str, type]] = {
     "finalize_timeout_sec": ("TRACEML_FINALIZE_TIMEOUT_SEC", float),
     "dashboard_port": ("TRACEML_DASHBOARD_PORT", int),
     "dashboard_auto_open": ("TRACEML_DASHBOARD_AUTO_OPEN", bool),
+    "exporter": ("TRACEML_EXPORTER", str),
+    "exporter_hostname": ("TRACEML_EXPORTER_HOSTNAME", bool),
 }
 
 # Fallback values used when no CLI flag, env var, or yaml entry is present.
@@ -66,6 +68,8 @@ BUILT_IN_DEFAULTS: dict[str, Any] = {
     "finalize_timeout_sec": DEFAULT_FINALIZE_TIMEOUT_SEC,
     "dashboard_port": 8765,
     "dashboard_auto_open": True,
+    "exporter": "",
+    "exporter_hostname": False,
 }
 
 # Env var strings treated as True for bool fields.

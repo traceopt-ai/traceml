@@ -117,6 +117,9 @@ def read_traceml_env() -> dict[str, Any]:
             os.environ.get("TRACEML_EXPECTED_WORLD_SIZE", "1")
         ),
         "html_report": os.environ.get("TRACEML_HTML_REPORT", "0") == "1",
+        "exporter": os.environ.get("TRACEML_EXPORTER", ""),
+        "exporter_hostname": os.environ.get("TRACEML_EXPORTER_HOSTNAME", "0")
+        == "1",
     }
 
 
@@ -278,6 +281,8 @@ def main() -> None:
         html_report=bool(cfg["html_report"]),
         finalize_timeout_sec=float(cfg["finalize_timeout_sec"]),
         expected_world_size=int(cfg["expected_world_size"]),
+        exporter=str(cfg["exporter"]),
+        exporter_hostname=bool(cfg["exporter_hostname"]),
         # The `traceml run` launcher hands its ranks the same session id,
         # stamped explicit, and (single-node) the same run nonce, so a
         # payload stamped otherwise came from another run. This entrypoint

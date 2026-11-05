@@ -20,6 +20,7 @@ import time
 from pathlib import Path
 from typing import Any, BinaryIO, Callable, Iterable, Mapping, Optional
 
+from traceml_ai.aggregator.export import EXPORTER_NAMES
 from traceml_ai.launcher.launch_config import (
     TORCH_LAUNCHER_REQUIRED,
     AggregatorLaunchConfig,
@@ -540,6 +541,17 @@ def _require_positive_interval(args: argparse.Namespace) -> None:
         )
 
 
+def _require_known_exporter(exporter: object) -> str:
+    """Return a normalized supported exporter name, or exit clearly."""
+    name = str(exporter or "").strip()
+    if name and name not in EXPORTER_NAMES:
+        raise SystemExit(
+            f"[TraceML] Unknown exporter: {name!r}. "
+            f"Supported: {list(EXPORTER_NAMES)}"
+        )
+    return name
+
+
 def validate_launch_args(args: argparse.Namespace) -> None:
     """Validate cross-argument constraints for TraceML launch commands."""
     if _disable_traceml_requested(args, os.environ):
@@ -670,6 +682,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     # --no-history inverts history_enabled: True flag → False override, absent → None.
     # Distributed/identity settings (nproc, nnodes, master/aggregator address,
     # run name) are owned by the typed launch configs below, not traceml.yaml.
+    exporter_supported = getattr(args, "command", None) != "watch"
     cli_overrides = {
         "mode": args.mode,
         "interval": args.interval,
@@ -681,6 +694,14 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         "dashboard_port": args.dashboard_port,
         "dashboard_auto_open": (
             False if args.no_dashboard_auto_open else None
+        ),
+        "exporter": (
+            getattr(args, "exporter", None) if exporter_supported else ""
+        ),
+        "exporter_hostname": (
+            getattr(args, "exporter_hostname", None)
+            if exporter_supported
+            else False
         ),
     }
 
@@ -694,6 +715,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     except ValueError as exc:
         print(f"[TraceML] ERROR: {exc}", file=sys.stderr)
         raise SystemExit(1)
+    cfg["exporter"] = _require_known_exporter(cfg.get("exporter"))
     cfg["finalize_timeout_sec"] = float(
         cfg.get("finalize_timeout_sec") or DEFAULT_FINALIZE_TIMEOUT_SEC
     )
@@ -807,6 +829,8 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     env["TRACEML_HTML_REPORT"] = (
         "1" if getattr(args, "html_report", False) else "0"
     )
+    env["TRACEML_EXPORTER"] = str(cfg["exporter"]).strip()
+    env["TRACEML_EXPORTER_HOSTNAME"] = "1" if cfg["exporter_hostname"] else "0"
     env["NODE_RANK"] = str(torchrun_cfg.node_rank)
 
     env.update(launch_context.to_env())
@@ -1472,6 +1496,8 @@ def _resolve_serve_settings(args: argparse.Namespace):
         "enable_logging": args.enable_logging,
         "logs_dir": args.logs_dir,
         "history_retention": getattr(args, "history_retention", None),
+        "exporter": getattr(args, "exporter", None),
+        "exporter_hostname": getattr(args, "exporter_hostname", None),
     }
     cfg = resolve_config(
         cli_overrides=cli_overrides,
@@ -1479,6 +1505,7 @@ def _resolve_serve_settings(args: argparse.Namespace):
         yaml_config=yaml_cfg,
         defaults=BUILT_IN_DEFAULTS,
     )
+    cfg["exporter"] = _require_known_exporter(cfg.get("exporter"))
 
     run_identity = RunIdentity.from_args(
         args,
@@ -1519,6 +1546,8 @@ def _resolve_serve_settings(args: argparse.Namespace):
         dashboard_port=int(cfg["dashboard_port"]),
         dashboard_auto_open=bool(cfg["dashboard_auto_open"]),
         finalize_timeout_sec=float(cfg["finalize_timeout_sec"]),
+        exporter=str(cfg["exporter"]),
+        exporter_hostname=bool(cfg["exporter_hostname"]),
         session_id=run_identity.session_id,
         # With --run-name/--session-id, drop ranks that name a different run
         # explicitly. A plain `python train.py` makes up its own id and is

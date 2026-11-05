@@ -120,6 +120,7 @@ def _make_aggregator(tmp_path: Path, *, writer: _Writer, tcp: _TCP):
     agg._display_driver = _Display()
     agg._tcp_server = tcp
     agg._sqlite_writer = writer
+    agg._export_worker = None
     return agg
 
 
@@ -762,3 +763,340 @@ def test_stop_generates_summary_through_real_writer(tmp_path):
     assert not (
         tmp_path / "run" / "aggregator" / "finalization_error.json"
     ).exists()
+
+
+# Export worker shutdown inside stop().
+
+
+def _export_stats(**overrides):
+    from traceml_ai.aggregator.export import ExportStats
+
+    values = {
+        "written_records": 4,
+        "dropped_batches": 0,
+        "failed_records": 0,
+        "skipped_items": 0,
+        "exporter_failed": False,
+    }
+    values.update(overrides)
+    return ExportStats(**values)
+
+
+class _LoggedTCP(_TCP):
+    def __init__(self, calls):
+        super().__init__()
+        self._calls = calls
+
+    def stop(self):
+        self._calls.append("tcp_stop")
+        super().stop()
+
+
+class _LoggedWriter(_Writer):
+    def __init__(self, calls):
+        super().__init__(_ok_result())
+        self._calls = calls
+
+    def finalize(self, timeout_sec):
+        self._calls.append("sqlite_finalize")
+        return super().finalize(timeout_sec)
+
+
+class _FakeExportWorker:
+    def __init__(self, calls, stats):
+        self._calls = calls
+        self._stats = stats
+        self.stop_timeouts = []
+
+    def submit(self, payload):
+        return None
+
+    def stop(self, timeout_sec):
+        self._calls.append("export_stop")
+        self.stop_timeouts.append(timeout_sec)
+        return self._stats
+
+    def stats(self):
+        return self._stats
+
+
+class _LateFailureExportWorker(_FakeExportWorker):
+    """``stop`` returns clean counts; a call still running fails later."""
+
+    def stop(self, timeout_sec):
+        clean = super().stop(timeout_sec)
+        self._stats = _export_stats(failed_records=1, exporter_failed=True)
+        return clean
+
+
+def _export_aggregator(monkeypatch, tmp_path, *, stats=None, worker=True):
+    """An aggregator whose settle, TCP stop and finalize log their order."""
+    calls = []
+    agg = _make_aggregator(
+        tmp_path, writer=_LoggedWriter(calls), tcp=_LoggedTCP(calls)
+    )
+    if worker:
+        agg._export_worker = _FakeExportWorker(
+            calls, stats if stats is not None else _export_stats()
+        )
+    settle_budgets = []
+
+    def _settle(timeout_sec):
+        calls.append("settle")
+        settle_budgets.append(timeout_sec)
+        return None
+
+    agg._settle_end_of_run_telemetry = _settle
+    monkeypatch.setattr(
+        trace_aggregator,
+        "generate_summary",
+        lambda *args, **kwargs: _write_fake_summary(tmp_path),
+    )
+    return agg, calls, settle_budgets
+
+
+def _warning_path(tmp_path):
+    return tmp_path / "run" / "aggregator" / "finalization_warning.json"
+
+
+def test_export_worker_stops_after_tcp_and_before_sqlite_finalize(
+    monkeypatch, tmp_path
+):
+    agg, calls, _ = _export_aggregator(monkeypatch, tmp_path)
+
+    agg.stop(timeout_sec=10.0)
+
+    assert calls == ["settle", "tcp_stop", "export_stop", "sqlite_finalize"]
+    assert agg._export_worker.stop_timeouts == [pytest.approx(1.0, abs=0.01)]
+
+
+@pytest.mark.parametrize(
+    ("left", "expected"),
+    [(0.0, 0.0), (0.1, 0.1), (0.5, 0.5), (10.0, 1.0), (40.0, 2.0)],
+)
+def test_export_stop_budget_is_a_slice_of_the_time_left(left, expected):
+    assert TraceMLAggregator._export_stop_budget(left) == pytest.approx(
+        expected
+    )
+
+
+def test_zero_timeout_gives_export_no_time(monkeypatch, tmp_path):
+    agg, _, _ = _export_aggregator(monkeypatch, tmp_path)
+
+    agg.stop(timeout_sec=0.0)
+
+    assert agg._export_worker.stop_timeouts == [0.0]
+
+
+def test_small_timeout_never_gives_export_more_than_it(monkeypatch, tmp_path):
+    agg, _, _ = _export_aggregator(monkeypatch, tmp_path)
+
+    agg.stop(timeout_sec=0.1)
+
+    (budget,) = agg._export_worker.stop_timeouts
+    assert 0.0 <= budget <= 0.1
+
+
+def test_export_budget_leaves_the_sqlite_budget_unchanged(
+    monkeypatch, tmp_path
+):
+    # A frozen clock makes every remaining() equal the full timeout, so the
+    # budgets are compared exactly.
+    monkeypatch.setattr(
+        trace_aggregator,
+        "time",
+        type("_Clock", (), {"monotonic": staticmethod(lambda: 100.0)}),
+    )
+    real_budget = TraceMLAggregator._sqlite_finalize_budget
+    budget_calls = []
+
+    def _spy_budget(timeout_sec):
+        result = real_budget(timeout_sec)
+        budget_calls.append((timeout_sec, result))
+        return result
+
+    monkeypatch.setattr(
+        TraceMLAggregator, "_sqlite_finalize_budget", staticmethod(_spy_budget)
+    )
+    runs = {}
+    for worker in (False, True):
+        root = tmp_path / str(worker)
+        agg, _, settle = _export_aggregator(monkeypatch, root, worker=worker)
+        agg.stop(timeout_sec=40.0)
+        runs[worker] = (settle, agg._sqlite_writer.finalize_timeouts)
+
+    assert budget_calls == [(40.0, 10.0), (40.0, 10.0)]
+    assert runs[False][1] == runs[True][1] == [40.0]
+    assert runs[False][0] == [30.0]
+    assert runs[True][0] == [28.0]
+
+
+def test_export_losses_write_a_warning_without_failing_summary_mode(
+    monkeypatch, tmp_path
+):
+    stats = _export_stats(failed_records=3, exporter_failed=True)
+    agg, _, _ = _export_aggregator(monkeypatch, tmp_path, stats=stats)
+    assert agg._settings.mode == "summary"
+
+    agg.stop(timeout_sec=10.0)
+
+    warning = json.loads(_warning_path(tmp_path).read_text(encoding="utf-8"))
+    assert warning["status"] == "warning"
+    assert warning["export"] == {
+        "written_records": 4,
+        "dropped_batches": 0,
+        "failed_records": 3,
+        "skipped_items": 0,
+        "exporter_failed": True,
+    }
+    assert not (
+        tmp_path / "run" / "aggregator" / "finalization_error.json"
+    ).exists()
+
+
+def test_dropped_export_batches_join_an_existing_warning(
+    monkeypatch, tmp_path
+):
+    stats = _export_stats(dropped_batches=2)
+    agg, _, _ = _export_aggregator(monkeypatch, tmp_path, stats=stats)
+    agg._settle_end_of_run_telemetry = lambda timeout_sec: {
+        "status": "warning",
+        "completed_at": "now",
+        "missing_ranks": [1],
+    }
+
+    agg.stop(timeout_sec=10.0)
+
+    warning = json.loads(_warning_path(tmp_path).read_text(encoding="utf-8"))
+    assert warning["missing_ranks"] == [1]
+    assert warning["export"]["dropped_batches"] == 2
+
+
+def test_skipped_export_items_alone_write_a_warning(monkeypatch, tmp_path):
+    stats = _export_stats(written_records=0, skipped_items=2)
+    agg, _, _ = _export_aggregator(monkeypatch, tmp_path, stats=stats)
+
+    agg.stop(timeout_sec=10.0)
+
+    warning = json.loads(_warning_path(tmp_path).read_text(encoding="utf-8"))
+    assert warning["reason"] == "export_incomplete"
+    assert warning["message"] == (
+        "Telemetry export did not write every admitted record."
+    )
+    assert "SQLite" not in warning["message"]
+    assert warning["export"] == {
+        "written_records": 0,
+        "dropped_batches": 0,
+        "failed_records": 0,
+        "skipped_items": 2,
+        "exporter_failed": False,
+    }
+
+
+def test_export_stats_are_read_again_after_sqlite_finalize(
+    monkeypatch, tmp_path
+):
+    agg, calls, _ = _export_aggregator(monkeypatch, tmp_path)
+    agg._export_worker = _LateFailureExportWorker(calls, _export_stats())
+
+    agg.stop(timeout_sec=10.0)
+
+    warning = json.loads(_warning_path(tmp_path).read_text(encoding="utf-8"))
+    assert warning["reason"] == "export_incomplete"
+    assert warning["export"]["failed_records"] == 1
+    assert warning["export"]["exporter_failed"] is True
+
+
+def test_error_artifact_reads_the_export_stats_again(monkeypatch, tmp_path):
+    agg, calls, _ = _export_aggregator(monkeypatch, tmp_path)
+    agg._export_worker = _LateFailureExportWorker(calls, _export_stats())
+    agg._sqlite_writer.result = SQLiteFinalizeResult(
+        ok=False,
+        elapsed_sec=0.0,
+        enqueued=1,
+        written=0,
+        dropped=0,
+        queue_size=1,
+        checkpoint_ok=False,
+        error="boom",
+    )
+
+    with pytest.raises(TraceMLFinalizationError):
+        agg.stop(timeout_sec=10.0)
+
+    error = json.loads(
+        (
+            tmp_path / "run" / "aggregator" / "finalization_error.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert error["export"]["exporter_failed"] is True
+
+
+def test_clean_export_writes_no_export_warning(monkeypatch, tmp_path):
+    agg, _, _ = _export_aggregator(monkeypatch, tmp_path)
+
+    agg.stop(timeout_sec=10.0)
+
+    assert not _warning_path(tmp_path).exists()
+
+
+def test_export_stats_reach_the_error_artifact(monkeypatch, tmp_path):
+    agg, _, _ = _export_aggregator(monkeypatch, tmp_path)
+    agg._sqlite_writer.result = SQLiteFinalizeResult(
+        ok=False,
+        elapsed_sec=0.0,
+        enqueued=1,
+        written=0,
+        dropped=0,
+        queue_size=1,
+        checkpoint_ok=False,
+        error="boom",
+    )
+
+    with pytest.raises(TraceMLFinalizationError):
+        agg.stop(timeout_sec=10.0)
+
+    error = json.loads(
+        (
+            tmp_path / "run" / "aggregator" / "finalization_error.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert error["export"]["written_records"] == 4
+
+
+def test_export_worker_stops_even_when_settle_raises(monkeypatch, tmp_path):
+    agg, calls, _ = _export_aggregator(monkeypatch, tmp_path)
+
+    def _settle(timeout_sec):
+        raise RuntimeError("settle failed")
+
+    agg._settle_end_of_run_telemetry = _settle
+
+    with pytest.raises(RuntimeError, match="settle failed"):
+        agg.stop(timeout_sec=10.0)
+
+    assert calls == ["export_stop"]
+
+
+def test_settle_runs_for_export_when_history_is_disabled(
+    monkeypatch, tmp_path
+):
+    from dataclasses import replace
+
+    agg, calls, _ = _export_aggregator(monkeypatch, tmp_path)
+    agg._settings = replace(agg._settings, mode="cli", history_enabled=False)
+
+    agg.stop(timeout_sec=10.0)
+
+    assert calls == ["settle", "tcp_stop", "export_stop", "sqlite_finalize"]
+
+
+def test_settle_is_skipped_without_history_or_export(monkeypatch, tmp_path):
+    from dataclasses import replace
+
+    agg, calls, _ = _export_aggregator(monkeypatch, tmp_path, worker=False)
+    agg._settings = replace(agg._settings, mode="cli", history_enabled=False)
+
+    agg.stop(timeout_sec=10.0)
+
+    assert calls == ["tcp_stop", "sqlite_finalize"]

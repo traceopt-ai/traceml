@@ -21,7 +21,7 @@ import queue
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from traceml_ai.aggregator.export.base import Exporter
 from traceml_ai.aggregator.export.records import records_from_payload
@@ -61,9 +61,24 @@ class ExportStats:
     skipped_items: int
     exporter_failed: bool
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Return a JSON-serializable representation for diagnostics."""
+        return {
+            "written_records": int(self.written_records),
+            "dropped_batches": int(self.dropped_batches),
+            "failed_records": int(self.failed_records),
+            "skipped_items": int(self.skipped_items),
+            "exporter_failed": bool(self.exporter_failed),
+        }
+
 
 class ExportWorker:
-    """Bounded queue drained to one exporter on a fixed tick."""
+    """
+    Bounded queue drained to one exporter on a fixed tick.
+
+    ``start()`` and ``stop()`` are not safe to call concurrently; the
+    aggregator calls them in sequence on one thread.
+    """
 
     def __init__(
         self,

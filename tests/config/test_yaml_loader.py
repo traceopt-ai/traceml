@@ -416,6 +416,44 @@ def test_resolve_config_history_disabled_via_cli() -> None:
     assert result["history_enabled"] is False
 
 
+def test_load_yaml_config_exporter_keys(tmp_path: Path) -> None:
+    p = _write(tmp_path, "exporter: jsonl\nexporter_hostname: true\n")
+    yaml = load_yaml_config(p)
+    result = resolve_config(_no_cli(), _no_env(), yaml, _defaults())
+    assert result["exporter"] == "jsonl"
+    assert result["exporter_hostname"] is True
+
+
+def test_resolve_config_exporter_defaults_off() -> None:
+    result = resolve_config(_no_cli(), _no_env(), _no_yaml(), _defaults())
+    assert result["exporter"] == ""
+    assert result["exporter_hostname"] is False
+
+
+def test_resolve_config_exporter_env_beats_yaml() -> None:
+    env = {"TRACEML_EXPORTER": "jsonl", "TRACEML_EXPORTER_HOSTNAME": "0"}
+    yaml = {"exporter": "other", "exporter_hostname": True}
+    result = resolve_config(_no_cli(), env, yaml, _defaults())
+    assert result["exporter"] == "jsonl"
+    assert result["exporter_hostname"] is False
+
+
+def test_resolve_config_exporter_cli_beats_env() -> None:
+    cli = {**_no_cli(), "exporter": "jsonl", "exporter_hostname": True}
+    env = {"TRACEML_EXPORTER": "other", "TRACEML_EXPORTER_HOSTNAME": "0"}
+    result = resolve_config(cli, env, _no_yaml(), _defaults())
+    assert result["exporter"] == "jsonl"
+    assert result["exporter_hostname"] is True
+
+
+def test_load_yaml_config_rejects_non_bool_exporter_hostname(
+    tmp_path: Path,
+) -> None:
+    p = _write(tmp_path, "exporter_hostname: maybe\n")
+    with pytest.raises(ValueError, match="'exporter_hostname' must be"):
+        load_yaml_config(p)
+
+
 def test_load_yaml_config_unreadable_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
