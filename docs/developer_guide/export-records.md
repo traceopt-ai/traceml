@@ -73,6 +73,7 @@ The two stamps are taken separately, so they are not guaranteed to be equal.
 ## Ordering and duplicates
 
 Records preserve payload order and are not sorted by this mapper.
+Within one envelope, records follow the writer's table order, so a system snapshot gives its `SystemRecord` before its `SystemGpuRecord` entries.
 The StepTime sampler emits steps in order within one rank.
 Records from different ranks interleave.
 The key of a step record is `(global_rank, step)`.
