@@ -26,7 +26,7 @@ from traceml_ai.telemetry.retention import parse_history_retention
 
 
 def _add_exporter_args(parser: argparse.ArgumentParser) -> None:
-    """Add structured step-time export arguments."""
+    """Add the structured export arguments."""
     parser.add_argument(
         "--exporter",
         type=str,
