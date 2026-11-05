@@ -300,8 +300,13 @@ TraceMLRayConfig(
     history_retention="30m",
     bind_host="0.0.0.0",
     port=0,
+    exporter="",
+    exporter_hostname=False,
 )
 ```
+
+``exporter="jsonl"`` writes step-time records to a JSON Lines file during
+the run; see [Live Export](../live-export.md).
 
 The default ``mode="summary"`` is recommended for Ray because distributed worker
 logs are noisy. Use ``mode="cli"`` only when you specifically want live terminal
