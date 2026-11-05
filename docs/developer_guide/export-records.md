@@ -103,7 +103,7 @@ Each value is `None` when the rank did not send it.
 A custom exporter receives the same records as the built-in `jsonl` exporter.
 It implements the `Exporter` interface from `traceml_ai.aggregator.export`: `open()`, `write(records)`, `flush()` and `close(*, dropped_batches=0)`.
 The export worker calls all four from its own background thread, and the calls never overlap.
-It calls `open` once, then `write` and `flush` once per tick, then `close` once.
+It calls `open` once, then `write` and `flush` zero or more times, then `close` once.
 `close` is not called when `open` raised.
 `dropped_batches` is the number of payload batches the worker never handed to `write`.
 A method may raise.
@@ -111,7 +111,8 @@ The worker then logs the failure, stops using the exporter, and records the loss
 
 Set the `exporter` setting to `module:factory` to use one.
 The value works in each place `jsonl` does.
-That is `exporter: "my_exporters:make_exporter"` in `traceml.yaml`, `--exporter my_exporters:make_exporter` on `traceml run` and `traceml serve`, or `TRACEML_EXPORTER=my_exporters:make_exporter`.
+Use `exporter: "my_exporters:make_exporter"` in `traceml.yaml`, `--exporter my_exporters:make_exporter` on `traceml run` and `traceml serve`, or `TRACEML_EXPORTER=my_exporters:make_exporter`.
+With Ray, use `TraceMLRayConfig(exporter="my_exporters:make_exporter")`.
 `traceml watch` has no exporter and ignores the setting.
 The launcher checks the resolved value from whichever of these sets it.
 It checks only the form: a dotted module path, a colon, and one identifier.
@@ -127,7 +128,7 @@ Install the module, or put its directory on `PYTHONPATH`.
 
 - `session_root` is the run's folder, `<logs-dir>/<run-name>`.
 - `export_dir` is `session_root / "aggregator" / "export"`, where `jsonl` writes. TraceML does not create it for a factory.
-- `include_hostname` is the `exporter_hostname` setting.
+- `include_hostname` tells the exporter whether to keep the hostname from each record. It is set by `exporter_hostname`.
 
 A factory failure never fails the run.
 The failures are an import error, a missing attribute, an exception or `SystemExit` from the module or the factory, and a factory that returns `None`.
@@ -139,24 +140,28 @@ Its `export` block has `exporter_failed` set to `true`, and `failed_records` equ
 TraceML does not check the returned object up front.
 If it lacks one of the four methods, export fails when the worker first calls that method, and the loss is recorded the same way.
 
-This factory returns an exporter that appends every record as one JSON line to one file.
+This factory returns an exporter that writes every record as one JSON line to one file.
 
 ```python
 import json
 
 
 class OneFileExporter:
-    def __init__(self, path):
+    def __init__(self, path, include_hostname):
         self._path = path
+        self._include_hostname = include_hostname
         self._file = None
 
     def open(self):
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._file = open(self._path, "a", encoding="utf-8")
+        self._file = open(self._path, "x", encoding="utf-8")
 
     def write(self, records):
         for record in records:
-            self._file.write(json.dumps(record.to_dict()) + "\n")
+            data = record.to_dict()
+            if not self._include_hostname:
+                data.pop("hostname", None)
+            self._file.write(json.dumps(data) + "\n")
 
     def flush(self):
         self._file.flush()
@@ -166,7 +171,10 @@ class OneFileExporter:
 
 
 def make_exporter(context):
-    return OneFileExporter(context.export_dir / "records.jsonl")
+    return OneFileExporter(
+        context.export_dir / "records.jsonl",
+        context.include_hostname,
+    )
 ```
 
 ## Internal mapping example

@@ -36,18 +36,18 @@ class Exporter(Protocol):
     A sink for export records.
 
     The export worker calls the complete lifecycle from its background
-    thread: ``open`` once before the first write, ``write`` then ``flush``
-    per tick, and ``close`` once at the end, or after a failed ``write`` or
-    ``flush``. Calls never overlap. ``close`` is not called when ``open``
-    raised. A method may raise; the worker logs the failure and stops using
-    the exporter.
+    thread: ``open`` once, zero or more ``write`` and ``flush`` pairs, then
+    ``close`` once at the end or after a failed ``write`` or ``flush``.
+    Calls never overlap. ``close`` is not called when ``open`` raised. A
+    method may raise; the worker logs the failure and stops using the
+    exporter.
     """
 
     def open(self) -> None:
         """Prepare the sink before the first write."""
 
     def write(self, records: Sequence[Record]) -> None:
-        """Accept one tick's records, in order."""
+        """Accept one batch of records, in order."""
 
     def flush(self) -> None:
         """
