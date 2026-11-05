@@ -14,10 +14,7 @@ import json
 import pytest
 
 from traceml_ai.aggregator.export.json_exporter import JsonExporter
-from traceml_ai.aggregator.export.records import (
-    RECORD_TYPES,
-    StepTimeRecord,
-)
+from traceml_ai.aggregator.export.records import StepTimeRecord
 
 EVENTS = {
     "_traceml_internal:forward_time": {
@@ -56,9 +53,15 @@ def test_one_file_per_stream(tmp_path) -> None:
     exporter.flush()
     exporter.close()
 
-    assert sorted(p.name for p in tmp_path.iterdir()) == sorted(
-        f"{cls.STREAM}.jsonl" for cls in RECORD_TYPES
-    )
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "process.jsonl",
+        "runtime_environment.jsonl",
+        "stdout_stderr.jsonl",
+        "step_memory.jsonl",
+        "step_time.jsonl",
+        "system.jsonl",
+        "system_gpu.jsonl",
+    ]
 
 
 def test_open_creates_each_stream_file_empty(tmp_path) -> None:

@@ -471,6 +471,135 @@ def test_system_cpu_percent_keeps_zero_and_missing(cpu, cpu_percent):
     assert record.to_dict()["cpu_percent"] == cpu_percent
 
 
+def _only(cls, sampler: str, table: str, row: dict):
+    """The single record of type ``cls`` built from one row."""
+    batch = records_from_payload(_payload(sampler, table, row))
+    (record,) = [r for r in batch.records if type(r) is cls]
+    return record
+
+
+# (record, sampler, table, field, raw key, base row)
+INT_BOOLS = [
+    (
+        SystemRecord,
+        "SystemSampler",
+        "SystemTable",
+        "gpu_available",
+        "gpu_available",
+        {"seq": 1, "timestamp_unix_ns": TS, "gpu_count": 0, "gpus": []},
+    ),
+    (
+        ProcessRecord,
+        "ProcessSampler",
+        "ProcessTable",
+        "gpu_available",
+        "gpu_available",
+        {"seq": 1, "timestamp_unix_ns": TS, "gpu_count": 0},
+    ),
+    (
+        RuntimeEnvironmentRecord,
+        "RuntimeEnvironmentSampler",
+        "RuntimeEnvironmentTable",
+        "distributed_initialized",
+        "distributed_initialized",
+        {"seq": 1, "timestamp_unix_ns": TS},
+    ),
+]
+
+
+@pytest.mark.parametrize("raw, value", [(False, 0), (True, 1)])
+@pytest.mark.parametrize("case", INT_BOOLS, ids=lambda c: c[0].STREAM)
+def test_booleans_are_integer_zero_or_one(case, raw, value):
+    cls, sampler, table, field, key, row = case
+    record = _only(cls, sampler, table, dict(row, **{key: raw}))
+
+    assert getattr(record, field) == value
+    assert type(getattr(record, field)) is int
+    text = json.dumps(record.to_dict())
+    assert f'"{field}": {value}' in text
+    assert "true" not in text and "false" not in text
+
+
+@pytest.mark.parametrize("case", INT_BOOLS, ids=lambda c: c[0].STREAM)
+def test_missing_boolean_is_none(case):
+    cls, sampler, table, field, _, row = case
+
+    assert getattr(_only(cls, sampler, table, row), field) is None
+
+
+ZEROS = [
+    (
+        SystemGpuRecord,
+        "SystemSampler",
+        "SystemTable",
+        # util %, mem used/total bytes, temperature C, power usage/limit W
+        {"seq": 1, "gpus": [[0.0, 0.0, 8.0e9, 0.0, 0.0, 300.0]]},
+        {
+            "util": 0.0,
+            "mem_used_bytes": 0.0,
+            "temperature_c": 0.0,
+            "power_usage_w": 0.0,
+        },
+    ),
+    (
+        ProcessRecord,
+        "ProcessSampler",
+        "ProcessTable",
+        {
+            "seq": 1,
+            "cpu": 0.0,
+            "ram_used": 0.0,
+            "gpu": {
+                "device": 0,
+                "mem_used": 0.0,
+                "mem_reserved": 0.0,
+                "mem_total": 8.0e9,
+            },
+        },
+        {
+            "cpu_percent": 0.0,
+            "ram_used_bytes": 0.0,
+            "gpu_device_index": 0,
+            "gpu_mem_used_bytes": 0.0,
+            "gpu_mem_reserved_bytes": 0.0,
+        },
+    ),
+    (
+        StepMemoryRecord,
+        "StepMemorySampler",
+        "step_memory",
+        # Integer zeros: the writer emits them as float 0.0.
+        {"seq": 1, "step": 7, "peak_alloc": 0, "peak_resv": 0},
+        {"peak_alloc_bytes": 0.0, "peak_reserved_bytes": 0.0},
+    ),
+]
+
+
+@pytest.mark.parametrize("case", ZEROS, ids=lambda c: c[0].STREAM)
+def test_measured_zeros_stay_zero(case):
+    cls, sampler, table, row, expected = case
+    record = _only(cls, sampler, table, dict(row, timestamp_unix_ns=TS))
+
+    for field, value in expected.items():
+        got = getattr(record, field)
+        assert got == value and type(got) is type(value), field
+
+
+def test_stdout_stderr_keeps_only_non_empty_lines():
+    rows = [
+        {"timestamp_unix_ns": TS, "line": line} for line in ["", "x", None]
+    ]
+    payload = _payload("Stdout/Stderr", "stdout_stderr", rows[0])
+    payload["body"]["tables"]["stdout_stderr"].extend(rows[1:])
+
+    batch = records_from_payload(payload)
+
+    assert [(type(r), r.line) for r in batch.records] == [
+        (StdoutStderrRecord, "x")
+    ]
+    assert batch.skipped == 0
+
+
 def test_list_batch_yields_records_for_every_envelope():
     batch = records_from_payload(
         [_step_payload(7), _step_payload(8), "not an envelope"]
