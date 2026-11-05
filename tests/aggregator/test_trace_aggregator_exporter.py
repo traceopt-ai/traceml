@@ -137,6 +137,22 @@ def test_aggregator_rejects_an_unknown_exporter_at_construction(tmp_path):
         )
 
 
+@pytest.mark.parametrize(
+    ("world_size", "capacity"),
+    [(1, 4_096), (496, 4_960)],
+)
+def test_aggregator_sizes_export_queue_for_world_size(
+    tmp_path, world_size, capacity
+):
+    agg = TraceMLAggregator(
+        logger=_Logger(),
+        stop_event=threading.Event(),
+        settings=_settings(tmp_path, "jsonl", expected_world_size=world_size),
+    )
+
+    assert agg._export_worker._q.maxsize == capacity
+
+
 def test_start_starts_the_export_worker_after_sqlite(tmp_path):
     calls = []
 

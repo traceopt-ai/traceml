@@ -52,6 +52,10 @@ _SQLITE_FINALIZE_BUDGET_MIN_SEC = 5.0
 _SQLITE_FINALIZE_BUDGET_MAX_SEC = 60.0
 _SQLITE_FINALIZE_TINY_FLOOR_SEC = 0.001
 _EXPORT_INTERVAL_SEC = 1.0
+# One queue entry is one admitted TCP batch from a rank. Preserve the current
+# small-run floor and give large runs room for complete rank-wide rounds.
+_EXPORT_QUEUE_MIN_BATCHES = 4_096
+_EXPORT_QUEUE_BUFFERED_ROUNDS = 10
 _EXPORT_STOP_BUDGET_FRACTION = 0.1
 _EXPORT_STOP_BUDGET_MIN_SEC = 0.5
 _EXPORT_STOP_BUDGET_MAX_SEC = 2.0
@@ -124,6 +128,14 @@ def _resolve_exporter(
     )
 
 
+def _export_queue_capacity(expected_world_size: int) -> int:
+    """Return the bounded export queue capacity for one run."""
+    return max(
+        _EXPORT_QUEUE_MIN_BATCHES,
+        max(1, int(expected_world_size)) * _EXPORT_QUEUE_BUFFERED_ROUNDS,
+    )
+
+
 class TraceMLAggregator:
     """Telemetry aggregator process."""
 
@@ -182,6 +194,7 @@ class TraceMLAggregator:
             self._export_worker = ExportWorker(
                 export_sink,
                 interval_sec=_EXPORT_INTERVAL_SEC,
+                max_queue=_export_queue_capacity(self._expected_world_size),
                 logger=self._logger,
             )
 
