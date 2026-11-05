@@ -541,16 +541,15 @@ def _require_positive_interval(args: argparse.Namespace) -> None:
         )
 
 
-def _require_known_exporter(args: argparse.Namespace) -> None:
-    exporter = getattr(args, "exporter", None)
-    if exporter is None:
-        return
-    name = str(exporter).strip()
+def _require_known_exporter(exporter: object) -> str:
+    """Return a normalized supported exporter name, or exit clearly."""
+    name = str(exporter or "").strip()
     if name and name not in EXPORTER_NAMES:
         raise SystemExit(
             f"[TraceML] Unknown exporter: {name!r}. "
             f"Supported: {list(EXPORTER_NAMES)}"
         )
+    return name
 
 
 def validate_launch_args(args: argparse.Namespace) -> None:
@@ -599,7 +598,6 @@ def validate_launch_args(args: argparse.Namespace) -> None:
             "Remove --no-history to enable HTML report generation."
         )
     _require_positive_interval(args)
-    _require_known_exporter(args)
     finalize_timeout_sec = getattr(args, "finalize_timeout_sec", None)
     if finalize_timeout_sec is not None:
         from traceml_ai.config.yaml_loader import is_finite_positive
@@ -684,6 +682,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     # --no-history inverts history_enabled: True flag → False override, absent → None.
     # Distributed/identity settings (nproc, nnodes, master/aggregator address,
     # run name) are owned by the typed launch configs below, not traceml.yaml.
+    exporter_supported = getattr(args, "command", None) != "watch"
     cli_overrides = {
         "mode": args.mode,
         "interval": args.interval,
@@ -696,8 +695,14 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         "dashboard_auto_open": (
             False if args.no_dashboard_auto_open else None
         ),
-        "exporter": getattr(args, "exporter", None),
-        "exporter_hostname": getattr(args, "exporter_hostname", None),
+        "exporter": (
+            getattr(args, "exporter", None) if exporter_supported else ""
+        ),
+        "exporter_hostname": (
+            getattr(args, "exporter_hostname", None)
+            if exporter_supported
+            else False
+        ),
     }
 
     try:
@@ -710,6 +715,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     except ValueError as exc:
         print(f"[TraceML] ERROR: {exc}", file=sys.stderr)
         raise SystemExit(1)
+    cfg["exporter"] = _require_known_exporter(cfg.get("exporter"))
     cfg["finalize_timeout_sec"] = float(
         cfg.get("finalize_timeout_sec") or DEFAULT_FINALIZE_TIMEOUT_SEC
     )
@@ -1499,6 +1505,7 @@ def _resolve_serve_settings(args: argparse.Namespace):
         yaml_config=yaml_cfg,
         defaults=BUILT_IN_DEFAULTS,
     )
+    cfg["exporter"] = _require_known_exporter(cfg.get("exporter"))
 
     run_identity = RunIdentity.from_args(
         args,
@@ -1564,7 +1571,6 @@ def run_serve(args: argparse.Namespace) -> None:
     cleanly, and preserves final-summary behavior.
     """
     _require_positive_interval(args)
-    _require_known_exporter(args)
     try:
         settings = _resolve_serve_settings(args)
     except ValueError as exc:

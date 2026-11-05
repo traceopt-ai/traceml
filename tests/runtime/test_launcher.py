@@ -871,11 +871,18 @@ class _AggregatorEnvCaptured(Exception):
     pass
 
 
-def _aggregator_env(monkeypatch, tmp_path, *flags: str) -> dict:
+def _aggregator_env(
+    monkeypatch,
+    tmp_path,
+    *flags: str,
+    command: str = "run",
+    clear_exporter_env: bool = True,
+) -> dict:
     """Launch up to the aggregator spawn and return the env it gets."""
     monkeypatch.chdir(tmp_path)
-    for var in ("TRACEML_EXPORTER", "TRACEML_EXPORTER_HOSTNAME"):
-        monkeypatch.delenv(var, raising=False)
+    if clear_exporter_env:
+        for var in ("TRACEML_EXPORTER", "TRACEML_EXPORTER_HOSTNAME"):
+            monkeypatch.delenv(var, raising=False)
     script = tmp_path / "train.py"
     script.write_text("print('unused')\n", encoding="utf-8")
     observed: dict = {}
@@ -897,7 +904,7 @@ def _aggregator_env(monkeypatch, tmp_path, *flags: str) -> dict:
         monkeypatch.setattr(launcher_commands, name, replacement)
     args = build_parser().parse_args(
         [
-            "run",
+            command,
             str(script),
             "--logs-dir",
             str(tmp_path / "logs"),
@@ -925,6 +932,28 @@ def test_run_passes_exporter_flags_to_the_aggregator_env(
 
 def test_run_exporter_env_defaults_off(monkeypatch, tmp_path) -> None:
     env = _aggregator_env(monkeypatch, tmp_path)
+
+    assert env["TRACEML_EXPORTER"] == ""
+    assert env["TRACEML_EXPORTER_HOSTNAME"] == "0"
+
+
+def test_watch_does_not_offer_step_time_exporter_flags() -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["watch", "train.py", "--exporter", "jsonl"])
+
+
+def test_watch_keeps_step_time_exporter_off_from_the_environment(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setenv("TRACEML_EXPORTER", "jsonl")
+    monkeypatch.setenv("TRACEML_EXPORTER_HOSTNAME", "1")
+
+    env = _aggregator_env(
+        monkeypatch,
+        tmp_path,
+        command="watch",
+        clear_exporter_env=False,
+    )
 
     assert env["TRACEML_EXPORTER"] == ""
     assert env["TRACEML_EXPORTER_HOSTNAME"] == "0"
@@ -959,14 +988,16 @@ def test_run_rejects_an_unknown_exporter_before_launch(
     script.write_text("print('unused')\n", encoding="utf-8")
     forbidden = _forbid_guard_launch_side_effects(monkeypatch)
     monkeypatch.setattr(
-        sys, "argv", ["traceml", "run", str(script), "--exporter", "bogus"]
+        sys,
+        "argv",
+        ["traceml", "run", str(script), "--exporter", "unsupported"],
     )
 
     with pytest.raises(SystemExit) as exc:
         cli.main()
 
     assert str(exc.value) == (
-        "[TraceML] Unknown exporter: 'bogus'. Supported: ['jsonl']"
+        "[TraceML] Unknown exporter: 'unsupported'. Supported: ['jsonl']"
     )
     for replacement in forbidden.values():
         replacement.assert_not_called()
@@ -984,6 +1015,25 @@ def test_run_strips_the_exporter_name(monkeypatch, tmp_path) -> None:
     assert env["TRACEML_EXPORTER"] == "jsonl"
 
 
+def test_run_rejects_an_unknown_exporter_from_the_environment(
+    monkeypatch, tmp_path
+) -> None:
+    from traceml_ai.launcher import cli
+
+    monkeypatch.chdir(tmp_path)
+    script = tmp_path / "train.py"
+    script.write_text("print('unused')\n", encoding="utf-8")
+    monkeypatch.setenv("TRACEML_EXPORTER", "unsupported")
+    forbidden = _forbid_guard_launch_side_effects(monkeypatch)
+    monkeypatch.setattr(sys, "argv", ["traceml", "run", str(script)])
+
+    with pytest.raises(SystemExit, match="Unknown exporter: 'unsupported'"):
+        cli.main()
+
+    for replacement in forbidden.values():
+        replacement.assert_not_called()
+
+
 def test_serve_rejects_an_unknown_exporter(monkeypatch, tmp_path) -> None:
     monkeypatch.chdir(tmp_path)
     run_aggregator = Mock(side_effect=AssertionError("must not start"))
@@ -993,9 +1043,32 @@ def test_serve_rejects_an_unknown_exporter(monkeypatch, tmp_path) -> None:
     )
     from traceml_ai.launcher.commands import run_serve
 
-    args = build_parser().parse_args(["serve", "--exporter", "bogus"])
+    args = build_parser().parse_args(["serve", "--exporter", "unsupported"])
 
-    with pytest.raises(SystemExit, match=r"Unknown exporter: 'bogus'"):
+    with pytest.raises(SystemExit, match="Unknown exporter: 'unsupported'"):
+        run_serve(args)
+
+    run_aggregator.assert_not_called()
+
+
+def test_serve_rejects_an_unknown_exporter_from_yaml(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TRACEML_EXPORTER", raising=False)
+    (tmp_path / "traceml.yaml").write_text(
+        "exporter: unsupported\n", encoding="utf-8"
+    )
+    run_aggregator = Mock(side_effect=AssertionError("must not start"))
+    monkeypatch.setattr(
+        "traceml_ai.aggregator.aggregator_main.run_aggregator",
+        run_aggregator,
+    )
+    from traceml_ai.launcher.commands import run_serve
+
+    args = build_parser().parse_args(["serve"])
+
+    with pytest.raises(SystemExit, match="Unknown exporter: 'unsupported'"):
         run_serve(args)
 
     run_aggregator.assert_not_called()
