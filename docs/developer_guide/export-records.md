@@ -20,6 +20,7 @@ The other streams (step memory, system, process, runtime environment, stdout/std
 
 Every record class carries `STREAM`, `SCHEMA_VERSION` (currently `1`) and `COLUMNS`, its field names in order.
 `to_dict()` returns `stream`, `schema_version` and then every field.
+The JSON Lines exporter drops `hostname` from each line unless `exporter_hostname` is on; with it on, a rank that sent no hostname gives `null`.
 An unavailable value remains `None`; a measured zero remains `0`.
 `StepTimeRecord` differs from its row in one field.
 It carries the decoded `events` map in place of the `events_json` text.
@@ -94,12 +95,92 @@ Do not key on `seq`.
 `events[name][device]` is a map of `is_gpu` (bool), `duration_ms`, `cpu_ms`, `gpu_ms` (float, milliseconds) and `n_calls` (int).
 Each value is `None` when the rank did not send it.
 `cpu_ms` is CPU wall time and `gpu_ms` is CUDA event time, each summed over the step's calls.
-`gpu_ms` is `None` when no GPU timing was recorded.
+`gpu_ms` is `None` unless every call of that phase in the step measured the GPU clock; a measured zero stays `0.0`.
 `duration_ms` is the legacy effective duration, and `is_gpu` says whether GPU time backs it.
+
+## Custom exporters
+
+A custom exporter receives the same records as the built-in `jsonl` exporter.
+It implements the `Exporter` interface from `traceml_ai.aggregator.export`: `open()`, `write(records)`, `flush()` and `close(*, dropped_batches=0)`.
+The export worker calls all four from its own background thread, and the calls never overlap.
+It calls `open` once, then `write` and `flush` zero or more times, then `close` once.
+`close` is not called when `open` raised.
+`dropped_batches` is the number of payload batches the worker never handed to `write`.
+A method may raise.
+The worker then logs the failure, stops using the exporter, and records the loss in `finalization_warning.json`.
+
+Set the `exporter` setting to `module:factory` to use one.
+The value works in each place `jsonl` does.
+Use `exporter: "my_exporters:make_exporter"` in `traceml.yaml`, `--exporter my_exporters:make_exporter` on `traceml run` and `traceml serve`, or `TRACEML_EXPORTER=my_exporters:make_exporter`.
+With Ray, use `TraceMLRayConfig(exporter="my_exporters:make_exporter")`.
+`traceml watch` has no exporter and ignores the setting.
+The launcher checks the resolved value from whichever of these sets it.
+It checks only the form: a dotted module path, a colon, and one identifier.
+It never imports the module.
+The aggregator process imports the module, reads the attribute and calls it as `factory(context)`.
+The factory runs on the aggregator's main thread at startup, before the worker thread exists.
+Create connections, clients and files in `open`, not in the factory, so they belong to the thread that uses them.
+The training ranks never import it.
+Install the module, or put its directory on `PYTHONPATH`.
+`traceml run` starts the aggregator as a separate script, so the working directory is not on its import path.
+
+`context` is an `ExporterContext` with three fields.
+
+- `session_root` is the run's folder, `<logs-dir>/<run-name>`.
+- `export_dir` is `session_root / "aggregator" / "export"`, where `jsonl` writes. TraceML does not create it for a factory.
+- `include_hostname` tells the exporter whether to keep the hostname from each record. It is set by `exporter_hostname`.
+
+A factory failure never fails the run.
+The failures are an import error, a missing attribute, an exception or `SystemExit` from the module or the factory, and a factory that returns `None`.
+Each one is treated like an exporter whose `open` raised.
+The worker logs it once with the `[TraceML]` prefix, naming the value and the failure.
+The run continues, and `final_summary.json` is unchanged.
+`finalization_warning.json` records the loss.
+Its `export` block has `exporter_failed` set to `true`, and `failed_records` equals the records admitted.
+TraceML does not check the returned object up front.
+If it lacks one of the four methods, export fails when the worker first calls that method, and the loss is recorded the same way.
+
+This factory returns an exporter that writes every record as one JSON line to one file.
+
+```python
+import json
+
+
+class OneFileExporter:
+    def __init__(self, path, include_hostname):
+        self._path = path
+        self._include_hostname = include_hostname
+        self._file = None
+
+    def open(self):
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._file = open(self._path, "x", encoding="utf-8")
+
+    def write(self, records):
+        for record in records:
+            data = record.to_dict()
+            if not self._include_hostname:
+                data.pop("hostname", None)
+            self._file.write(json.dumps(data) + "\n")
+
+    def flush(self):
+        self._file.flush()
+
+    def close(self, *, dropped_batches=0):
+        self._file.close()
+
+
+def make_exporter(context):
+    return OneFileExporter(
+        context.export_dir / "records.jsonl",
+        context.include_hostname,
+    )
+```
 
 ## Internal mapping example
 
-This example uses the internal payload mapper; the custom-exporter interface is defined separately.
+This example uses the internal payload mapper.
+A custom exporter does not need it; see [Custom exporters](#custom-exporters).
 
 ```python
 from traceml_ai.aggregator.export import StepTimeRecord, records_from_payload

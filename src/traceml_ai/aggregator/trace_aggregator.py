@@ -6,13 +6,14 @@
 
 """Out-of-process telemetry server and display driver host."""
 
+import importlib
 import logging
 import sys
 import threading
 import time
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Type
 
 from traceml_ai.aggregator.display_drivers.base import BaseDisplayDriver
 from traceml_ai.aggregator.display_drivers.cli import CLIDisplayDriver
@@ -20,9 +21,11 @@ from traceml_ai.aggregator.display_drivers.summary import SummaryDisplayDriver
 from traceml_ai.aggregator.export import (
     EXPORTER_NAMES,
     Exporter,
+    ExporterContext,
     ExportStats,
     ExportWorker,
     JsonExporter,
+    parse_exporter_factory,
 )
 from traceml_ai.aggregator.sqlite_writer import (
     SQLiteWriterConfig,
@@ -110,21 +113,89 @@ def _resolve_display_driver(mode: str) -> Type[BaseDisplayDriver]:
     return driver_cls
 
 
+_SUPPORTED_EXPORTERS = f"{list(EXPORTER_NAMES)} or 'module:factory'"
+
+
+class _FailedExporter:
+    """
+    Stand-in for an exporter factory that failed.
+
+    ``open`` raises the failure, so the export worker logs it once, marks
+    the exporter failed and counts every admitted record as lost; the end
+    of run warning artifact then records the loss.
+    """
+
+    def __init__(self, message: str) -> None:
+        self._message = message
+
+    def open(self) -> None:
+        raise RuntimeError(self._message)
+
+    def write(self, records: Sequence[Any]) -> None:
+        return None
+
+    def flush(self) -> None:
+        return None
+
+    def close(self, *, dropped_batches: int = 0) -> None:
+        return None
+
+
+def _load_exporter_factory(value: str, context: ExporterContext) -> Exporter:
+    """
+    Import ``module:attr`` and return ``attr(context)``.
+
+    Never raises: any failure, including ``SystemExit`` from the module or
+    the factory, gives a ``_FailedExporter`` carrying the reason.
+    """
+
+    def failed(failure: str) -> Exporter:
+        return _FailedExporter(f"[TraceML] Exporter {value!r} {failure}")
+
+    parsed = parse_exporter_factory(value)
+    if parsed is None:
+        return failed("is not of the form 'module:factory'")
+    module_name, attr = parsed
+    try:
+        factory = getattr(importlib.import_module(module_name), attr)
+    except (Exception, SystemExit) as exc:
+        return failed(f"could not be loaded: {exc!r}")
+    try:
+        exporter = factory(context)
+    except (Exception, SystemExit) as exc:
+        return failed(f"factory raised {exc!r}")
+    if exporter is None:
+        return failed("factory returned None")
+    return exporter
+
+
 def _resolve_exporter(
     settings: TraceMLSettings, session_root: Path
 ) -> Optional[Exporter]:
-    """Return the export sink ``settings.exporter`` names, or None if off."""
+    """
+    Return the export sink ``settings.exporter`` names, or None if off.
+
+    A value with a colon names a factory, imported here in the aggregator
+    process and called with an ``ExporterContext``; a factory that fails
+    gives an exporter whose ``open`` raises. An unknown plain name raises.
+    """
     name = str(settings.exporter or "").strip()
     if not name:
         return None
+    context = ExporterContext(
+        session_root=session_root,
+        export_dir=session_root / "aggregator" / "export",
+        include_hostname=bool(settings.exporter_hostname),
+    )
+    if ":" in name:
+        return _load_exporter_factory(name, context)
     if name == "jsonl":
         return JsonExporter(
-            session_root / "aggregator" / "export",
-            include_hostname=bool(settings.exporter_hostname),
+            context.export_dir, include_hostname=context.include_hostname
         )
     raise ValueError(
         f"[TraceML] Unknown exporter: {name!r}. "
-        f"Supported: {list(EXPORTER_NAMES)}"
+        f"Supported: {_SUPPORTED_EXPORTERS}"
     )
 
 
@@ -187,7 +258,9 @@ class TraceMLAggregator:
         )
 
         # Optional structured export of admitted telemetry. An unknown name
-        # raises here, at aggregator startup, never mid-run.
+        # raises here, at aggregator startup, never mid-run. A failed factory
+        # gives an exporter whose open raises, so the worker logs it once and
+        # the warning artifact records the loss; the run continues.
         self._export_worker: Optional[ExportWorker] = None
         export_sink = _resolve_exporter(settings, session_root)
         if export_sink is not None:
