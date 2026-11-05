@@ -4,10 +4,10 @@
 
 With the `exporter` setting on, the aggregator writes every admitted step-time record to a JSON Lines file while the run is going.
 There is one line for every step each rank reports.
-The file sits beside the SQLite store under the run's `aggregator/` folder.
-A background worker writes it, so the run never waits on the file.
-Step time is the only stream so far.
-Other streams follow.
+The file is written under the run's `aggregator/export/` folder.
+A background worker writes the file, so training does not wait for file writes.
+At shutdown, TraceML waits briefly for pending records to be written.
+Currently, only step-time records are exported.
 
 ## Switching it on
 
@@ -38,7 +38,7 @@ With Ray, the fields on `TraceMLRayConfig` set it.
 Ray reads no environment variable and no `traceml.yaml` for it, so `exporter=""` means off.
 
 Lines carry no hostname by default, because the file may be uploaded elsewhere.
-To add `hostname` to every line, use `--exporter-hostname`, `exporter_hostname: true` in YAML, `TRACEML_EXPORTER_HOSTNAME=1`, or `TraceMLRayConfig(exporter_hostname=True)`.
+To add `hostname` to every data line, use `--exporter-hostname`, `exporter_hostname: true` in YAML, `TRACEML_EXPORTER_HOSTNAME=1`, or `TraceMLRayConfig(exporter_hostname=True)`.
 With the switch on, a rank that sent no hostname gives `"hostname": null`.
 
 ## The files
@@ -46,7 +46,7 @@ With the switch on, a rank that sent no hostname gives `"hostname": null`.
 The step-time file is `<logs-dir>/<run-name>/aggregator/export/step_time.jsonl`.
 On Ray the run folder is named by `session_id`.
 There is one file for the whole job, however many ranks and nodes it has, because one aggregator serves the job.
-Each line carries `global_rank`, `local_rank`, `node_rank` and `step`.
+Each data line carries `global_rank`, `local_rank`, `node_rank` and `step`.
 Key a consumer on `(global_rank, step)`.
 
 The file is created when the aggregator starts.
@@ -77,7 +77,7 @@ If another warning already started the file, the `export` block is added to it.
 
 The closing line's `written_records` and `dropped_batches` are the same counts for that file.
 `failed_records` and `skipped_items` appear only in the warning file, so read it when you need every count.
-A file without a closing line means a write to it failed or the aggregator did not finish.
+After the run finishes, a file without a closing line means a write failed or the aggregator did not finish cleanly.
 
 ## Field reference
 
