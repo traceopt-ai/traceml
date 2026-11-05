@@ -112,7 +112,9 @@ The worker then logs the failure, stops using the exporter, and records the loss
 Set the `exporter` setting to `module:factory` to use one.
 The value works in each place `jsonl` does.
 That is `exporter: "my_exporters:make_exporter"` in `traceml.yaml`, `--exporter my_exporters:make_exporter` on `traceml run` and `traceml serve`, or `TRACEML_EXPORTER=my_exporters:make_exporter`.
-The launcher checks only the form of the value: a dotted module path, a colon, and one identifier.
+`traceml watch` has no exporter and ignores the setting.
+The launcher checks the resolved value from whichever of these sets it.
+It checks only the form: a dotted module path, a colon, and one identifier.
 It never imports the module.
 The aggregator process imports the module, reads the attribute and calls it as `factory(context)`.
 The factory runs on the aggregator's main thread at startup, before the worker thread exists.
