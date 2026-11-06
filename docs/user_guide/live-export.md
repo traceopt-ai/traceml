@@ -12,7 +12,7 @@ At shutdown, TraceML waits briefly for pending records to be written.
 
 Export is off by default.
 The built-in exporter is `jsonl`.
-A custom exporter is `exporter: module:factory`, described in [Custom exporters](../developer_guide/export-records.md#custom-exporters).
+A custom exporter is selected by setting `exporter` to a `module:factory` value, described in [Custom exporters](../developer_guide/export-records.md#custom-exporters).
 Pick whichever layer fits your setup:
 
 ```bash
