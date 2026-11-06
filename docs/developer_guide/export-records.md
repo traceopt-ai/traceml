@@ -100,7 +100,7 @@ The default is `step_time`.
 
 The setting accepts only these five names, comma separated.
 `RuntimeEnvironmentRecord` and `StdoutStderrRecord` are reachable only through `all`.
-An unknown name, or a value that names no stream, raises `ValueError` at aggregator startup.
+An unknown name, or a value that names no stream, raises `ValueError` when the aggregator starts with an exporter set.
 The message lists the supported names.
 `traceml run` and `traceml serve` check the value before launch and exit with the same message.
 
@@ -282,7 +282,7 @@ Its only fields are `observed_timestamp_unix_ns`, `rank`, `timestamp_unix_ns` an
 | Field | Type | Unit | `None` means |
 |---|---|---|---|
 | `observed_timestamp_unix_ns` | int | ns | see common fields |
-| `rank` | int | | see common fields |
+| `rank` | int | | the rank's `global_rank`; this record has no `global_rank` field |
 | `timestamp_unix_ns` | int | ns | see common fields |
 | `line` | str | | never `None`; empty lines are not recorded |
 

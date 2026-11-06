@@ -112,7 +112,7 @@ The order you write them in does not change the output.
 The CLI flag beats `TRACEML_EXPORT_STREAMS`, which beats `traceml.yaml`, which beats the default.
 With Ray, only `TraceMLRayConfig(export_streams=...)` sets it.
 An unknown name stops `traceml run` and `traceml serve` before launch, and the message lists the supported names.
-The setting changes nothing while `exporter` is off, though the launcher still checks the value.
+The setting changes nothing while `exporter` is off, though `traceml run` and `traceml serve` still check the value.
 
 ## The files
 
