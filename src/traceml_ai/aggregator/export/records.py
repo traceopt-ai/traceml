@@ -265,6 +265,17 @@ _WRITERS = (
     stdout_stderr_writer,
 )
 
+# The record streams each writer produces. Literal: the writer modules do
+# not expose the tables they write; a test checks this against their DDL.
+_WRITER_STREAMS = {
+    runtime_environment_writer: ("runtime_environment",),
+    system_writer: ("system", "system_gpu"),
+    process_writer: ("process",),
+    step_time_writer: ("step_time",),
+    step_memory_writer: ("step_memory",),
+    stdout_stderr_writer: ("stdout_stderr",),
+}
+
 
 @dataclass(frozen=True)
 class RecordBatch:
@@ -290,7 +301,8 @@ def records_from_payload(
     does not fit its record are skipped and counted; nothing raises.
     ``streams`` names the ``Record.STREAM`` values to keep; the rows of any
     other stream are neither built nor counted as skipped, because leaving
-    them out is a choice, not a loss. None keeps every stream.
+    them out is a choice, not a loss. A writer whose streams are all
+    unselected is not run and counts nothing. None keeps every stream.
     """
     items = payload if isinstance(payload, list) else [payload]
     records: List[Record] = []
@@ -309,6 +321,10 @@ def records_from_payload(
             )
             for writer in _WRITERS:
                 if not writer.accepts_sampler(envelope.meta.sampler):
+                    continue
+                if streams is not None and not any(
+                    stream in streams for stream in _WRITER_STREAMS[writer]
+                ):
                     continue
                 try:
                     rows_by_table = writer.build_rows(

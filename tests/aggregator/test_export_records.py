@@ -635,6 +635,19 @@ def test_export_writers_are_the_sqlite_projection_writers():
     assert tables == {cls.TABLE for cls in RECORD_TYPES}
 
 
+def test_writer_streams_match_the_tables_each_writer_creates():
+    by_table = {cls.TABLE: cls.STREAM for cls in RECORD_TYPES}
+    assert set(export_records._WRITER_STREAMS) == set(export_records._WRITERS)
+    for writer, streams in export_records._WRITER_STREAMS.items():
+        with sqlite3.connect(":memory:") as conn:
+            writer.init_schema(conn)
+            names = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        created = {by_table[n] for (n,) in names if n != "sqlite_sequence"}
+        assert set(streams) == created, writer.__name__
+
+
 def test_to_dict_keys_are_the_v1_contract():
     assert {cls.STREAM for cls in RECORD_TYPES} == set(V1_KEYS)
     records = records_from_payload(

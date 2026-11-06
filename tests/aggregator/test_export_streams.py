@@ -24,7 +24,9 @@ from traceml_ai.aggregator.export import (
     JsonExporter,
     StepTimeRecord,
     parse_export_streams,
+    records_from_payload,
 )
+from traceml_ai.aggregator.sqlite_writers import system
 
 
 def test_default_selects_step_time():
@@ -90,6 +92,21 @@ def test_worker_hands_only_selected_records_to_the_exporter():
     assert stats.written_records == 1
     assert stats.skipped_items == 0
     assert stats.failed_records == 0
+
+
+def test_unselected_writer_is_not_run_or_counted(monkeypatch):
+    def boom(**kwargs):
+        raise RuntimeError("projection failed")
+
+    monkeypatch.setattr(system, "build_rows", boom)
+    payload = _payload(*next(c for c in CASES if c[1] is system)[2:5])
+
+    excluded = records_from_payload(payload, streams=("step_time",))
+    kept = records_from_payload(payload)
+
+    assert excluded.records == []
+    assert excluded.skipped == 0
+    assert kept.skipped == 1
 
 
 def test_json_exporter_creates_only_selected_files(tmp_path):
