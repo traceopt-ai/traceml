@@ -139,6 +139,17 @@ def test_aggregator_rejects_an_unknown_exporter_at_construction(tmp_path):
         )
 
 
+def test_aggregator_rejects_an_unknown_export_stream_at_construction(
+    tmp_path,
+):
+    with pytest.raises(ValueError, match="'bogus'"):
+        TraceMLAggregator(
+            logger=_Logger(),
+            stop_event=threading.Event(),
+            settings=_settings(tmp_path, "jsonl", export_streams="bogus"),
+        )
+
+
 @pytest.mark.parametrize(
     ("world_size", "capacity"),
     [(1, 4_096), (496, 4_960)],

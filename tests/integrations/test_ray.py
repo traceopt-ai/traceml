@@ -95,7 +95,10 @@ def test_worker_settings_connect_to_actor_endpoint():
 
 def test_exporter_settings_reach_the_aggregator_only():
     config = TraceMLRayConfig(
-        session_id="ray-run", exporter="jsonl", exporter_hostname=True
+        session_id="ray-run",
+        exporter="jsonl",
+        export_streams="all",
+        exporter_hostname=True,
     )
 
     aggregator = _build_aggregator_settings(
@@ -109,6 +112,7 @@ def test_exporter_settings_reach_the_aggregator_only():
     )
 
     assert aggregator.exporter == "jsonl"
+    assert aggregator.export_streams == "all"
     assert aggregator.exporter_hostname is True
     assert worker.exporter == ""
     assert worker.exporter_hostname is False
@@ -121,6 +125,7 @@ def test_exporter_is_off_by_default():
     )
 
     assert settings.exporter == ""
+    assert settings.export_streams == "step_time"
     assert settings.exporter_hostname is False
 
 

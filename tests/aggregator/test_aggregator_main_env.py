@@ -63,17 +63,21 @@ def test_read_traceml_env_run_nonce_defaults_to_empty(monkeypatch) -> None:
 
 def test_read_traceml_env_exporter_from_env(monkeypatch) -> None:
     monkeypatch.setenv("TRACEML_EXPORTER", "jsonl")
+    monkeypatch.setenv("TRACEML_EXPORT_STREAMS", "step_time,system")
     monkeypatch.setenv("TRACEML_EXPORTER_HOSTNAME", "1")
     cfg = read_traceml_env()
     assert cfg["exporter"] == "jsonl"
+    assert cfg["export_streams"] == "step_time,system"
     assert cfg["exporter_hostname"] is True
 
 
 def test_read_traceml_env_exporter_defaults_off(monkeypatch) -> None:
     monkeypatch.delenv("TRACEML_EXPORTER", raising=False)
+    monkeypatch.delenv("TRACEML_EXPORT_STREAMS", raising=False)
     monkeypatch.delenv("TRACEML_EXPORTER_HOSTNAME", raising=False)
     cfg = read_traceml_env()
     assert cfg["exporter"] == ""
+    assert cfg["export_streams"] == "step_time"
     assert cfg["exporter_hostname"] is False
 
 
@@ -81,6 +85,7 @@ def test_aggregator_main_passes_exporter_settings(monkeypatch) -> None:
     from traceml_ai.aggregator import aggregator_main
 
     monkeypatch.setenv("TRACEML_EXPORTER", "jsonl")
+    monkeypatch.setenv("TRACEML_EXPORT_STREAMS", "all")
     monkeypatch.setenv("TRACEML_EXPORTER_HOSTNAME", "1")
     captured = {}
 
@@ -98,4 +103,5 @@ def test_aggregator_main_passes_exporter_settings(monkeypatch) -> None:
         assert exc.code == 0
 
     assert captured["settings"].exporter == "jsonl"
+    assert captured["settings"].export_streams == "all"
     assert captured["settings"].exporter_hostname is True

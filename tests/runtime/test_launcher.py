@@ -881,7 +881,11 @@ def _aggregator_env(
     """Launch up to the aggregator spawn and return the env it gets."""
     monkeypatch.chdir(tmp_path)
     if clear_exporter_env:
-        for var in ("TRACEML_EXPORTER", "TRACEML_EXPORTER_HOSTNAME"):
+        for var in (
+            "TRACEML_EXPORTER",
+            "TRACEML_EXPORT_STREAMS",
+            "TRACEML_EXPORTER_HOSTNAME",
+        ):
             monkeypatch.delenv(var, raising=False)
     script = tmp_path / "train.py"
     script.write_text("print('unused')\n", encoding="utf-8")
@@ -999,6 +1003,51 @@ def test_run_rejects_an_unknown_exporter_before_launch(
     assert str(exc.value) == (
         "[TraceML] Unknown exporter: 'unsupported'. "
         "Supported: ['jsonl'] or 'module:factory'"
+    )
+    for replacement in forbidden.values():
+        replacement.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "flags, expected",
+    [
+        (
+            ("--export-streams", "step_time, step_memory"),
+            "step_time,step_memory",
+        ),
+        ((), "step_time"),
+    ],
+)
+def test_run_passes_export_streams_to_the_aggregator_env(
+    monkeypatch, tmp_path, flags, expected
+) -> None:
+    env = _aggregator_env(monkeypatch, tmp_path, *flags)
+
+    assert env["TRACEML_EXPORT_STREAMS"] == expected
+
+
+def test_run_rejects_unknown_export_streams_before_launch(
+    monkeypatch, tmp_path
+) -> None:
+    from traceml_ai.launcher import cli
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TRACEML_EXPORT_STREAMS", raising=False)
+    script = tmp_path / "train.py"
+    script.write_text("print('unused')\n", encoding="utf-8")
+    forbidden = _forbid_guard_launch_side_effects(monkeypatch)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["traceml", "run", str(script), "--export-streams", "step_time,gpu"],
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+
+    assert str(exc.value) == (
+        "[TraceML] Unknown export stream: 'gpu'. "
+        "Supported: ['step_time', 'step_memory', 'process', 'system', 'all']"
     )
     for replacement in forbidden.values():
         replacement.assert_not_called()

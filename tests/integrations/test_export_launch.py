@@ -58,7 +58,9 @@ def test_two_rank_run_exports_step_time_jsonl(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
 
     session_root = tmp_path / "logs" / _RUN_NAME
-    path = session_root / "aggregator" / "export" / "step_time.jsonl"
+    export_dir = session_root / "aggregator" / "export"
+    assert sorted(p.name for p in export_dir.iterdir()) == ["step_time.jsonl"]
+    path = export_dir / "step_time.jsonl"
     lines = [json.loads(line) for line in path.read_text().splitlines()]
     *data, closing = lines
 
