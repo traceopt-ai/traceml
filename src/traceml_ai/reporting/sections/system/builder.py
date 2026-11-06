@@ -12,6 +12,15 @@ from typing import Any, Dict, Iterable, Optional
 
 from traceml_ai.diagnostics.common import DiagnosticResult
 from traceml_ai.diagnostics.system import SystemDiagnosis
+from traceml_ai.measurements.system import (
+    PerGPUSummary,
+    SystemClusterSummary,
+    SystemMeasurements,
+    SystemNodeSummary,
+    node_gpu_headroom_min_bytes,
+    node_gpu_mem_peak_percent,
+    percent,
+)
 from traceml_ai.reporting.schema import (
     BaseGlobal,
     BaseGroups,
@@ -19,17 +28,6 @@ from traceml_ai.reporting.schema import (
     BaseSectionPayload,
     GlobalWindow,
     GroupRow,
-)
-from traceml_ai.reporting.sections.system.loader import SystemSectionData
-from traceml_ai.reporting.sections.system.model import (
-    SYSTEM_METRIC_NAMES,
-    PerGPUSummary,
-    SystemClusterSummary,
-    SystemNodeSummary,
-    average_optional,
-    node_gpu_headroom_min_gb,
-    node_gpu_mem_peak_percent,
-    percent,
 )
 from traceml_ai.reporting.summaries.issue_summary import (
     diagnostic_result_to_json,
@@ -39,10 +37,17 @@ from traceml_ai.reporting.summaries.summary_formatting import (
     format_optional,
 )
 
-
-def _node_headroom_min_bytes(node: SystemNodeSummary) -> Optional[float]:
-    value_gb = node_gpu_headroom_min_gb(node)
-    return None if value_gb is None else float(value_gb) * 1_000_000_000.0
+SYSTEM_METRIC_NAMES = [
+    "cpu_percent",
+    "ram_bytes",
+    "ram_percent",
+    "gpu_util_percent",
+    "gpu_mem_bytes",
+    "gpu_mem_percent",
+    "gpu_temp_c",
+    "gpu_power_w",
+    "gpu_headroom_bytes",
+]
 
 
 def _system_mode(cluster: SystemClusterSummary) -> str:
@@ -77,7 +82,12 @@ def _gpu_mem_avg_bytes_from_summaries(
     gpus: Iterable[PerGPUSummary],
 ) -> Optional[float]:
     """Return average used GPU memory across physical GPU summaries."""
-    return average_optional(gpu.mem_avg_bytes for gpu in gpus)
+    values = [
+        float(gpu.mem_avg_bytes)
+        for gpu in gpus
+        if gpu.mem_avg_bytes is not None
+    ]
+    return sum(values) / len(values) if values else None
 
 
 def _node_metric_values(node: SystemNodeSummary) -> Dict[str, Any]:
@@ -98,7 +108,7 @@ def _node_metric_values(node: SystemNodeSummary) -> Dict[str, Any]:
         "gpu_mem_percent": _gpu_mem_percent_from_summaries(per_gpu),
         "gpu_temp_c": agg.gpu_temp_avg_c,
         "gpu_power_w": agg.gpu_power_avg_w,
-        "gpu_headroom_bytes": _node_headroom_min_bytes(node),
+        "gpu_headroom_bytes": node_gpu_headroom_min_bytes(node),
     }
 
 
@@ -276,7 +286,7 @@ def _card_stats(
 
 
 def build_system_payload(
-    data: SystemSectionData,
+    data: SystemMeasurements,
     diagnosis_result: DiagnosticResult[SystemDiagnosis],
 ) -> Dict[str, Any]:
     """

@@ -21,11 +21,11 @@ def safe_float(x: Any) -> float:
 
 def bytes_to_gb(x: Optional[float]) -> Optional[float]:
     """
-    Convert bytes to decimal gigabytes for display and summary JSON.
+    Convert bytes to binary gigabytes (GiB) for display.
     """
     if x is None:
         return None
-    return float(x) / 1e9
+    return float(x) / 1024**3
 
 
 def format_optional(

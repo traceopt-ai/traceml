@@ -11,7 +11,7 @@ def test_all_four_section_titles_present(make_payload) -> None:
 def test_units_resolved_by_metric_name_suffix(make_payload) -> None:
     out = render_sections(make_payload())
     assert "ms" in out  # *_ms metrics
-    assert "GB" in out  # *_bytes -> decimal GB
+    assert "GiB" in out  # *_bytes -> binary GiB
     assert "%" in out  # *_percent
 
 

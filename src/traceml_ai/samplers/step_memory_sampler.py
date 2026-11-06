@@ -34,7 +34,7 @@ class StepMemorySampler(BaseSampler):
         """
         return StepMemorySample(
             sample_idx=self.sample_idx,
-            timestamp=float(event.timestamp),
+            timestamp_unix_ns=event.timestamp_unix_ns,
             device=event.device,
             step=event.step,
             peak_allocated=event.peak_allocated,

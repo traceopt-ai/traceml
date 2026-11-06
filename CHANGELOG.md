@@ -7,6 +7,29 @@ which carry the full historical notes for versions predating this file.
 
 ## [Unreleased]
 
+- Step Time now uses complete GPU phase timing when Input Wait is absent from
+  the entire analysis window. Input Wait and outer Step Time remain unavailable
+  rather than being treated as zero.
+- Memory byte counts now render consistently in binary units (`GiB`, `MiB`,
+  `KiB`, and `TiB`) across the dashboard, terminal, HTML, and comparison text.
+  Values on surfaces that previously used decimal `GB` read about 6.9% lower;
+  stored byte values and the legacy compare JSON keys remain unchanged.
+- **Breaking (raw telemetry and summary):** Raw telemetry uses integer Unix
+  nanoseconds. `timestamp_unix_ns` records the source measurement, including
+  stdout/stderr capture, and `observed_timestamp_unix_ns` records when the
+  aggregator processes an envelope. Final-summary schema `2.0` replaces
+  float-second bounds with integer Unix nanoseconds:
+
+  - `analysis_window`: `start_ts_s` / `end_ts_s` become
+    `start_time_unix_ns` / `end_time_unix_ns`.
+  - `analysis_window.sections.*`: `observed_start_ts_s` / `observed_end_ts_s`
+    become `first_sample_time_unix_ns` / `last_sample_time_unix_ns`.
+  - Section `metadata`: `analysis_start_ts_s` / `analysis_end_ts_s` become
+    `analysis_start_time_unix_ns` / `analysis_end_time_unix_ns`.
+
+  Raw SQLite histories are not migrated. Start a fresh run after upgrading and
+  use the same TraceML version for workers and the aggregator. Saved summaries
+  remain readable by `traceml view` and `traceml compare`.
 - The browser dashboard is now installed with
   `pip install "traceml-ai[dashboard]"`; the default install remains focused on
   summary and terminal output.

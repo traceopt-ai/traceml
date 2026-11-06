@@ -115,6 +115,7 @@ class SystemSample:
 
     Notes
     -----
+    - ``timestamp_unix_ns`` is the source measurement time in Unix nanoseconds.
     - GPU metrics are stored as an ordered list.
       The list index corresponds to the GPU index on the host.
     - This class is immutable (`frozen=True`) to prevent accidental mutation
@@ -122,7 +123,7 @@ class SystemSample:
     """
 
     sample_idx: int
-    timestamp: float
+    timestamp_unix_ns: int
     cpu_percent: Optional[float]
     ram_used: Optional[float]
     ram_total: Optional[float]
@@ -147,7 +148,7 @@ class SystemSample:
         """
         return {
             "seq": self.sample_idx,
-            "ts": self.timestamp,
+            "timestamp_unix_ns": int(self.timestamp_unix_ns),
             "cpu": self.cpu_percent,
             "ram_used": self.ram_used,
             "ram_total": self.ram_total,
@@ -173,7 +174,7 @@ class SystemSample:
         """
         return SystemSample(
             sample_idx=data["seq"],
-            timestamp=data["ts"],
+            timestamp_unix_ns=int(data["timestamp_unix_ns"]),
             cpu_percent=data["cpu"],
             ram_used=data["ram_used"],
             ram_total=data["ram_total"],

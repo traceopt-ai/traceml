@@ -4,20 +4,23 @@
 # you may not use this file except in compliance with the License.
 # SPDX-License-Identifier: Apache-2.0
 
+import sqlite3
+from contextlib import closing
+
 from tests.sqlite_fixtures import (
     insert_process_sample,
     insert_system_sample,
     summary_database,
 )
+from traceml_ai.measurements.process import read_process_measurements
+from traceml_ai.measurements.system import read_system_measurements
+from traceml_ai.measurements.window import (
+    AnalysisWindow,
+    resolve_analysis_window,
+)
+from traceml_ai.reporting.analysis_window import build_analysis_window_payload
 from traceml_ai.reporting.sections.process import ProcessSummarySection
-from traceml_ai.reporting.analysis_window import AnalysisWindow
-from traceml_ai.reporting.sections.process.loader import (
-    load_process_section_data,
-)
 from traceml_ai.reporting.sections.system import SystemSummarySection
-from traceml_ai.reporting.sections.system.loader import (
-    load_system_section_data,
-)
 from traceml_ai.reporting.summaries.process import (
     generate_process_summary_card,
 )
@@ -45,7 +48,7 @@ def _seed_system_samples(conn) -> None:
                 "power_usage_w": 120.0,
             },
             {
-                "recv_ts_ns": 10,
+                "observed_timestamp_unix_ns": 10,
                 "gpu_idx": 1,
                 "util": 40.0,
                 "mem_used_bytes": 5.0,
@@ -59,8 +62,8 @@ def _seed_system_samples(conn) -> None:
 
 def _seed_process_samples(conn) -> None:
     for row_id, ts, cpu, ram, used, reserved in (
-        (1, 10.0, 80.0, 4e9, 5e9, 6e9),
-        (2, 11.0, 40.0, 2e9, 3e9, 4e9),
+        (1, 10.0, 80.0, 4 * 1024**3, 5e9, 6e9),
+        (2, 11.0, 40.0, 2 * 1024**3, 3e9, 4e9),
     ):
         insert_process_sample(
             conn,
@@ -71,7 +74,7 @@ def _seed_process_samples(conn) -> None:
             gpu_count=1,
             cpu_percent=cpu,
             ram_used_bytes=ram,
-            ram_total_bytes=16e9,
+            ram_total_bytes=16 * 1024**3,
             gpu_device_index=0,
             gpu_mem_used_bytes=used,
             gpu_mem_reserved_bytes=reserved,
@@ -79,18 +82,26 @@ def _seed_process_samples(conn) -> None:
         )
 
 
-def test_system_section_loader_and_builder_use_sqlite_fixture(tmp_path):
+def test_system_measurements_and_builder_use_sqlite_fixture(tmp_path):
     db_path = tmp_path / "system.db"
     with summary_database(db_path) as conn:
         _seed_system_samples(conn)
+        conn.execute(
+            "INSERT INTO system_samples("
+            "observed_timestamp_unix_ns, global_rank, local_rank, world_size, "
+            "local_world_size, node_rank, hostname, timestamp_unix_ns"
+            ") VALUES (11, 0, 0, 1, 1, 0, 'worker-0', 11000000000)"
+        )
 
-    data = load_system_section_data(str(db_path))
+    with closing(sqlite3.connect(db_path)) as connection:
+        data = read_system_measurements(connection)
     result = SystemSummarySection().build(str(db_path))
 
-    assert data.cluster.aggregate.system_samples == 1
+    assert data.cluster.aggregate.system_samples == 2
     assert data.cluster.nodes["0"].per_gpu[0].util_peak_percent == 70.0
     assert result.section == "system"
-    assert result.payload["metadata"]["samples"] == 1
+    assert result.payload["metadata"]["samples"] == 2
+    assert result.payload["metadata"]["duration_s"] == 1.0
     assert "TraceML System Summary" in result.text
     assert "- Diagnosis: MODERATE GPU UTIL" in result.text
     assert result.payload["diagnosis"]["kind"] == "MODERATE_GPU_UTILIZATION"
@@ -170,15 +181,16 @@ def test_system_section_reports_scoped_multinode_primary_issue(tmp_path):
     assert payload["global"]["worst"]["gpu_temp_c"]["idx"] == "1"
 
 
-def test_system_loader_uses_selected_time_window(tmp_path):
+def test_system_measurements_use_selected_time_window(tmp_path):
     db_path = tmp_path / "system_latest.db"
+    timestamp_s = 1_792_336_915.3680508
     with summary_database(db_path) as conn:
         _seed_system_samples(conn)
         insert_system_sample(
             conn,
             row_id=2,
             rank=0,
-            ts=20.0,
+            ts=timestamp_s,
             gpu_available=True,
             gpu_count=1,
             cpu_percent=90.0,
@@ -196,10 +208,14 @@ def test_system_loader_uses_selected_time_window(tmp_path):
             ),
         )
 
-    data = load_system_section_data(
-        str(db_path),
-        analysis_window=AnalysisWindow(30.0, start_ts_s=20.0, end_ts_s=20.0),
-    )
+    with closing(sqlite3.connect(db_path)) as connection:
+        window = resolve_analysis_window(connection, retention_s=1.0)
+    assert window.end_time_unix_ns == round(timestamp_s * 1_000_000_000)
+    with closing(sqlite3.connect(db_path)) as connection:
+        data = read_system_measurements(
+            connection,
+            analysis_window=window,
+        )
 
     assert data.cluster.aggregate.system_samples == 1
     assert data.cluster.aggregate.cpu_avg_percent == 90.0
@@ -207,7 +223,7 @@ def test_system_loader_uses_selected_time_window(tmp_path):
     assert data.cluster.nodes["0"].per_gpu[0].util_peak_percent == 80.0
 
 
-def test_system_loader_uses_selected_time_window_per_node(tmp_path):
+def test_system_measurements_use_selected_time_window_per_node(tmp_path):
     db_path = tmp_path / "system_latest_per_node.db"
     with summary_database(db_path) as conn:
         _seed_system_samples(conn)
@@ -243,10 +259,15 @@ def test_system_loader_uses_selected_time_window_per_node(tmp_path):
                 )
                 row_id += 1
 
-    data = load_system_section_data(
-        str(db_path),
-        analysis_window=AnalysisWindow(30.0, start_ts_s=12.0, end_ts_s=12.0),
-    )
+    with closing(sqlite3.connect(db_path)) as connection:
+        data = read_system_measurements(
+            connection,
+            analysis_window=AnalysisWindow(
+                30.0,
+                start_time_unix_ns=12_000_000_000,
+                end_time_unix_ns=12_000_000_000,
+            ),
+        )
 
     assert data.cluster.aggregate.system_samples == 2
     assert set(data.cluster.nodes) == {"0", "1"}
@@ -256,22 +277,24 @@ def test_system_loader_uses_selected_time_window_per_node(tmp_path):
     assert data.cluster.nodes["1"].per_gpu[0].util_peak_percent == 64.0
 
 
-def test_process_section_loader_and_builder_use_sqlite_fixture(tmp_path):
+def test_process_measurements_and_builder_use_sqlite_fixture(tmp_path):
     db_path = tmp_path / "process.db"
     with summary_database(db_path) as conn:
         _seed_process_samples(conn)
 
-    data = load_process_section_data(str(db_path))
+    with closing(sqlite3.connect(db_path)) as connection:
+        data = read_process_measurements(connection)
     result = ProcessSummarySection().build(str(db_path))
 
     assert data.aggregate.process_samples == 2
     assert result.section == "process"
     assert result.payload["metadata"]["samples"] == 2
+    assert result.payload["metadata"]["duration_s"] == 1.0
     assert "TraceML Process Summary" in result.text
     assert "- Diagnosis: NORMAL" in result.text
     assert (
         "- Stats: global ranks 1 | CPU avg 60% | "
-        "RSS peak 4.0 / 16.0 GB | GPU reserved peak 60%"
+        "RSS peak 4.0 / 16.0 GiB | GPU reserved peak 60%"
     ) in result.text
     assert "- Takeaway:" not in result.text
     assert "- Issues:" not in result.text
@@ -307,24 +330,50 @@ def test_process_section_loader_and_builder_use_sqlite_fixture(tmp_path):
     assert "takeaway" not in result.payload["global"]
 
 
-def test_process_loader_uses_selected_time_window(tmp_path):
+def test_process_measurements_use_selected_time_window(tmp_path):
     db_path = tmp_path / "process_latest.db"
+    boundary_unix_ns = 1_792_336_915_368_049_000
     with summary_database(db_path) as conn:
         _seed_process_samples(conn)
+        conn.execute(
+            "UPDATE process_samples SET timestamp_unix_ns = ? WHERE id = 2",
+            (boundary_unix_ns,),
+        )
+        conn.execute(
+            "UPDATE process_samples SET timestamp_unix_ns = ? WHERE id = 1",
+            (boundary_unix_ns - 1,),
+        )
+        conn.execute(
+            "INSERT INTO process_samples(observed_timestamp_unix_ns, global_rank, "
+            "timestamp_unix_ns, cpu_percent) VALUES (3, 0, ?, 90.0)",
+            (boundary_unix_ns + 1,),
+        )
 
-    data = load_process_section_data(
-        str(db_path),
-        analysis_window=AnalysisWindow(30.0, start_ts_s=11.0, end_ts_s=11.0),
+    window = AnalysisWindow(
+        30.0,
+        start_time_unix_ns=boundary_unix_ns,
+        end_time_unix_ns=boundary_unix_ns,
     )
+    with closing(sqlite3.connect(db_path)) as connection:
+        data = read_process_measurements(
+            connection,
+            analysis_window=window,
+        )
 
+    assert (
+        build_analysis_window_payload(str(db_path), window)["sections"][
+            "process"
+        ]["samples"]
+        == 1
+    )
     assert data.aggregate.process_samples == 1
     assert data.aggregate.cpu_avg_percent == 40.0
-    assert data.aggregate.ram_avg_bytes == 2000000000.0
+    assert data.aggregate.ram_avg_bytes == 2 * 1024**3
     assert data.per_global_rank[0].cpu_avg_percent == 40.0
     assert data.per_global_rank[0].gpu_mem_reserved_avg_bytes == 4000000000.0
 
 
-def test_process_loader_ignores_rows_without_global_rank(tmp_path):
+def test_process_measurements_ignore_rows_without_global_rank(tmp_path):
     db_path = tmp_path / "process_legacy_rank.db"
     with summary_database(db_path) as conn:
         _seed_process_samples(conn)
@@ -346,7 +395,8 @@ def test_process_loader_ignores_rows_without_global_rank(tmp_path):
             gpu_mem_total_bytes=10e9,
         )
 
-    data = load_process_section_data(str(db_path))
+    with closing(sqlite3.connect(db_path)) as connection:
+        data = read_process_measurements(connection)
 
     assert data.aggregate.process_samples == 2
     assert data.aggregate.distinct_global_ranks == 1

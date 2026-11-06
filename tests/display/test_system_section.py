@@ -37,7 +37,7 @@ from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section impor
 )
 from traceml_ai.renderers.system.dashboard_models import GpuRow  # noqa: E402
 
-GB = 1e9
+GIB = float(1024**3)
 
 
 def test_span_reads_as_a_window_not_a_clock() -> None:
@@ -49,11 +49,11 @@ def test_span_reads_as_a_window_not_a_clock() -> None:
 
 
 def test_levels_carry_their_denominator() -> None:
-    assert format_gb_pair(6.31 * GB, 16.1 * GB) == ("6.3", "/ 16.1 GB")
-    assert format_gb_pair(9.0 * GB, 200.0 * GB) == ("9.0", "/ 200 GB")
-    assert format_gb_pair(None, 16.1 * GB) == ("n/a", "")
+    assert format_gb_pair(6.31 * GIB, 16.1 * GIB) == ("6.3", "/ 16.1 GiB")
+    assert format_gb_pair(9.0 * GIB, 200.0 * GIB) == ("9.0", "/ 200 GiB")
+    assert format_gb_pair(None, 16.1 * GIB) == ("n/a", "")
     # Changed deliberately: sub-gigabyte values keep useful precision.
-    assert format_gb_pair(0.47 * GB, None) == ("0.47", "GB")
+    assert format_gb_pair(0.47 * GIB, None) == ("0.47", "GiB")
 
 
 def test_disclosure_text_states_the_range_and_no_verdict() -> None:
@@ -190,8 +190,8 @@ def _gpus():
             "gpu_idx": 0,
             "util_now": 100.0,
             "util_p50": 100.0,
-            "mem_used": 6.67 * GB,
-            "mem_total": 16.1 * GB,
+            "mem_used": 6.67 * GIB,
+            "mem_total": 16.1 * GIB,
             "temp": 54.0,
             "power": 68.0,
             "power_limit": 70.0,
@@ -201,8 +201,8 @@ def _gpus():
             "gpu_idx": 1,
             "util_now": 0.0,
             "util_p50": 0.0,
-            "mem_used": 0.47 * GB,
-            "mem_total": 16.1 * GB,
+            "mem_used": 0.47 * GIB,
+            "mem_total": 16.1 * GIB,
             "temp": 41.0,
             "power": 33.0,
             "power_limit": 70.0,
@@ -314,10 +314,10 @@ def test_whole_run_charts_share_one_clock_axis() -> None:
         "gpu_available": True,
         "rollups": {
             "cpu": {"now": 30.0, "p50": 32.0, "p95": 44.0},
-            "ram": {"now": 9.0 * GB, "total": 200.0 * GB},
+            "ram": {"now": 9.0 * GIB, "total": 200.0 * GIB},
             "gpu_util": {"now": 99.0, "p50": 99.0, "p95": 99.0},
             "gpu_delta": {"now": 0.0, "p95": 0.0},
-            "gpu_mem": {"now": 6.3 * GB, "total": 16.1 * GB},
+            "gpu_mem": {"now": 6.3 * GIB, "total": 16.1 * GIB},
             "temp": {"now": 48.0, "status": "OK"},
             "gpu_power": {
                 "now": 68.0,
@@ -434,10 +434,10 @@ def test_power_chart_draws_limit_and_floor_reference_lines() -> None:
             "gpu_available": True,
             "rollups": {
                 "cpu": {"now": 9.0, "p50": 8.0, "p95": 12.0},
-                "ram": {"now": 9.0 * GB, "total": 200.0 * GB},
+                "ram": {"now": 9.0 * GIB, "total": 200.0 * GIB},
                 "gpu_util": {"now": 25.0, "p50": 25.0, "p95": 25.0},
                 "gpu_delta": {"now": 0.0, "p95": 0.0},
-                "gpu_mem": {"now": 6.67 * GB, "total": 16.1 * GB},
+                "gpu_mem": {"now": 6.67 * GIB, "total": 16.1 * GIB},
                 "temp": {"now": 54.0, "status": "OK"},
                 "gpu_power": power,
                 "gpus": _gpus(),
@@ -494,7 +494,7 @@ def test_section_builds_and_updates_without_a_browser() -> None:
         "gpu_available": True,
         "rollups": {
             "cpu": {"now": 9.0, "p50": 8.0, "p95": 12.0},
-            "ram": {"now": 9.0 * GB, "total": 200.0 * GB},
+            "ram": {"now": 9.0 * GIB, "total": 200.0 * GIB},
             "gpu_util": {"now": 0.0, "p50": 25.0, "p95": 25.0},
             "gpu_delta": {"now": 0.0, "p95": 100.0},
             # The computer decides both of these now, so a hand-built
@@ -502,7 +502,7 @@ def test_section_builds_and_updates_without_a_browser() -> None:
             # re-derive them from the rows.
             "rows_over": True,
             "util_range": (0.0, 100.0),
-            "gpu_mem": {"now": 6.67 * GB, "total": 16.1 * GB},
+            "gpu_mem": {"now": 6.67 * GIB, "total": 16.1 * GIB},
             "temp": {"now": 54.0, "status": "OK"},
             "gpu_power": {"now": 68.0, "p50": 67.0, "limit": 70.0},
             "gpus": _gpus(),
@@ -602,7 +602,7 @@ def test_section_builds_and_updates_without_a_browser() -> None:
     assert panel["tiles"]["mem"].content != "n/a"
 
     # Every GPU unreported on the newest tick (represented here by legacy
-    # all-zero rows): level tiles say so instead of printing 0 °C / 0.0 GB.
+    # all-zero rows): level tiles say so instead of printing 0 °C / 0.0 GiB.
     zeroed = dict(later)
     zeroed["rollups"] = dict(later["rollups"])
     zeroed["rollups"]["gpus"] = [
@@ -634,7 +634,7 @@ def test_section_builds_and_updates_without_a_browser() -> None:
                 "gpu_available": False,
                 "rollups": {
                     "cpu": {"now": 3.0, "p50": 3.0},
-                    "ram": {"now": 1.0 * GB, "total": 16.0 * GB},
+                    "ram": {"now": 1.0 * GIB, "total": 16.0 * GIB},
                     "gpu_power": {"now": None, "p50": None, "limit": None},
                     "gpus": [],
                 },
@@ -701,13 +701,13 @@ def test_every_tile_keeps_a_qualifier_line() -> None:
             "gpu_available": True,
             "rollups": {
                 "cpu": {"now": 9.0, "p50": 8.0},
-                "ram": {"now": 9.0 * GB, "total": 200.0 * GB},
+                "ram": {"now": 9.0 * GIB, "total": 200.0 * GIB},
                 "gpu_util": {"now": 99.0, "p50": 99.0},
                 # The four-GPU case deliberately has one missing reading so
                 # the qualifier's newest-tick scope remains explicit.
                 "util_gpu_count": 1 if n_gpus == 1 else 3,
                 "gpu_delta": {"now": 0.0, "p95": 0.0},
-                "gpu_mem": {"now": 6.3 * GB, "total": 16.1 * GB},
+                "gpu_mem": {"now": 6.3 * GIB, "total": 16.1 * GIB},
                 "temp": {"now": 48.0},
                 "gpu_power": {"now": 66.0, "p50": 66.0, "limit": 70.0},
                 "gpus": [
@@ -715,8 +715,8 @@ def test_every_tile_keeps_a_qualifier_line() -> None:
                         "gpu_idx": i,
                         "util_now": 99.0,
                         "util_p50": 99.0,
-                        "mem_used": 6.3 * GB,
-                        "mem_total": 16.1 * GB,
+                        "mem_used": 6.3 * GIB,
+                        "mem_total": 16.1 * GIB,
                         "temp": 48.0,
                         "power": 66.0,
                         "power_limit": 70.0,
@@ -781,12 +781,12 @@ def test_a_small_real_reading_is_not_printed_as_zero() -> None:
         system_section,
     )
 
-    assert system_section.format_gb_pair(27e6, 16.1e9)[0] == "0.03"
-    assert system_section.format_gb_pair(500e6, 16.1e9)[0] == "0.50"
+    assert system_section.format_gb_pair(27 * 1024**2, 16.1 * GIB)[0] == "0.03"
+    assert system_section.format_gb_pair(0.5 * GIB, 16.1 * GIB)[0] == "0.50"
     # At and above a gigabyte the extra digit is noise, so one decimal.
-    assert system_section.format_gb_pair(6.3e9, 16.1e9)[0] == "6.3"
+    assert system_section.format_gb_pair(6.3 * GIB, 16.1 * GIB)[0] == "6.3"
     # Absence remains distinct from every measured value.
-    assert system_section.format_gb_pair(None, 16.1e9)[0] == "n/a"
+    assert system_section.format_gb_pair(None, 16.1 * GIB)[0] == "n/a"
 
 
 def _tile_number(content: str) -> str:
@@ -846,7 +846,7 @@ def test_tiles_abstain_when_the_payload_carries_no_measurement() -> None:
             "gpus": [
                 {
                     "gpu_idx": i,
-                    "mem_total": 16.1 * GB,
+                    "mem_total": 16.1 * GIB,
                     "power_limit": 70.0,
                     "reported": True,
                 }
@@ -924,7 +924,7 @@ def test_the_card_says_when_its_numbers_are_held_over() -> None:
         "gpu_available": False,
         "rollups": {
             "cpu": {"now": 42.0, "p50": 42.0, "p95": 42.0},
-            "ram": {"now": 9.0 * GB, "total": 200.0 * GB},
+            "ram": {"now": 9.0 * GIB, "total": 200.0 * GIB},
             "status": "STALE (exception: OperationalError)",
             "ctx": {"gpu_count": 0},
         },
@@ -952,7 +952,7 @@ def test_a_healthy_card_carries_no_stale_marker() -> None:
         "gpu_available": False,
         "rollups": {
             "cpu": {"now": 42.0, "p50": 42.0, "p95": 42.0},
-            "ram": {"now": 9.0 * GB, "total": 200.0 * GB},
+            "ram": {"now": 9.0 * GIB, "total": 200.0 * GIB},
             "ctx": {"gpu_count": 0},
         },
         "series": {"x_time": [], "cpu": []},
@@ -969,7 +969,7 @@ def _liveness_payload(state: str, age_s: float) -> dict:
         "gpu_available": False,
         "rollups": {
             "cpu": {"now": 42.0, "p50": 42.0, "p95": 42.0},
-            "ram": {"now": 9.0 * GB, "total": 200.0 * GB},
+            "ram": {"now": 9.0 * GIB, "total": 200.0 * GIB},
             "node_liveness": {"state": state, "age_s": age_s},
             "ctx": {"gpu_count": 0},
         },
@@ -1076,9 +1076,9 @@ def test_the_first_tick_waits_and_the_gpu_slots_come_back() -> None:
                 "gpu_available": True,
                 "rollups": {
                     "cpu": {"now": 9.0, "p50": 8.0},
-                    "ram": {"now": 9.0 * GB, "total": 200.0 * GB},
+                    "ram": {"now": 9.0 * GIB, "total": 200.0 * GIB},
                     "gpu_util": {"now": 99.0, "p50": 99.0},
-                    "gpu_mem": {"now": 6.3 * GB, "total": 16.1 * GB},
+                    "gpu_mem": {"now": 6.3 * GIB, "total": 16.1 * GIB},
                     "temp": {"now": 48.0},
                     "gpu_power": {"now": 66.0, "p50": 66.0, "limit": 70.0},
                     "gpus": _gpus(),
@@ -1132,7 +1132,7 @@ def test_a_gpu_that_reports_no_power_says_so() -> None:
                 "gpu_available": True,
                 "rollups": {
                     "cpu": {"now": 9.0, "p50": 8.0},
-                    "ram": {"now": 9.0 * GB, "total": 200.0 * GB},
+                    "ram": {"now": 9.0 * GIB, "total": 200.0 * GIB},
                     "gpu_util": {"now": 99.0, "p50": 99.0},
                     "gpu_power": {"now": None, "p50": None, "limit": None},
                     "gpus": gpus,
@@ -1229,7 +1229,7 @@ def _cpu_only_payload(window_len: int = 20) -> dict:
         "gpu_available": False,
         "rollups": {
             "cpu": {"now": 38.0, "p50": 42.0, "p95": 60.0},
-            "ram": {"now": 8.4 * GB, "total": 25.8 * GB},
+            "ram": {"now": 8.4 * GIB, "total": 25.8 * GIB},
             "gpu_power": {"now": None, "p50": None, "limit": None},
             "gpus": [],
             "ctx": {"gpu_count": 0},
@@ -1289,7 +1289,7 @@ def test_a_cpu_only_card_shows_what_exists_and_no_absence() -> None:
     assert "n/a" not in joined, shown
     # The RAM tile is labelled for what it holds and reads compactly.
     assert "ram usage" in shown
-    assert "8.4 / 25.8 GB" in shown
+    assert "8.4 / 25.8 GiB" in shown
     assert "used / total" in shown
     # The CPU chart keeps its heading and its labelled median, the label
     # directly before the value.
@@ -1406,7 +1406,7 @@ def test_a_cpu_only_card_gets_its_gpu_slots_back_when_one_reports() -> None:
     gpu["rollups"] = dict(
         gpu["rollups"],
         gpu_util={"now": 99.0, "p50": 99.0},
-        gpu_mem={"now": 6.3 * GB, "total": 16.1 * GB},
+        gpu_mem={"now": 6.3 * GIB, "total": 16.1 * GIB},
         temp={"now": 48.0},
         gpu_power={"now": 66.0, "p50": 66.0, "limit": 70.0},
         gpus=_gpus(),
@@ -1446,8 +1446,8 @@ def _cpu_db(path, cpu_values) -> None:
                 gpu_count=0,
                 seq=seq,
                 cpu_percent=cpu,
-                ram_used_bytes=8.4 * GB,
-                ram_total_bytes=25.8 * GB,
+                ram_used_bytes=8.4 * GIB,
+                ram_total_bytes=25.8 * GIB,
             )
 
 

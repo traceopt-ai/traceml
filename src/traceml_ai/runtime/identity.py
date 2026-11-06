@@ -86,7 +86,7 @@ def _default_node_rank(
 
 @dataclass(frozen=True)
 class RuntimeIdentity:
-    """Process identity resolved from distributed launcher metadata."""
+    """Run-scoped process identity from distributed launcher metadata."""
 
     global_rank: int
     local_rank: int
@@ -97,17 +97,6 @@ class RuntimeIdentity:
     pid: int
 
     @property
-    def rank(self) -> int:
-        """
-        Backward-compatible TraceML rank.
-
-        Current TraceML runtime paths historically use local rank for sampler
-        selection, sender metadata, and rank-local directories. Multi-node
-        storage/reporting will migrate to ``global_rank`` in follow-up work.
-        """
-        return self.local_rank
-
-    @property
     def is_distributed(self) -> bool:
         """Return True when the identity describes a multi-process job."""
         return self.world_size > 1
@@ -116,19 +105,6 @@ class RuntimeIdentity:
     def is_multinode(self) -> bool:
         """Return True when world size exceeds local world size."""
         return self.world_size > self.local_world_size
-
-    def to_meta(self) -> dict[str, Any]:
-        """Serialize identity for telemetry metadata envelopes."""
-        return {
-            "rank": self.rank,
-            "global_rank": self.global_rank,
-            "local_rank": self.local_rank,
-            "world_size": self.world_size,
-            "local_world_size": self.local_world_size,
-            "node_rank": self.node_rank,
-            "hostname": self.hostname,
-            "pid": self.pid,
-        }
 
 
 @dataclass(frozen=True)

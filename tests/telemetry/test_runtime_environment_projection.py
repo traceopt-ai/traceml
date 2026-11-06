@@ -13,7 +13,6 @@ def _runtime_environment_payload(
 ) -> dict:
     return {
         "rank": 5,
-        "global_rank": 5,
         "local_rank": 1,
         "world_size": 8,
         "local_world_size": 4,
@@ -21,7 +20,6 @@ def _runtime_environment_payload(
         "hostname": "worker-1",
         "pid": 4321,
         "sampler": sampler,
-        "timestamp": 123.0,
         "tables": (
             tables
             if tables is not None
@@ -29,7 +27,7 @@ def _runtime_environment_payload(
                 "RuntimeEnvironmentTable": [
                     {
                         "seq": 0,
-                        "ts": 123.25,
+                        "timestamp_unix_ns": 123_250_000_001,
                         "topology": "single_node_multi_process",
                         "distributed_initialized": True,
                         "distributed_backend": "nccl",
@@ -71,13 +69,13 @@ def test_runtime_environment_projection_inserts_identity_and_strategy() -> (
 
     rows = runtime_environment_projection.build_rows(
         _envelope(_runtime_environment_payload()),
-        recv_ts_ns=999,
+        observed_timestamp_unix_ns=999,
     )
     runtime_environment_projection.insert_rows(conn, rows)
 
     row = conn.execute("""
-        SELECT recv_ts_ns, rank, global_rank, local_rank, world_size,
-               local_world_size, node_rank, hostname, pid, sample_ts_s, seq,
+        SELECT observed_timestamp_unix_ns, rank, global_rank, local_rank, world_size,
+               local_world_size, node_rank, hostname, pid, timestamp_unix_ns, seq,
                topology, distributed_initialized, distributed_backend,
                training_strategy, strategy_source, strategy_confidence
         FROM runtime_environment;
@@ -93,7 +91,7 @@ def test_runtime_environment_projection_inserts_identity_and_strategy() -> (
         1,
         "worker-1",
         4321,
-        123.25,
+        123_250_000_001,
         0,
         "single_node_multi_process",
         1,
@@ -103,11 +101,42 @@ def test_runtime_environment_projection_inserts_identity_and_strategy() -> (
         "high",
     )
 
+    source_time_rows = [
+        {"timestamp_unix_ns": 123_250_000_001},
+        {"ts": 1.25},
+        {"timestamp_unix_ns": None},
+        {"timestamp_unix_ns": True},
+        {"timestamp_unix_ns": 2**63},
+        {},
+    ]
+    runtime_environment_projection.insert_rows(
+        conn,
+        runtime_environment_projection.build_rows(
+            _envelope(
+                _runtime_environment_payload(
+                    tables={"RuntimeEnvironmentTable": source_time_rows}
+                )
+            ),
+            observed_timestamp_unix_ns=1000,
+        ),
+    )
+    assert conn.execute(
+        "SELECT timestamp_unix_ns FROM runtime_environment ORDER BY id"
+    ).fetchall() == [
+        (123_250_000_001,),
+        (123_250_000_001,),
+        (None,),
+        (None,),
+        (None,),
+        (None,),
+        (None,),
+    ]
+
 
 def test_runtime_environment_projection_ignores_non_matching_sampler() -> None:
     rows = runtime_environment_projection.build_rows(
         _envelope(_runtime_environment_payload(sampler="ProcessSampler")),
-        recv_ts_ns=999,
+        observed_timestamp_unix_ns=999,
     )
 
     assert rows == {"runtime_environment": []}
@@ -120,7 +149,7 @@ def test_runtime_environment_projection_ignores_malformed_payload() -> None:
                 tables={"UnexpectedTable": [{"training_strategy": "ddp"}]}
             )
         ),
-        recv_ts_ns=999,
+        observed_timestamp_unix_ns=999,
     )
 
     assert rows == {"runtime_environment": []}

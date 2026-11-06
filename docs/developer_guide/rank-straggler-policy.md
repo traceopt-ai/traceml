@@ -30,10 +30,11 @@ window, as opposed to the single-rank bottleneck kinds (`INPUT_BOUND`,
 ## Selected clock and eligibility
 
 Step Time diagnosis analyzes one *selected clock* for the window. It uses GPU
-event timing when every rank and step has GPU timing for Traced Step Time,
-Input Wait, and traced phase events; otherwise it falls back to explicit
-`cpu_ms` timing. All rank-straggler comparisons below are in that selected
-clock.
+event timing when every rank and step has complete GPU timing for Traced Step
+Time and the traced phases present in the window. Input Wait is also required
+when any row measures it; if no row measures it, Input Wait remains unavailable
+without forcing CPU fallback. Otherwise it falls back to explicit `cpu_ms`
+timing. All rank-straggler comparisons below are in that selected clock.
 
 TraceML first picks one visible synchronization phase per rank:
 

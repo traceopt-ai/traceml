@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Optional, Sequence
 
 from traceml_ai.core.registry import Registry
-from traceml_ai.renderers.step_memory.schema import StepMemoryCombinedMetric
+from traceml_ai.measurements.step_memory import StepMemoryCombinedMetric
 from traceml_ai.step_time.model import StepTimeWindow
 
 if TYPE_CHECKING:

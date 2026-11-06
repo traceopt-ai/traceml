@@ -231,7 +231,7 @@ def test_changed_cursor_builds_one_new_analysis(tmp_path: Path) -> None:
         conn.execute(
             """
             INSERT INTO step_time_samples(
-                recv_ts_ns, rank, global_rank, step, events_json
+                observed_timestamp_unix_ns, rank, global_rank, step, events_json
             ) VALUES (?, ?, ?, ?, ?)
             """,
             (3, 0, 0, 3, events_json),

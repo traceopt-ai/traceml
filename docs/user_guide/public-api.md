@@ -131,6 +131,29 @@ streams are pipes, so `isatty()` is false. TraceML does not replace Python's
 See [Training Crashes](training-crashes.md) for artifact paths and failure
 behavior.
 
+### Raw sampler logs
+
+`--enable-logging` enables best-effort raw logs from the sampler writers in
+each training rank. Each sampler appends length-prefixed MessagePack records
+to `rank_<N>/data/<Sampler>/<Table>.msgpack` inside a generated session folder
+under the logs directory. Writers flush periodically, so short runs may
+produce no file, final records may be absent, and the generated folder may
+differ from the run's session folder. These limitations are tracked in
+[#580](https://github.com/traceopt-ai/traceml/issues/580). The same setting
+comes from `enable_logging: true` in `traceml.yaml` or
+`TRACEML_ENABLE_LOGGING=1`; when it is off, no `.msgpack` files are written.
+
+The training processes write these files, so with `traceml serve` the flag
+does not reach them. Set `TRACEML_ENABLE_LOGGING=1` in the training
+environment or pass `enable_logging=True` to `traceml.init()` instead.
+
+`traceml inspect <file>` prints each record as JSON. If the file ends in a
+cut-off frame, for example because the process was killed while writing, it
+prints the complete records first and then exits with status 1. A file that
+is still being written can end mid-frame too, so inspect it after the run
+finishes. A file that ends exactly between two records reads as complete, so
+a run killed between writes still exits 0.
+
 ### History and configuration
 
 `run`, `watch`, and `serve` accept `--history-retention DURATION`. The default
@@ -198,6 +221,23 @@ node-0 endpoint. Configure the expected world size to match your workers.
 | `--logs-dir` | Session log directory. |
 | `--run-name` / `--session-id` | Shared run identity; choose a fresh name. |
 | `--history-retention` | History duration; default `30m`. |
+| `--interval` | Aggregator render interval in seconds. |
+| `--enable-logging` | Does not reach the training processes; see [Raw sampler logs](#raw-sampler-logs). |
+
+`serve` is the low-level entry point, so it has no flags for launching or
+wrapping training. Settings that belong to the aggregator still work through
+`traceml.yaml` or environment variables:
+
+| `run` / `watch` flag | With `serve` |
+| --- | --- |
+| `--dashboard-port` | `dashboard_port` or `TRACEML_DASHBOARD_PORT` |
+| `--no-dashboard-auto-open` | `dashboard_auto_open: false` or `TRACEML_DASHBOARD_AUTO_OPEN=0` |
+| `--finalize-timeout-sec` | `finalize_timeout_sec` or `TRACEML_FINALIZE_TIMEOUT_SEC` |
+| `--no-history` | `history_enabled: false` or `TRACEML_HISTORY_ENABLED=0` |
+| `--html-report` | Not available; run `traceml view <summary.json> --html` afterwards. |
+| `--disable-traceml`, `--trace-max-steps` | Set `TRACEML_DISABLED=1` or `TRACEML_TRACE_MAX_STEPS` in the training process. |
+| `--args`, `--master-addr`, `--master-port`, `--node-rank` | Not applicable; pass them to your own `torchrun`. |
+| `--save-training-output`, `--no-save-training-output`, `--on-missing-aggregator` | Not applicable; training output stays with your terminal, and `traceml.init()` handles a missing aggregator as described below. |
 
 An existing run folder is not overwritten. Telemetry with a different
 explicit worker session ID is ignored. Workers that generate their own ID,

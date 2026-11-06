@@ -16,10 +16,11 @@ from traceml_ai.diagnostics.step_memory import (
     build_step_memory_diagnosis,
 )
 from traceml_ai.diagnostics.step_memory_formatters import format_cli_diagnosis
+from traceml_ai.measurements.step_memory import StepMemoryCombinedMetric
 from traceml_ai.renderers.shared.freshness import stale_rank_label
 from traceml_ai.utils.formatting import fmt_mem_new
 
-from .schema import StepMemoryCombinedMetric, StepMemoryCombinedResult
+from .schema import StepMemoryCombinedResult
 
 
 class StepMemoryRichFormatter(Formatter[StepMemoryCombinedResult, Panel]):

@@ -22,16 +22,16 @@ def ensure_session_dir(
     *,
     logs_dir: Path | str,
     session_id: str,
-    rank: int | None = None,
+    global_rank: int | None = None,
 ) -> Path:
     """
     Return a session directory path and ensure it exists.
 
-    ``rank`` is the global distributed rank. It is used only for process-owned
-    files, where local rank would collide across nodes.
+    ``global_rank`` is used only for process-owned files, where local rank would
+    collide across nodes.
     """
     root = Path(logs_dir).resolve() / session_id
-    if rank is not None:
-        root = root / rank_dir_name(rank)
+    if global_rank is not None:
+        root = root / rank_dir_name(global_rank)
     root.mkdir(parents=True, exist_ok=True)
     return root

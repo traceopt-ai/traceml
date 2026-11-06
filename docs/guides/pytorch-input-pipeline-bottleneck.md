@@ -73,8 +73,8 @@ STEP TIMING (Median R1/N0), GPU Clock              || STEP MEMORY: BALANCED · 4
 Step Time            303.7 ms  100%                ||
 ├─ Input Wait          3.8 ms    1%                 ||
 ├─ Compute         259.5 ms   85%                  || avg per-step peak       median rank avg     worst rank avg
-│  ├─ Forward      80.0 ms   26%                    || Allocated               8.5 GB              9.4 GB, R2/N1
-│  ├─ Backward    169.5 ms   56%                    || Reserved                8.9 GB              9.8 GB, R2/N1
+│  ├─ Forward      80.0 ms   26%                    || Allocated               7.9 GiB             8.8 GiB, R2/N1
+│  ├─ Backward    169.5 ms   56%                    || Reserved                8.3 GiB             9.1 GiB, R2/N1
 │  └─ Optimizer    10.0 ms    3%                    ||
 ├─ H2D               1.1 ms   <1%                  ||
 └─ Residual         39.3 ms   13%                  ||
@@ -85,9 +85,9 @@ Evidence: GPU utilization averaged 14%.                      ||
                                                                ||
                        median node avg   worst node avg      ||                       median rank avg   worst rank avg
 CPU                    18%               26%, N1             ||  CPU capacity         12%               81%, R2/N1
-RAM used               16.0 GB (27%)     20.8 GB (35%), N1   ||  RSS used             3.1 GB (10%)      5.4 GB (17%), R1/N0
-GPU util               9%                9%, N1              ||  CUDA allocated       2.9 GB            4.6 GB, R3/N1
-GPU memory/device      5.0 GB (31%)      7.0 GB (44%), N1    ||  CUDA reserved        3.2 GB (20%)      6.8 GB (43%), R3/N1
+RAM used               14.9 GiB (27%)    19.4 GiB (35%), N1  ||  RSS used             2.9 GiB (10%)     5.0 GiB (17%), R1/N0
+GPU util               9%                9%, N1              ||  CUDA allocated       2.7 GiB           4.3 GiB, R3/N1
+GPU memory/device      4.7 GiB (31%)     6.5 GiB (44%), N1   ||  CUDA reserved        3.0 GiB (20%)     6.3 GiB (43%), R3/N1
 GPU temperature        58C               70C, N1             ||
 GPU power              220W              280W, N1            ||
 

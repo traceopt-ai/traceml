@@ -196,7 +196,7 @@ def write_system_manifest_if_missing(
     """
     try:
         ctx = resolve_runtime_context()
-        if ctx.global_rank != 0:
+        if ctx.identity.global_rank != 0:
             return
         if not ctx.session_id or not str(ctx.logs_dir):
             logger.error(

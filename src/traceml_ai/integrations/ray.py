@@ -80,6 +80,16 @@ class TraceMLRayConfig:
         Aggregator TCP port. ``0`` asks the OS to pick a free port.
     stop_timeout_sec:
         Best-effort timeout for aggregator shutdown.
+    exporter:
+        Structured export sink for the aggregator actor. ``""`` (default)
+        is off; ``"jsonl"`` writes JSON Lines under the session's
+        ``aggregator/export/`` directory.
+    export_streams:
+        Record streams to export, comma separated: ``"step_time"``
+        (default), ``"step_memory"``, ``"process"``, ``"system"`` (host and
+        GPU records) or ``"all"``. Used only when ``exporter`` is set.
+    exporter_hostname:
+        Include hostname on records that have a hostname field.
     """
 
     mode: str = "summary"
@@ -96,6 +106,9 @@ class TraceMLRayConfig:
     bind_host: str = "0.0.0.0"
     port: int = 0
     stop_timeout_sec: float = 5.0
+    exporter: str = ""
+    export_streams: str = "step_time"
+    exporter_hostname: bool = False
 
 
 def _require_ray() -> tuple[Any, Any]:
@@ -149,6 +162,9 @@ def _build_aggregator_settings(
         logs_dir=str(config.logs_dir),
         session_id=str(config.session_id),
         history_retention_s=parse_history_retention(config.history_retention),
+        exporter=str(config.exporter),
+        export_streams=str(config.export_streams),
+        exporter_hostname=bool(config.exporter_hostname),
         aggregator=AggregatorTransportSettings(
             connect_host=str(connect_host),
             bind_host=str(config.bind_host),

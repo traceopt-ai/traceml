@@ -321,19 +321,19 @@ def format_percent(value: Optional[float]) -> Optional[str]:
 
 
 def format_gb(value: Optional[float]) -> Optional[str]:
-    """Format a byte count as decimal gigabytes with one decimal."""
+    """Format a byte count in GiB with one decimal."""
     gb = bytes_to_gb(value)
     return None if gb is None else f"{gb:.1f}"
 
 
 def format_capacity(value: Optional[float]) -> Optional[str]:
-    """Format a byte count in GB, or MB when it would round to zero GB."""
+    """Format a byte count in GiB, or MiB when it would round to zero GiB."""
     gb = bytes_to_gb(value)
     if gb is None:
         return None
     if gb < 0.1:
-        return f"{float(value or 0.0) / 1e6:.1f} MB"
-    return f"{gb:.1f} GB"
+        return f"{float(value or 0.0) / 1024**2:.1f} MiB"
+    return f"{gb:.1f} GiB"
 
 
 def format_memory_value(

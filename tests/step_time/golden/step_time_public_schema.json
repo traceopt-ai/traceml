@@ -214,9 +214,9 @@
     "issues[].summary",
     "metadata",
     "metadata.analysis_end_step",
-    "metadata.analysis_end_ts_s",
+    "metadata.analysis_end_time_unix_ns",
     "metadata.analysis_start_step",
-    "metadata.analysis_start_ts_s",
+    "metadata.analysis_start_time_unix_ns",
     "metadata.duration_s",
     "metadata.global_ranks_seen",
     "metadata.global_ranks_used",
@@ -411,5 +411,5 @@
       "traced_step_time_ms": "average=value median=value worst=value rank0=value rank1=value"
     }
   },
-  "schema_version": 1.9
+  "schema_version": 2.0
 }

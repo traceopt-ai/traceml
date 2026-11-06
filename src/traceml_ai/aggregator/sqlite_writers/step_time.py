@@ -27,7 +27,7 @@ Therefore, the SQL schema keeps only stable fields in first-class columns:
 - global_rank, local_rank, world_size, local_world_size, node_rank
 - hostname
 - step
-- sample_ts_s
+- timestamp_unix_ns
 - seq
 
 and stores the dynamic event map as JSON text in `events_json`.
@@ -77,7 +77,7 @@ def _optional_str(value: Any) -> Optional[str]:
 class StepTimePayloadIdentity:
     """Distributed identity stored with projected step-time telemetry."""
 
-    rank: Optional[int]
+    legacy_rank: Optional[int]
     global_rank: Optional[int]
     local_rank: Optional[int]
     world_size: Optional[int]
@@ -90,16 +90,13 @@ def _payload_identity(meta: TelemetryMeta) -> StepTimePayloadIdentity:
     """
     Return storage identity for one StepTimeSampler payload.
 
-    ``global_rank`` is the canonical distributed identity. ``rank`` is still
-    written as the same value so current live renderers keep working until they
-    move to explicit identity fields.
+    ``global_rank`` is the canonical distributed identity. The legacy SQLite
+    ``rank`` column is written from the same normalized value for compatibility.
     """
     global_rank = _optional_int(meta.global_rank)
-    legacy_rank = _optional_int(meta.rank)
-    rank = global_rank if global_rank is not None else legacy_rank
 
     return StepTimePayloadIdentity(
-        rank=rank,
+        legacy_rank=global_rank,
         global_rank=global_rank,
         local_rank=_optional_int(meta.local_rank),
         world_size=_optional_int(meta.world_size),
@@ -144,7 +141,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
     conn.execute("""
         CREATE TABLE IF NOT EXISTS step_time_samples (
             id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-            recv_ts_ns         INTEGER NOT NULL,
+            observed_timestamp_unix_ns         INTEGER NOT NULL,
             rank               INTEGER,
             global_rank        INTEGER,
             local_rank         INTEGER,
@@ -152,7 +149,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
             local_world_size   INTEGER,
             node_rank          INTEGER,
             hostname           TEXT,
-            sample_ts_s        REAL,
+            timestamp_unix_ns  INTEGER,
             seq                INTEGER,
             step               INTEGER,
             events_json        TEXT NOT NULL
@@ -195,12 +192,12 @@ def init_schema(conn: sqlite3.Connection) -> None:
         definition="TEXT",
     )
     conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_step_time_samples_rank_step_ts
-        ON step_time_samples(rank, step, sample_ts_s, id);
+        CREATE INDEX IF NOT EXISTS idx_step_time_samples_rank_step_timestamp
+        ON step_time_samples(rank, step, timestamp_unix_ns, id);
         """)
     conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_step_time_samples_global_rank_step_ts
-        ON step_time_samples(global_rank, step, sample_ts_s, id);
+        CREATE INDEX IF NOT EXISTS idx_step_time_samples_global_rank_step_timestamp
+        ON step_time_samples(global_rank, step, timestamp_unix_ns, id);
         """)
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_step_time_samples_global_rank_step_id
@@ -292,7 +289,7 @@ def _normalize_events(events_raw: Any) -> Dict[str, Dict[str, Dict[str, Any]]]:
 
 def build_rows(
     envelope: TelemetryEnvelope,
-    recv_ts_ns: int,
+    observed_timestamp_unix_ns: int,
 ) -> Dict[str, list[tuple]]:
     """
     Build SQLite projection rows from one decoded StepTimeSampler payload.
@@ -301,8 +298,8 @@ def build_rows(
     ----------
     envelope:
         Canonical telemetry envelope from the main SQLite writer.
-    recv_ts_ns:
-        Receive timestamp assigned by the main writer for this payload.
+    observed_timestamp_unix_ns:
+        Time the main writer observes this payload, in Unix nanoseconds.
 
     Returns
     -------
@@ -340,14 +337,16 @@ def build_rows(
                 continue
 
             seq_raw = row.get("seq")
-            ts_raw = row.get("timestamp")
+            timestamp_unix_ns = row.get("timestamp_unix_ns")
+            if not (
+                type(timestamp_unix_ns) is int
+                and -(2**63) <= timestamp_unix_ns < 2**63
+            ):
+                timestamp_unix_ns = None
             step_raw = row.get("step")
             events_raw = row.get("events")
 
             seq = int(seq_raw) if isinstance(seq_raw, int) else None
-            sample_ts_s = (
-                float(ts_raw) if isinstance(ts_raw, (int, float)) else None
-            )
             step = int(step_raw) if isinstance(step_raw, int) else None
 
             restricted_events = _normalize_events(events_raw)
@@ -359,15 +358,15 @@ def build_rows(
 
             out["step_time_samples"].append(
                 (
-                    recv_ts_ns,
-                    identity.rank,
+                    observed_timestamp_unix_ns,
+                    identity.legacy_rank,
                     identity.global_rank,
                     identity.local_rank,
                     identity.world_size,
                     identity.local_world_size,
                     identity.node_rank,
                     identity.hostname,
-                    sample_ts_s,
+                    timestamp_unix_ns,
                     seq,
                     step,
                     events_json,
@@ -395,7 +394,7 @@ def insert_rows(
         conn.executemany(
             """
             INSERT INTO step_time_samples(
-                recv_ts_ns,
+                observed_timestamp_unix_ns,
                 rank,
                 global_rank,
                 local_rank,
@@ -403,7 +402,7 @@ def insert_rows(
                 local_world_size,
                 node_rank,
                 hostname,
-                sample_ts_s,
+                timestamp_unix_ns,
                 seq,
                 step,
                 events_json

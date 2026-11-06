@@ -38,7 +38,6 @@ def test_runtime_identity_single_process_defaults():
 
     assert identity.global_rank == 0
     assert identity.local_rank == 0
-    assert identity.rank == 0
     assert identity.world_size == 1
     assert identity.local_world_size == 1
     assert identity.node_rank == 0
@@ -61,7 +60,6 @@ def test_runtime_identity_resolves_single_node_torchrun_env():
 
     assert identity.global_rank == 2
     assert identity.local_rank == 2
-    assert identity.rank == 2
     assert identity.world_size == 4
     assert identity.local_world_size == 4
     assert identity.node_rank == 0
@@ -82,7 +80,6 @@ def test_runtime_identity_resolves_multinode_torchrun_env():
 
     assert identity.global_rank == 5
     assert identity.local_rank == 1
-    assert identity.rank == 1
     assert identity.world_size == 8
     assert identity.local_world_size == 4
     assert identity.node_rank == 1

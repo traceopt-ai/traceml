@@ -102,12 +102,12 @@ def system_db(tmp_path: Path) -> Callable[..., str]:
                     )
             if null_ts_before:
                 # The best-effort projection stores malformed or legacy
-                # telemetry without a usable `ts` as NULL. Both tables carry
+                # telemetry without a usable source time as NULL. Both tables carry
                 # that projected clock, so a parent sample without one has
                 # GPU children in the same state.
                 for table in ("system_samples", "system_gpu_samples"):
                     conn.execute(
-                        f"UPDATE {table} SET sample_ts_s = NULL "
+                        f"UPDATE {table} SET timestamp_unix_ns = NULL "
                         "WHERE seq < ?",
                         (int(null_ts_before),),
                     )

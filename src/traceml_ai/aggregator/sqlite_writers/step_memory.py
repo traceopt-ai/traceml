@@ -63,7 +63,7 @@ def _optional_str(value: Any) -> Optional[str]:
 class StepMemoryPayloadIdentity:
     """Distributed identity stored with projected step-memory telemetry."""
 
-    rank: Optional[int]
+    legacy_rank: Optional[int]
     global_rank: Optional[int]
     local_rank: Optional[int]
     world_size: Optional[int]
@@ -75,11 +75,9 @@ class StepMemoryPayloadIdentity:
 def _payload_identity(meta: TelemetryMeta) -> StepMemoryPayloadIdentity:
     """Return storage identity for one StepMemorySampler payload."""
     global_rank = _optional_int(meta.global_rank)
-    legacy_rank = _optional_int(meta.rank)
-    rank = global_rank if global_rank is not None else legacy_rank
 
     return StepMemoryPayloadIdentity(
-        rank=rank,
+        legacy_rank=global_rank,
         global_rank=global_rank,
         local_rank=_optional_int(meta.local_rank),
         world_size=_optional_int(meta.world_size),
@@ -117,7 +115,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
     conn.execute("""
         CREATE TABLE IF NOT EXISTS step_memory_samples (
             id                   INTEGER PRIMARY KEY AUTOINCREMENT,
-            recv_ts_ns           INTEGER NOT NULL,
+            observed_timestamp_unix_ns           INTEGER NOT NULL,
             rank                 INTEGER,
             global_rank          INTEGER,
             local_rank           INTEGER,
@@ -125,7 +123,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
             local_world_size     INTEGER,
             node_rank            INTEGER,
             hostname             TEXT,
-            sample_ts_s          REAL,
+            timestamp_unix_ns    INTEGER,
             seq                  INTEGER,
             device               TEXT,
             step                 INTEGER,
@@ -170,16 +168,16 @@ def init_schema(conn: sqlite3.Connection) -> None:
         definition="TEXT",
     )
     conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_step_memory_samples_rank_step_ts
-        ON step_memory_samples(rank, step, sample_ts_s, id);
+        CREATE INDEX IF NOT EXISTS idx_step_memory_samples_rank_step_timestamp
+        ON step_memory_samples(rank, step, timestamp_unix_ns, id);
         """)
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_step_memory_samples_step_rank
         ON step_memory_samples(step, rank, id);
         """)
     conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_step_memory_samples_global_rank_step_ts
-        ON step_memory_samples(global_rank, step, sample_ts_s, id);
+        CREATE INDEX IF NOT EXISTS idx_step_memory_samples_global_rank_step_timestamp
+        ON step_memory_samples(global_rank, step, timestamp_unix_ns, id);
         """)
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_step_memory_samples_step_global_rank
@@ -189,7 +187,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
 
 def build_rows(
     envelope: TelemetryEnvelope,
-    recv_ts_ns: int,
+    observed_timestamp_unix_ns: int,
 ) -> Dict[str, list[tuple]]:
     """
     Build SQLite projection rows from one decoded StepMemorySampler payload.
@@ -222,16 +220,18 @@ def build_rows(
                 continue
 
             seq_raw = row.get("seq")
-            ts_raw = row.get("ts")
+            timestamp_unix_ns = row.get("timestamp_unix_ns")
+            if not (
+                type(timestamp_unix_ns) is int
+                and -(2**63) <= timestamp_unix_ns < 2**63
+            ):
+                timestamp_unix_ns = None
             device_raw = row.get("device")
             step_raw = row.get("step")
             peak_alloc_raw = row.get("peak_alloc")
             peak_resv_raw = row.get("peak_resv")
 
             seq = int(seq_raw) if isinstance(seq_raw, int) else None
-            sample_ts_s = (
-                float(ts_raw) if isinstance(ts_raw, (int, float)) else None
-            )
             device = str(device_raw) if isinstance(device_raw, str) else None
             step = int(step_raw) if isinstance(step_raw, int) else None
             peak_alloc_bytes = (
@@ -247,15 +247,15 @@ def build_rows(
 
             out["step_memory_samples"].append(
                 (
-                    recv_ts_ns,
-                    identity.rank,
+                    observed_timestamp_unix_ns,
+                    identity.legacy_rank,
                     identity.global_rank,
                     identity.local_rank,
                     identity.world_size,
                     identity.local_world_size,
                     identity.node_rank,
                     identity.hostname,
-                    sample_ts_s,
+                    timestamp_unix_ns,
                     seq,
                     device,
                     step,
@@ -278,7 +278,7 @@ def insert_rows(
         conn.executemany(
             """
             INSERT INTO step_memory_samples(
-                recv_ts_ns,
+                observed_timestamp_unix_ns,
                 rank,
                 global_rank,
                 local_rank,
@@ -286,7 +286,7 @@ def insert_rows(
                 local_world_size,
                 node_rank,
                 hostname,
-                sample_ts_s,
+                timestamp_unix_ns,
                 seq,
                 device,
                 step,

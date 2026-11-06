@@ -136,9 +136,11 @@ for missing signals, Step Time reports `INCOMPLETE_DATA` instead of
 `BALANCED`.
 
 Step-time diagnosis uses one selected clock for the analyzed window. It uses
-GPU event timing when every rank/step has GPU timing for Traced Step Time,
-Input Wait, and traced phase events present in the window. Otherwise it uses
-explicit `cpu_ms` timing. The live CLI Step Time table, dashboard, and final
+GPU event timing when every rank/step has complete GPU timing for Traced Step
+Time and the traced phases present in the window. Input Wait is also required
+when any row measures it; if no row measures it, Input Wait remains unavailable
+without forcing CPU fallback. Otherwise diagnosis uses explicit `cpu_ms`
+timing. The live CLI Step Time table, dashboard, and final
 summary use the same global-rank SQLite loader and selected-clock window
 builder for diagnosis-facing timing; they differ only by row window sizing.
 The canonical model exposes selected-clock `input_wait_ms`, outer

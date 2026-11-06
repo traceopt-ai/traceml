@@ -53,6 +53,9 @@ YAML_KEY_SCHEMA: dict[str, tuple[str, type]] = {
     "finalize_timeout_sec": ("TRACEML_FINALIZE_TIMEOUT_SEC", float),
     "dashboard_port": ("TRACEML_DASHBOARD_PORT", int),
     "dashboard_auto_open": ("TRACEML_DASHBOARD_AUTO_OPEN", bool),
+    "exporter": ("TRACEML_EXPORTER", str),
+    "export_streams": ("TRACEML_EXPORT_STREAMS", str),
+    "exporter_hostname": ("TRACEML_EXPORTER_HOSTNAME", bool),
 }
 
 # Fallback values used when no CLI flag, env var, or yaml entry is present.
@@ -66,17 +69,39 @@ BUILT_IN_DEFAULTS: dict[str, Any] = {
     "finalize_timeout_sec": DEFAULT_FINALIZE_TIMEOUT_SEC,
     "dashboard_port": 8765,
     "dashboard_auto_open": True,
+    "exporter": "",
+    # DEFAULT_EXPORT_STREAMS in traceml_ai.aggregator.export; a literal so
+    # traceml.init() does not import the aggregator export package.
+    "export_streams": "step_time",
+    "exporter_hostname": False,
 }
 
 # Env var strings treated as True for bool fields.
 _BOOL_ENV_TRUE = frozenset({"1", "true", "yes"})
 
-_POSITIVE_FLOAT_KEYS = frozenset({"finalize_timeout_sec"})
+_POSITIVE_FLOAT_KEYS = frozenset({"interval", "finalize_timeout_sec"})
+
+MAX_PORT = 65535
+
+_PORT_KEYS = frozenset({"dashboard_port"})
 
 
 def is_finite_positive(value: float) -> bool:
     number = float(value)
     return math.isfinite(number) and number > 0.0
+
+
+def _is_finite_positive_value(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    try:
+        return is_finite_positive(value)
+    except (TypeError, ValueError):
+        return False
+
+
+def is_valid_port(value: int) -> bool:
+    return 1 <= int(value) <= MAX_PORT
 
 
 def find_config_file(start_dir: Path) -> Path | None:
@@ -238,6 +263,11 @@ def _validate_and_coerce(
                 f"[TraceML] {path}: '{key}' must be an integer, got {value!r}"
             )
         if isinstance(value, int):
+            if key in _PORT_KEYS and not is_valid_port(value):
+                raise ValueError(
+                    f"[TraceML] {path}: '{key}' must be an integer between "
+                    f"1 and {MAX_PORT}, got {value!r}"
+                )
             return value
         raise ValueError(
             f"[TraceML] {path}: '{key}' must be an integer, got {value!r}"
@@ -284,11 +314,17 @@ def _coerce_env(key: str, raw_env: str) -> Any:
         return raw_env.strip().lower() in _BOOL_ENV_TRUE
     if expected_type is int:
         try:
-            return int(raw_env)
+            number = int(raw_env)
         except ValueError:
             raise ValueError(
                 f"[TraceML] env var {env_var}={raw_env!r} is not a valid integer."
             ) from None
+        if key in _PORT_KEYS and not is_valid_port(number):
+            raise ValueError(
+                f"[TraceML] env var {env_var}={raw_env!r} must be an integer "
+                f"between 1 and {MAX_PORT}."
+            )
+        return number
     if expected_type is float:
         try:
             number = float(raw_env)
@@ -319,6 +355,15 @@ def resolve_config(
     for key, (env_var, _) in YAML_KEY_SCHEMA.items():
         cli_val = cli_overrides.get(key)
         if cli_val is not None:
+            # Explicit overrides such as traceml.init(interval=...) get the
+            # same range check as env vars and traceml.yaml.
+            if key in _POSITIVE_FLOAT_KEYS and not _is_finite_positive_value(
+                cli_val
+            ):
+                raise ValueError(
+                    f"[TraceML] {key}={cli_val!r} must be a finite number "
+                    "greater than 0."
+                )
             result[key] = cli_val
         elif env_var in parent_env:
             result[key] = _coerce_env(key, parent_env[env_var])

@@ -17,8 +17,8 @@ Storage model
 Stdout/stderr is intentionally stored as a very simple append-only stream:
 - one row per line
 - rank retained for filtering
-- receive timestamp retained for stable ordering
-- sampler timestamp retained when available
+- aggregator observation timestamp retained for stable ordering
+- source collection timestamp retained when available
 
 Expected payload shape
 ----------------------
@@ -26,7 +26,12 @@ Canonical telemetry envelope:
 {
     "meta": {"sampler": "Stdout/Stderr", ...},
     "body": {
-        "tables": {"stdout_stderr": [{"line": "..."}, ...]}
+        "tables": {
+            "stdout_stderr": [
+                {"timestamp_unix_ns": 1700000000000000000, "line": "..."},
+                ...
+            ]
+        }
     }
 }
 """
@@ -55,25 +60,21 @@ def init_schema(conn: sqlite3.Connection) -> None:
     conn.execute("""
         CREATE TABLE IF NOT EXISTS stdout_stderr_samples (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            recv_ts_ns   INTEGER NOT NULL,
+            observed_timestamp_unix_ns   INTEGER NOT NULL,
             rank         INTEGER,
-            sample_ts_s  REAL,
-            line         TEXT NOT NULL
+            timestamp_unix_ns INTEGER,
+            line              TEXT NOT NULL
         );
         """)
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_stdout_stderr_rank_id
         ON stdout_stderr_samples(rank, id);
         """)
-    conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_stdout_stderr_sample_ts
-        ON stdout_stderr_samples(sample_ts_s, id);
-        """)
 
 
 def build_rows(
     envelope: TelemetryEnvelope,
-    recv_ts_ns: int,
+    observed_timestamp_unix_ns: int,
 ) -> Dict[str, list[tuple]]:
     """
     Build SQLite projection rows from one decoded StdoutStderrSampler payload.
@@ -82,8 +83,8 @@ def build_rows(
     ----------
     envelope:
         Canonical telemetry envelope from the main SQLite writer.
-    recv_ts_ns:
-        Receive timestamp assigned by the main writer for this payload.
+    observed_timestamp_unix_ns:
+        Time the main writer observes this payload, in Unix nanoseconds.
 
     Returns
     -------
@@ -105,10 +106,9 @@ def build_rows(
     if not accepts_sampler(sampler):
         return out
 
-    rank = envelope.meta.rank
-
-    ts_raw = envelope.meta.timestamp
-    sample_ts_s = float(ts_raw) if isinstance(ts_raw, (int, float)) else None
+    # The table keeps its legacy column name, but the value is canonical global
+    # rank after envelope normalization.
+    rank = envelope.meta.global_rank
 
     tables = envelope.tables
     if not isinstance(tables, dict):
@@ -122,6 +122,12 @@ def build_rows(
             if not isinstance(row, dict):
                 continue
 
+            timestamp_unix_ns = row.get("timestamp_unix_ns")
+            if not (
+                type(timestamp_unix_ns) is int
+                and -(2**63) <= timestamp_unix_ns < 2**63
+            ):
+                timestamp_unix_ns = None
             line_raw = row.get("line")
             if line_raw is None:
                 continue
@@ -132,9 +138,9 @@ def build_rows(
 
             out["stdout_stderr_samples"].append(
                 (
-                    recv_ts_ns,
+                    observed_timestamp_unix_ns,
                     rank,
-                    sample_ts_s,
+                    timestamp_unix_ns,
                     line,
                 )
             )
@@ -153,9 +159,9 @@ def insert_rows(
         conn.executemany(
             """
             INSERT INTO stdout_stderr_samples(
-                recv_ts_ns,
+                observed_timestamp_unix_ns,
                 rank,
-                sample_ts_s,
+                timestamp_unix_ns,
                 line
             )
             VALUES (?, ?, ?, ?);

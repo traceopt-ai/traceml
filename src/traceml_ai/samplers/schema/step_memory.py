@@ -26,12 +26,13 @@ class StepMemorySample:
 
     Units
     -----
+    timestamp_unix_ns : measurement time in Unix nanoseconds
     peak_allocated : bytes
     peak_reserved  : bytes
     """
 
     sample_idx: int
-    timestamp: float
+    timestamp_unix_ns: int
     device: Optional[str]
     step: Optional[int]
     peak_allocated: Optional[float]
@@ -48,7 +49,7 @@ class StepMemorySample:
         """
         return {
             "seq": self.sample_idx,
-            "ts": self.timestamp,
+            "timestamp_unix_ns": int(self.timestamp_unix_ns),
             "device": self.device,
             "step": self.step,
             "peak_alloc": self.peak_allocated,
@@ -72,7 +73,7 @@ class StepMemorySample:
         """
         return StepMemorySample(
             sample_idx=data["seq"],
-            timestamp=float(data["ts"]),
+            timestamp_unix_ns=int(data["timestamp_unix_ns"]),
             device=data.get("device"),
             step=data.get("step"),
             peak_allocated=data.get("peak_alloc"),

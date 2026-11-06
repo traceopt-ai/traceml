@@ -54,6 +54,7 @@ def _make_aggregator(tmp_path: Path, settings: TraceMLSettings):
     agg._finished_ranks = {}
     agg._foreign_senders = {}
     agg._drain_lock = threading.Lock()
+    agg._export_worker = None
     return agg
 
 
@@ -77,7 +78,6 @@ def _envelope(**stamp) -> dict:
         ),
         sampler_name="SystemSampler",
         tables={"SystemTable": [{"seq": 1}]},
-        timestamp=1.0,
     )
     payload["meta"].update(stamp)
     return payload
@@ -337,7 +337,7 @@ def test_foreign_rows_never_reach_sqlite_over_the_real_wire(tmp_path):
     def system_envelope(rank: int, cpu: float, session: str) -> dict:
         sample = SystemSample(
             sample_idx=1,
-            timestamp=time.time(),
+            timestamp_unix_ns=time.time_ns(),
             cpu_percent=cpu,
             ram_used=1.0,
             ram_total=8.0,
@@ -580,3 +580,57 @@ def test_stop_warns_about_foreign_senders_when_settle_raises(tmp_path, capsys):
     ]
     error = tmp_path / "run-b" / "aggregator" / "finalization_error.json"
     assert "settle failed" in error.read_text(encoding="utf-8")
+
+
+# Export fan-out: admitted payloads reach SQLite and the export worker.
+
+
+class _RecordingExportWorker:
+    def __init__(self, fail: bool = False):
+        self.submitted = []
+        self._fail = fail
+
+    def submit(self, payload):
+        if self._fail:
+            raise RuntimeError("submit failed")
+        self.submitted.append(payload)
+
+
+class _RecordingLogger(_Logger):
+    def __init__(self):
+        self.exceptions = []
+
+    def exception(self, msg, *args, **kwargs):
+        self.exceptions.append(msg)
+
+
+def test_admitted_batch_reaches_sqlite_and_export(tmp_path):
+    agg = _make_aggregator(tmp_path, _enforcing(tmp_path))
+    own = _envelope(session_id="run-b")
+    foreign = _envelope(session_id="run-a")
+    agg._sqlite_writer = _Writer()
+    agg._export_worker = _RecordingExportWorker()
+    agg._tcp_server = _TCP([[own], [foreign], foreign])
+
+    agg._drain_tcp()
+
+    assert agg._sqlite_writer.ingested == [[own]]
+    assert agg._export_worker.submitted == [[own]]
+
+
+def test_failing_export_submit_is_logged_and_ingest_continues(tmp_path):
+    agg = _make_aggregator(tmp_path, _settings(tmp_path))
+    agg._logger = _RecordingLogger()
+    first = _envelope(session_id="run-b")
+    second = _envelope(session_id="run-b")
+    agg._sqlite_writer = _Writer()
+    agg._export_worker = _RecordingExportWorker(fail=True)
+    agg._tcp_server = _TCP([[first], [second]])
+
+    agg._drain_tcp()
+
+    assert agg._sqlite_writer.ingested == [[first], [second]]
+    assert agg._logger.exceptions == [
+        "[TraceML] ExportWorker.submit failed",
+        "[TraceML] ExportWorker.submit failed",
+    ]

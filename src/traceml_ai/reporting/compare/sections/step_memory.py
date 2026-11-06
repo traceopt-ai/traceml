@@ -52,14 +52,6 @@ class StepMemoryComparer:
                     delta_unit="percentage_point",
                     direction="higher_is_worse",
                 ),
-                "trend_worst_delta_bytes": numeric_metric(
-                    key="trend_worst_delta_bytes",
-                    label="Memory trend",
-                    unit="bytes",
-                    lhs=None,
-                    rhs=None,
-                    direction="higher_is_worse",
-                ),
             },
         )
 

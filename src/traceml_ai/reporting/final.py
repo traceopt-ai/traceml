@@ -8,17 +8,23 @@
 
 from __future__ import annotations
 
+import sqlite3
 import sys
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from traceml_ai.core.summaries import SummaryResult
 from traceml_ai.loggers.error_log import get_error_logger
-from traceml_ai.reporting.analysis_window import (
+from traceml_ai.measurements.reader import read_recent
+from traceml_ai.measurements.window import (
     AnalysisWindow,
-    build_analysis_window_payload,
     resolve_analysis_window,
+)
+from traceml_ai.reporting.analysis_window import (
+    build_analysis_window_payload,
+    build_analysis_window_payload_from_connection,
 )
 from traceml_ai.reporting.primary_diagnosis import build_primary_diagnosis
 from traceml_ai.reporting.run_context import load_run_manifest_projection
@@ -44,8 +50,8 @@ from traceml_ai.sdk.protocol import (
 from traceml_ai.telemetry.retention import DEFAULT_HISTORY_RETENTION_S
 from traceml_ai.utils.atomic_io import write_json_atomic, write_text_atomic
 
-# Version 1.9 adds portable launcher context for local comparison and export.
-SCHEMA_VERSION = 1.9
+# Version 2.0 uses integer Unix-nanosecond analysis bounds.
+SCHEMA_VERSION = 2.0
 
 DEFAULT_PROFILE = "run"
 
@@ -173,21 +179,17 @@ def _final_meta_nodes_observed(
 
 
 def _final_meta_gpus_observed(
-    *,
     system_summary: Dict[str, Any],
-    mode: str,
-    world_size: Optional[int],
 ) -> Optional[int]:
-    """Infer observed GPU count from system metadata with a safe fallback."""
-    value = _safe_int(
+    """Return the GPU count System telemetry observed, or None.
+
+    The world size is not a GPU count: CPU ranks and several ranks per GPU
+    both break that equation, so a missing System count stays unknown.
+    """
+    return _safe_int(
         _section_metadata(system_summary).get("gpus_observed"),
         allow_zero=True,
     )
-    if value is not None:
-        return value
-    if mode == "single_node" and world_size is not None:
-        return int(world_size)
-    return None
 
 
 def _build_final_meta(
@@ -215,11 +217,7 @@ def _build_final_meta(
             system_summary,
             sections,
         ),
-        "gpus_observed": _final_meta_gpus_observed(
-            system_summary=system_summary,
-            mode=mode,
-            world_size=world_size,
-        ),
+        "gpus_observed": _final_meta_gpus_observed(system_summary),
     }
 
 
@@ -331,6 +329,29 @@ class FinalReportGenerator:
                 result = _fallback_section_result(section)
             results[result.section] = result
 
+        analysis_window_payload = (
+            build_analysis_window_payload(db_path, self.analysis_window)
+            if self.analysis_window is not None
+            else None
+        )
+        return self._build_payload(
+            results,
+            analysis_window_payload=analysis_window_payload,
+            session_root=session_root,
+            profile=profile,
+            write_html=write_html,
+        )
+
+    def _build_payload(
+        self,
+        results: Dict[str, SummaryResult],
+        *,
+        analysis_window_payload: Optional[Dict[str, Any]],
+        session_root: Optional[str],
+        profile: str,
+        write_html: bool,
+    ) -> Dict[str, Any]:
+        """Assemble the unchanged public report from built sections."""
         system_summary = dict(
             results.get("system", SummaryResult("system")).payload
         )
@@ -342,12 +363,6 @@ class FinalReportGenerator:
         )
         step_memory_summary = dict(
             results.get("step_memory", SummaryResult("step_memory")).payload
-        )
-
-        analysis_window_payload = (
-            build_analysis_window_payload(db_path, self.analysis_window)
-            if self.analysis_window is not None
-            else None
         )
 
         primary_diagnosis = build_primary_diagnosis(
@@ -419,17 +434,57 @@ def build_summary_payload(
     """
     Build the structured final summary payload for one session database.
     """
-    active_generator = generator
-    if active_generator is None:
-        analysis_window = resolve_analysis_window(
+    if generator is not None:
+        return generator.generate(
             db_path,
-            retention_s=history_retention_s,
+            session_root=session_root,
+            profile=profile,
+            write_html=write_html,
         )
-        active_generator = build_final_report_generator(
-            analysis_window=analysis_window,
-        )
-    return active_generator.generate(
-        db_path,
+
+    with closing(sqlite3.connect(db_path)) as connection:
+        connection.execute("BEGIN")
+        try:
+            analysis_window = resolve_analysis_window(
+                connection,
+                retention_s=history_retention_s,
+            )
+            measurements = read_recent(connection, analysis_window)
+            analysis_window_payload = (
+                build_analysis_window_payload_from_connection(
+                    connection,
+                    analysis_window,
+                )
+            )
+        finally:
+            if connection.in_transaction:
+                connection.rollback()
+
+    standard_generator = build_final_report_generator(
+        analysis_window=analysis_window,
+    )
+    results: Dict[str, SummaryResult] = {}
+    for section in standard_generator.sections:
+        name = section.name
+        try:
+            error = measurements.errors.get(name)
+            if error is not None:
+                raise error
+            data = getattr(measurements, name)
+            if data is None:
+                raise RuntimeError(f"Missing {name} measurements")
+            result = section.build_from_data(data)  # type: ignore[attr-defined]
+        except Exception as exc:
+            _log_final_report_error(
+                f"Final summary section failed: {name}",
+                exc,
+            )
+            result = _fallback_section_result(section)
+        results[result.section] = result
+
+    return standard_generator._build_payload(
+        results,
+        analysis_window_payload=analysis_window_payload,
         session_root=session_root,
         profile=profile,
         write_html=write_html,

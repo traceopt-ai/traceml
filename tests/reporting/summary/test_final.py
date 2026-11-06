@@ -5,7 +5,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
+
+import pytest
 
 from tests.sqlite_fixtures import (
     insert_process_sample,
@@ -15,7 +19,10 @@ from tests.sqlite_fixtures import (
     summary_database,
 )
 from traceml_ai.core.summaries import SummaryResult
-from traceml_ai.reporting.analysis_window import resolve_analysis_window
+from traceml_ai.measurements.window import (
+    resolve_analysis_window,
+)
+from traceml_ai.reporting.analysis_window import build_analysis_window_payload
 from traceml_ai.reporting.final import (
     FinalReportGenerator,
     build_summary_payload,
@@ -109,6 +116,51 @@ def _point(value: float, idx: int) -> dict:
     return {"value": value, "idx": str(idx)}
 
 
+def _insert_complete_summary_step(
+    connection: sqlite3.Connection,
+    *,
+    row_id: int,
+    step: int,
+) -> None:
+    """Insert one complete sample from every built-in report family."""
+    insert_system_sample(
+        connection,
+        row_id=row_id,
+        rank=0,
+        ts=float(step),
+        gpu_available=True,
+        gpu_count=1,
+        gpu_util=25.0 * row_id,
+        cpu_percent=10.0 * row_id,
+    )
+    insert_process_sample(
+        connection,
+        row_id=row_id,
+        rank=0,
+        ts=float(step),
+        gpu_available=True,
+        gpu_count=1,
+        cpu_percent=10.0 * row_id,
+    )
+    insert_step_time_sample(
+        connection,
+        row_id=row_id,
+        rank=0,
+        step=step,
+        ts=float(step),
+        traced_step_time=10.0 * row_id,
+    )
+    insert_step_memory_sample(
+        connection,
+        row_id=row_id,
+        rank=0,
+        step=step,
+        ts=float(step),
+        alloc=100.0 * row_id,
+        reserved=200.0 * row_id,
+    )
+
+
 def _status_payload(status: str) -> dict:
     return _payload(
         metadata={},
@@ -152,7 +204,7 @@ def test_final_summary_fixture_schema_contains_all_sections(tmp_path) -> None:
 
     payload = build_summary_payload(str(db_path))
 
-    assert payload["schema_version"] == 1.9
+    assert payload["schema_version"] == 2.0
     assert set(payload) == {
         "schema_version",
         "generated_at",
@@ -250,17 +302,159 @@ def test_final_summary_aligns_sections_to_step_derived_time_window(
 
     assert window["start_step"] == 200
     assert window["end_step"] == 500
-    assert window["start_ts_s"] == 1200.0
-    assert window["end_ts_s"] == 3000.0
+    assert window["start_time_unix_ns"] == 1_200_000_000_000
+    assert window["end_time_unix_ns"] == 3_000_000_000_000
     assert window["sections"]["step_time"]["samples"] == 301
     assert window["sections"]["step_memory"]["samples"] == 301
     assert window["sections"]["system"]["samples"] == 500
     assert window["sections"]["process"]["samples"] == 400
+    assert payload["step_time"]["metadata"]["samples"] == 301
+    assert payload["step_memory"]["metadata"]["samples"] == 301
     assert payload["duration_s"] is None
     for section in ("system", "process", "step_time", "step_memory"):
+        observation = window["sections"][section]
+        assert observation["first_sample_time_unix_ns"] == 1_200_000_000_000
+        assert observation["last_sample_time_unix_ns"] == 3_000_000_000_000
         metadata = payload[section]["metadata"]
-        assert metadata["analysis_start_ts_s"] == 1200.0
-        assert metadata["analysis_end_ts_s"] == 3000.0
+        assert metadata["analysis_start_time_unix_ns"] == 1_200_000_000_000
+        assert metadata["analysis_end_time_unix_ns"] == 3_000_000_000_000
+
+
+def test_builtin_sections_share_one_sqlite_snapshot(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from traceml_ai.measurements import reader as measurement_reader
+
+    db_path = tmp_path / "shared-snapshot.db"
+    with summary_database(db_path) as connection:
+        connection.execute("PRAGMA journal_mode=WAL;")
+        _insert_complete_summary_step(connection, row_id=1, step=1)
+
+    writer = sqlite3.connect(db_path)
+    original_read = measurement_reader.read_process_measurements
+    committed = False
+
+    def commit_duplicate_then_read(*args, **kwargs):
+        nonlocal committed
+        if not committed:
+            _insert_complete_summary_step(writer, row_id=2, step=1)
+            writer.commit()
+            committed = True
+        return original_read(*args, **kwargs)
+
+    monkeypatch.setattr(
+        measurement_reader,
+        "read_process_measurements",
+        commit_duplicate_then_read,
+    )
+    try:
+        first = build_summary_payload(str(db_path))
+        second = build_summary_payload(str(db_path))
+    finally:
+        writer.close()
+
+    assert committed is True
+    assert {
+        name: first["analysis_window"]["sections"][name]["samples"]
+        for name in ("system", "process", "step_time", "step_memory")
+    } == {"system": 1, "process": 1, "step_time": 1, "step_memory": 1}
+    assert {
+        name: second["analysis_window"]["sections"][name]["samples"]
+        for name in ("system", "process", "step_time", "step_memory")
+    } == {"system": 2, "process": 2, "step_time": 2, "step_memory": 2}
+    assert first["system"]["metadata"]["samples"] == 1
+    assert second["system"]["metadata"]["samples"] == 2
+    assert first["process"]["metadata"]["samples"] == 1
+    assert second["process"]["metadata"]["samples"] == 2
+    assert first["step_time"]["global"]["median"]["step_time_ms"][
+        "value"
+    ] == pytest.approx(11.0)
+    assert second["step_time"]["global"]["median"]["step_time_ms"][
+        "value"
+    ] == pytest.approx(21.0)
+    assert first["step_memory"]["global"]["median"]["peak_allocated_bytes"][
+        "value"
+    ] == pytest.approx(100.0)
+    assert second["step_memory"]["global"]["median"]["peak_allocated_bytes"][
+        "value"
+    ] == pytest.approx(200.0)
+
+
+def test_builtin_family_read_failure_keeps_sibling_results(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from traceml_ai.measurements import reader as measurement_reader
+    from traceml_ai.reporting import final as final_report
+
+    db_path = tmp_path / "family-failure.db"
+    with summary_database(db_path) as connection:
+        _insert_complete_summary_step(connection, row_id=1, step=1)
+
+    def fail_process_read(*args, **kwargs):
+        raise RuntimeError("process read failed")
+
+    connect_calls = 0
+    sqlite_connect = final_report.sqlite3.connect
+
+    def count_connect(*args, **kwargs):
+        nonlocal connect_calls
+        connect_calls += 1
+        return sqlite_connect(*args, **kwargs)
+
+    monkeypatch.setattr(
+        measurement_reader,
+        "read_process_measurements",
+        fail_process_read,
+    )
+    monkeypatch.setattr(final_report.sqlite3, "connect", count_connect)
+    logged_errors = []
+    monkeypatch.setattr(
+        final_report,
+        "_log_final_report_error",
+        lambda message, error: logged_errors.append((message, error)),
+    )
+
+    payload = build_summary_payload(str(db_path))
+
+    assert connect_calls == 1
+    assert len(logged_errors) == 1
+    assert logged_errors[0][0] == "Final summary section failed: process"
+    assert str(logged_errors[0][1]) == "process read failed"
+    assert payload["process"]["diagnosis"]["status"] == "NO DATA"
+    assert payload["system"]["metadata"]["samples"] == 1
+    assert payload["step_time"]["metadata"]["samples"] == 1
+    assert payload["step_memory"]["metadata"]["samples"] == 1
+
+
+def test_periodic_window_observes_nanosecond_step_memory(tmp_path) -> None:
+    db_path = tmp_path / "periodic.db"
+    end_unix_ns = 1_792_336_915_368_049_000
+    start_unix_ns = end_unix_ns - 1_000_000_000
+    with summary_database(db_path) as conn:
+        conn.execute(
+            "INSERT INTO process_samples(observed_timestamp_unix_ns, timestamp_unix_ns) "
+            "VALUES (1, ?), (2, ?);",
+            (start_unix_ns, end_unix_ns),
+        )
+        conn.execute(
+            "INSERT INTO step_memory_samples(observed_timestamp_unix_ns, timestamp_unix_ns) "
+            "VALUES (1, ?), (2, ?), (3, ?), (4, ?);",
+            (start_unix_ns - 1, start_unix_ns, end_unix_ns, end_unix_ns + 1),
+        )
+
+    with closing(sqlite3.connect(db_path)) as connection:
+        window = resolve_analysis_window(connection, retention_s=1.0)
+    assert window.start_time_unix_ns == start_unix_ns
+    assert window.end_time_unix_ns == end_unix_ns
+    assert window.duration_s == 1.0
+    assert (
+        build_analysis_window_payload(str(db_path), window)["sections"][
+            "step_memory"
+        ]["samples"]
+        == 2
+    )
 
 
 def test_analysis_window_keeps_declared_rank_universe_after_pruning(
@@ -279,11 +473,52 @@ def test_analysis_window_keeps_declared_rank_universe_after_pruning(
                 traced_step_time=10.0,
             )
 
-    window = resolve_analysis_window(str(db_path), retention_s=1800.0)
+    with closing(sqlite3.connect(db_path)) as connection:
+        window = resolve_analysis_window(connection, retention_s=1800.0)
 
     assert window.anchor is None
     assert window.start_step is None
     assert window.end_step is None
+
+
+def test_failed_system_section_leaves_gpus_observed_unknown():
+    # Four CPU ranks on one node: the world size says nothing about GPUs.
+    process = {
+        "card": "TraceML Process Summary",
+        "metadata": {"mode": "single_node", "global_ranks_seen": 4},
+    }
+    payload = build_summary_payload(
+        "fake.db",
+        generator=_generator(
+            _BrokenSection("system"),
+            _PayloadSection("process", process),
+            _StaticSection("step_time"),
+            _StaticSection("step_memory"),
+        ),
+    )
+
+    assert payload["meta"]["mode"] == "single_node"
+    assert payload["meta"]["world_size"] == 4
+    assert payload["meta"]["gpus_observed"] is None
+
+
+@pytest.mark.parametrize("observed", [0, 4])
+def test_gpus_observed_comes_from_system_telemetry(observed):
+    system = {
+        "card": "TraceML System Summary",
+        "metadata": {"mode": "single_node", "gpus_observed": observed},
+    }
+    payload = build_summary_payload(
+        "fake.db",
+        generator=_generator(
+            _PayloadSection("system", system),
+            _StaticSection("process"),
+            _StaticSection("step_time"),
+            _StaticSection("step_memory"),
+        ),
+    )
+
+    assert payload["meta"]["gpus_observed"] == observed
 
 
 def test_final_report_generator_preserves_summary_schema_and_order():
@@ -297,7 +532,7 @@ def test_final_report_generator_preserves_summary_schema_and_order():
         ),
     )
 
-    assert payload["schema_version"] == 1.9
+    assert payload["schema_version"] == 2.0
     assert payload["duration_s"] is None
     assert list(payload.keys()) == [
         "schema_version",

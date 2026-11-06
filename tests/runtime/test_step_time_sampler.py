@@ -146,6 +146,168 @@ def test_step_time_sampler_aggregates_repeated_event_clocks() -> None:
     assert stats["n_calls"] == 2
 
 
+@pytest.mark.parametrize("gpu_first", [True, False])
+def test_step_time_sampler_mixed_clock_calls_share_one_device_entry(
+    gpu_first: bool,
+) -> None:
+    gpu_call = TimeEvent(
+        name="_test_mixed",
+        device="cuda:0",
+        cpu_start=1.0,
+        cpu_end=1.002,
+        gpu_time_ms=50.0,
+        resolved=True,
+    )
+    cpu_call = TimeEvent(
+        name="_test_mixed",
+        device="cuda:0",
+        cpu_start=2.0,
+        cpu_end=2.003,
+        gpu_time_ms=None,
+        resolved=True,
+    )
+    calls = (gpu_call, cpu_call) if gpu_first else (cpu_call, gpu_call)
+    payload = _payload_for(*calls)
+
+    stats = payload["_test_mixed"]["cuda:0"]
+
+    # Both calls count; one CPU-clock call keeps the entry on the CPU clock.
+    # The GPU clock was measured for one of two calls, so its total is
+    # None: a partial sum (50.0) must never read as the entry's GPU time.
+    assert stats["is_gpu"] is False
+    assert stats["duration_ms"] == pytest.approx(5.0)
+    assert stats["cpu_ms"] == pytest.approx(5.0)
+    assert stats["gpu_ms"] is None
+    assert stats["n_calls"] == 2
+
+
+def test_step_time_sampler_keeps_measured_zero_gpu_time() -> None:
+    payload = _payload_for(
+        TimeEvent(
+            name="_test_zero",
+            device="cuda:0",
+            cpu_start=1.0,
+            cpu_end=1.002,
+            gpu_time_ms=0.0,
+            resolved=True,
+        ),
+        TimeEvent(
+            name="_test_zero_mixed",
+            device="cuda:0",
+            cpu_start=1.0,
+            cpu_end=1.002,
+            gpu_time_ms=0.0,
+            resolved=True,
+        ),
+        TimeEvent(
+            name="_test_zero_mixed",
+            device="cuda:0",
+            cpu_start=2.0,
+            cpu_end=2.003,
+            gpu_time_ms=None,
+            resolved=True,
+        ),
+    )
+
+    # A measured zero is a value, never None, when every call measured it.
+    all_gpu = payload["_test_zero"]["cuda:0"]
+    assert all_gpu["is_gpu"] is True
+    assert all_gpu["duration_ms"] == 0.0
+    assert all_gpu["gpu_ms"] == 0.0
+
+    # Beside a call with no GPU clock the zero is a partial total: None.
+    mixed = payload["_test_zero_mixed"]["cuda:0"]
+    assert mixed["is_gpu"] is False
+    assert mixed["gpu_ms"] is None
+    assert mixed["duration_ms"] == pytest.approx(5.0)
+
+
+def test_step_time_sampler_cpu_named_event_never_counts_as_gpu_clock() -> None:
+    payload = _payload_for(
+        TimeEvent(
+            name="_traceml_internal:step_time",
+            device="cuda:0",
+            cpu_start=1.0,
+            cpu_end=1.002,
+            gpu_time_ms=5.0,
+            resolved=True,
+        ),
+    )
+
+    stats = payload["_traceml_internal:step_time"]["cuda:0"]
+
+    # The traced step keeps the CPU clock even with GPU time present.
+    assert stats["is_gpu"] is False
+    assert stats["duration_ms"] == pytest.approx(2.0)
+    assert stats["cpu_ms"] == pytest.approx(2.0)
+    assert stats["gpu_ms"] == pytest.approx(5.0)
+    assert stats["n_calls"] == 1
+
+
+def test_step_time_sampler_all_gpu_clock_calls_keep_gpu_entry() -> None:
+    payload = _payload_for(
+        TimeEvent(
+            name="_test_gpu",
+            device="cuda:0",
+            cpu_start=1.0,
+            cpu_end=1.002,
+            gpu_time_ms=5.0,
+            resolved=True,
+        ),
+        TimeEvent(
+            name="_test_gpu",
+            device="cuda:0",
+            cpu_start=2.0,
+            cpu_end=2.003,
+            gpu_time_ms=7.0,
+            resolved=True,
+        ),
+    )
+
+    assert payload == {
+        "_test_gpu": {
+            "cuda:0": {
+                "is_gpu": True,
+                "duration_ms": pytest.approx(12.0),
+                "cpu_ms": pytest.approx(5.0),
+                "gpu_ms": pytest.approx(12.0),
+                "n_calls": 2,
+            }
+        }
+    }
+
+
+def test_step_time_sampler_all_cpu_clock_calls_keep_cpu_entry() -> None:
+    payload = _payload_for(
+        TimeEvent(
+            name="_test_cpu",
+            device="cuda:0",
+            cpu_start=1.0,
+            cpu_end=1.002,
+            resolved=True,
+        ),
+        TimeEvent(
+            name="_test_cpu",
+            device="cuda:0",
+            cpu_start=2.0,
+            cpu_end=2.003,
+            resolved=True,
+        ),
+    )
+
+    assert payload == {
+        "_test_cpu": {
+            "cuda:0": {
+                "is_gpu": False,
+                "duration_ms": pytest.approx(5.0),
+                "cpu_ms": pytest.approx(5.0),
+                "gpu_ms": None,
+                "n_calls": 2,
+            }
+        }
+    }
+
+
 def test_sampler_sums_segmented_step_time_and_h2d_once() -> None:
     """Pre-step H2D segments combine with, but do not duplicate, step time."""
     payload = _payload_for(
@@ -231,7 +393,10 @@ def test_completed_captures_wait_until_sampler_drains(
     assert rows[0]["events"]["forward"]["cpu"]["cpu_ms"] == pytest.approx(5.0)
     assert rows[0]["events"]["forward"]["cpu"]["n_calls"] == 2
     assert rows[1]["events"]["forward"]["cpu"]["cpu_ms"] == pytest.approx(4.0)
-    assert [row["timestamp"] for row in rows] == [2.003, 3.004]
+    assert [row["timestamp_unix_ns"] for row in rows] == [
+        2_003_000_000,
+        3_004_000_000,
+    ]
     assert step_events.drain_step_time_batches() == []
     sampler.sample()
     assert len(rows) == 2
@@ -299,6 +464,11 @@ def test_unresolved_cuda_batch_holds_back_later_batches(
     end.ready = True
     sampler.sample()
     assert [row["step"] for row in rows] == [10, 11]
+    assert [row["timestamp_unix_ns"] for row in rows] == [
+        1_002_000_000,
+        2_001_000_000,
+    ]
+    assert all("timestamp" not in row for row in rows)
     assert rows[0]["events"]["gpu"]["cuda:0"]["gpu_ms"] == 7.0
     assert returned == [start, end]
     assert event.gpu_start is event.gpu_end is None

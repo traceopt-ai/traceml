@@ -60,6 +60,8 @@ means the candidate is slower; a negative delta means it is faster.
 
 The text report groups forward, backward, and optimizer timing into **Compute**.
 The comparison JSON retains those individual phases for closer inspection.
+For compatibility, its legacy `rss_avg_gb` and `ram_avg_gb` keys retain their
+names, but their values are GiB calculated as bytes divided by `1024³`.
 DataLoader Fetch (CPU) is supplemental evidence; it is not added to Input Wait
 or Step Time.
 

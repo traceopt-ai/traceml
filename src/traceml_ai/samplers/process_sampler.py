@@ -242,7 +242,7 @@ class ProcessSampler(BaseSampler):
 
             sample = ProcessSample(
                 sample_idx=self.sample_idx,
-                timestamp=time.time(),
+                timestamp_unix_ns=time.time_ns(),
                 pid=self.pid,
                 cpu_percent=self._sample_cpu(),
                 cpu_logical_core_count=self.cpu_count,

@@ -78,7 +78,7 @@ def _format_value(value: Any, unit: Optional[str]) -> str:
     if unit == "percent":
         return f"{float(value):.1f}%"
     if unit == "gb":
-        return f"{float(value):.1f} GB"
+        return f"{float(value):.1f} GiB"
     if unit == "bytes":
         return fmt_mem_new(float(value))
     return str(value)
@@ -108,7 +108,7 @@ def _format_delta(metric: Dict[str, Any]) -> str:
     elif unit == "percent":
         base = f"{delta:+.1f}%"
     elif unit == "gb":
-        base = f"{delta:+.1f} GB"
+        base = f"{delta:+.1f} GiB"
     else:
         base = f"{delta:+.1f}"
 

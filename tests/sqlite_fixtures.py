@@ -99,7 +99,7 @@ def insert_system_sample(
     ram_total_bytes: float | None = 16_000.0,
     gpu_samples: Sequence[Mapping[str, Any]] | None = None,
 ) -> None:
-    """Insert one node sample and its optional per-GPU children."""
+    """Insert a node sample and GPU children; ``ts`` is Unix seconds."""
     resolved_node = _defaulted(node_rank, rank)
     resolved_global = _defaulted(global_rank, rank)
     resolved_hostname = _defaulted(hostname, f"worker-{rank}")
@@ -107,14 +107,14 @@ def insert_system_sample(
     _insert_row(
         conn,
         "system_samples",
-        recv_ts_ns=row_id,
+        observed_timestamp_unix_ns=row_id,
         global_rank=resolved_global,
         local_rank=local_rank,
         world_size=world_size,
         local_world_size=local_world_size,
         node_rank=resolved_node,
         hostname=resolved_hostname,
-        sample_ts_s=ts,
+        timestamp_unix_ns=round(ts * 1_000_000_000),
         seq=resolved_seq,
         cpu_percent=30.0 + rank if cpu_percent is None else cpu_percent,
         ram_used_bytes=(
@@ -134,14 +134,18 @@ def insert_system_sample(
         _insert_row(
             conn,
             "system_gpu_samples",
-            recv_ts_ns=int(gpu.get("recv_ts_ns", row_id + offset)),
+            observed_timestamp_unix_ns=int(
+                gpu.get("observed_timestamp_unix_ns", row_id + offset)
+            ),
             global_rank=gpu.get("global_rank", resolved_global),
             local_rank=gpu.get("local_rank", local_rank),
             world_size=gpu.get("world_size", world_size),
             local_world_size=gpu.get("local_world_size", local_world_size),
             node_rank=gpu.get("node_rank", resolved_node),
             hostname=gpu.get("hostname", resolved_hostname),
-            sample_ts_s=gpu.get("sample_ts_s", ts),
+            timestamp_unix_ns=gpu.get(
+                "timestamp_unix_ns", round(ts * 1_000_000_000)
+            ),
             seq=gpu.get("seq", resolved_seq),
             gpu_idx=gpu.get("gpu_idx", rank),
             util=gpu.get("util", gpu_util),
@@ -182,7 +186,7 @@ def insert_process_sample(
     _insert_row(
         conn,
         "process_samples",
-        recv_ts_ns=row_id,
+        observed_timestamp_unix_ns=row_id,
         rank=rank,
         global_rank=resolved_global,
         local_rank=local_rank,
@@ -190,7 +194,7 @@ def insert_process_sample(
         local_world_size=local_world_size,
         node_rank=node_rank,
         hostname=_defaulted(hostname, f"worker-{rank}"),
-        sample_ts_s=ts,
+        timestamp_unix_ns=round(ts * 1_000_000_000),
         seq=_defaulted(seq, row_id),
         cpu_percent=50.0 + rank if cpu_percent is None else cpu_percent,
         cpu_logical_core_count=cpu_logical_core_count,
@@ -307,7 +311,7 @@ def insert_step_time_sample(
     )
     sample = StepTimeEventSample(
         seq=_defaulted(seq, row_id),
-        timestamp=float(step) if ts is None else ts,
+        timestamp_unix_ns=round((float(step) if ts is None else ts) * 1e9),
         step=step,
         events=dict(payload),
     )
@@ -328,7 +332,9 @@ def insert_step_time_sample(
     )
     step_time_projection.insert_rows(
         conn,
-        step_time_projection.build_rows(envelope, recv_ts_ns=row_id),
+        step_time_projection.build_rows(
+            envelope, observed_timestamp_unix_ns=row_id
+        ),
     )
 
 
@@ -349,11 +355,11 @@ def insert_step_memory_sample(
     ts: float | None = None,
     seq: int | None | object = _UNSET,
 ) -> None:
-    """Insert one canonical Step Memory projection row."""
+    """Insert one canonical Step Memory row; ``ts`` is in seconds."""
     _insert_row(
         conn,
         "step_memory_samples",
-        recv_ts_ns=row_id,
+        observed_timestamp_unix_ns=row_id,
         rank=rank,
         global_rank=rank,
         local_rank=local_rank,
@@ -361,7 +367,7 @@ def insert_step_memory_sample(
         local_world_size=local_world_size,
         node_rank=_defaulted(node_rank, rank),
         hostname=_defaulted(hostname, f"worker-{rank}"),
-        sample_ts_s=float(step) if ts is None else ts,
+        timestamp_unix_ns=round((float(step) if ts is None else ts) * 1e9),
         seq=_defaulted(seq, row_id),
         device=device,
         step=step,
@@ -376,19 +382,19 @@ def insert_training_strategy(
 ) -> None:
     """Append runtime strategy rows in observation order.
 
-    ``recv_ts_ns`` continues after the latest stored row, so repeated calls
+    ``observed_timestamp_unix_ns`` continues after the latest stored row, so repeated calls
     keep the receive clock strictly increasing as the aggregator's does.
     """
-    (next_recv_ts_ns,) = conn.execute(
-        "SELECT COALESCE(MAX(recv_ts_ns), 0) + 1 FROM runtime_environment"
+    (next_observed_timestamp_unix_ns,) = conn.execute(
+        "SELECT COALESCE(MAX(observed_timestamp_unix_ns), 0) + 1 FROM runtime_environment"
     ).fetchone()
     conn.executemany(
-        "INSERT INTO runtime_environment(recv_ts_ns, training_strategy) "
+        "INSERT INTO runtime_environment(observed_timestamp_unix_ns, training_strategy) "
         "VALUES (?, ?)",
         [
-            (recv_ts_ns, strategy)
-            for recv_ts_ns, strategy in enumerate(
-                strategies, start=next_recv_ts_ns
+            (observed_timestamp_unix_ns, strategy)
+            for observed_timestamp_unix_ns, strategy in enumerate(
+                strategies, start=next_observed_timestamp_unix_ns
             )
         ],
     )

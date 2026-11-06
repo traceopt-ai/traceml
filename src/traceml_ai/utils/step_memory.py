@@ -84,6 +84,6 @@ class StepMemoryTracker:
                 ),
                 step=-1,  # assigned when the capture completes
                 # Capture occurrence time here; queue draining can happen later.
-                timestamp=time.time(),
+                timestamp_unix_ns=time.time_ns(),
             )
         )
