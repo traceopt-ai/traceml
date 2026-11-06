@@ -20,7 +20,12 @@ import time
 from pathlib import Path
 from typing import Any, BinaryIO, Callable, Iterable, Mapping, Optional
 
-from traceml_ai.aggregator.export import EXPORTER_NAMES, parse_exporter_factory
+from traceml_ai.aggregator.export import (
+    DEFAULT_EXPORT_STREAMS,
+    EXPORTER_NAMES,
+    parse_export_streams,
+    parse_exporter_factory,
+)
 from traceml_ai.launcher.launch_config import (
     TORCH_LAUNCHER_REQUIRED,
     AggregatorLaunchConfig,
@@ -555,6 +560,16 @@ def _require_known_exporter(exporter: object) -> str:
     )
 
 
+def _require_known_export_streams(value: object) -> str:
+    """Return the stripped stream names, comma joined, or exit clearly."""
+    try:
+        parse_export_streams(value)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from None
+    names = [name.strip() for name in str(value).split(",")]
+    return ",".join(dict.fromkeys(name for name in names if name))
+
+
 def validate_launch_args(args: argparse.Namespace) -> None:
     """Validate cross-argument constraints for TraceML launch commands."""
     if _disable_traceml_requested(args, os.environ):
@@ -701,6 +716,11 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         "exporter": (
             getattr(args, "exporter", None) if exporter_supported else ""
         ),
+        "export_streams": (
+            getattr(args, "export_streams", None)
+            if exporter_supported
+            else DEFAULT_EXPORT_STREAMS
+        ),
         "exporter_hostname": (
             getattr(args, "exporter_hostname", None)
             if exporter_supported
@@ -719,6 +739,9 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         print(f"[TraceML] ERROR: {exc}", file=sys.stderr)
         raise SystemExit(1)
     cfg["exporter"] = _require_known_exporter(cfg.get("exporter"))
+    cfg["export_streams"] = _require_known_export_streams(
+        cfg.get("export_streams")
+    )
     cfg["finalize_timeout_sec"] = float(
         cfg.get("finalize_timeout_sec") or DEFAULT_FINALIZE_TIMEOUT_SEC
     )
@@ -833,6 +856,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         "1" if getattr(args, "html_report", False) else "0"
     )
     env["TRACEML_EXPORTER"] = str(cfg["exporter"]).strip()
+    env["TRACEML_EXPORT_STREAMS"] = str(cfg["export_streams"])
     env["TRACEML_EXPORTER_HOSTNAME"] = "1" if cfg["exporter_hostname"] else "0"
     env["NODE_RANK"] = str(torchrun_cfg.node_rank)
 
@@ -1500,6 +1524,7 @@ def _resolve_serve_settings(args: argparse.Namespace):
         "logs_dir": args.logs_dir,
         "history_retention": getattr(args, "history_retention", None),
         "exporter": getattr(args, "exporter", None),
+        "export_streams": getattr(args, "export_streams", None),
         "exporter_hostname": getattr(args, "exporter_hostname", None),
     }
     cfg = resolve_config(
@@ -1509,6 +1534,9 @@ def _resolve_serve_settings(args: argparse.Namespace):
         defaults=BUILT_IN_DEFAULTS,
     )
     cfg["exporter"] = _require_known_exporter(cfg.get("exporter"))
+    cfg["export_streams"] = _require_known_export_streams(
+        cfg.get("export_streams")
+    )
 
     run_identity = RunIdentity.from_args(
         args,
@@ -1550,6 +1578,7 @@ def _resolve_serve_settings(args: argparse.Namespace):
         dashboard_auto_open=bool(cfg["dashboard_auto_open"]),
         finalize_timeout_sec=float(cfg["finalize_timeout_sec"]),
         exporter=str(cfg["exporter"]),
+        export_streams=str(cfg["export_streams"]),
         exporter_hostname=bool(cfg["exporter_hostname"]),
         session_id=run_identity.session_id,
         # With --run-name/--session-id, drop ranks that name a different run

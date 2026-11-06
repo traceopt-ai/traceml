@@ -84,6 +84,10 @@ class TraceMLRayConfig:
         Structured export sink for the aggregator actor. ``""`` (default)
         is off; ``"jsonl"`` writes JSON Lines under the session's
         ``aggregator/export/`` directory.
+    export_streams:
+        Record streams to export, comma separated: ``"step_time"``
+        (default), ``"step_memory"``, ``"process"``, ``"system"`` (host and
+        GPU records) or ``"all"``. Used only when ``exporter`` is set.
     exporter_hostname:
         Include the hostname on every exported line.
     """
@@ -103,6 +107,7 @@ class TraceMLRayConfig:
     port: int = 0
     stop_timeout_sec: float = 5.0
     exporter: str = ""
+    export_streams: str = "step_time"
     exporter_hostname: bool = False
 
 
@@ -158,6 +163,7 @@ def _build_aggregator_settings(
         session_id=str(config.session_id),
         history_retention_s=parse_history_retention(config.history_retention),
         exporter=str(config.exporter),
+        export_streams=str(config.export_streams),
         exporter_hostname=bool(config.exporter_hostname),
         aggregator=AggregatorTransportSettings(
             connect_host=str(connect_host),

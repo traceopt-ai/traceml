@@ -39,6 +39,17 @@ def _add_exporter_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--export-streams",
+        type=str,
+        default=None,
+        help=(
+            "Record streams to export, comma separated: step_time "
+            "(default), step_memory, process, system (host and GPU "
+            "records) or all (every stream, including runtime_environment "
+            "and stdout_stderr)."
+        ),
+    )
+    parser.add_argument(
         "--exporter-hostname",
         action="store_const",
         const=True,
