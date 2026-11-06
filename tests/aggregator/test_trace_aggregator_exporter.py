@@ -104,7 +104,7 @@ def test_resolve_exporter_is_off_for_an_empty_name(tmp_path):
 
 
 def test_resolve_exporter_builds_jsonl_under_the_session(tmp_path):
-    sink = _resolve_exporter(_settings(tmp_path, "jsonl"), tmp_path / "run")
+    sink, _ = _resolve_exporter(_settings(tmp_path, "jsonl"), tmp_path / "run")
 
     assert isinstance(sink, JsonExporter)
     assert sink._directory == tmp_path / "run" / "aggregator" / "export"
@@ -112,7 +112,7 @@ def test_resolve_exporter_builds_jsonl_under_the_session(tmp_path):
 
 
 def test_resolve_exporter_strips_the_name(tmp_path):
-    sink = _resolve_exporter(_settings(tmp_path, " jsonl "), tmp_path)
+    sink, _ = _resolve_exporter(_settings(tmp_path, " jsonl "), tmp_path)
 
     assert isinstance(sink, JsonExporter)
 
@@ -120,7 +120,9 @@ def test_resolve_exporter_strips_the_name(tmp_path):
 def test_resolve_exporter_passes_the_hostname_opt_in(tmp_path):
     settings = _settings(tmp_path, "jsonl", exporter_hostname=True)
 
-    assert _resolve_exporter(settings, tmp_path)._include_hostname is True
+    sink, _ = _resolve_exporter(settings, tmp_path)
+
+    assert sink._include_hostname is True
 
 
 def test_resolve_exporter_rejects_an_unknown_name(tmp_path):
@@ -134,6 +136,17 @@ def test_aggregator_rejects_an_unknown_exporter_at_construction(tmp_path):
             logger=_Logger(),
             stop_event=threading.Event(),
             settings=_settings(tmp_path, "bogus"),
+        )
+
+
+def test_aggregator_rejects_an_unknown_export_stream_at_construction(
+    tmp_path,
+):
+    with pytest.raises(ValueError, match="'bogus'"):
+        TraceMLAggregator(
+            logger=_Logger(),
+            stop_event=threading.Event(),
+            settings=_settings(tmp_path, "jsonl", export_streams="bogus"),
         )
 
 

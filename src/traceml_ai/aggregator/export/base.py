@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, Sequence
+from typing import Protocol, Sequence, Tuple
 
-from traceml_ai.aggregator.export.records import Record
+from traceml_ai.aggregator.export.records import RECORD_TYPES, Record
 
 
 @dataclass(frozen=True)
@@ -24,11 +24,15 @@ class ExporterContext:
     ``export_dir`` is ``session_root / "aggregator" / "export"``, where the
     JSON Lines exporter writes; it is not created for a factory.
     ``include_hostname`` is the ``exporter_hostname`` setting.
+    ``streams`` is the ``Record.STREAM`` values the ``export_streams``
+    setting selects, in RECORD_TYPES order; the exporter receives records
+    of these streams only, so a factory can prepare one sink per stream.
     """
 
     session_root: Path
     export_dir: Path
     include_hostname: bool
+    streams: Tuple[str, ...] = tuple(cls.STREAM for cls in RECORD_TYPES)
 
 
 class Exporter(Protocol):

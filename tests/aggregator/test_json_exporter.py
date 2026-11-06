@@ -53,7 +53,15 @@ def test_one_file_per_stream(tmp_path) -> None:
     exporter.flush()
     exporter.close()
 
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["step_time.jsonl"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "process.jsonl",
+        "runtime_environment.jsonl",
+        "stdout_stderr.jsonl",
+        "step_memory.jsonl",
+        "step_time.jsonl",
+        "system.jsonl",
+        "system_gpu.jsonl",
+    ]
 
 
 def test_open_creates_each_stream_file_empty(tmp_path) -> None:

@@ -25,6 +25,7 @@ from traceml_ai.aggregator.export import (
     ExportStats,
     ExportWorker,
     JsonExporter,
+    parse_export_streams,
     parse_exporter_factory,
 )
 from traceml_ai.aggregator.sqlite_writer import (
@@ -171,28 +172,35 @@ def _load_exporter_factory(value: str, context: ExporterContext) -> Exporter:
 
 def _resolve_exporter(
     settings: TraceMLSettings, session_root: Path
-) -> Optional[Exporter]:
+) -> Optional[Tuple[Exporter, Tuple[str, ...]]]:
     """
-    Return the export sink ``settings.exporter`` names, or None if off.
+    Return the export sink ``settings.exporter`` names and the record
+    streams ``settings.export_streams`` selects, or None if export is off.
 
     A value with a colon names a factory, imported here in the aggregator
     process and called with an ``ExporterContext``; a factory that fails
-    gives an exporter whose ``open`` raises. An unknown plain name raises.
+    gives an exporter whose ``open`` raises. An unknown plain name or an
+    unknown stream name raises.
     """
     name = str(settings.exporter or "").strip()
     if not name:
         return None
+    streams = parse_export_streams(settings.export_streams)
     context = ExporterContext(
         session_root=session_root,
         export_dir=session_root / "aggregator" / "export",
         include_hostname=bool(settings.exporter_hostname),
+        streams=streams,
     )
     if ":" in name:
-        return _load_exporter_factory(name, context)
+        return _load_exporter_factory(name, context), streams
     if name == "jsonl":
-        return JsonExporter(
-            context.export_dir, include_hostname=context.include_hostname
+        sink = JsonExporter(
+            context.export_dir,
+            include_hostname=context.include_hostname,
+            streams=streams,
         )
+        return sink, streams
     raise ValueError(
         f"[TraceML] Unknown exporter: {name!r}. "
         f"Supported: {_SUPPORTED_EXPORTERS}"
@@ -257,18 +265,22 @@ class TraceMLAggregator:
             settings.session_id or "default"
         )
 
-        # Optional structured export of admitted telemetry. An unknown name
-        # raises here, at aggregator startup, never mid-run. A failed factory
-        # gives an exporter whose open raises, so the worker logs it once and
-        # the warning artifact records the loss; the run continues.
+        # Optional structured export of admitted telemetry. An unknown
+        # exporter or stream name raises here, at aggregator startup, never
+        # mid-run. The worker hands the sink the selected streams only. A
+        # failed factory gives an exporter whose open raises, so the worker
+        # logs it once and the warning artifact records the loss; the run
+        # continues.
         self._export_worker: Optional[ExportWorker] = None
-        export_sink = _resolve_exporter(settings, session_root)
-        if export_sink is not None:
+        resolved_export = _resolve_exporter(settings, session_root)
+        if resolved_export is not None:
+            export_sink, export_streams = resolved_export
             self._export_worker = ExportWorker(
                 export_sink,
                 interval_sec=_EXPORT_INTERVAL_SEC,
                 max_queue=_export_queue_capacity(self._expected_world_size),
                 logger=self._logger,
+                streams=export_streams,
             )
 
         self._summary_service = FinalSummaryService(

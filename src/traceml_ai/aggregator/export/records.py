@@ -5,16 +5,16 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-Typed export records, built from the aggregator's projection tables.
+Typed export records, one per projection table the aggregator writes.
 
 A record is the table's row with names: its fields are the table's columns
 in DDL order, minus the autoincrement ``id``. Records are built by the same
 projection writers' ``build_rows`` that SQLite uses, so the export path and
 SQLite cannot disagree about a value. Missing values stay ``None``.
 
-Only step time has a record so far. It carries the decoded ``events`` map
-in place of the ``events_json`` text. The other projection tables get
-records in a follow-up.
+Step time is the one exception to "row with names": it carries the decoded
+``events`` map in place of the ``events_json`` text. The other records are
+plain rows.
 
 The field contract is documented in
 ``docs/developer_guide/export-records.md``.
@@ -26,9 +26,29 @@ import dataclasses
 import json
 import time
 from dataclasses import dataclass
-from typing import Any, ClassVar, Dict, List, Optional, Tuple
+from typing import (
+    Any,
+    ClassVar,
+    Collection,
+    Dict,
+    FrozenSet,
+    List,
+    Optional,
+    Tuple,
+)
 
+from traceml_ai.aggregator.sqlite_writers import process as process_writer
+from traceml_ai.aggregator.sqlite_writers import (
+    runtime_environment as runtime_environment_writer,
+)
+from traceml_ai.aggregator.sqlite_writers import (
+    stdout_stderr as stdout_stderr_writer,
+)
+from traceml_ai.aggregator.sqlite_writers import (
+    step_memory as step_memory_writer,
+)
 from traceml_ai.aggregator.sqlite_writers import step_time as step_time_writer
+from traceml_ai.aggregator.sqlite_writers import system as system_writer
 from traceml_ai.telemetry.envelope import normalize_telemetry_envelope
 
 SCHEMA_VERSION = 1
@@ -110,13 +130,193 @@ class StepTimeRecord(Record):
         return row[:-1] + (events,)
 
 
-RECORD_TYPES = (StepTimeRecord,)
+@_record("step_memory", "step_memory_samples")
+class StepMemoryRecord(Record):
+    """One step's peak device memory for one rank."""
+
+    observed_timestamp_unix_ns: int
+    rank: Optional[int]
+    global_rank: Optional[int]
+    local_rank: Optional[int]
+    world_size: Optional[int]
+    local_world_size: Optional[int]
+    node_rank: Optional[int]
+    hostname: Optional[str]
+    timestamp_unix_ns: Optional[int]
+    seq: Optional[int]
+    device: Optional[str]
+    step: Optional[int]
+    peak_alloc_bytes: Optional[float]
+    peak_reserved_bytes: Optional[float]
+
+
+@_record("system", "system_samples")
+class SystemRecord(Record):
+    """One host-level system snapshot."""
+
+    observed_timestamp_unix_ns: int
+    global_rank: Optional[int]
+    local_rank: Optional[int]
+    world_size: Optional[int]
+    local_world_size: Optional[int]
+    node_rank: Optional[int]
+    hostname: Optional[str]
+    timestamp_unix_ns: Optional[int]
+    seq: Optional[int]
+    cpu_percent: Optional[float]
+    ram_used_bytes: Optional[float]
+    ram_total_bytes: Optional[float]
+    gpu_available: Optional[int]
+    gpu_count: Optional[int]
+
+
+@_record("system_gpu", "system_gpu_samples")
+class SystemGpuRecord(Record):
+    """One GPU within a system snapshot."""
+
+    observed_timestamp_unix_ns: int
+    global_rank: Optional[int]
+    local_rank: Optional[int]
+    world_size: Optional[int]
+    local_world_size: Optional[int]
+    node_rank: Optional[int]
+    hostname: Optional[str]
+    timestamp_unix_ns: Optional[int]
+    seq: Optional[int]
+    gpu_idx: int
+    util: Optional[float]
+    mem_used_bytes: Optional[float]
+    mem_total_bytes: Optional[float]
+    temperature_c: Optional[float]
+    power_usage_w: Optional[float]
+    power_limit_w: Optional[float]
+
+
+@_record("process", "process_samples")
+class ProcessRecord(Record):
+    """One training-process snapshot for one rank."""
+
+    observed_timestamp_unix_ns: int
+    rank: Optional[int]
+    global_rank: Optional[int]
+    local_rank: Optional[int]
+    world_size: Optional[int]
+    local_world_size: Optional[int]
+    node_rank: Optional[int]
+    hostname: Optional[str]
+    timestamp_unix_ns: Optional[int]
+    seq: Optional[int]
+    cpu_percent: Optional[float]
+    cpu_logical_core_count: Optional[int]
+    ram_used_bytes: Optional[float]
+    ram_total_bytes: Optional[float]
+    gpu_available: Optional[int]
+    gpu_count: Optional[int]
+    gpu_device_index: Optional[int]
+    gpu_mem_used_bytes: Optional[float]
+    gpu_mem_reserved_bytes: Optional[float]
+    gpu_mem_total_bytes: Optional[float]
+
+
+@_record("runtime_environment", "runtime_environment")
+class RuntimeEnvironmentRecord(Record):
+    """One rank's runtime and distributed-training environment."""
+
+    observed_timestamp_unix_ns: int
+    rank: Optional[int]
+    global_rank: Optional[int]
+    local_rank: Optional[int]
+    world_size: Optional[int]
+    local_world_size: Optional[int]
+    node_rank: Optional[int]
+    hostname: Optional[str]
+    pid: Optional[int]
+    timestamp_unix_ns: Optional[int]
+    seq: Optional[int]
+    topology: Optional[str]
+    distributed_initialized: Optional[int]
+    distributed_backend: Optional[str]
+    training_strategy: Optional[str]
+    strategy_source: Optional[str]
+    strategy_confidence: Optional[str]
+
+
+@_record("stdout_stderr", "stdout_stderr_samples")
+class StdoutStderrRecord(Record):
+    """One captured stdout or stderr line."""
+
+    observed_timestamp_unix_ns: int
+    rank: Optional[int]
+    timestamp_unix_ns: Optional[int]
+    line: str
+
+
+RECORD_TYPES = (
+    StepTimeRecord,
+    StepMemoryRecord,
+    SystemRecord,
+    SystemGpuRecord,
+    ProcessRecord,
+    RuntimeEnvironmentRecord,
+    StdoutStderrRecord,
+)
 
 _RECORD_BY_TABLE = {cls.TABLE: cls for cls in RECORD_TYPES}
 
-# The projection writers that have export records; a subset of the SQLite
-# writer's projection list.
-_WRITERS = (step_time_writer,)
+# The same projection writers, in the same order, as the SQLite writer's
+# projection list; every table they write has a record.
+_WRITERS = (
+    runtime_environment_writer,
+    system_writer,
+    process_writer,
+    step_time_writer,
+    step_memory_writer,
+    stdout_stderr_writer,
+)
+
+# The record streams each writer produces. Literal: the writer modules do
+# not expose the tables they write; a test checks this against their DDL.
+_WRITER_STREAMS = {
+    runtime_environment_writer: ("runtime_environment",),
+    system_writer: ("system", "system_gpu"),
+    process_writer: ("process",),
+    step_time_writer: ("step_time",),
+    step_memory_writer: ("step_memory",),
+    stdout_stderr_writer: ("stdout_stderr",),
+}
+
+
+_ALL_STREAMS = frozenset(cls.STREAM for cls in RECORD_TYPES)
+
+
+def selected_streams(
+    streams: Optional[Collection[str]],
+) -> Optional[FrozenSet[str]]:
+    """
+    Return ``streams`` as a frozenset of known ``Record.STREAM`` names.
+
+    None stays None and means every stream. A string, an empty collection
+    or an unknown name raises ``ValueError``, so a selection can never
+    silently export nothing: ``"all"`` as a string would match no stream,
+    and ``frozenset("step_time")`` would be a set of letters.
+    """
+    if streams is None:
+        return None
+    if isinstance(streams, str):
+        raise ValueError(
+            "[TraceML] streams must be a collection of stream names, not "
+            "a string; parse a setting value with parse_export_streams"
+        )
+    selected = frozenset(streams)
+    if not selected:
+        raise ValueError("[TraceML] streams must name at least one stream")
+    unknown = sorted(selected - _ALL_STREAMS)
+    if unknown:
+        raise ValueError(
+            f"[TraceML] Unknown export streams: {unknown}. "
+            f"Known: {sorted(_ALL_STREAMS)}"
+        )
+    return selected
 
 
 @dataclass(frozen=True)
@@ -131,6 +331,7 @@ def records_from_payload(
     payload: Any,
     *,
     observed_timestamp_unix_ns: Optional[int] = None,
+    streams: Optional[Collection[str]] = None,
 ) -> RecordBatch:
     """
     Build export records from one admitted payload.
@@ -140,7 +341,14 @@ def records_from_payload(
     ``observed_timestamp_unix_ns`` when given, else ``time.time_ns()``.
     An item that does not normalise, a writer that raises, and a row that
     does not fit its record are skipped and counted; nothing raises.
+    ``streams`` names the ``Record.STREAM`` values to keep; the rows of any
+    other stream are neither built nor counted as skipped, because leaving
+    them out is a choice, not a loss. A writer whose streams are all
+    unselected is not run and counts nothing. None keeps every stream. A
+    string, an empty collection or an unknown name in ``streams`` raises
+    ``ValueError`` before any item is read; nothing else raises.
     """
+    streams = selected_streams(streams)
     items = payload if isinstance(payload, list) else [payload]
     records: List[Record] = []
     skipped = 0
@@ -159,6 +367,10 @@ def records_from_payload(
             for writer in _WRITERS:
                 if not writer.accepts_sampler(envelope.meta.sampler):
                     continue
+                if streams is not None and not any(
+                    stream in streams for stream in _WRITER_STREAMS[writer]
+                ):
+                    continue
                 try:
                     rows_by_table = writer.build_rows(
                         envelope=envelope,
@@ -171,6 +383,8 @@ def records_from_payload(
                     cls = _RECORD_BY_TABLE.get(table)
                     if cls is None:
                         skipped += len(rows)
+                        continue
+                    if streams is not None and cls.STREAM not in streams:
                         continue
                     for row in rows:
                         try:

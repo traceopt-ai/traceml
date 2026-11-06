@@ -301,12 +301,15 @@ TraceMLRayConfig(
     bind_host="0.0.0.0",
     port=0,
     exporter="",
+    export_streams="step_time",
     exporter_hostname=False,
 )
 ```
 
-``exporter="jsonl"`` writes step-time records to a JSON Lines file during
-the run; see [Live Export](../live-export.md).
+``exporter="jsonl"`` writes records to JSON Lines files during the run.
+``export_streams`` picks the streams as a comma-separated list of ``step_time`` (the default), ``step_memory``, ``process``, ``system`` or ``all``.
+For example, ``export_streams="step_time,step_memory"`` adds peak memory per step and device.
+See [Live Export](../live-export.md) for the files each stream writes.
 
 The default ``mode="summary"`` is recommended for Ray because distributed worker
 logs are noisy. Use ``mode="cli"`` only when you specifically want live terminal

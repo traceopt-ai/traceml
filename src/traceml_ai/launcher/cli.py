@@ -26,16 +26,27 @@ from traceml_ai.telemetry.retention import parse_history_retention
 
 
 def _add_exporter_args(parser: argparse.ArgumentParser) -> None:
-    """Add structured step-time export arguments."""
+    """Add the structured export arguments."""
     parser.add_argument(
         "--exporter",
         type=str,
         default=None,
         help=(
-            "Write live step-time records to "
-            "<logs-dir>/<run-name>/aggregator/export/step_time.jsonl "
-            "(jsonl), or load a custom exporter from module:factory in the "
-            "aggregator process. Default: off."
+            "Write live telemetry records as JSON Lines, one file per "
+            "stream, under <logs-dir>/<run-name>/aggregator/export/ "
+            "(jsonl), or load a custom exporter from module:factory in "
+            "the aggregator process. Default: off."
+        ),
+    )
+    parser.add_argument(
+        "--export-streams",
+        type=str,
+        default=None,
+        help=(
+            "Record streams to export, comma separated: step_time "
+            "(default), step_memory, process, system (host and GPU "
+            "records) or all (every stream, including runtime_environment "
+            "and stdout_stderr)."
         ),
     )
     parser.add_argument(
@@ -43,10 +54,7 @@ def _add_exporter_args(parser: argparse.ArgumentParser) -> None:
         action="store_const",
         const=True,
         default=None,
-        help=(
-            "Include the hostname in every exported step-time record. "
-            "Default: off."
-        ),
+        help="Include hostname on records that carry it. Default: off.",
     )
 
 

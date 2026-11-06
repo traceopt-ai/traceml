@@ -446,6 +446,20 @@ def test_resolve_config_exporter_cli_beats_env() -> None:
     assert result["exporter_hostname"] is True
 
 
+def test_resolve_config_export_streams_precedence() -> None:
+    def resolve(cli=None, env=None, yaml=None) -> str:
+        overrides = {**_no_cli(), "export_streams": cli}
+        result = resolve_config(overrides, env or {}, yaml or {}, _defaults())
+        return result["export_streams"]
+
+    env = {"TRACEML_EXPORT_STREAMS": "step_memory"}
+    yaml = {"export_streams": "all"}
+    assert resolve() == "step_time"
+    assert resolve(yaml=yaml) == "all"
+    assert resolve(env=env, yaml=yaml) == "step_memory"
+    assert resolve(cli="system", env=env, yaml=yaml) == "system"
+
+
 def test_resolve_config_keeps_a_factory_exporter_from_env() -> None:
     env = {"TRACEML_EXPORTER": "my_exporters:make"}
     result = resolve_config(_no_cli(), env, _no_yaml(), _defaults())

@@ -177,13 +177,15 @@ def test_factory_receives_the_context(tmp_path):
         tmp_path, f"{__name__}:make_exporter", exporter_hostname=True
     )
 
-    sink = _resolve_exporter(settings, tmp_path / "run")
+    sink, streams = _resolve_exporter(settings, tmp_path / "run")
 
     assert sink is _MADE[0]
+    assert streams == ("step_time",)
     assert sink.context == ExporterContext(
         session_root=tmp_path / "run",
         export_dir=tmp_path / "run" / "aggregator" / "export",
         include_hostname=True,
+        streams=("step_time",),
     )
     assert not (tmp_path / "run").exists()
 
@@ -191,7 +193,7 @@ def test_factory_receives_the_context(tmp_path):
 def test_factory_value_is_stripped(tmp_path):
     settings = _settings(tmp_path, f" {__name__} : make_exporter ")
 
-    sink = _resolve_exporter(settings, tmp_path)
+    sink, _ = _resolve_exporter(settings, tmp_path)
 
     assert sink is _MADE[0]
     assert sink.context.include_hostname is False
@@ -219,9 +221,66 @@ def test_factory_exporter_receives_the_worker_records(tmp_path):
     assert record.step == 1
     assert exporter.calls[3] == ("close", 0)
     assert logger.errors == []
+    assert exporter.context.streams == ("step_time",)
     export_dir = tmp_path / "logs" / "run" / "aggregator" / "export"
     assert exporter.context.export_dir == export_dir.resolve()
     assert not export_dir.exists()
+
+
+def test_factory_exporter_receives_only_the_selected_streams(tmp_path):
+    step_memory = build_telemetry_envelope(
+        identity=SenderIdentity(
+            global_rank=0, local_rank=0, hostname="host-a", pid=4242
+        ),
+        sampler_name="StepMemorySampler",
+        tables={
+            "step_memory": [
+                {
+                    "seq": 1,
+                    "timestamp_unix_ns": 1_700_000_000_000_000_000,
+                    "device": "cuda:0",
+                    "step": 1,
+                    "peak_alloc": 1024.0,
+                    "peak_resv": 2048.0,
+                }
+            ]
+        },
+    )
+    process = build_telemetry_envelope(
+        identity=SenderIdentity(
+            global_rank=0, local_rank=0, hostname="host-a", pid=4242
+        ),
+        sampler_name="ProcessSampler",
+        tables={
+            "ProcessTable": [
+                {"seq": 1, "timestamp_unix_ns": 1_700_000_000_000_000_000}
+            ]
+        },
+    )
+    agg = TraceMLAggregator(
+        logger=_Logger(),
+        stop_event=threading.Event(),
+        settings=_settings(
+            tmp_path,
+            f"{__name__}:make_exporter",
+            export_streams="step_time,step_memory",
+        ),
+    )
+    agg._tcp_server = _TCP(
+        [[_step_time_payload(), step_memory, process, _rank_finished()]]
+    )
+    agg._export_worker.start()
+
+    agg._drain_tcp()
+    agg.stop(timeout_sec=5.0)
+
+    (exporter,) = _MADE
+    assert exporter.context.streams == ("step_time", "step_memory")
+    writes = [call[1] for call in exporter.calls if call[0] == "write"]
+    assert [[r.STREAM for r in batch] for batch in writes] == [
+        ["step_time", "step_memory"]
+    ]
+    assert agg._export_worker.stats().skipped_items == 0
 
 
 @pytest.mark.parametrize(
@@ -239,7 +298,7 @@ def test_factory_exporter_receives_the_worker_records(tmp_path):
 def test_failed_factory_gives_an_exporter_whose_open_raises(
     tmp_path, value, failure
 ):
-    sink = _resolve_exporter(_settings(tmp_path, value), tmp_path)
+    sink, _ = _resolve_exporter(_settings(tmp_path, value), tmp_path)
 
     message = _open_failure(sink)
     assert message.startswith(f"[TraceML] Exporter {value!r} ")
@@ -255,7 +314,7 @@ def test_module_that_exits_on_import_does_not_stop_the_aggregator(
     monkeypatch.syspath_prepend(str(tmp_path))
     value = "traceml_exiting_exporter:make"
 
-    sink = _resolve_exporter(_settings(tmp_path, value), tmp_path)
+    sink, _ = _resolve_exporter(_settings(tmp_path, value), tmp_path)
 
     message = _open_failure(sink)
     assert message.startswith(f"[TraceML] Exporter {value!r} could not be")

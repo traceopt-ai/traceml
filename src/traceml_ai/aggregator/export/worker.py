@@ -21,10 +21,13 @@ import queue
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from traceml_ai.aggregator.export.base import Exporter
-from traceml_ai.aggregator.export.records import records_from_payload
+from traceml_ai.aggregator.export.records import (
+    records_from_payload,
+    selected_streams,
+)
 from traceml_ai.loggers.error_log import get_error_logger
 
 _MIN_INTERVAL_SEC = 0.01
@@ -87,9 +90,13 @@ class ExportWorker:
         interval_sec: float = 1.0,
         max_queue: int = 4096,
         logger: Optional[Any] = None,
+        streams: Optional[Iterable[str]] = None,
     ) -> None:
         self._exporter = exporter
         self._name = type(exporter).__name__
+        # The ``Record.STREAM`` values handed to the exporter; None is all.
+        # A string, an empty or an unknown selection raises here.
+        self._streams = selected_streams(streams)
         interval = float(interval_sec)
         if not math.isfinite(interval):
             interval = 1.0
@@ -290,7 +297,7 @@ class ExportWorker:
         skipped = 0
         for payload in payloads:
             try:
-                batch = records_from_payload(payload)
+                batch = records_from_payload(payload, streams=self._streams)
                 records.extend(batch.records)
                 skipped += batch.skipped
             except Exception:
