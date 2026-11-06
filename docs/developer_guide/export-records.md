@@ -23,13 +23,15 @@ The record uses the same projection code as the SQLite row, so their projected f
 
 Every record class carries `STREAM`, `SCHEMA_VERSION` (currently `1`) and `COLUMNS`, its field names in order.
 `to_dict()` returns `stream`, `schema_version` and then every field.
-The JSON Lines exporter drops `hostname` from each line unless `exporter_hostname` is on; with it on, a rank that sent no hostname gives `null`.
+The JSON Lines exporter omits `hostname` unless `exporter_hostname` is on.
+When enabled, records that have a `hostname` field keep it, with `null` when the rank sent no hostname.
 An unavailable value remains `None`; a measured zero remains `0`.
 `StepTimeRecord` is the one record that differs from its row, in one field.
 It carries the decoded `events` map in place of the `events_json` text.
 
 `records_from_payload(payload, *, observed_timestamp_unix_ns=None, streams=None)` takes one admitted telemetry payload, a dict or a list of dicts.
-It returns a `RecordBatch` of `records` and `skipped`, and it never raises.
+It returns a `RecordBatch` of `records` and `skipped`.
+A string, an empty collection or an unknown name in `streams` raises `ValueError` before payload processing.
 When `observed_timestamp_unix_ns` is given, every envelope in the payload gets that value.
 Otherwise each envelope is stamped with `time.time_ns()` when its records are built.
 When `streams` is given, only records whose `STREAM` is in it are built.
@@ -320,7 +322,7 @@ Install the module, or put its directory on `PYTHONPATH`.
 
 - `session_root` is the run's folder, `<logs-dir>/<run-name>`.
 - `export_dir` is `session_root / "aggregator" / "export"`, where `jsonl` writes. TraceML does not create it for a factory.
-- `include_hostname` tells the exporter whether to keep the hostname from each record. It is set by `exporter_hostname`.
+- `include_hostname` tells the exporter whether to keep a record's `hostname` field, if present. It is set by `exporter_hostname`.
 - `streams` is the selected `STREAM` names, in the order of the record table above. A factory can use it to prepare one sink per stream.
 
 A factory failure never fails the run.

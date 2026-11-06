@@ -54,7 +54,7 @@ def _add_exporter_args(parser: argparse.ArgumentParser) -> None:
         action="store_const",
         const=True,
         default=None,
-        help="Include the hostname in every exported record. Default: off.",
+        help="Include hostname on records that carry it. Default: off.",
     )
 
 

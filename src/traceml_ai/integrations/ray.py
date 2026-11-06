@@ -89,7 +89,7 @@ class TraceMLRayConfig:
         (default), ``"step_memory"``, ``"process"``, ``"system"`` (host and
         GPU records) or ``"all"``. Used only when ``exporter`` is set.
     exporter_hostname:
-        Include the hostname on every exported line.
+        Include hostname on records that have a hostname field.
     """
 
     mode: str = "summary"

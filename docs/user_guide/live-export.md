@@ -38,8 +38,9 @@ With Ray, the fields on `TraceMLRayConfig` set it.
 Ray reads no environment variable and no `traceml.yaml` for it, so `exporter=""` means off.
 
 Lines carry no hostname by default, because the file may be uploaded elsewhere.
-To add `hostname` to every data line, use `--exporter-hostname`, `exporter_hostname: true` in YAML, `TRACEML_EXPORTER_HOSTNAME=1`, or `TraceMLRayConfig(exporter_hostname=True)`.
-With the switch on, a rank that sent no hostname gives `"hostname": null`.
+To include `hostname` on records that have this field, use `--exporter-hostname`, `exporter_hostname: true` in YAML, `TRACEML_EXPORTER_HOSTNAME=1`, or `TraceMLRayConfig(exporter_hostname=True)`.
+For these records, a rank that sent no hostname gives `"hostname": null`.
+Stdout/stderr records have no hostname field.
 
 ## Choosing streams
 
