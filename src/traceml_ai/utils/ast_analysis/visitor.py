@@ -188,12 +188,15 @@ class PatternVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Assign(self, node: ast.Assign) -> None:  # noqa: N802
+        disabled = (
+            isinstance(node.value, ast.Constant) and not node.value.value
+        )
         for target in node.targets:
             if (
                 isinstance(target, ast.Attribute)
                 and target.attr == "benchmark"
             ):
-                if is_cudnn_attr(target):
+                if is_cudnn_attr(target) and not disabled:
                     self.models.append(
                         ModelFinding(
                             location=self._loc(node),
