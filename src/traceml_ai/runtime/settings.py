@@ -105,6 +105,9 @@ class TraceMLSettings:
       was given to it, "generated" when it made one up.
     - `exporter` names the structured export sink ("" = off, "jsonl" =
       one `<stream>.jsonl` per record stream under `aggregator/export/`).
+    - `export_streams` names the record streams to export, comma separated:
+      `step_time` (default), `step_memory`, `process`, `system` (host and
+      GPU records) or `all`.
     - `exporter_hostname` keeps the hostname on every exported record.
     """
 
@@ -130,4 +133,5 @@ class TraceMLSettings:
     admit_generated_session_id: bool = False
     session_source: str = ""
     exporter: str = ""
+    export_streams: str = "step_time"
     exporter_hostname: bool = False

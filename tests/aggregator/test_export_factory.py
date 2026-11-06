@@ -177,13 +177,15 @@ def test_factory_receives_the_context(tmp_path):
         tmp_path, f"{__name__}:make_exporter", exporter_hostname=True
     )
 
-    sink = _resolve_exporter(settings, tmp_path / "run")
+    sink, streams = _resolve_exporter(settings, tmp_path / "run")
 
     assert sink is _MADE[0]
+    assert streams == ("step_time",)
     assert sink.context == ExporterContext(
         session_root=tmp_path / "run",
         export_dir=tmp_path / "run" / "aggregator" / "export",
         include_hostname=True,
+        streams=("step_time",),
     )
     assert not (tmp_path / "run").exists()
 
@@ -191,7 +193,7 @@ def test_factory_receives_the_context(tmp_path):
 def test_factory_value_is_stripped(tmp_path):
     settings = _settings(tmp_path, f" {__name__} : make_exporter ")
 
-    sink = _resolve_exporter(settings, tmp_path)
+    sink, _ = _resolve_exporter(settings, tmp_path)
 
     assert sink is _MADE[0]
     assert sink.context.include_hostname is False
@@ -239,7 +241,7 @@ def test_factory_exporter_receives_the_worker_records(tmp_path):
 def test_failed_factory_gives_an_exporter_whose_open_raises(
     tmp_path, value, failure
 ):
-    sink = _resolve_exporter(_settings(tmp_path, value), tmp_path)
+    sink, _ = _resolve_exporter(_settings(tmp_path, value), tmp_path)
 
     message = _open_failure(sink)
     assert message.startswith(f"[TraceML] Exporter {value!r} ")
@@ -255,7 +257,7 @@ def test_module_that_exits_on_import_does_not_stop_the_aggregator(
     monkeypatch.syspath_prepend(str(tmp_path))
     value = "traceml_exiting_exporter:make"
 
-    sink = _resolve_exporter(_settings(tmp_path, value), tmp_path)
+    sink, _ = _resolve_exporter(_settings(tmp_path, value), tmp_path)
 
     message = _open_failure(sink)
     assert message.startswith(f"[TraceML] Exporter {value!r} could not be")

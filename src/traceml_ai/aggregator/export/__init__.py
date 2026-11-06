@@ -50,8 +50,54 @@ def parse_exporter_factory(value: str) -> Optional[Tuple[str, str]]:
     return match.group(1), match.group(2)
 
 
+# Names the ``export_streams`` setting accepts. ``system`` selects the host
+# record and its GPU records; ``all`` selects every record stream.
+EXPORT_STREAM_NAMES = ("step_time", "step_memory", "process", "system", "all")
+DEFAULT_EXPORT_STREAMS = "step_time"
+
+_STREAMS_BY_NAME = {
+    "step_time": ("step_time",),
+    "step_memory": ("step_memory",),
+    "process": ("process",),
+    "system": ("system", "system_gpu"),
+    "all": tuple(cls.STREAM for cls in RECORD_TYPES),
+}
+
+
+def parse_export_streams(value: object) -> Tuple[str, ...]:
+    """
+    Return the record streams a comma-separated ``export_streams`` value
+    selects.
+
+    Names are split on commas, stripped, and must be in EXPORT_STREAM_NAMES.
+    The result is the selected ``Record.STREAM`` values in RECORD_TYPES
+    order, each once. An empty value or an unknown name raises ValueError
+    whose message names the bad value and lists EXPORT_STREAM_NAMES.
+    """
+    supported = list(EXPORT_STREAM_NAMES)
+    names = [name.strip() for name in str(value or "").split(",")]
+    names = [name for name in names if name]
+    if not names:
+        raise ValueError(
+            "[TraceML] export_streams must name at least one stream. "
+            f"Supported: {supported}"
+        )
+    selected = set()
+    for name in names:
+        streams = _STREAMS_BY_NAME.get(name)
+        if streams is None:
+            raise ValueError(
+                f"[TraceML] Unknown export stream: {name!r}. "
+                f"Supported: {supported}"
+            )
+        selected.update(streams)
+    return tuple(cls.STREAM for cls in RECORD_TYPES if cls.STREAM in selected)
+
+
 __all__ = [
+    "DEFAULT_EXPORT_STREAMS",
     "EXPORTER_NAMES",
+    "EXPORT_STREAM_NAMES",
     "RECORD_TYPES",
     "SCHEMA_VERSION",
     "ExportStats",
@@ -68,6 +114,7 @@ __all__ = [
     "StepTimeRecord",
     "SystemGpuRecord",
     "SystemRecord",
+    "parse_export_streams",
     "parse_exporter_factory",
     "records_from_payload",
 ]

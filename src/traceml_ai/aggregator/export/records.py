@@ -26,7 +26,7 @@ import dataclasses
 import json
 import time
 from dataclasses import dataclass
-from typing import Any, ClassVar, Dict, List, Optional, Tuple
+from typing import Any, ClassVar, Collection, Dict, List, Optional, Tuple
 
 from traceml_ai.aggregator.sqlite_writers import process as process_writer
 from traceml_ai.aggregator.sqlite_writers import (
@@ -278,6 +278,7 @@ def records_from_payload(
     payload: Any,
     *,
     observed_timestamp_unix_ns: Optional[int] = None,
+    streams: Optional[Collection[str]] = None,
 ) -> RecordBatch:
     """
     Build export records from one admitted payload.
@@ -287,6 +288,9 @@ def records_from_payload(
     ``observed_timestamp_unix_ns`` when given, else ``time.time_ns()``.
     An item that does not normalise, a writer that raises, and a row that
     does not fit its record are skipped and counted; nothing raises.
+    ``streams`` names the ``Record.STREAM`` values to keep; the rows of any
+    other stream are neither built nor counted as skipped, because leaving
+    them out is a choice, not a loss. None keeps every stream.
     """
     items = payload if isinstance(payload, list) else [payload]
     records: List[Record] = []
@@ -318,6 +322,8 @@ def records_from_payload(
                     cls = _RECORD_BY_TABLE.get(table)
                     if cls is None:
                         skipped += len(rows)
+                        continue
+                    if streams is not None and cls.STREAM not in streams:
                         continue
                     for row in rows:
                         try:

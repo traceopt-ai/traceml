@@ -21,7 +21,7 @@ import queue
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from traceml_ai.aggregator.export.base import Exporter
 from traceml_ai.aggregator.export.records import records_from_payload
@@ -87,9 +87,12 @@ class ExportWorker:
         interval_sec: float = 1.0,
         max_queue: int = 4096,
         logger: Optional[Any] = None,
+        streams: Optional[Iterable[str]] = None,
     ) -> None:
         self._exporter = exporter
         self._name = type(exporter).__name__
+        # The ``Record.STREAM`` values handed to the exporter; None is all.
+        self._streams = None if streams is None else frozenset(streams)
         interval = float(interval_sec)
         if not math.isfinite(interval):
             interval = 1.0
@@ -290,7 +293,7 @@ class ExportWorker:
         skipped = 0
         for payload in payloads:
             try:
-                batch = records_from_payload(payload)
+                batch = records_from_payload(payload, streams=self._streams)
                 records.extend(batch.records)
                 skipped += batch.skipped
             except Exception:

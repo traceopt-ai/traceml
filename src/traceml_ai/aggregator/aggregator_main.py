@@ -118,6 +118,9 @@ def read_traceml_env() -> dict[str, Any]:
         ),
         "html_report": os.environ.get("TRACEML_HTML_REPORT", "0") == "1",
         "exporter": os.environ.get("TRACEML_EXPORTER", ""),
+        "export_streams": os.environ.get(
+            "TRACEML_EXPORT_STREAMS", "step_time"
+        ),
         "exporter_hostname": os.environ.get("TRACEML_EXPORTER_HOSTNAME", "0")
         == "1",
     }
@@ -282,6 +285,7 @@ def main() -> None:
         finalize_timeout_sec=float(cfg["finalize_timeout_sec"]),
         expected_world_size=int(cfg["expected_world_size"]),
         exporter=str(cfg["exporter"]),
+        export_streams=str(cfg["export_streams"]),
         exporter_hostname=bool(cfg["exporter_hostname"]),
         # The `traceml run` launcher hands its ranks the same session id,
         # stamped explicit, and (single-node) the same run nonce, so a

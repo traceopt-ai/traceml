@@ -5,14 +5,14 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-Exporter that writes JSON Lines, one file per stream.
+Exporter that writes JSON Lines, one file per selected stream.
 
 Each record becomes one compact JSON object on its own line in
-``<directory>/<stream>.jsonl``. ``open`` creates one file per record type,
-exclusively: an existing file raises, so a reused run folder cannot mix two
-runs. ``close`` appends one closing line per file with the records written
-and the batches the worker dropped, so a run with no records still ends
-with a closing line per stream.
+``<directory>/<stream>.jsonl``. ``open`` creates one file per selected
+record type, exclusively: an existing file raises, so a reused run folder
+cannot mix two runs. ``close`` appends one closing line per file with the
+records written and the batches the worker dropped, so a run with no
+records still ends with a closing line per selected stream.
 """
 
 from __future__ import annotations
@@ -20,7 +20,17 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Set, TextIO, Tuple, Union
+from typing import (
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    TextIO,
+    Tuple,
+    Union,
+)
 
 from traceml_ai.aggregator.export.records import (
     RECORD_TYPES,
@@ -35,16 +45,23 @@ def _dumps(obj: Dict) -> str:
 
 
 class JsonExporter:
-    """Write export records as JSON Lines under one directory."""
+    """
+    Write export records as JSON Lines under one directory.
+
+    ``streams`` names the ``Record.STREAM`` values that get a file; None
+    gives every record type one.
+    """
 
     def __init__(
         self,
         directory: Union[str, os.PathLike],
         *,
         include_hostname: bool = False,
+        streams: Optional[Iterable[str]] = None,
     ) -> None:
         self._directory = Path(directory)
         self._include_hostname = bool(include_hostname)
+        self._streams = None if streams is None else frozenset(streams)
         self._files: Dict[str, TextIO] = {}
         self._written: Dict[str, int] = {}
         # Streams where a write or flush to the file raised.
@@ -53,7 +70,7 @@ class JsonExporter:
 
     def open(self) -> None:
         """
-        Create the directory, then one empty file per record type.
+        Create the directory, then one empty file per selected record type.
 
         Each file is created exclusively: an existing one raises
         ``FileExistsError`` naming its path, and the files this call
@@ -66,6 +83,8 @@ class JsonExporter:
         try:
             for cls in RECORD_TYPES:
                 stream = cls.STREAM
+                if self._streams is not None and stream not in self._streams:
+                    continue
                 if stream in self._files or stream in created:
                     continue
                 path = self._directory / f"{stream}.jsonl"
