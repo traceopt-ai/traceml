@@ -2,17 +2,17 @@
 
 ## What it is
 
-With the `exporter` setting on, the aggregator writes every admitted step-time record to a JSON Lines file while the run is going.
-There is one line for every step each rank reports.
-The file is written under the run's `aggregator/export/` folder.
-A background worker writes the file, so training does not wait for file writes.
+With the `exporter` setting on, the aggregator writes telemetry records to JSON Lines files while the run is going.
+It writes one file per selected stream, under the run's `aggregator/export/` folder.
+By default it exports only the `step_time` stream, which has one line for every step each rank reports.
+A background worker writes the files, so training does not wait for file writes.
 At shutdown, TraceML waits briefly for pending records to be written.
-Currently, only step-time records are exported.
 
 ## Switching it on
 
 Export is off by default.
-`jsonl` is the only exporter so far.
+The built-in exporter is `jsonl`.
+A custom exporter is `exporter: module:factory`, described in [Custom exporters](../developer_guide/export-records.md#custom-exporters).
 Pick whichever layer fits your setup:
 
 ```bash
@@ -41,20 +41,100 @@ Lines carry no hostname by default, because the file may be uploaded elsewhere.
 To add `hostname` to every data line, use `--exporter-hostname`, `exporter_hostname: true` in YAML, `TRACEML_EXPORTER_HOSTNAME=1`, or `TraceMLRayConfig(exporter_hostname=True)`.
 With the switch on, a rank that sent no hostname gives `"hostname": null`.
 
+## Choosing streams
+
+With export on and nothing else set, only `step_time` is exported.
+The `export_streams` setting chooses the streams.
+It takes a comma-separated list of these names:
+
+| Name | Files | One line per |
+|---|---|---|
+| `step_time` (default) | `step_time.jsonl` | step of each rank, with its phase timings |
+| `step_memory` | `step_memory.jsonl` | step and device of each rank, with peak memory |
+| `process` | `process.jsonl` | snapshot of each training process, with its CPU, RAM and GPU memory |
+| `system` | `system.jsonl` and `system_gpu.jsonl` | host snapshot, and each GPU in that snapshot |
+| `all` | every file above, plus `runtime_environment.jsonl` and `stdout_stderr.jsonl` | record of every stream |
+
+To add step memory to the default, name both streams:
+
+```bash
+traceml run --exporter jsonl --export-streams step_time,step_memory train.py
+TRACEML_EXPORTER=jsonl TRACEML_EXPORT_STREAMS=step_time,step_memory traceml run train.py
+```
+
+```yaml
+# traceml.yaml
+exporter: jsonl
+export_streams: step_time,step_memory
+```
+
+```python
+TraceMLRayConfig(exporter="jsonl", export_streams="step_time,step_memory")
+```
+
+To add process and system telemetry, name those streams as well:
+
+```bash
+traceml run --exporter jsonl --export-streams step_time,process,system train.py
+```
+
+```yaml
+# traceml.yaml
+exporter: jsonl
+export_streams: step_time,process,system
+```
+
+`system` writes two files.
+`system.jsonl` has one line per host snapshot.
+`system_gpu.jsonl` has one line per GPU in that snapshot.
+On a multi-rank run, only local rank 0 of each node sends system snapshots.
+
+To export everything, use `all`:
+
+```bash
+traceml run --exporter jsonl --export-streams all train.py
+```
+
+```yaml
+# traceml.yaml
+exporter: jsonl
+export_streams: all
+```
+
+`all` adds two streams that no other name selects.
+`runtime_environment.jsonl` holds each rank's topology, `torch.distributed` state and detected training strategy.
+`stdout_stderr.jsonl` is the stream for captured stdout and stderr lines.
+Ranks of this release do not capture stdout or stderr, so that file holds only its closing line.
+
+Spaces around the names are ignored, and a repeated name is harmless.
+The order you write them in does not change the output.
+`export_streams` resolves like `exporter`.
+The CLI flag beats `TRACEML_EXPORT_STREAMS`, which beats `traceml.yaml`, which beats the default.
+With Ray, only `TraceMLRayConfig(export_streams=...)` sets it.
+An unknown name stops `traceml run` and `traceml serve` before launch, and the message lists the supported names.
+The setting changes nothing while `exporter` is off, though the launcher still checks the value.
+
 ## The files
 
-The step-time file is `<logs-dir>/<run-name>/aggregator/export/step_time.jsonl`.
+Each selected stream has its own file, `<logs-dir>/<run-name>/aggregator/export/<stream>.jsonl`.
+With the default, that is `step_time.jsonl` alone.
 On Ray the run folder is named by `session_id`.
-There is one file for the whole job, however many ranks and nodes it has, because one aggregator serves the job.
-Each data line carries `global_rank`, `local_rank`, `node_rank` and `step`.
-Key a consumer on `(global_rank, step)`.
+There is one set of files for the whole job, however many ranks and nodes it has, because one aggregator serves the job.
 
-The file is created when the aggregator starts.
-A run that records no steps still leaves a file, holding only its closing line.
+Fields vary by stream.
+Every data line starts with `stream` and `schema_version`.
+The [Export Records](../developer_guide/export-records.md) tables list the other fields of each stream.
+Key step-time lines on `(global_rank, step)`.
+Key step-memory lines on `(global_rank, device, step)`, because one step has one line per device.
+The developer page gives the key of every stream.
+
+Every selected file is created when the aggregator starts.
+A stream with no records still leaves a file, holding only its closing line.
 An existing file is never overwritten or appended to.
-If the run folder already has one, export stays off for that run and the loss is reported as below, with `exporter_failed` true.
+If the run folder already has one of the selected files, export stays off for that run.
+The loss is then reported as below, with `exporter_failed` true.
 
-These two lines come from a two-rank CPU run of four steps.
+These two lines come from `step_time.jsonl` of a two-rank CPU run of four steps.
 The first is a data line and the second is the closing line:
 
 ```json
@@ -67,16 +147,25 @@ It gives the CPU time, the GPU time, the duration TraceML uses, and how many cal
 `gpu_ms` is `null` on a CPU run.
 It is also `null` when any call in the step lacked a GPU measurement.
 
+A file that finished cleanly ends with one closing line.
+Its `written_records` counts the data lines of that file only.
+Its `dropped_batches` is one count for the whole export worker, because a dropped batch can hold records of any stream.
+So every closing line of a run shows the same `dropped_batches`.
+
 ## When something was lost
 
 Export never fails the run.
-When the export did not write every admitted record, `finalization_warning.json` in the run folder gets an `export` block.
+When the export did not write every record of the selected streams, `finalization_warning.json` in the run folder gets an `export` block.
 The block holds `written_records`, `dropped_batches`, `failed_records`, `skipped_items` and `exporter_failed`.
 If export is the only problem, the file also says `"reason": "export_incomplete"`.
 If another warning already started the file, the `export` block is added to it.
 
-The closing line's `written_records` and `dropped_batches` are the same counts for that file.
+The block's `written_records` is the total over all files.
+Its `dropped_batches` is the number every closing line shows.
 `failed_records` and `skipped_items` appear only in the warning file, so read it when you need every count.
+A stream you did not select is not a loss.
+Its records are never built, so they are not counted as written, failed or skipped.
+`dropped_batches` counts whole payload batches before selection, so a dropped batch may have held no selected record.
 After the run finishes, a file without a closing line means a write failed or the aggregator did not finish cleanly.
 
 ## Field reference

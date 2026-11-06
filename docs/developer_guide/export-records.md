@@ -28,10 +28,13 @@ An unavailable value remains `None`; a measured zero remains `0`.
 `StepTimeRecord` is the one record that differs from its row, in one field.
 It carries the decoded `events` map in place of the `events_json` text.
 
-`records_from_payload(payload, *, observed_timestamp_unix_ns=None)` takes one admitted telemetry payload, a dict or a list of dicts.
+`records_from_payload(payload, *, observed_timestamp_unix_ns=None, streams=None)` takes one admitted telemetry payload, a dict or a list of dicts.
 It returns a `RecordBatch` of `records` and `skipped`, and it never raises.
 When `observed_timestamp_unix_ns` is given, every envelope in the payload gets that value.
 Otherwise each envelope is stamped with `time.time_ns()` when its records are built.
+When `streams` is given, only records whose `STREAM` is in it are built.
+The rows of every other stream are neither built nor counted in `skipped`, because leaving them out is not a loss.
+`None` keeps every stream.
 
 `skipped` counts three kinds of unit, not rows.
 
@@ -76,9 +79,45 @@ Records preserve payload order and are not sorted by this mapper.
 Within one envelope, records follow the writer's table order, so a system snapshot gives its `SystemRecord` before its `SystemGpuRecord` entries.
 The StepTime sampler emits steps in order within one rank.
 Records from different ranks interleave.
-The key of a step record is `(global_rank, step)`.
-Duplicate rows are passed through, not removed, so a consumer that needs one row per step keys on `(global_rank, step)`.
-Do not key on `seq`.
+Each stream has its own key, listed under [Stream selection](#stream-selection).
+Duplicate rows are passed through, not removed, so a consumer that needs one row per key deduplicates on that key.
+Do not key a step record on `seq`, because one sampler tick can carry several steps.
+
+## Stream selection
+
+The `export_streams` setting chooses which records reach the exporter.
+The export worker applies it once, before any exporter sees a record.
+So the `jsonl` exporter and a custom exporter receive the same selected records.
+The default is `step_time`.
+
+| Name | Records |
+|---|---|
+| `step_time` | `StepTimeRecord` |
+| `step_memory` | `StepMemoryRecord` |
+| `process` | `ProcessRecord` |
+| `system` | `SystemRecord` and `SystemGpuRecord` |
+| `all` | every record, including `RuntimeEnvironmentRecord` and `StdoutStderrRecord` |
+
+The setting accepts only these five names, comma separated.
+`RuntimeEnvironmentRecord` and `StdoutStderrRecord` are reachable only through `all`.
+An unknown name, or a value that names no stream, raises `ValueError` at aggregator startup.
+The message lists the supported names.
+`traceml run` and `traceml serve` check the value before launch and exit with the same message.
+
+The fields vary by stream, and so does the key that identifies one row.
+
+| `STREAM` | One record per | Key |
+|---|---|---|
+| `step_time` | step of a rank | `(global_rank, step)` |
+| `step_memory` | step and device of a rank | `(global_rank, device, step)` |
+| `system` | host snapshot of a node's local rank 0 | `(global_rank, seq)` |
+| `system_gpu` | GPU in that host snapshot | `(global_rank, seq, gpu_idx)` |
+| `process` | process snapshot of a rank | `(global_rank, seq)` |
+| `runtime_environment` | rank process, at most once | `global_rank` |
+| `stdout_stderr` | captured line of a rank | none; read the lines in file order |
+
+A snapshot stream increments `seq` once per sampler tick and sends one snapshot per tick, so `seq` identifies a snapshot within a rank.
+`gpu_idx` is the GPU's position in the snapshot's GPU list.
 
 ## Records
 
@@ -249,12 +288,16 @@ Its only fields are `observed_timestamp_unix_ns`, `rank`, `timestamp_unix_ns` an
 
 ## Custom exporters
 
-A custom exporter receives the same records as the built-in `jsonl` exporter.
+A custom exporter receives the same records as the built-in `jsonl` exporter, those of the selected streams.
 It implements the `Exporter` interface from `traceml_ai.aggregator.export`: `open()`, `write(records)`, `flush()` and `close(*, dropped_batches=0)`.
 The export worker calls all four from its own background thread, and the calls never overlap.
 It calls `open` once, then `write` and `flush` zero or more times, then `close` once.
 `close` is not called when `open` raised.
+One `write` batch may hold several selected record types, interleaved in payload order.
+An exporter that treats streams differently dispatches on `record.STREAM` or `type(record)`.
 `dropped_batches` is the number of payload batches the worker never handed to `write`.
+It is one count for the whole worker, not one per stream, so the `jsonl` exporter writes the same value in every closing line.
+A closing line's `written_records`, by contrast, counts only the lines of its own file.
 A method may raise.
 The worker then logs the failure, stops using the exporter, and records the loss in `finalization_warning.json`.
 
@@ -273,11 +316,12 @@ The training ranks never import it.
 Install the module, or put its directory on `PYTHONPATH`.
 `traceml run` starts the aggregator as a separate script, so the working directory is not on its import path.
 
-`context` is an `ExporterContext` with three fields.
+`context` is an `ExporterContext` with four fields.
 
 - `session_root` is the run's folder, `<logs-dir>/<run-name>`.
 - `export_dir` is `session_root / "aggregator" / "export"`, where `jsonl` writes. TraceML does not create it for a factory.
 - `include_hostname` tells the exporter whether to keep the hostname from each record. It is set by `exporter_hostname`.
+- `streams` is the selected `STREAM` names, in the order of the record table above. A factory can use it to prepare one sink per stream.
 
 A factory failure never fails the run.
 The failures are an import error, a missing attribute, an exception or `SystemExit` from the module or the factory, and a factory that returns `None`.
@@ -290,6 +334,7 @@ TraceML does not check the returned object up front.
 If it lacks one of the four methods, export fails when the worker first calls that method, and the loss is recorded the same way.
 
 This factory returns an exporter that writes every record as one JSON line to one file.
+Each line keeps the `stream` field from `to_dict()`, so a reader can tell the selected streams apart.
 
 ```python
 import json
