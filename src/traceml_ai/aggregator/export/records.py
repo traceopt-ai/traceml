@@ -26,7 +26,16 @@ import dataclasses
 import json
 import time
 from dataclasses import dataclass
-from typing import Any, ClassVar, Collection, Dict, List, Optional, Tuple
+from typing import (
+    Any,
+    ClassVar,
+    Collection,
+    Dict,
+    FrozenSet,
+    List,
+    Optional,
+    Tuple,
+)
 
 from traceml_ai.aggregator.sqlite_writers import process as process_writer
 from traceml_ai.aggregator.sqlite_writers import (
@@ -277,6 +286,39 @@ _WRITER_STREAMS = {
 }
 
 
+_ALL_STREAMS = frozenset(cls.STREAM for cls in RECORD_TYPES)
+
+
+def selected_streams(
+    streams: Optional[Collection[str]],
+) -> Optional[FrozenSet[str]]:
+    """
+    Return ``streams`` as a frozenset of known ``Record.STREAM`` names.
+
+    None stays None and means every stream. A string, an empty collection
+    or an unknown name raises ``ValueError``, so a selection can never
+    silently export nothing: ``"all"`` as a string would match no stream,
+    and ``frozenset("step_time")`` would be a set of letters.
+    """
+    if streams is None:
+        return None
+    if isinstance(streams, str):
+        raise ValueError(
+            "[TraceML] streams must be a collection of stream names, not "
+            "a string; parse a setting value with parse_export_streams"
+        )
+    selected = frozenset(streams)
+    if not selected:
+        raise ValueError("[TraceML] streams must name at least one stream")
+    unknown = sorted(selected - _ALL_STREAMS)
+    if unknown:
+        raise ValueError(
+            f"[TraceML] Unknown export streams: {unknown}. "
+            f"Known: {sorted(_ALL_STREAMS)}"
+        )
+    return selected
+
+
 @dataclass(frozen=True)
 class RecordBatch:
     """Records built from one payload, and the malformed inputs skipped."""
@@ -302,8 +344,11 @@ def records_from_payload(
     ``streams`` names the ``Record.STREAM`` values to keep; the rows of any
     other stream are neither built nor counted as skipped, because leaving
     them out is a choice, not a loss. A writer whose streams are all
-    unselected is not run and counts nothing. None keeps every stream.
+    unselected is not run and counts nothing. None keeps every stream. A
+    string, an empty collection or an unknown name in ``streams`` raises
+    ``ValueError`` before any item is read; nothing else raises.
     """
+    streams = selected_streams(streams)
     items = payload if isinstance(payload, list) else [payload]
     records: List[Record] = []
     skipped = 0

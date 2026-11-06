@@ -1026,8 +1026,15 @@ def test_run_passes_export_streams_to_the_aggregator_env(
     assert env["TRACEML_EXPORT_STREAMS"] == expected
 
 
+@pytest.mark.parametrize(
+    "value, message",
+    [
+        ("step_time,gpu", "[TraceML] Unknown export stream: 'gpu'. "),
+        (" , ", "[TraceML] export_streams must name at least one stream. "),
+    ],
+)
 def test_run_rejects_unknown_export_streams_before_launch(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, value, message
 ) -> None:
     from traceml_ai.launcher import cli
 
@@ -1039,14 +1046,13 @@ def test_run_rejects_unknown_export_streams_before_launch(
     monkeypatch.setattr(
         sys,
         "argv",
-        ["traceml", "run", str(script), "--export-streams", "step_time,gpu"],
+        ["traceml", "run", str(script), "--export-streams", value],
     )
 
     with pytest.raises(SystemExit) as exc:
         cli.main()
 
-    assert str(exc.value) == (
-        "[TraceML] Unknown export stream: 'gpu'. "
+    assert str(exc.value) == message + (
         "Supported: ['step_time', 'step_memory', 'process', 'system', 'all']"
     )
     for replacement in forbidden.values():

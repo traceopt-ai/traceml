@@ -36,6 +36,7 @@ from traceml_ai.aggregator.export.records import (
     RECORD_TYPES,
     SCHEMA_VERSION,
     Record,
+    selected_streams,
 )
 
 
@@ -61,7 +62,8 @@ class JsonExporter:
     ) -> None:
         self._directory = Path(directory)
         self._include_hostname = bool(include_hostname)
-        self._streams = None if streams is None else frozenset(streams)
+        # A string, an empty or an unknown selection raises here.
+        self._streams = selected_streams(streams)
         self._files: Dict[str, TextIO] = {}
         self._written: Dict[str, int] = {}
         # Streams where a write or flush to the file raised.

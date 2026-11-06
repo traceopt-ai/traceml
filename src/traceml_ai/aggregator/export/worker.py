@@ -24,7 +24,10 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional
 
 from traceml_ai.aggregator.export.base import Exporter
-from traceml_ai.aggregator.export.records import records_from_payload
+from traceml_ai.aggregator.export.records import (
+    records_from_payload,
+    selected_streams,
+)
 from traceml_ai.loggers.error_log import get_error_logger
 
 _MIN_INTERVAL_SEC = 0.01
@@ -92,7 +95,8 @@ class ExportWorker:
         self._exporter = exporter
         self._name = type(exporter).__name__
         # The ``Record.STREAM`` values handed to the exporter; None is all.
-        self._streams = None if streams is None else frozenset(streams)
+        # A string, an empty or an unknown selection raises here.
+        self._streams = selected_streams(streams)
         interval = float(interval_sec)
         if not math.isfinite(interval):
             interval = 1.0

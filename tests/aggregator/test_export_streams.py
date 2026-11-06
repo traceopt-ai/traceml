@@ -19,6 +19,7 @@ from tests.aggregator.test_export_worker import (
 )
 from traceml_ai.aggregator.export import (
     DEFAULT_EXPORT_STREAMS,
+    EXPORT_STREAM_NAMES,
     RECORD_TYPES,
     ExportWorker,
     JsonExporter,
@@ -31,6 +32,46 @@ from traceml_ai.aggregator.sqlite_writers import system
 
 def test_default_selects_step_time():
     assert parse_export_streams(DEFAULT_EXPORT_STREAMS) == ("step_time",)
+
+
+def test_every_setting_name_has_a_stream_mapping():
+    from traceml_ai.aggregator.export import _STREAMS_BY_NAME
+
+    assert set(_STREAMS_BY_NAME) == set(EXPORT_STREAM_NAMES)
+
+
+@pytest.mark.parametrize(
+    "streams, message",
+    [
+        ("all", "not a string"),
+        ((), "at least one stream"),
+        (("step_time", "gpu"), "Unknown export streams: ['gpu']"),
+    ],
+)
+def test_a_bad_streams_argument_raises_instead_of_exporting_nothing(
+    tmp_path, streams, message
+):
+    calls = [
+        lambda: records_from_payload(
+            _payload(*CASES[0][2:5]), streams=streams
+        ),
+        lambda: ExportWorker(_RecordingExporter(), streams=streams),
+        lambda: JsonExporter(tmp_path, streams=streams),
+    ]
+    for call in calls:
+        with pytest.raises(ValueError) as exc:
+            call()
+        assert message in str(exc.value)
+
+
+def test_every_layer_carries_the_same_default():
+    from traceml_ai.config.yaml_loader import BUILT_IN_DEFAULTS
+    from traceml_ai.integrations.ray import TraceMLRayConfig
+    from traceml_ai.runtime.settings import TraceMLSettings
+
+    assert BUILT_IN_DEFAULTS["export_streams"] == DEFAULT_EXPORT_STREAMS
+    assert TraceMLSettings().export_streams == DEFAULT_EXPORT_STREAMS
+    assert TraceMLRayConfig().export_streams == DEFAULT_EXPORT_STREAMS
 
 
 def test_subset_and_order():
