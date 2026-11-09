@@ -18,7 +18,7 @@
 [**Quickstart**](#quickstart) ·
 [**Integrations**](#integrations) ·
 [**Distributed training**](#distributed-training-and-straggler-detection) ·
-[**Monitoring**](#continuous-monitoring) ·
+[**Live telemetry**](#live-telemetry-export) ·
 [**Compare runs**](#compare-runs) ·
 [**Documentation**](https://traceopt-ai.github.io/traceml/)
 
@@ -34,8 +34,8 @@ and saves reports for comparison or CI.
   explicit step instrumentation for custom PyTorch loops.
 - **Distributed diagnosis:** compare rank timings and identify stragglers
   across GPUs and nodes.
-- **Continuous monitoring:** collect timing and resource metrics
-  throughout training.
+- **Live telemetry export:** export per-step, per-rank timing and resource
+  records from the aggregator to JSONL or a custom backend.
 
 ## Quickstart
 
@@ -244,12 +244,21 @@ for ports and shared storage,
 [integration support matrix](https://traceopt-ai.github.io/traceml/user_guide/integrations/#integration-support-matrix)
 for framework-specific details, including FSDP.
 
-## Continuous monitoring
+## Live telemetry export
 
-TraceML records GPU phase timings with CUDA events and resolves them
-asynchronously. Telemetry is batched and processed by a separate aggregator.
+Export per-step, per-rank timing records from the aggregator while training:
 
-Use a kernel profiler when the diagnosis points inside GPU compute.
+```bash
+traceml run --exporter jsonl train.py
+```
+
+By default, TraceML writes live step timings to
+`logs/<run-name>/aggregator/export/step_time.jsonl`. You can also use a
+[custom exporter](https://traceopt-ai.github.io/traceml/developer_guide/export-records/#custom-exporters)
+to send selected telemetry directly to your platform.
+
+See [Live Export](https://traceopt-ai.github.io/traceml/user_guide/live-export/)
+for available streams, configuration options, and the record schema.
 
 ## Compare runs
 

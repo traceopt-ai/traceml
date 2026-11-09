@@ -7,6 +7,8 @@ which carry the full historical notes for versions predating this file.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-09
+
 - Added opt-in live telemetry export to JSON Lines files or a custom
   `module:factory` exporter. One bounded background worker prepares and
   delivers records; export failures and dropped data are reported without
