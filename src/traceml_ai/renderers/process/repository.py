@@ -224,7 +224,7 @@ class ProcessRepository:
                     MAX(cpu_percent) AS cpu_max,
                     MAX(ram_used_bytes) AS ram_used_max,
                     MAX(ram_total_bytes) AS ram_total,
-                    MAX(sample_ts_s) AS sample_ts_s
+                    MAX(timestamp_unix_ns) AS timestamp_unix_ns
                 FROM seq_rows
                 GROUP BY seq
             ),
@@ -271,7 +271,7 @@ class ProcessRepository:
             )
             SELECT
                 b.seq,
-                b.sample_ts_s,
+                b.timestamp_unix_ns,
                 b.cpu_max,
                 b.ram_used_max,
                 b.ram_total,
@@ -291,7 +291,9 @@ class ProcessRepository:
         ).fetchall()
 
     # --- per-rank reads --------------------------------------------------
-    def newest_sample_ts(self, conn: sqlite3.Connection) -> Optional[float]:
+    def newest_timestamp_unix_ns(
+        self, conn: sqlite3.Connection
+    ) -> Optional[int]:
         """The newest sample clock, read once per tick and reused.
 
         Every time bound below derives from it. Deriving them separately
@@ -299,15 +301,15 @@ class ProcessRepository:
         and leave one computation reading a window the other never saw.
         """
         row = conn.execute(
-            "SELECT MAX(sample_ts_s) FROM process_samples"
+            "SELECT MAX(timestamp_unix_ns) FROM process_samples"
         ).fetchone()
-        return float(row[0]) if row and row[0] is not None else None
+        return int(row[0]) if row and row[0] is not None else None
 
     def fetch_recent_rank_window(
         self,
         conn: sqlite3.Connection,
         window_s: float = 60.0,
-        newest_ts: Optional[float] = None,
+        newest_timestamp_unix_ns: Optional[int] = None,
         max_rows_per_rank: int = 2000,
     ) -> List[sqlite3.Row]:
         """Every rank's samples from the last ``window_s`` seconds.
@@ -325,15 +327,17 @@ class ProcessRepository:
         sampler cannot make one tick's read unbounded. It sits far above
         any real cadence, so under normal operation the duration decides.
         """
-        floor_ts = None
-        if newest_ts is not None:
-            floor_ts = float(newest_ts) - max(0.0, float(window_s))
+        floor_timestamp_unix_ns = None
+        if newest_timestamp_unix_ns is not None:
+            floor_timestamp_unix_ns = int(newest_timestamp_unix_ns) - round(
+                max(0.0, float(window_s)) * 1_000_000_000
+            )
         return conn.execute(
             """
             WITH recent AS (
                 SELECT * FROM process_samples
                 WHERE COALESCE(global_rank, rank) IS NOT NULL
-                  AND (? IS NULL OR sample_ts_s >= ?)
+                  AND (? IS NULL OR timestamp_unix_ns >= ?)
             ),
             ranked AS (
                 SELECT
@@ -348,7 +352,11 @@ class ProcessRepository:
             WHERE rn <= ?
             ORDER BY COALESCE(global_rank, rank) ASC, seq ASC, id ASC;
             """,
-            (floor_ts, floor_ts, int(max(1, max_rows_per_rank))),
+            (
+                floor_timestamp_unix_ns,
+                floor_timestamp_unix_ns,
+                int(max(1, max_rows_per_rank)),
+            ),
         ).fetchall()
 
     def fetch_rank_latest(self, conn: sqlite3.Connection) -> List[sqlite3.Row]:
@@ -402,10 +410,10 @@ class ProcessRepository:
             WITH per_rank AS (
                 SELECT
                     COUNT(*) AS n,
-                    MIN(sample_ts_s) AS lo,
-                    MAX(sample_ts_s) AS hi
+                    MIN(timestamp_unix_ns) AS lo,
+                    MAX(timestamp_unix_ns) AS hi
                 FROM process_samples
-                WHERE sample_ts_s IS NOT NULL
+                WHERE timestamp_unix_ns IS NOT NULL
                   AND ({value_sql}) IS NOT NULL
                   AND COALESCE(global_rank, rank) IS NOT NULL
                 GROUP BY COALESCE(global_rank, rank)
@@ -416,8 +424,8 @@ class ProcessRepository:
         if row is None or row[0] is None or row[1] is None:
             return None
         return RunStats(
-            first_ts=float(row[0]),
-            last_ts=float(row[1]),
+            first_ts=row[0] / 1_000_000_000,
+            last_ts=row[1] / 1_000_000_000,
             sample_count=int(row[2] or 0),
             rank_count=max(1, int(row[3] or 1)),
             max_samples_per_rank=max(1, int(row[4] or 1)),
@@ -442,14 +450,14 @@ class ProcessRepository:
                 WITH base AS (
                     SELECT
                         COALESCE(global_rank, rank) AS rank_id,
-                        sample_ts_s AS ts,
+                        timestamp_unix_ns / 1000000000.0 AS ts,
                         ({value_sql}) AS v,
                         ROW_NUMBER() OVER (
                             PARTITION BY COALESCE(global_rank, rank)
-                            ORDER BY sample_ts_s ASC, id ASC
+                            ORDER BY timestamp_unix_ns ASC, id ASC
                         ) AS rn
                     FROM process_samples
-                    WHERE sample_ts_s IS NOT NULL
+                    WHERE timestamp_unix_ns IS NOT NULL
                       AND ({value_sql}) IS NOT NULL
                       AND COALESCE(global_rank, rank) IS NOT NULL
                 ),

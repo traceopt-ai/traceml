@@ -1,5 +1,6 @@
 import pytest
 
+from traceml_ai.runtime import environment_state
 from traceml_ai.runtime.environment import RuntimeEnvironmentInfo
 from traceml_ai.runtime.environment_state import (
     publish_runtime_environment_once,
@@ -38,8 +39,17 @@ def test_sampler_emits_no_row_before_publish() -> None:
     assert sampler.sender.collect_payload() is None
 
 
-def test_sampler_drains_one_published_environment_row() -> None:
+def test_sampler_drains_one_published_environment_row(monkeypatch) -> None:
+    timestamp_unix_ns = 1_700_000_000_000_000_001
+    monkeypatch.setattr(
+        environment_state.time, "time_ns", lambda: timestamp_unix_ns
+    )
     publish_runtime_environment_once(_info())
+    monkeypatch.setattr(
+        environment_state.time,
+        "time_ns",
+        lambda: timestamp_unix_ns + 10_000_000_000,
+    )
     sampler = RuntimeEnvironmentSampler()
 
     sampler.sample()
@@ -48,6 +58,8 @@ def test_sampler_drains_one_published_environment_row() -> None:
     rows = list(sampler.db.get_table("RuntimeEnvironmentTable") or [])
     assert len(rows) == 1
     assert rows[0]["seq"] == 0
+    assert rows[0]["timestamp_unix_ns"] == timestamp_unix_ns
+    assert "ts" not in rows[0]
     assert rows[0]["training_strategy"] == "ddp"
     assert rows[0]["distributed_backend"] == "nccl"
 

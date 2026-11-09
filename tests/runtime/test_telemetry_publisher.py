@@ -84,7 +84,6 @@ class _FakeSender:
         self.payload = payload
         self.fail_collect = fail_collect
         self.sender = None
-        self.rank = None
         self.identity = None
         self.collect_count = 0
 
@@ -111,7 +110,6 @@ class _FakeSampler:
 def _payload(sampler: str) -> dict:
     return {
         "meta": {
-            "rank": 0,
             "global_rank": 0,
             "local_rank": 0,
             "world_size": 1,
@@ -120,13 +118,12 @@ def _payload(sampler: str) -> dict:
             "hostname": "",
             "pid": 0,
             "sampler": sampler,
-            "timestamp": 1.0,
         },
         "body": {"tables": {"rows": [{"v": 1}]}},
     }
 
 
-def test_publisher_attaches_senders_to_tcp_client_and_rank() -> None:
+def test_publisher_attaches_senders_to_tcp_client_and_identity() -> None:
     tcp_client = _FakeTCPClient()
     sender = _FakeSender(payload={"rows": [1]})
     sampler = _FakeSampler("SamplerA", sender=sender)
@@ -139,7 +136,6 @@ def test_publisher_attaches_senders_to_tcp_client_and_rank() -> None:
     publisher.attach_senders([sampler])
 
     assert sender.sender is tcp_client
-    assert sender.rank is None
     assert sender.identity == SenderIdentity(global_rank=3, local_rank=3)
 
 
@@ -159,7 +155,6 @@ def test_publisher_logs_sender_attach_failures_and_continues() -> None:
     publisher.attach_senders([bad_sampler, good_sampler])
 
     assert good_sender.sender is tcp_client
-    assert good_sender.rank is None
     assert len(logger.errors) == 1
     assert "sender attach failed" in logger.errors[0]
     assert "RuntimeError: attach failed" in logger.errors[0]

@@ -24,6 +24,7 @@ Storage units
 -------------
 This projection stores raw values wherever possible.
 
+- timestamp_unix_ns        : source measurement time in Unix nanoseconds
 - cpu_percent             : percent
 - ram_used_bytes          : bytes
 - ram_total_bytes         : bytes
@@ -76,7 +77,7 @@ def _optional_str(value: Any) -> Optional[str]:
 class ProcessPayloadIdentity:
     """Distributed identity stored with projected process telemetry."""
 
-    rank: Optional[int]
+    legacy_rank: Optional[int]
     global_rank: Optional[int]
     local_rank: Optional[int]
     world_size: Optional[int]
@@ -89,16 +90,13 @@ def _payload_identity(meta: TelemetryMeta) -> ProcessPayloadIdentity:
     """
     Return storage identity for one ProcessSampler payload.
 
-    New code should read ``global_rank``. The legacy ``rank`` column is still
-    written as the same value to keep existing process summaries working while
-    the reporting layer is migrated separately.
+    New code should read ``global_rank``. The legacy SQLite ``rank`` column is
+    written from the same normalized value for compatibility.
     """
     global_rank = _optional_int(meta.global_rank)
-    legacy_rank = _optional_int(meta.rank)
-    rank = global_rank if global_rank is not None else legacy_rank
 
     return ProcessPayloadIdentity(
-        rank=rank,
+        legacy_rank=global_rank,
         global_rank=global_rank,
         local_rank=_optional_int(meta.local_rank),
         world_size=_optional_int(meta.world_size),
@@ -142,7 +140,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
     conn.execute("""
         CREATE TABLE IF NOT EXISTS process_samples (
             id                       INTEGER PRIMARY KEY AUTOINCREMENT,
-            recv_ts_ns               INTEGER NOT NULL,
+            observed_timestamp_unix_ns               INTEGER NOT NULL,
             rank                     INTEGER,
             global_rank              INTEGER,
             local_rank               INTEGER,
@@ -150,7 +148,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
             local_world_size         INTEGER,
             node_rank                INTEGER,
             hostname                 TEXT,
-            sample_ts_s              REAL,
+            timestamp_unix_ns        INTEGER,
             seq                      INTEGER,
             cpu_percent              REAL,
             cpu_logical_core_count   INTEGER,
@@ -201,18 +199,18 @@ def init_schema(conn: sqlite3.Connection) -> None:
         definition="TEXT",
     )
     conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_process_samples_rank_ts
-        ON process_samples(rank, sample_ts_s, id);
+        CREATE INDEX IF NOT EXISTS idx_process_samples_rank_timestamp
+        ON process_samples(rank, timestamp_unix_ns, id);
         """)
     conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_process_samples_global_rank_ts
-        ON process_samples(global_rank, sample_ts_s, id);
+        CREATE INDEX IF NOT EXISTS idx_process_samples_global_rank_timestamp
+        ON process_samples(global_rank, timestamp_unix_ns, id);
         """)
 
 
 def build_rows(
     envelope: TelemetryEnvelope,
-    recv_ts_ns: int,
+    observed_timestamp_unix_ns: int,
 ) -> Dict[str, list[tuple]]:
     """
     Build SQLite projection rows from one decoded ProcessSampler payload.
@@ -221,8 +219,8 @@ def build_rows(
     ----------
     envelope:
         Canonical telemetry envelope from the main SQLite writer.
-    recv_ts_ns:
-        Receive timestamp assigned by the main writer for this payload.
+    observed_timestamp_unix_ns:
+        Time the main writer observes this payload, in Unix nanoseconds.
 
     Returns
     -------
@@ -260,7 +258,12 @@ def build_rows(
                 continue
 
             seq_raw = row.get("seq")
-            ts_raw = row.get("ts")
+            timestamp_unix_ns = row.get("timestamp_unix_ns")
+            if not (
+                type(timestamp_unix_ns) is int
+                and -(2**63) <= timestamp_unix_ns < 2**63
+            ):
+                timestamp_unix_ns = None
             cpu_percent_raw = row.get("cpu")
             cpu_logical_core_count_raw = row.get("cpu_cores")
             ram_used_raw = row.get("ram_used")
@@ -270,9 +273,6 @@ def build_rows(
             gpu_raw = row.get("gpu")
 
             seq = int(seq_raw) if isinstance(seq_raw, int) else None
-            sample_ts_s = (
-                float(ts_raw) if isinstance(ts_raw, (int, float)) else None
-            )
             cpu_percent = (
                 float(cpu_percent_raw)
                 if isinstance(cpu_percent_raw, (int, float))
@@ -336,15 +336,15 @@ def build_rows(
 
             out["process_samples"].append(
                 (
-                    recv_ts_ns,
-                    identity.rank,
+                    observed_timestamp_unix_ns,
+                    identity.legacy_rank,
                     identity.global_rank,
                     identity.local_rank,
                     identity.world_size,
                     identity.local_world_size,
                     identity.node_rank,
                     identity.hostname,
-                    sample_ts_s,
+                    timestamp_unix_ns,
                     seq,
                     cpu_percent,
                     cpu_logical_core_count,
@@ -380,7 +380,7 @@ def insert_rows(
         conn.executemany(
             """
             INSERT INTO process_samples(
-                recv_ts_ns,
+                observed_timestamp_unix_ns,
                 rank,
                 global_rank,
                 local_rank,
@@ -388,7 +388,7 @@ def insert_rows(
                 local_world_size,
                 node_rank,
                 hostname,
-                sample_ts_s,
+                timestamp_unix_ns,
                 seq,
                 cpu_percent,
                 cpu_logical_core_count,

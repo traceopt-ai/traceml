@@ -134,7 +134,7 @@ def _least_headroom_sample(
         total = _opt_float(row["gpu_mem_total_bytes"])
         if reserved is None or total is None or total <= 0:
             continue
-        stamp = _opt_float(row["sample_ts_s"])
+        stamp = _optional_int(row["timestamp_unix_ns"])
         seq = _opt_float(row["seq"])
         row_id = _opt_float(row["id"])
         candidates.append(
@@ -262,8 +262,12 @@ class ProcessDashboardComputer:
         try:
             with self._db.connect() as conn:
                 self._advance(conn)
-                newest_ts = self._db.newest_sample_ts(conn)
-                ranks, _policy, by_rank = self._rank_snapshots(conn, newest_ts)
+                newest_timestamp_unix_ns = self._db.newest_timestamp_unix_ns(
+                    conn
+                )
+                ranks, _policy, by_rank = self._rank_snapshots(
+                    conn, newest_timestamp_unix_ns
+                )
                 out = self._build_payload(ranks)
                 out = self._with_charts(conn, out, by_rank)
         except Exception:
@@ -296,7 +300,7 @@ class ProcessDashboardComputer:
     def _rank_snapshots(
         self,
         conn: Any,
-        newest_ts: Optional[float],
+        newest_timestamp_unix_ns: Optional[int],
     ) -> Tuple[
         Tuple[RankSnapshot, ...],
         FreshnessPolicy,
@@ -311,7 +315,7 @@ class ProcessDashboardComputer:
         clock = read_rank_clock(
             self._db,
             conn,
-            newest_ts=newest_ts,
+            newest_timestamp_unix_ns=newest_timestamp_unix_ns,
             configured_interval_s=self._configured_interval_s,
         )
         snapshots = [
@@ -671,11 +675,11 @@ class ProcessDashboardComputer:
         for rank_id in sorted(by_rank):
             stamps, values = [], []
             for row in by_rank[rank_id]:
-                stamp = _opt_float(row["sample_ts_s"])
+                stamp = _optional_int(row["timestamp_unix_ns"])
                 value = value_of(row)
                 if stamp is None or value is None:
                     continue
-                stamps.append(stamp)
+                stamps.append(stamp / 1_000_000_000)
                 values.append(value)
             if stamps:
                 traces.append(
@@ -826,11 +830,12 @@ def _entry_from_row(row: Any) -> ProcessHistoryEntry:
             ),
         )
 
+    timestamp_unix_ns = _optional_int(row["timestamp_unix_ns"])
     return ProcessHistoryEntry(
         seq=int(row["seq"]),
         ts=(
-            float(row["sample_ts_s"])
-            if row["sample_ts_s"] is not None
+            timestamp_unix_ns / 1_000_000_000
+            if timestamp_unix_ns is not None
             else None
         ),
         cpu_percent_max=float(row["cpu_max"] or 0.0),

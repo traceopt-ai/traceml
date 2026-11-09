@@ -169,8 +169,9 @@ def test_final_summary_still_requests_generation_when_artifact_missing(
             request_id=next(request_ids),
             created_at="",
             pid=1,
-            rank=0,
+            global_rank=0,
             local_rank=0,
+            node_rank=0,
         ),
     )
 

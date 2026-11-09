@@ -24,7 +24,7 @@ from tests.sqlite_fixtures import (
     insert_system_sample as _insert_system_sample,
     summary_database,
 )
-from traceml_ai.reporting.analysis_window import AnalysisWindow
+from traceml_ai.measurements.window import AnalysisWindow
 from traceml_ai.reporting.schema import BaseSectionPayload
 from traceml_ai.reporting.sections.process import ProcessSummarySection
 from traceml_ai.reporting.sections.step_memory import StepMemorySummarySection
@@ -371,7 +371,7 @@ def test_summary_sections_cover_multi_rank_aligned_run(tmp_path: Path) -> None:
                 """
                 UPDATE system_gpu_samples
                 SET mem_used_bytes = ?
-                WHERE recv_ts_ns = ? AND node_rank = ?;
+                WHERE observed_timestamp_unix_ns = ? AND node_rank = ?;
                 """,
                 (gpu_mem_by_rank[rank], 10 + rank, rank),
             )

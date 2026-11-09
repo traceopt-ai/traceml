@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional
 
@@ -16,13 +15,6 @@ from typing import Any, Mapping, Optional
 def _optional_int(value: Any) -> Optional[int]:
     try:
         return int(value) if value is not None else None
-    except Exception:
-        return None
-
-
-def _optional_float(value: Any) -> Optional[float]:
-    try:
-        return float(value) if value is not None else None
     except Exception:
         return None
 
@@ -41,10 +33,12 @@ class TelemetryMeta:
     """Stable metadata carried once per sampler payload.
 
     ``session_id``, ``run_nonce`` and ``session_source`` are the optional run
-    stamp. Payloads from ranks that predate it carry ``None``.
+    stamp. Payloads from ranks that predate it carry ``None``. Legacy ``rank``
+    is used only when ``global_rank`` is absent or unusable. This fallback
+    cannot reconstruct global identity from a legacy local-rank value.
+    Newly serialized metadata uses explicit identity fields.
     """
 
-    rank: Optional[int]
     global_rank: Optional[int]
     local_rank: Optional[int]
     world_size: Optional[int]
@@ -53,7 +47,6 @@ class TelemetryMeta:
     hostname: Optional[str]
     pid: Optional[int]
     sampler: Optional[str]
-    timestamp: Optional[float]
     session_id: Optional[str] = None
     run_nonce: Optional[str] = None
     session_source: Optional[str] = None
@@ -62,12 +55,11 @@ class TelemetryMeta:
     def from_mapping(cls, data: Mapping[str, Any]) -> "TelemetryMeta":
         """Create metadata from a transport mapping using best-effort coercion."""
         global_rank = _optional_int(data.get("global_rank"))
-        rank = global_rank
-        if rank is None:
-            rank = _optional_int(data.get("rank"))
+        if global_rank is None:
+            # Use legacy input only when no usable explicit global rank exists.
+            global_rank = _optional_int(data.get("rank"))
 
         return cls(
-            rank=rank,
             global_rank=global_rank,
             local_rank=_optional_int(data.get("local_rank")),
             world_size=_optional_int(data.get("world_size")),
@@ -76,7 +68,6 @@ class TelemetryMeta:
             hostname=_optional_str(data.get("hostname")),
             pid=_optional_int(data.get("pid")),
             sampler=_optional_str(data.get("sampler")),
-            timestamp=_optional_float(data.get("timestamp")),
             session_id=_optional_str(data.get("session_id")),
             run_nonce=_optional_str(data.get("run_nonce")),
             session_source=_optional_str(data.get("session_source")),
@@ -85,7 +76,6 @@ class TelemetryMeta:
     def to_dict(self) -> dict[str, Any]:
         """Return a MessagePack/JSON-friendly metadata dictionary."""
         return {
-            "rank": self.rank,
             "global_rank": self.global_rank,
             "local_rank": self.local_rank,
             "world_size": self.world_size,
@@ -94,7 +84,6 @@ class TelemetryMeta:
             "hostname": self.hostname,
             "pid": self.pid,
             "sampler": self.sampler,
-            "timestamp": self.timestamp,
             "session_id": self.session_id,
             "run_nonce": self.run_nonce,
             "session_source": self.session_source,
@@ -134,14 +123,10 @@ def build_telemetry_envelope(
     identity: Any,
     sampler_name: str,
     tables: Mapping[str, Any],
-    timestamp: Optional[float] = None,
 ) -> dict[str, Any]:
     """Build the canonical wire payload emitted by runtime sampler senders."""
     fields = dict(identity.to_payload_fields())
     fields["sampler"] = str(sampler_name)
-    fields["timestamp"] = (
-        time.time() if timestamp is None else float(timestamp)
-    )
     return TelemetryEnvelope(
         meta=TelemetryMeta.from_mapping(fields),
         body={"tables": dict(tables)},

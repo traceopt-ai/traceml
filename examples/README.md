@@ -36,6 +36,7 @@ Prefer Colab? Browse the [runnable notebooks](../notebooks/README.md).
 |---|---|---|
 | [Plain PyTorch quickstart](quickstart.py) | Plain PyTorch loop with an explicit step boundary and a final summary | CPU / CUDA |
 | [Summary logging](summary_logging_minimal.py) | Export `traceml.summary()` for W&B or MLflow | CPU / CUDA |
+| [MLflow summary](mlflow_summary_minimal.py) | Log `traceml.summary()` to MLflow as metrics and tags; optionally attach the full report | CPU / CUDA; requires `pip install mlflow` |
 | [Custom instrumentation](manual_custom_minimal.py) | Custom batch source and explicit wrappers in manual mode | CPU / CUDA |
 
 ## Framework integrations
@@ -158,8 +159,8 @@ traceml run examples/workloads/bert_single_gpu_compare.py --mode=summary --run-n
 
 ## Case studies
 
-[Browse case studies](case_studies/README.md) for measured investigations and
-reproduction packages, including ResNet, LeRobot, and RF-DETR.
+[Browse case studies](case_studies/README.md) for measured investigations,
+including ResNet, LeRobot, and RF-DETR.
 
 ---
 
@@ -223,7 +224,8 @@ traceml run examples/distributed/ddp_minimal.py \
 ```
 
 The same `--steps` option sets the run length of `quickstart.py`,
-`summary_logging_minimal.py`, `manual_custom_minimal.py`,
+`summary_logging_minimal.py`, `mlflow_summary_minimal.py`,
+`manual_custom_minimal.py`,
 `integrations/huggingface_trainer_minimal.py`,
 `integrations/accelerate_minimal.py`, `integrations/deepspeed_minimal.py`,
 `distributed/fsdp_minimal_cuda.py`, `diagnosis/h2d_timing_demo.py`,

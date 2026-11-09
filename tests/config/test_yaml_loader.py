@@ -283,6 +283,15 @@ def test_load_yaml_config_int_as_float(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("value", ["0", "-5", "-0.5", ".nan", ".inf"])
+def test_load_yaml_config_rejects_non_positive_interval(
+    tmp_path: Path, value: str
+) -> None:
+    p = _write(tmp_path, f"interval: {value}\n")
+    with pytest.raises(ValueError, match="'interval' must be a finite"):
+        load_yaml_config(p)
+
+
+@pytest.mark.parametrize("value", ["0", "-5", "-0.5", ".nan", ".inf"])
 def test_load_yaml_config_rejects_non_positive_finalize_timeout(
     tmp_path: Path, value: str
 ) -> None:
@@ -380,6 +389,15 @@ def test_resolve_config_env_float_coercion() -> None:
 
 
 @pytest.mark.parametrize("value", ["0", "-5", "nan", "inf"])
+def test_resolve_config_rejects_non_positive_interval_env(
+    value: str,
+) -> None:
+    env = {"TRACEML_INTERVAL": value}
+    with pytest.raises(ValueError, match="TRACEML_INTERVAL.*greater than 0"):
+        resolve_config(_no_cli(), env, _no_yaml(), _defaults())
+
+
+@pytest.mark.parametrize("value", ["0", "-5", "nan", "inf"])
 def test_resolve_config_rejects_non_positive_finalize_timeout_env(
     value: str,
 ) -> None:
@@ -396,6 +414,71 @@ def test_resolve_config_history_disabled_via_cli() -> None:
     env = {"TRACEML_HISTORY_ENABLED": "1"}
     result = resolve_config(cli, env, yaml, _defaults())
     assert result["history_enabled"] is False
+
+
+def test_load_yaml_config_exporter_keys(tmp_path: Path) -> None:
+    p = _write(tmp_path, "exporter: jsonl\nexporter_hostname: true\n")
+    yaml = load_yaml_config(p)
+    result = resolve_config(_no_cli(), _no_env(), yaml, _defaults())
+    assert result["exporter"] == "jsonl"
+    assert result["exporter_hostname"] is True
+
+
+def test_resolve_config_exporter_defaults_off() -> None:
+    result = resolve_config(_no_cli(), _no_env(), _no_yaml(), _defaults())
+    assert result["exporter"] == ""
+    assert result["exporter_hostname"] is False
+
+
+def test_resolve_config_exporter_env_beats_yaml() -> None:
+    env = {"TRACEML_EXPORTER": "jsonl", "TRACEML_EXPORTER_HOSTNAME": "0"}
+    yaml = {"exporter": "other", "exporter_hostname": True}
+    result = resolve_config(_no_cli(), env, yaml, _defaults())
+    assert result["exporter"] == "jsonl"
+    assert result["exporter_hostname"] is False
+
+
+def test_resolve_config_exporter_cli_beats_env() -> None:
+    cli = {**_no_cli(), "exporter": "jsonl", "exporter_hostname": True}
+    env = {"TRACEML_EXPORTER": "other", "TRACEML_EXPORTER_HOSTNAME": "0"}
+    result = resolve_config(cli, env, _no_yaml(), _defaults())
+    assert result["exporter"] == "jsonl"
+    assert result["exporter_hostname"] is True
+
+
+def test_resolve_config_export_streams_precedence() -> None:
+    def resolve(cli=None, env=None, yaml=None) -> str:
+        overrides = {**_no_cli(), "export_streams": cli}
+        result = resolve_config(overrides, env or {}, yaml or {}, _defaults())
+        return result["export_streams"]
+
+    env = {"TRACEML_EXPORT_STREAMS": "step_memory"}
+    yaml = {"export_streams": "all"}
+    assert resolve() == "step_time"
+    assert resolve(yaml=yaml) == "all"
+    assert resolve(env=env, yaml=yaml) == "step_memory"
+    assert resolve(cli="system", env=env, yaml=yaml) == "system"
+
+
+def test_resolve_config_keeps_a_factory_exporter_from_env() -> None:
+    env = {"TRACEML_EXPORTER": "my_exporters:make"}
+    result = resolve_config(_no_cli(), env, _no_yaml(), _defaults())
+    assert result["exporter"] == "my_exporters:make"
+
+
+def test_load_yaml_config_keeps_a_factory_exporter(tmp_path: Path) -> None:
+    p = _write(tmp_path, 'exporter: "my_exporters:make"\n')
+    yaml = load_yaml_config(p)
+    result = resolve_config(_no_cli(), _no_env(), yaml, _defaults())
+    assert result["exporter"] == "my_exporters:make"
+
+
+def test_load_yaml_config_rejects_non_bool_exporter_hostname(
+    tmp_path: Path,
+) -> None:
+    p = _write(tmp_path, "exporter_hostname: maybe\n")
+    with pytest.raises(ValueError, match="'exporter_hostname' must be"):
+        load_yaml_config(p)
 
 
 def test_load_yaml_config_unreadable_file(
@@ -499,6 +582,31 @@ def test_load_yaml_config_dashboard_port_type_error(tmp_path: Path) -> None:
     p = _write(tmp_path, "dashboard_port: not_a_port\n")
     with pytest.raises(ValueError, match="dashboard_port"):
         load_yaml_config(p)
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "65536", "70000"])
+def test_load_yaml_config_rejects_out_of_range_dashboard_port(
+    tmp_path: Path, value: str
+) -> None:
+    p = _write(tmp_path, f"dashboard_port: {value}\n")
+    with pytest.raises(ValueError, match="dashboard_port.*1 and 65535"):
+        load_yaml_config(p)
+
+
+def test_load_yaml_config_accepts_highest_dashboard_port(
+    tmp_path: Path,
+) -> None:
+    p = _write(tmp_path, "dashboard_port: 65535\n")
+    assert load_yaml_config(p)["dashboard_port"] == 65535
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "65536", "70000"])
+def test_resolve_config_rejects_out_of_range_dashboard_port_env(
+    value: str,
+) -> None:
+    env = {"TRACEML_DASHBOARD_PORT": value}
+    with pytest.raises(ValueError, match="TRACEML_DASHBOARD_PORT"):
+        resolve_config(_no_cli(), env, _no_yaml(), _defaults())
 
 
 def test_resolve_config_dashboard_defaults() -> None:

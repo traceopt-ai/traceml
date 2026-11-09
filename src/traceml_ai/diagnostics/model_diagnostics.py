@@ -19,7 +19,7 @@ from traceml_ai.diagnostics.trends import (
     compute_trend_pct,
 )
 from traceml_ai.loggers.error_log import get_error_logger
-from traceml_ai.renderers.step_memory.schema import StepMemoryCombinedMetric
+from traceml_ai.measurements.step_memory import StepMemoryCombinedMetric
 from traceml_ai.step_time.model import StepTimeMetric, StepTimeWindow
 
 Severity = str  # "info" | "warn" | "crit"

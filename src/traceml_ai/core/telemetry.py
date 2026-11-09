@@ -37,7 +37,7 @@ class ProjectionWriter(Protocol):
     def build_rows(
         self,
         envelope: TelemetryEnvelope,
-        recv_ts_ns: int,
+        observed_timestamp_unix_ns: int,
     ) -> Dict[str, list[tuple]]:
         """Build table-keyed SQLite rows from one canonical envelope."""
 

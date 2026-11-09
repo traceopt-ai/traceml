@@ -5,6 +5,7 @@ import socket
 import subprocess
 import sys
 from pathlib import Path
+from typing import Mapping, Optional
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
@@ -24,12 +25,15 @@ def _run(
     run_name: str = "hf-auto",
     command: str = "run",
     nproc_per_node: int = 1,
+    extra_env: Optional[Mapping[str, str]] = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run a script through the TraceML launcher in an isolated test session.
 
     ``nproc_per_node`` selects the number of local CPU workers. The launcher
     validates the value and uses torchrun only when more than one worker is
-    requested.
+    requested. ``extra_env`` is applied last, over the environment set up
+    here, so a test can switch a setting on through its ``TRACEML_*``
+    variable.
     """
     env = dict(os.environ)
     env["CUDA_VISIBLE_DEVICES"] = ""
@@ -37,6 +41,8 @@ def _run(
     env["PYTHONPATH"] = os.pathsep.join(
         part for part in (str(SRC), env.get("PYTHONPATH", "")) if part
     )
+    if extra_env:
+        env.update(extra_env)
     argv = [
         sys.executable,
         "-m",

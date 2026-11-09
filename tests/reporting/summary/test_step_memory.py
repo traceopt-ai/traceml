@@ -5,12 +5,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import sqlite3
+from contextlib import closing
 
 from traceml_ai.diagnostics.step_memory import SUMMARY_STEP_MEMORY_POLICY
+from traceml_ai.measurements.step_memory import read_step_memory_measurements
+from traceml_ai.measurements.window import AnalysisWindow
 from traceml_ai.reporting.sections.step_memory import StepMemorySummarySection
-from traceml_ai.reporting.sections.step_memory.loader import (
-    load_step_memory_section_data,
-)
 from traceml_ai.reporting.summaries.step_memory import (
     generate_step_memory_summary_card,
 )
@@ -22,7 +22,7 @@ def _create_step_memory_db(path: str) -> None:
         conn.execute("""
             CREATE TABLE step_memory_samples (
                 id                   INTEGER PRIMARY KEY AUTOINCREMENT,
-                recv_ts_ns           INTEGER NOT NULL,
+                observed_timestamp_unix_ns           INTEGER NOT NULL,
                 rank                 INTEGER,
                 global_rank          INTEGER,
                 local_rank           INTEGER,
@@ -30,7 +30,7 @@ def _create_step_memory_db(path: str) -> None:
                 local_world_size     INTEGER,
                 node_rank            INTEGER,
                 hostname             TEXT,
-                sample_ts_s          REAL,
+                timestamp_unix_ns    INTEGER,
                 seq                  INTEGER,
                 device               TEXT,
                 step                 INTEGER,
@@ -48,7 +48,7 @@ def _create_step_memory_db(path: str) -> None:
                 1,
                 0,
                 "worker-0",
-                1.0,
+                1_000_000_000,
                 1,
                 "cuda:0",
                 1,
@@ -64,7 +64,7 @@ def _create_step_memory_db(path: str) -> None:
                 1,
                 0,
                 "worker-0",
-                2.0,
+                2_000_000_000,
                 2,
                 "cuda:0",
                 2,
@@ -80,7 +80,7 @@ def _create_step_memory_db(path: str) -> None:
                 1,
                 0,
                 "worker-0",
-                3.0,
+                3_000_000_000,
                 3,
                 "cuda:0",
                 3,
@@ -91,7 +91,7 @@ def _create_step_memory_db(path: str) -> None:
         conn.executemany(
             """
             INSERT INTO step_memory_samples(
-                recv_ts_ns,
+                observed_timestamp_unix_ns,
                 rank,
                 global_rank,
                 local_rank,
@@ -99,7 +99,7 @@ def _create_step_memory_db(path: str) -> None:
                 local_world_size,
                 node_rank,
                 hostname,
-                sample_ts_s,
+                timestamp_unix_ns,
                 seq,
                 device,
                 step,
@@ -119,7 +119,8 @@ def test_step_memory_section_loader_and_builder_use_sqlite_fixture(tmp_path):
     db_path = tmp_path / "memory.db"
     _create_step_memory_db(str(db_path))
 
-    data = load_step_memory_section_data(str(db_path))
+    with closing(sqlite3.connect(db_path)) as connection:
+        data = read_step_memory_measurements(connection)
     result = StepMemorySummarySection().build(str(db_path))
 
     assert data.training_steps == 3
@@ -215,7 +216,7 @@ def test_step_memory_loader_uses_latest_common_steps_per_global_rank(tmp_path):
                 1,
                 0,
                 "worker-0",
-                2.0,
+                2_000_000_000,
                 1,
                 "cuda:0",
                 2,
@@ -231,7 +232,7 @@ def test_step_memory_loader_uses_latest_common_steps_per_global_rank(tmp_path):
                 1,
                 0,
                 "worker-0",
-                3.0,
+                3_000_000_000,
                 2,
                 "cuda:0",
                 3,
@@ -247,7 +248,7 @@ def test_step_memory_loader_uses_latest_common_steps_per_global_rank(tmp_path):
                 1,
                 0,
                 "worker-0",
-                4.0,
+                4_000_000_000,
                 3,
                 "cuda:0",
                 4,
@@ -258,7 +259,7 @@ def test_step_memory_loader_uses_latest_common_steps_per_global_rank(tmp_path):
         conn.executemany(
             """
             INSERT INTO step_memory_samples(
-                recv_ts_ns,
+                observed_timestamp_unix_ns,
                 rank,
                 global_rank,
                 local_rank,
@@ -266,7 +267,7 @@ def test_step_memory_loader_uses_latest_common_steps_per_global_rank(tmp_path):
                 local_world_size,
                 node_rank,
                 hostname,
-                sample_ts_s,
+                timestamp_unix_ns,
                 seq,
                 device,
                 step,
@@ -281,17 +282,49 @@ def test_step_memory_loader_uses_latest_common_steps_per_global_rank(tmp_path):
     finally:
         conn.close()
 
-    data = load_step_memory_section_data(
-        str(db_path),
-        start_step=2,
-        end_step=3,
-    )
+    with closing(sqlite3.connect(db_path)) as connection:
+        data = read_step_memory_measurements(
+            connection,
+            analysis_window=AnalysisWindow(
+                retention_s=1.0,
+                start_step=2,
+                end_step=3,
+                start_time_unix_ns=0,
+                end_time_unix_ns=0,
+            ),
+        )
 
     assert data.aligned_window.steps == (2, 3)
     assert data.aligned_window.global_ranks_seen == 2
     assert data.aligned_window.global_ranks_used == 2
     assert data.per_global_rank["0"].metrics["peak_allocated_bytes"] == 115.0
     assert data.per_global_rank["1"].metrics["peak_allocated_bytes"] == 215.0
+
+    for start_ns, end_ns, expected_steps in (
+        (2_000_000_000, 3_000_000_000, (2, 3)),
+        (2_000_000_001, 3_000_000_000, (3,)),
+        (2_000_000_000, 2_999_999_999, (2,)),
+    ):
+        with closing(sqlite3.connect(db_path)) as connection:
+            bounded = read_step_memory_measurements(
+                connection,
+                analysis_window=AnalysisWindow(
+                    retention_s=1.0,
+                    start_time_unix_ns=start_ns,
+                    end_time_unix_ns=end_ns,
+                ),
+            )
+        assert bounded.aligned_window.steps == expected_steps
+        section = StepMemorySummarySection(
+            analysis_window=AnalysisWindow(
+                retention_s=1.0,
+                start_time_unix_ns=start_ns,
+                end_time_unix_ns=end_ns,
+            )
+        )
+        assert (
+            section.load(str(db_path)).aligned_window.steps == expected_steps
+        )
 
 
 def test_step_memory_summary_wrapper_delegates_to_section_path(tmp_path):

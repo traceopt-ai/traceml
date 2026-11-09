@@ -16,6 +16,7 @@ import struct
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 
 from traceml_ai.database.database import Database
 from traceml_ai.runtime.sender import SenderIdentity
@@ -80,9 +81,9 @@ class TestDBIncrementalSender:
             db=db,
             sampler_name="test_sampler",
             sender=mock_transport,
-            rank=0,
             max_rows_per_flush=max_rows_per_flush,
         )
+        sender.identity = SenderIdentity(global_rank=0, local_rank=0)
         return sender, mock_transport
 
     def _tables(self, payload):
@@ -190,7 +191,7 @@ class TestDBIncrementalSender:
         assert "t2" in tables
         assert len(tables["t2"]) == 1
 
-    def test_payload_rank_uses_attached_runtime_rank(self):
+    def test_payload_uses_explicit_runtime_identity(self):
         db = Database(sampler_name="test")
         sender, transport = self._make_sender(db)
         sender.identity = SenderIdentity(global_rank=5, local_rank=1)
@@ -200,7 +201,7 @@ class TestDBIncrementalSender:
 
         payload = transport.send.call_args[0][0]
         assert set(payload) == {"meta", "body"}
-        assert payload["meta"]["rank"] == 5
+        assert "rank" not in payload["meta"]
         assert payload["meta"]["global_rank"] == 5
         assert payload["meta"]["local_rank"] == 1
         assert payload["meta"]["world_size"] == 1
@@ -209,7 +210,17 @@ class TestDBIncrementalSender:
         assert payload["meta"]["hostname"] == ""
         assert payload["meta"]["pid"] == 0
         assert payload["meta"]["sampler"] == "test_sampler"
-        assert isinstance(payload["meta"]["timestamp"], float)
+        assert "timestamp" not in payload["meta"]
+
+    def test_payload_requires_attached_runtime_identity(self):
+        from traceml_ai.database.database_sender import DBIncrementalSender
+
+        db = Database(sampler_name="test")
+        db.add_record("t1", {"v": 1})
+        sender = DBIncrementalSender(db=db, sampler_name="test_sampler")
+
+        with pytest.raises(RuntimeError, match="runtime identity"):
+            sender.collect_payload()
 
 
 # DatabaseWriter tests

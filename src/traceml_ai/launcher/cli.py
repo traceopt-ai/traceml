@@ -25,6 +25,39 @@ from traceml_ai.runtime.settings import (
 from traceml_ai.telemetry.retention import parse_history_retention
 
 
+def _add_exporter_args(parser: argparse.ArgumentParser) -> None:
+    """Add the structured export arguments."""
+    parser.add_argument(
+        "--exporter",
+        type=str,
+        default=None,
+        help=(
+            "Write live telemetry records as JSON Lines, one file per "
+            "stream, under <logs-dir>/<run-name>/aggregator/export/ "
+            "(jsonl), or load a custom exporter from module:factory in "
+            "the aggregator process. Default: off."
+        ),
+    )
+    parser.add_argument(
+        "--export-streams",
+        type=str,
+        default=None,
+        help=(
+            "Record streams to export, comma separated: step_time "
+            "(default), step_memory, process, system (host and GPU "
+            "records) or all (every stream, including runtime_environment "
+            "and stdout_stderr)."
+        ),
+    )
+    parser.add_argument(
+        "--exporter-hostname",
+        action="store_const",
+        const=True,
+        default=None,
+        help="Include hostname on records that carry it. Default: off.",
+    )
+
+
 def _add_launch_args(parser: argparse.ArgumentParser) -> None:
     """Add shared launch arguments for TraceML run commands."""
     parser.add_argument(
@@ -58,7 +91,10 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         action="store_const",
         const=True,
         default=None,
-        help="Enable TraceML logging output.",
+        help=(
+            "Also write raw sampler records to .msgpack files; read them "
+            "with `traceml inspect`."
+        ),
     )
     parser.add_argument(
         "--logs-dir",
@@ -265,6 +301,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run a script with TraceML bottleneck instrumentation.",
     )
     _add_launch_args(run_parser)
+    _add_exporter_args(run_parser)
 
     serve_parser = sub.add_parser(
         "serve",
@@ -330,7 +367,10 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_const",
         const=True,
         default=None,
-        help="Enable TraceML logging output.",
+        help=(
+            "Has no effect here: raw sampler logs are written by the "
+            "training processes, so set TRACEML_ENABLE_LOGGING=1 there."
+        ),
     )
     serve_parser.add_argument(
         "--history-retention",
@@ -339,6 +379,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="DURATION",
         help="Raw telemetry analysis history. Default: 30m.",
     )
+    _add_exporter_args(serve_parser)
     serve_parser.add_argument(
         "--aggregator-host",
         type=str,
@@ -428,7 +469,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     inspect_parser = sub.add_parser(
-        "inspect", help="Inspect binary .msgpack logs."
+        "inspect",
+        help=(
+            "Print the records in a .msgpack log, such as one written with "
+            "--enable-logging; exit 1 if the file ends in a cut-off frame."
+        ),
     )
     inspect_parser.add_argument("file", help="Path to a .msgpack file.")
 

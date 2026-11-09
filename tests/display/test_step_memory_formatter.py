@@ -2,14 +2,14 @@ from rich.console import Console
 from rich.panel import Panel
 
 from traceml_ai.diagnostics.step_memory import LIVE_STEP_MEMORY_POLICY
-from traceml_ai.renderers.step_memory.formatter import StepMemoryRichFormatter
-from traceml_ai.renderers.step_memory.schema import (
+from traceml_ai.measurements.step_memory import (
     StepMemoryCombinedCoverage,
     StepMemoryCombinedMetric,
-    StepMemoryCombinedResult,
     StepMemoryCombinedSeries,
     StepMemoryCombinedSummary,
 )
+from traceml_ai.renderers.step_memory.formatter import StepMemoryRichFormatter
+from traceml_ai.renderers.step_memory.schema import StepMemoryCombinedResult
 
 
 def _metric(

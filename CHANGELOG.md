@@ -7,6 +7,70 @@ which carry the full historical notes for versions predating this file.
 
 ## [Unreleased]
 
+- Added opt-in live telemetry export to JSON Lines files or a custom
+  `module:factory` exporter. One bounded background worker prepares and
+  delivers records; export failures and dropped data are reported without
+  failing training.
+- Added `export_streams` through CLI, environment, YAML, and Ray configuration.
+  Export remains disabled by default. When enabled, it selects `step_time`;
+  users can also select `step_memory`, `process`, `system` (host and GPU
+  records), or `all`. JSONL creates one file per selected stream.
+- Built-in final-report sections now read one consistent SQLite snapshot.
+  Shared measurement readers replace the superseded reporting loaders while
+  preserving calculations, alignment, and diagnosis policies.
+- Corrected aggregation of CPU-only and GPU-timed calls within the same phase.
+  An incomplete GPU measurement remains unavailable rather than becoming a
+  partial total.
+- Added a bounded drain for pending step measurements during normal shutdown
+  and serialized on-demand and shutdown summary generation to prevent overlap.
+- Made distributed process identity explicit with `global_rank`, `local_rank`,
+  and `node_rank`. Missing observed GPU counts remain unknown rather than
+  being inferred from the number of training processes.
+- Invalid ports and non-positive or non-finite sampling intervals now fail
+  before launch with a clear error.
+- `traceml inspect` now exits with status 1 for truncated MessagePack logs,
+  after printing all complete records.
+- Preserved fractional Hugging Face logging, saving, and evaluation intervals
+  in `code_manifest.json`.
+- Removed the always-null `trend_worst_delta_bytes` compare metric.
+- Added an executable MLflow summary example and a self-contained RF-DETR
+  demo, published measured LeRobot regression results, and updated export
+  and CLI documentation.
+- Fixed documentation dependency compatibility.
+- Pinned GitHub Actions to commit SHAs and updated development tooling.
+- Step Time now uses complete GPU phase timing when Input Wait is absent from
+  the entire analysis window. Input Wait and outer Step Time remain unavailable
+  rather than being treated as zero.
+- Memory byte counts now render consistently in binary units (`GiB`, `MiB`,
+  `KiB`, and `TiB`) across the dashboard, terminal, HTML, and comparison text.
+  Values on surfaces that previously used decimal `GB` read about 6.9% lower;
+  stored byte values and the legacy compare JSON keys remain unchanged.
+  Values that round to 1024 now display in the next unit instead.
+- **Breaking (raw telemetry and summary):** Raw telemetry uses integer Unix
+  nanoseconds. `timestamp_unix_ns` records the source measurement, including
+  stdout/stderr capture, and `observed_timestamp_unix_ns` records when the
+  aggregator processes an envelope. Final-summary schema `2.0` replaces
+  float-second bounds with integer Unix nanoseconds:
+
+  - `analysis_window`: `start_ts_s` / `end_ts_s` become
+    `start_time_unix_ns` / `end_time_unix_ns`.
+  - `analysis_window.sections.*`: `observed_start_ts_s` / `observed_end_ts_s`
+    become `first_sample_time_unix_ns` / `last_sample_time_unix_ns`.
+  - Section `metadata`: `analysis_start_ts_s` / `analysis_end_ts_s` become
+    `analysis_start_time_unix_ns` / `analysis_end_time_unix_ns`.
+
+  Raw SQLite histories are not migrated. Start a fresh run after upgrading and
+  use the same TraceML version for workers and the aggregator. Saved summaries
+  remain readable by `traceml view` and `traceml compare`.
+
+Existing limitations remain in aggregator cleanup after launcher death
+([#573](https://github.com/traceopt-ai/traceml/issues/573)) and optional raw-log
+placement and final flushing
+([#580](https://github.com/traceopt-ai/traceml/issues/580)). These are separate
+follow-ups; the raw-log issues do not affect the new JSONL exporter.
+
+## [0.5.0] - 2026-10-07
+
 - The browser dashboard is now installed with
   `pip install "traceml-ai[dashboard]"`; the default install remains focused on
   summary and terminal output.
@@ -29,6 +93,26 @@ which carry the full historical notes for versions predating this file.
   hooks on every layer.
 - `traceml watch` remains resource-only and does not install Lightning training
   instrumentation.
+
+See the [0.5.0 release notes](https://github.com/traceopt-ai/traceml/pull/543)
+for the complete release summary.
+
+## [0.4.2] - 2026-10-02
+
+- Added an experimental local performance guard, portable run context, and
+  optional Step Time thresholds with CI-friendly exit codes in
+  `traceml compare`. Comparisons without a threshold retain their existing
+  behavior.
+- Improved run isolation: reject reused run directories, occupied aggregator
+  ports, and telemetry stamped for another run. Finalization no longer waits
+  unnecessarily for ranks whose connections have closed.
+- Improved System and Trainer Process dashboard cards, missing-rank
+  indicators, CPU-only presentation, and HTML coverage context.
+- Expanded CPU/Gloo distributed validation and packaged regression checks,
+  while retaining Ubuntu and Windows installation and teardown coverage.
+
+See the [0.4.2 release notes](https://github.com/traceopt-ai/traceml/pull/520)
+for the complete release summary and qualification limits.
 
 ## [0.4.1] - 2026-09-24
 

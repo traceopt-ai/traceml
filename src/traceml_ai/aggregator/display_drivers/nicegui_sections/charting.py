@@ -53,16 +53,16 @@ def drift_axis_bounds(
 ) -> Tuple[float, float, float]:
     """A y range fitted to the data, for a series whose signal is DRIFT.
 
-    RSS is a level a few GB high that moves by tens of MB across a run.
+    RSS is a level a few GiB high that moves by tens of MiB across a run.
     Zero-anchoring it, which is right for a share of capacity, puts that
     whole movement inside one pixel: on the three-hour capture the ranks
-    sit at 1.48 to 1.50 GB on an axis that would run to 5. The leak this
+    sit at 1.48 to 1.50 GiB on an axis that would run to 5. The leak this
     chart exists to show would be invisible.
 
     Returns ``(low, high, tick)``: two equal steps whose ends sit on one
     decimal grid, so the three labels step evenly and no two print alike.
-    A range fitted to a steady process otherwise spanned a few kilobytes,
-    and its three ticks all read "0.586 GB". ``min_span`` is the smallest
+    A range fitted to a steady process otherwise spanned a few KiB,
+    and its three ticks all read "0.586 GiB". ``min_span`` is the smallest
     range drawn, in the caller's unit, so a flat line sits mid-plot on
     ticks that still say something.
     """
@@ -111,8 +111,8 @@ def _decimals(step: float) -> int:
 def value_axis_formatter(step: float, unit: str) -> str:
     """Tick formatter whose precision comes from the tick STEP.
 
-    Magnitude alone is not enough: an axis fitted to a 20 MB drift around
-    1.4 GB would label every tick "1.4 GB" and say nothing. The range is
+    Magnitude alone is not enough: an axis fitted to a 20 MiB drift around
+    1.4 GiB would label every tick "1.4 GiB" and say nothing. The range is
     not enough either, because rounding it can still print two ticks
     alike. At the step's own precision neighbouring ticks always differ.
     """
@@ -138,7 +138,7 @@ def pad_tick_labels(formatter: str, width: int) -> str:
     """Wrap a tick formatter so every label is ``width`` characters wide.
 
     Two charts stacked in one card fit their y labels separately, so a
-    "30%" axis and a "1.111 GB" axis start their plots at different x and
+    "30%" axis and a "1.111 GiB" axis start their plots at different x and
     the same moment sits at two positions. Tick labels are monospace and
     right-aligned against the axis, so leading spaces move no visible
     text; they make both charts reserve the same room for their labels.

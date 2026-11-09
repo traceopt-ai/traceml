@@ -106,7 +106,7 @@ def test_rank_summary_extracts_input_bound_clocks_from_events() -> None:
     assert rank_average(window, 0).step_time_ms == 24.0
 
 
-def test_step_time_section_uses_summary_pipeline_and_sqlite_fixture(
+def test_step_time_section_uses_canonical_analysis_and_sqlite_fixture(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -116,16 +116,20 @@ def test_step_time_section_uses_summary_pipeline_and_sqlite_fixture(
     _create_step_time_db(str(db_path))
 
     calls = []
-    original_run = section_module.StepTimePipeline.run
+    original_analyze = section_module.analyze_step_time_snapshot
 
-    def capture_run(pipeline, request):
-        calls.append((pipeline.profile, request.window_size))
-        return original_run(pipeline, request)
+    def capture_analysis(**kwargs):
+        calls.append(kwargs["request"].window_size)
+        return original_analyze(**kwargs)
 
-    monkeypatch.setattr(section_module.StepTimePipeline, "run", capture_run)
+    monkeypatch.setattr(
+        section_module,
+        "analyze_step_time_snapshot",
+        capture_analysis,
+    )
     result = StepTimeSummarySection().build(str(db_path))
 
-    assert calls == [("summary", None)]
+    assert calls == [None]
     assert result.section == "step_time"
     assert result.payload["metadata"]["training_total_steps"] == 2
     assert result.payload["metadata"]["training_latest_step"] == 2

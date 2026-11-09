@@ -308,6 +308,7 @@ def test_lightning_completed_step_counts_reach_summary(L, tmp_path):
         StepMemorySummarySection,
     )
     from traceml_ai.reporting.sections.step_time import StepTimeSummarySection
+    from traceml_ai.runtime.sender import SenderIdentity
     from traceml_ai.samplers.step_memory_sampler import StepMemorySampler
     from traceml_ai.samplers.step_time_sampler import StepTimeSampler
     from traceml_ai.telemetry.envelope import normalize_telemetry_envelope
@@ -325,12 +326,17 @@ def test_lightning_completed_step_counts_reach_summary(L, tmp_path):
             (StepMemorySampler(), step_memory),
         ):
             sampler.sample()
-            sampler.sender.rank = 0
+            sampler.sender.identity = SenderIdentity(
+                global_rank=0,
+                local_rank=0,
+            )
             envelope = normalize_telemetry_envelope(
                 sampler.sender.collect_payload()
             )
             assert envelope is not None
-            rows_by_table = writer.build_rows(envelope, recv_ts_ns=1)
+            rows_by_table = writer.build_rows(
+                envelope, observed_timestamp_unix_ns=1
+            )
             assert sum(map(len, rows_by_table.values())) == 3
             writer.insert_rows(conn, rows_by_table)
     for section in (StepTimeSummarySection, StepMemorySummarySection):

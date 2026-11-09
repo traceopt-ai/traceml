@@ -52,11 +52,12 @@ and model-diagnostics composer. Add a new Step Time dashboard view by
 consuming that result; do not register another provider or add a presenter
 cache.
 
-Final-summary Step Time uses the same `StepTimePipeline` with the `summary`
-profile. `StepTimeSummarySection` runs it once and gives the completed
-`StepTimeAnalysis` to a pure reporting projector. The projector may map facts
-to stable JSON names, topology, and text, but it must not query SQLite,
-reanalyze ranks, or run diagnosis again.
+Final-summary Step Time loads its repository snapshot inside the report's
+shared SQLite transaction. After that transaction closes,
+`StepTimeSummarySection` runs the canonical analyzer and summary diagnosis,
+then gives the completed `StepTimeAnalysis` to a pure reporting projector.
+The projector may map facts to stable JSON names, topology, and text, but it
+must not query SQLite, reanalyze ranks, or run diagnosis again.
 
 The three core Step Time shapes are:
 
@@ -154,19 +155,22 @@ Current sections:
 - `step_time`
 - `step_memory`
 
-Most sections use some variation of this shape:
+Numeric measurement types, SQLite reads, and reductions live under
+`src/traceml_ai/measurements/`. System, Process, and Step Memory expose a
+`read_<domain>_measurements(connection, *, analysis_window=...)` function that
+uses a caller-owned SQLite connection.
+
+Final-report sections keep diagnosis adaptation and public projection under
+`src/traceml_ai/reporting/sections/<domain>/`:
 
 ```text
-loader.py     read SQLite / section inputs
-builder.py    build JSON payload and card text
-formatter.py  render section text
-model.py      section-local data helpers
+__init__.py  adapt measurements, run diagnosis, and orchestrate the section
+builder.py   build the public JSON payload and card text
 ```
 
-Do not add empty layers merely to match that filename list. Step Time already
-loads, analyzes, and diagnoses through `StepTimePipeline`, so its reporting
-section contains only orchestration and a pure projector. It has no parallel
-loader model and no second statistics implementation.
+Do not add extra loader, model, or formatter modules without a distinct owner
+or behavior. Step Time reuses its existing repository and analyzer instead of
+duplicating them under `measurements/` or `reporting/`.
 
 Register sections through `src/traceml_ai/reporting/final.py`. Keep the aggregator
 as a caller only; report assembly belongs in `reporting`.

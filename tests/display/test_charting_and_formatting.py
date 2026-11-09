@@ -24,15 +24,15 @@ GIB = float(1024**3)
 
 # --- formatting ----------------------------------------------------------
 def test_a_measured_value_never_prints_as_zero():
-    """27 MB is a reading. Printed with one decimal it reads as absent."""
+    """27 MiB is a reading. Printed with one decimal it reads as absent."""
     value, rest = formatting.format_gb_pair(27 * 1024 * 1024, None)
     assert value == "0.03"
-    assert rest == "GB"
+    assert rest == "GiB"
 
 
 def test_a_level_carries_its_denominator():
     value, rest = formatting.format_gb_pair(6.3 * GIB, 16.1 * GIB)
-    assert (value, rest) == ("6.3", "/ 16.1 GB")
+    assert (value, rest) == ("6.3", "/ 16.1 GiB")
 
 
 def test_absence_is_a_marker_not_a_number():
@@ -47,13 +47,13 @@ def test_a_garbled_value_does_not_raise():
     assert formatting.gb("many") is None
 
 
-def test_decimal_gb_conversion_preserves_the_moved_helper_contract():
+def test_binary_gib_conversion_keeps_absence_zero_and_failure_distinct():
     """Absence, measured zero, and failed conversion remain distinct."""
-    assert formatting.gb_si(None) is None
-    assert formatting.gb_si(0) == 0.0
-    assert formatting.gb_si(1_000_000_000) == 1.0
-    assert formatting.gb_si("not a number") is None
-    assert formatting.gb_si(10**400) is None
+    assert formatting.gb(None) is None
+    assert formatting.gb(0) == 0.0
+    assert formatting.gb(1024**3) == 1.0
+    assert formatting.gb("not a number") is None
+    assert formatting.gb(10**400) is None
 
 
 @pytest.mark.parametrize(

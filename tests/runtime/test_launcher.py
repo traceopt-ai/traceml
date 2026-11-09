@@ -802,6 +802,429 @@ def test_explicit_live_mode_allows_no_history() -> None:
     validate_launch_args(args)
 
 
+@pytest.mark.parametrize("command", ["run", "watch"])
+@pytest.mark.parametrize("value", ["0", "-1", "nan", "inf"])
+def test_validate_rejects_non_finite_or_non_positive_interval(
+    command: str, value: str
+) -> None:
+    args = build_parser().parse_args(
+        [command, "train.py", "--mode=cli", "--interval", value]
+    )
+
+    with pytest.raises(
+        SystemExit, match="--interval must be a finite number greater than 0"
+    ):
+        validate_launch_args(args)
+
+
+def test_validate_accepts_small_positive_interval() -> None:
+    args = build_parser().parse_args(
+        ["run", "train.py", "--mode=cli", "--interval", "0.1"]
+    )
+
+    validate_launch_args(args)
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "nan", "inf"])
+def test_serve_rejects_non_finite_or_non_positive_interval(
+    monkeypatch, tmp_path, value: str
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    run_aggregator = Mock(side_effect=AssertionError("must not start"))
+    monkeypatch.setattr(
+        "traceml_ai.aggregator.aggregator_main.run_aggregator",
+        run_aggregator,
+    )
+    from traceml_ai.launcher.commands import run_serve
+
+    args = build_parser().parse_args(["serve", "--interval", value])
+
+    with pytest.raises(
+        SystemExit, match="--interval must be a finite number greater than 0"
+    ):
+        run_serve(args)
+
+    run_aggregator.assert_not_called()
+
+
+def test_run_rejects_non_positive_interval_env_before_launch(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TRACEML_INTERVAL", "0")
+    script = tmp_path / "train.py"
+    script.write_text("print('unused')\n", encoding="utf-8")
+    forbidden = _forbid_guard_launch_side_effects(monkeypatch)
+    args = build_parser().parse_args(["run", str(script)])
+
+    with pytest.raises(SystemExit) as exc:
+        launch_process(str(script), args)
+
+    assert exc.value.code == 1
+    stderr = capsys.readouterr().err
+    assert "TRACEML_INTERVAL='0' must be a finite number" in stderr
+    for replacement in forbidden.values():
+        replacement.assert_not_called()
+
+
+class _AggregatorEnvCaptured(Exception):
+    pass
+
+
+def _aggregator_env(
+    monkeypatch,
+    tmp_path,
+    *flags: str,
+    command: str = "run",
+    clear_exporter_env: bool = True,
+) -> dict:
+    """Launch up to the aggregator spawn and return the env it gets."""
+    monkeypatch.chdir(tmp_path)
+    if clear_exporter_env:
+        for var in (
+            "TRACEML_EXPORTER",
+            "TRACEML_EXPORT_STREAMS",
+            "TRACEML_EXPORTER_HOSTNAME",
+        ):
+            monkeypatch.delenv(var, raising=False)
+    script = tmp_path / "train.py"
+    script.write_text("print('unused')\n", encoding="utf-8")
+    observed: dict = {}
+
+    def _start_aggregator(*, env, cwd):
+        observed.update(env)
+        raise _AggregatorEnvCaptured()
+
+    replacements = {
+        "install_shutdown_handlers": Mock(),
+        "ensure_aggregator_port_free": Mock(),
+        "start_aggregator_process": _start_aggregator,
+        "start_training_process": Mock(side_effect=AssertionError("train")),
+        "write_code_manifest": Mock(return_value=None),
+        "write_run_manifest": Mock(return_value=tmp_path / "manifest.json"),
+        "update_run_manifest": Mock(),
+    }
+    for name, replacement in replacements.items():
+        monkeypatch.setattr(launcher_commands, name, replacement)
+    args = build_parser().parse_args(
+        [
+            command,
+            str(script),
+            "--logs-dir",
+            str(tmp_path / "logs"),
+            "--run-name",
+            "exporter-env",
+            *flags,
+        ]
+    )
+
+    with pytest.raises(_AggregatorEnvCaptured):
+        launch_process(str(script), args)
+    return observed
+
+
+def test_run_passes_exporter_flags_to_the_aggregator_env(
+    monkeypatch, tmp_path
+) -> None:
+    env = _aggregator_env(
+        monkeypatch, tmp_path, "--exporter", "jsonl", "--exporter-hostname"
+    )
+
+    assert env["TRACEML_EXPORTER"] == "jsonl"
+    assert env["TRACEML_EXPORTER_HOSTNAME"] == "1"
+
+
+def test_run_exporter_env_defaults_off(monkeypatch, tmp_path) -> None:
+    env = _aggregator_env(monkeypatch, tmp_path)
+
+    assert env["TRACEML_EXPORTER"] == ""
+    assert env["TRACEML_EXPORTER_HOSTNAME"] == "0"
+
+
+def test_watch_does_not_offer_step_time_exporter_flags() -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["watch", "train.py", "--exporter", "jsonl"])
+
+
+def test_watch_keeps_step_time_exporter_off_from_the_environment(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setenv("TRACEML_EXPORTER", "jsonl")
+    monkeypatch.setenv("TRACEML_EXPORTER_HOSTNAME", "1")
+
+    env = _aggregator_env(
+        monkeypatch,
+        tmp_path,
+        command="watch",
+        clear_exporter_env=False,
+    )
+
+    assert env["TRACEML_EXPORTER"] == ""
+    assert env["TRACEML_EXPORTER_HOSTNAME"] == "0"
+
+
+def test_serve_resolves_exporter_flags(monkeypatch, tmp_path) -> None:
+    monkeypatch.chdir(tmp_path)
+    for var in ("TRACEML_EXPORTER", "TRACEML_EXPORTER_HOSTNAME"):
+        monkeypatch.delenv(var, raising=False)
+    parser = build_parser()
+
+    flagged = _resolve_serve_settings(
+        parser.parse_args(
+            ["serve", "--exporter", "jsonl", "--exporter-hostname"]
+        )
+    )
+    default = _resolve_serve_settings(parser.parse_args(["serve"]))
+
+    assert flagged.exporter == "jsonl"
+    assert flagged.exporter_hostname is True
+    assert default.exporter == ""
+    assert default.exporter_hostname is False
+
+
+def test_run_rejects_an_unknown_exporter_before_launch(
+    monkeypatch, tmp_path
+) -> None:
+    from traceml_ai.launcher import cli
+
+    monkeypatch.chdir(tmp_path)
+    script = tmp_path / "train.py"
+    script.write_text("print('unused')\n", encoding="utf-8")
+    forbidden = _forbid_guard_launch_side_effects(monkeypatch)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["traceml", "run", str(script), "--exporter", "unsupported"],
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+
+    assert str(exc.value) == (
+        "[TraceML] Unknown exporter: 'unsupported'. "
+        "Supported: ['jsonl'] or 'module:factory'"
+    )
+    for replacement in forbidden.values():
+        replacement.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "flags, expected",
+    [
+        (
+            ("--export-streams", "step_time, step_memory"),
+            "step_time,step_memory",
+        ),
+        ((), "step_time"),
+    ],
+)
+def test_run_passes_export_streams_to_the_aggregator_env(
+    monkeypatch, tmp_path, flags, expected
+) -> None:
+    env = _aggregator_env(monkeypatch, tmp_path, *flags)
+
+    assert env["TRACEML_EXPORT_STREAMS"] == expected
+
+
+@pytest.mark.parametrize(
+    "value, message",
+    [
+        ("step_time,gpu", "[TraceML] Unknown export stream: 'gpu'. "),
+        (" , ", "[TraceML] export_streams must name at least one stream. "),
+    ],
+)
+def test_run_rejects_unknown_export_streams_before_launch(
+    monkeypatch, tmp_path, value, message
+) -> None:
+    from traceml_ai.launcher import cli
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TRACEML_EXPORT_STREAMS", raising=False)
+    script = tmp_path / "train.py"
+    script.write_text("print('unused')\n", encoding="utf-8")
+    forbidden = _forbid_guard_launch_side_effects(monkeypatch)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["traceml", "run", str(script), "--export-streams", value],
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+
+    assert str(exc.value) == message + (
+        "Supported: ['step_time', 'step_memory', 'process', 'system', 'all']"
+    )
+    for replacement in forbidden.values():
+        replacement.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        ":make",
+        "mod:",
+        ":",
+        " mod : ",
+        "a:b:c",
+        "my mod:fac",
+        "1mod:make",
+        "mod:1make",
+    ],
+)
+def test_run_rejects_a_malformed_factory_value(
+    monkeypatch, tmp_path, value: str
+) -> None:
+    with pytest.raises(SystemExit) as exc:
+        _aggregator_env(monkeypatch, tmp_path, "--exporter", value)
+
+    assert str(exc.value) == (
+        f"[TraceML] Unknown exporter: {value.strip()!r}. "
+        "Supported: ['jsonl'] or 'module:factory'"
+    )
+
+
+def test_run_passes_a_factory_value_without_importing_it(
+    monkeypatch, tmp_path
+) -> None:
+    assert "mod" not in sys.modules
+
+    env = _aggregator_env(monkeypatch, tmp_path, "--exporter", " mod:make ")
+
+    assert env["TRACEML_EXPORTER"] == "mod:make"
+    assert "mod" not in sys.modules
+
+
+def test_run_passes_a_dotted_factory_module(monkeypatch, tmp_path) -> None:
+    env = _aggregator_env(
+        monkeypatch, tmp_path, "--exporter", "pkg.sub_mod:make_exporter"
+    )
+
+    assert env["TRACEML_EXPORTER"] == "pkg.sub_mod:make_exporter"
+    assert "pkg" not in sys.modules
+
+
+def test_run_checks_a_factory_value_from_the_environment(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setenv("TRACEML_EXPORTER", "my_exporters:make")
+    env = _aggregator_env(monkeypatch, tmp_path, clear_exporter_env=False)
+    assert env["TRACEML_EXPORTER"] == "my_exporters:make"
+
+    monkeypatch.setenv("TRACEML_EXPORTER", "my_exporters:1make")
+    with pytest.raises(SystemExit, match="'my_exporters:1make'"):
+        _aggregator_env(monkeypatch, tmp_path, clear_exporter_env=False)
+
+
+def test_run_strips_the_exporter_name(monkeypatch, tmp_path) -> None:
+    validate_launch_args(
+        build_parser().parse_args(
+            ["run", "train.py", "--mode=cli", "--exporter", " jsonl "]
+        )
+    )
+
+    env = _aggregator_env(monkeypatch, tmp_path, "--exporter", " jsonl ")
+
+    assert env["TRACEML_EXPORTER"] == "jsonl"
+
+
+def test_run_rejects_an_unknown_exporter_from_the_environment(
+    monkeypatch, tmp_path
+) -> None:
+    from traceml_ai.launcher import cli
+
+    monkeypatch.chdir(tmp_path)
+    script = tmp_path / "train.py"
+    script.write_text("print('unused')\n", encoding="utf-8")
+    monkeypatch.setenv("TRACEML_EXPORTER", "unsupported")
+    forbidden = _forbid_guard_launch_side_effects(monkeypatch)
+    monkeypatch.setattr(sys, "argv", ["traceml", "run", str(script)])
+
+    with pytest.raises(SystemExit, match="Unknown exporter: 'unsupported'"):
+        cli.main()
+
+    for replacement in forbidden.values():
+        replacement.assert_not_called()
+
+
+def test_serve_rejects_an_unknown_exporter(monkeypatch, tmp_path) -> None:
+    monkeypatch.chdir(tmp_path)
+    run_aggregator = Mock(side_effect=AssertionError("must not start"))
+    monkeypatch.setattr(
+        "traceml_ai.aggregator.aggregator_main.run_aggregator",
+        run_aggregator,
+    )
+    from traceml_ai.launcher.commands import run_serve
+
+    args = build_parser().parse_args(["serve", "--exporter", "unsupported"])
+
+    with pytest.raises(SystemExit, match="Unknown exporter: 'unsupported'"):
+        run_serve(args)
+
+    run_aggregator.assert_not_called()
+
+
+def test_serve_rejects_an_unknown_exporter_from_yaml(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TRACEML_EXPORTER", raising=False)
+    (tmp_path / "traceml.yaml").write_text(
+        "exporter: unsupported\n", encoding="utf-8"
+    )
+    run_aggregator = Mock(side_effect=AssertionError("must not start"))
+    monkeypatch.setattr(
+        "traceml_ai.aggregator.aggregator_main.run_aggregator",
+        run_aggregator,
+    )
+    from traceml_ai.launcher.commands import run_serve
+
+    args = build_parser().parse_args(["serve"])
+
+    with pytest.raises(SystemExit, match="Unknown exporter: 'unsupported'"):
+        run_serve(args)
+
+    run_aggregator.assert_not_called()
+
+
+def test_serve_accepts_a_factory_exporter(monkeypatch, tmp_path) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TRACEML_EXPORTER", raising=False)
+    run_aggregator = Mock(return_value=0)
+    monkeypatch.setattr(
+        "traceml_ai.aggregator.aggregator_main.run_aggregator",
+        run_aggregator,
+    )
+    from traceml_ai.launcher.commands import run_serve
+
+    args = build_parser().parse_args(
+        ["serve", "--exporter", "my_exporters:make"]
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        run_serve(args)
+
+    assert exc.value.code == 0
+    (settings,) = run_aggregator.call_args.args
+    assert settings.exporter == "my_exporters:make"
+    assert "my_exporters" not in sys.modules
+
+
+def test_serve_accepts_a_factory_exporter_from_yaml(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TRACEML_EXPORTER", raising=False)
+    (tmp_path / "traceml.yaml").write_text(
+        'exporter: " my_exporters:make "\n', encoding="utf-8"
+    )
+
+    settings = _resolve_serve_settings(build_parser().parse_args(["serve"]))
+
+    assert settings.exporter == "my_exporters:make"
+    assert "my_exporters" not in sys.modules
+
+
 @pytest.mark.parametrize("value", ["0", "-1", "nan", "inf"])
 def test_validate_rejects_non_finite_or_non_positive_finalize_timeout(
     value: str,
@@ -812,6 +1235,92 @@ def test_validate_rejects_non_finite_or_non_positive_finalize_timeout(
 
     with pytest.raises(SystemExit, match="--finalize-timeout-sec"):
         validate_launch_args(args)
+
+
+@pytest.mark.parametrize("flag", ["--master-port", "--aggregator-port"])
+def test_validate_rejects_port_above_65535(flag: str) -> None:
+    args = build_parser().parse_args(
+        ["run", "train.py", "--mode=cli", flag, "65536"]
+    )
+
+    with pytest.raises(SystemExit, match=f"{flag} must be <= 65535"):
+        validate_launch_args(args)
+
+
+@pytest.mark.parametrize("flag", ["--master-port", "--aggregator-port"])
+def test_validate_accepts_highest_port(flag: str) -> None:
+    args = build_parser().parse_args(
+        ["run", "train.py", "--mode=cli", flag, "65535"]
+    )
+
+    validate_launch_args(args)
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "65536", "70000"])
+def test_validate_rejects_out_of_range_dashboard_port(value: str) -> None:
+    args = build_parser().parse_args(
+        ["run", "train.py", "--mode=cli", "--dashboard-port", value]
+    )
+
+    with pytest.raises(
+        SystemExit, match="--dashboard-port must be an integer between"
+    ):
+        validate_launch_args(args)
+
+
+def test_validate_accepts_highest_dashboard_port() -> None:
+    args = build_parser().parse_args(
+        ["run", "train.py", "--mode=cli", "--dashboard-port", "65535"]
+    )
+
+    validate_launch_args(args)
+
+
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        ("65536", "--aggregator-port must be <= 65535"),
+        ("0", "--aggregator-port must be >= 1"),
+    ],
+)
+def test_serve_rejects_out_of_range_aggregator_port(
+    monkeypatch, tmp_path, value: str, message: str
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    run_aggregator = Mock(side_effect=AssertionError("must not start"))
+    monkeypatch.setattr(
+        "traceml_ai.aggregator.aggregator_main.run_aggregator",
+        run_aggregator,
+    )
+    from traceml_ai.launcher.commands import run_serve
+
+    args = build_parser().parse_args(["serve", "--aggregator-port", value])
+
+    with pytest.raises(SystemExit, match=f"\\[TraceML\\] ERROR: {message}"):
+        run_serve(args)
+
+    run_aggregator.assert_not_called()
+
+
+def test_run_rejects_out_of_range_dashboard_port_env_before_launch(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TRACEML_DASHBOARD_PORT", "70000")
+    script = tmp_path / "train.py"
+    script.write_text("print('unused')\n", encoding="utf-8")
+    forbidden = _forbid_guard_launch_side_effects(monkeypatch)
+    args = build_parser().parse_args(["run", str(script)])
+
+    with pytest.raises(SystemExit) as exc:
+        launch_process(str(script), args)
+
+    assert exc.value.code == 1
+    stderr = capsys.readouterr().err
+    assert "TRACEML_DASHBOARD_PORT='70000'" in stderr
+    assert "between 1 and 65535" in stderr
+    for replacement in forbidden.values():
+        replacement.assert_not_called()
 
 
 def _write_guard_config(tmp_path: Path, guard: str) -> None:

@@ -44,12 +44,16 @@ def _run(
             if dies is not None and rank == dies[0] and seq > dies[1]:
                 continue
             db.insert(
-                recv_ts_ns=int((1_700_000_000 + seq * cadence_s) * 1e9),
+                observed_timestamp_unix_ns=int(
+                    (1_700_000_000 + seq * cadence_s) * 1e9
+                ),
                 rank=rank,
                 global_rank=rank,
                 node_rank=0,
                 seq=seq,
-                sample_ts_s=1_700_000_000.0 + seq * cadence_s,
+                timestamp_unix_ns=round(
+                    (1_700_000_000.0 + seq * cadence_s) * 1_000_000_000
+                ),
                 cpu_percent=(700.0 if rank == hot_rank else 200.0),
                 cpu_logical_core_count=cores,
                 ram_used_bytes=(2.0 + rank * 0.5) * GB,
@@ -96,8 +100,8 @@ def test_an_unknown_age_is_counted_apart_from_live_and_stale(process_db):
     """The three states stay three; none of them absorbs another.
 
     `FreshnessPolicy.state_of` answers fresh / stale / unknown, and an
-    unknown age means a rank sent data with no usable arrival clock. Our
-    own writer cannot produce that (`recv_ts_ns` is `INTEGER NOT NULL`),
+    unknown age means a rank sent data with no usable observation clock. Our
+    own writer cannot produce that (`observed_timestamp_unix_ns` is `INTEGER NOT NULL`),
     so this is a guard rather than a live path, and it is asserted here
     rather than through the database for exactly that reason.
 
@@ -205,6 +209,7 @@ def test_a_short_run_stays_on_the_recent_view(process_db):
     assert chart.mode == "recent"
     assert chart.is_retained is False
     assert len(chart.traces) == 2
+    assert chart.traces[0].timestamps[0] == 1_700_000_002.0
     assert all(trace.timestamps for trace in chart.traces)
     assert all(
         len(trace.timestamps) == len(trace.values) for trace in chart.traces
@@ -370,12 +375,16 @@ def test_an_even_run_leaves_the_rows_shut(process_db):
     for seq in range(1, 31):
         for rank in range(4):
             process_db.insert(
-                recv_ts_ns=int((1_700_000_000 + seq * 2) * 1e9),
+                observed_timestamp_unix_ns=int(
+                    (1_700_000_000 + seq * 2) * 1e9
+                ),
                 rank=rank,
                 global_rank=rank,
                 node_rank=0,
                 seq=seq,
-                sample_ts_s=1_700_000_000.0 + seq * 2,
+                timestamp_unix_ns=round(
+                    (1_700_000_000.0 + seq * 2) * 1_000_000_000
+                ),
                 cpu_percent=200.0,
                 cpu_logical_core_count=8,
                 ram_used_bytes=2.0 * GB,
@@ -407,12 +416,14 @@ def test_the_recent_window_is_a_duration_not_a_sample_count(process_db):
     # 200 samples at 0.5 s: 100 s of history, of which 60 s is in window.
     for seq in range(1, 201):
         process_db.insert(
-            recv_ts_ns=int((1_700_000_000 + seq * 0.5) * 1e9),
+            observed_timestamp_unix_ns=int((1_700_000_000 + seq * 0.5) * 1e9),
             rank=0,
             global_rank=0,
             node_rank=0,
             seq=seq,
-            sample_ts_s=1_700_000_000.0 + seq * 0.5,
+            timestamp_unix_ns=round(
+                (1_700_000_000.0 + seq * 0.5) * 1_000_000_000
+            ),
             cpu_percent=200.0,
             cpu_logical_core_count=8,
             ram_used_bytes=2.0 * GB,
@@ -423,12 +434,14 @@ def test_the_recent_window_is_a_duration_not_a_sample_count(process_db):
         db_path=process_db.path, sampler_interval_s=0.5
     )
     with computer._db.connect() as conn:
-        newest = computer._db.newest_sample_ts(conn)
+        newest = computer._db.newest_timestamp_unix_ns(conn)
         rows = computer._db.fetch_recent_rank_window(
-            conn, window_s=RECENT_WINDOW_S, newest_ts=newest
+            conn,
+            window_s=RECENT_WINDOW_S,
+            newest_timestamp_unix_ns=newest,
         )
-    stamps = [r["sample_ts_s"] for r in rows]
-    span = max(stamps) - min(stamps)
+    stamps = [r["timestamp_unix_ns"] for r in rows]
+    span = (max(stamps) - min(stamps)) / 1_000_000_000
     assert span <= RECENT_WINDOW_S
     # A sample-count window would have taken all 200 rows, i.e. 100 s.
     assert len(rows) < 200
@@ -446,12 +459,14 @@ def test_the_rss_tile_shows_the_median_not_the_newest_sample(process_db):
         # Steady at 8 GB, then one teardown sample at 1 GB.
         used = 1.0 * GB if seq == 30 else 8.0 * GB
         process_db.insert(
-            recv_ts_ns=int((1_700_000_000 + seq * 2) * 1e9),
+            observed_timestamp_unix_ns=int((1_700_000_000 + seq * 2) * 1e9),
             rank=0,
             global_rank=0,
             node_rank=0,
             seq=seq,
-            sample_ts_s=1_700_000_000.0 + seq * 2,
+            timestamp_unix_ns=round(
+                (1_700_000_000.0 + seq * 2) * 1_000_000_000
+            ),
             cpu_percent=200.0,
             cpu_logical_core_count=8,
             ram_used_bytes=used,
@@ -475,12 +490,16 @@ def test_reserved_selects_on_each_rank_s_peak_not_its_newest(process_db):
             (1, 30.0 * GB if seq < 15 else 2.0 * GB),
         ):
             process_db.insert(
-                recv_ts_ns=int((1_700_000_000 + seq * 2) * 1e9),
+                observed_timestamp_unix_ns=int(
+                    (1_700_000_000 + seq * 2) * 1e9
+                ),
                 rank=rank,
                 global_rank=rank,
                 node_rank=0,
                 seq=seq,
-                sample_ts_s=1_700_000_000.0 + seq * 2,
+                timestamp_unix_ns=round(
+                    (1_700_000_000.0 + seq * 2) * 1_000_000_000
+                ),
                 cpu_percent=200.0,
                 cpu_logical_core_count=8,
                 ram_used_bytes=2.0 * GB,
@@ -515,12 +534,16 @@ def test_allocated_and_reserved_come_from_the_same_rank_and_row(process_db):
                 2: (6.0 * GB, 2.0 * GB),
             }[rank]
             process_db.insert(
-                recv_ts_ns=int((1_700_000_000 + seq * 2) * 1e9),
+                observed_timestamp_unix_ns=int(
+                    (1_700_000_000 + seq * 2) * 1e9
+                ),
                 rank=rank,
                 global_rank=rank,
                 node_rank=0,
                 seq=seq,
-                sample_ts_s=1_700_000_000.0 + seq * 2,
+                timestamp_unix_ns=round(
+                    (1_700_000_000.0 + seq * 2) * 1_000_000_000
+                ),
                 cpu_percent=200.0,
                 cpu_logical_core_count=8,
                 ram_used_bytes=2.0 * GB,
@@ -554,12 +577,16 @@ def test_the_total_sums_ranks_on_their_own_clocks(process_db):
     for seq in range(1, 21):
         for rank, offset, cpu in ((0, 0.0, 200.0), (1, 1.0, 400.0)):
             process_db.insert(
-                recv_ts_ns=int((1_700_000_000 + seq * 2 + offset) * 1e9),
+                observed_timestamp_unix_ns=int(
+                    (1_700_000_000 + seq * 2 + offset) * 1e9
+                ),
                 rank=rank,
                 global_rank=rank,
                 node_rank=0,
                 seq=seq,
-                sample_ts_s=1_700_000_000.0 + seq * 2 + offset,
+                timestamp_unix_ns=round(
+                    (1_700_000_000.0 + seq * 2 + offset) * 1_000_000_000
+                ),
                 cpu_percent=cpu,
                 cpu_logical_core_count=8,
                 ram_used_bytes=2.0 * GB,

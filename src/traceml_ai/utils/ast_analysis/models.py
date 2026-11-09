@@ -97,9 +97,9 @@ class HFTrainingArgumentsFinding:
     learning_rate: Optional[float] = None
     weight_decay: Optional[float] = None
     optim: Optional[str] = None
-    logging_steps: Optional[int] = None
-    save_steps: Optional[int] = None
-    eval_steps: Optional[int] = None
+    logging_steps: Optional[float] = None
+    save_steps: Optional[float] = None
+    eval_steps: Optional[float] = None
     max_steps: Optional[int] = None
     num_train_epochs: Optional[float] = None
     gradient_checkpointing: Optional[bool] = None

@@ -20,8 +20,15 @@ import time
 from pathlib import Path
 from typing import Any, BinaryIO, Callable, Iterable, Mapping, Optional
 
+from traceml_ai.aggregator.export import (
+    DEFAULT_EXPORT_STREAMS,
+    EXPORTER_NAMES,
+    parse_export_streams,
+    parse_exporter_factory,
+)
 from traceml_ai.launcher.launch_config import (
     TORCH_LAUNCHER_REQUIRED,
+    AggregatorLaunchConfig,
     DistributedLaunchConfig,
     RunIdentity,
     TorchrunLaunchConfig,
@@ -526,6 +533,43 @@ def _require_run_torch_support(args: argparse.Namespace) -> None:
     )
 
 
+def _require_positive_interval(args: argparse.Namespace) -> None:
+    interval = getattr(args, "interval", None)
+    if interval is None:
+        return
+    from traceml_ai.config.yaml_loader import is_finite_positive
+
+    if not is_finite_positive(interval):
+        raise SystemExit(
+            "[TraceML] ERROR: --interval must be a finite number greater "
+            "than 0."
+        )
+
+
+def _require_known_exporter(exporter: object) -> str:
+    """Return a normalized supported exporter name, or exit clearly."""
+    name = str(exporter or "").strip()
+    if not name or name in EXPORTER_NAMES:
+        return name
+    # A ``module:factory`` value is imported by the aggregator, never here.
+    if parse_exporter_factory(name) is not None:
+        return name
+    raise SystemExit(
+        f"[TraceML] Unknown exporter: {name!r}. "
+        f"Supported: {list(EXPORTER_NAMES)} or 'module:factory'"
+    )
+
+
+def _require_known_export_streams(value: object) -> str:
+    """Return the stripped stream names, comma joined, or exit clearly."""
+    try:
+        parse_export_streams(value)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from None
+    names = [name.strip() for name in str(value).split(",")]
+    return ",".join(dict.fromkeys(name for name in names if name))
+
+
 def validate_launch_args(args: argparse.Namespace) -> None:
     """Validate cross-argument constraints for TraceML launch commands."""
     if _disable_traceml_requested(args, os.environ):
@@ -571,6 +615,7 @@ def validate_launch_args(args: argparse.Namespace) -> None:
             "[TraceML] ERROR: --html-report requires history. "
             "Remove --no-history to enable HTML report generation."
         )
+    _require_positive_interval(args)
     finalize_timeout_sec = getattr(args, "finalize_timeout_sec", None)
     if finalize_timeout_sec is not None:
         from traceml_ai.config.yaml_loader import is_finite_positive
@@ -579,6 +624,15 @@ def validate_launch_args(args: argparse.Namespace) -> None:
             raise SystemExit(
                 "[TraceML] ERROR: --finalize-timeout-sec must be a finite "
                 "number greater than 0."
+            )
+    dashboard_port = getattr(args, "dashboard_port", None)
+    if dashboard_port is not None:
+        from traceml_ai.config.yaml_loader import MAX_PORT, is_valid_port
+
+        if not is_valid_port(dashboard_port):
+            raise SystemExit(
+                "[TraceML] ERROR: --dashboard-port must be an integer "
+                f"between 1 and {MAX_PORT}."
             )
     trace_max_steps = getattr(args, "trace_max_steps", None)
     if trace_max_steps is not None and int(trace_max_steps) <= 0:
@@ -646,6 +700,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     # --no-history inverts history_enabled: True flag → False override, absent → None.
     # Distributed/identity settings (nproc, nnodes, master/aggregator address,
     # run name) are owned by the typed launch configs below, not traceml.yaml.
+    exporter_supported = getattr(args, "command", None) != "watch"
     cli_overrides = {
         "mode": args.mode,
         "interval": args.interval,
@@ -658,13 +713,34 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         "dashboard_auto_open": (
             False if args.no_dashboard_auto_open else None
         ),
+        "exporter": (
+            getattr(args, "exporter", None) if exporter_supported else ""
+        ),
+        "export_streams": (
+            getattr(args, "export_streams", None)
+            if exporter_supported
+            else DEFAULT_EXPORT_STREAMS
+        ),
+        "exporter_hostname": (
+            getattr(args, "exporter_hostname", None)
+            if exporter_supported
+            else False
+        ),
     }
 
-    cfg = resolve_config(
-        cli_overrides=cli_overrides,
-        parent_env=launcher_env,
-        yaml_config=yaml_cfg,
-        defaults=launch_defaults,
+    try:
+        cfg = resolve_config(
+            cli_overrides=cli_overrides,
+            parent_env=launcher_env,
+            yaml_config=yaml_cfg,
+            defaults=launch_defaults,
+        )
+    except ValueError as exc:
+        print(f"[TraceML] ERROR: {exc}", file=sys.stderr)
+        raise SystemExit(1)
+    cfg["exporter"] = _require_known_exporter(cfg.get("exporter"))
+    cfg["export_streams"] = _require_known_export_streams(
+        cfg.get("export_streams")
     )
     cfg["finalize_timeout_sec"] = float(
         cfg.get("finalize_timeout_sec") or DEFAULT_FINALIZE_TIMEOUT_SEC
@@ -779,6 +855,9 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     env["TRACEML_HTML_REPORT"] = (
         "1" if getattr(args, "html_report", False) else "0"
     )
+    env["TRACEML_EXPORTER"] = str(cfg["exporter"]).strip()
+    env["TRACEML_EXPORT_STREAMS"] = str(cfg["export_streams"])
+    env["TRACEML_EXPORTER_HOSTNAME"] = "1" if cfg["exporter_hostname"] else "0"
     env["NODE_RANK"] = str(torchrun_cfg.node_rank)
 
     env.update(launch_context.to_env())
@@ -1415,8 +1494,9 @@ def _resolve_serve_settings(args: argparse.Namespace):
 
     UI/telemetry settings route through the shared config resolver
     (CLI > env > traceml.yaml > default), the same resolver the launcher uses.
-    Aggregator host/bind-host/port come from serve's own flags, and run
-    identity reuses the launcher's ``RunIdentity``.
+    Aggregator host/bind-host/port come from serve's own flags, validated by
+    the launcher's ``AggregatorLaunchConfig``, and run identity reuses the
+    launcher's ``RunIdentity``.
     """
     from traceml_ai.config.yaml_loader import (
         BUILT_IN_DEFAULTS,
@@ -1443,12 +1523,19 @@ def _resolve_serve_settings(args: argparse.Namespace):
         "enable_logging": args.enable_logging,
         "logs_dir": args.logs_dir,
         "history_retention": getattr(args, "history_retention", None),
+        "exporter": getattr(args, "exporter", None),
+        "export_streams": getattr(args, "export_streams", None),
+        "exporter_hostname": getattr(args, "exporter_hostname", None),
     }
     cfg = resolve_config(
         cli_overrides=cli_overrides,
         parent_env=os.environ,
         yaml_config=yaml_cfg,
         defaults=BUILT_IN_DEFAULTS,
+    )
+    cfg["exporter"] = _require_known_exporter(cfg.get("exporter"))
+    cfg["export_streams"] = _require_known_export_streams(
+        cfg.get("export_streams")
     )
 
     run_identity = RunIdentity.from_args(
@@ -1457,9 +1544,10 @@ def _resolve_serve_settings(args: argparse.Namespace):
         require_explicit=False,
     )
 
-    connect_host = str(getattr(args, "aggregator_host", None) or "127.0.0.1")
-    bind_host = str(getattr(args, "aggregator_bind_host", None) or "127.0.0.1")
-    port = int(getattr(args, "aggregator_port", 29765))
+    aggregator_cfg = AggregatorLaunchConfig.from_args(
+        args,
+        torchrun=TorchrunLaunchConfig(),
+    )
 
     # Expected worker count so the aggregator waits for ALL ranks before
     # finalizing (and warns about ranks that never report). Prefer explicit
@@ -1489,6 +1577,9 @@ def _resolve_serve_settings(args: argparse.Namespace):
         dashboard_port=int(cfg["dashboard_port"]),
         dashboard_auto_open=bool(cfg["dashboard_auto_open"]),
         finalize_timeout_sec=float(cfg["finalize_timeout_sec"]),
+        exporter=str(cfg["exporter"]),
+        export_streams=str(cfg["export_streams"]),
+        exporter_hostname=bool(cfg["exporter_hostname"]),
         session_id=run_identity.session_id,
         # With --run-name/--session-id, drop ranks that name a different run
         # explicitly. A plain `python train.py` makes up its own id and is
@@ -1496,9 +1587,9 @@ def _resolve_serve_settings(args: argparse.Namespace):
         enforce_session_id=run_identity.source != "generated",
         admit_generated_session_id=True,
         aggregator=AggregatorTransportSettings(
-            connect_host=connect_host,
-            bind_host=bind_host,
-            port=port,
+            connect_host=aggregator_cfg.connect_host,
+            bind_host=aggregator_cfg.bind_host,
+            port=aggregator_cfg.port,
         ),
     )
 
@@ -1511,6 +1602,7 @@ def run_serve(args: argparse.Namespace) -> None:
     prints the reachable endpoint, blocks until SIGINT/SIGTERM, shuts down
     cleanly, and preserves final-summary behavior.
     """
+    _require_positive_interval(args)
     try:
         settings = _resolve_serve_settings(args)
     except ValueError as exc:
@@ -1531,6 +1623,8 @@ def run_inspect(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
     decoder = MsgpackDecoder()
+    records = 0
+    truncated: Optional[str] = None
     with open(path, "rb") as f:
         try:
             while True:
@@ -1538,21 +1632,16 @@ def run_inspect(args: argparse.Namespace) -> None:
                 if not header:
                     break
                 if len(header) < 4:
-                    print(
-                        "[TraceML] WARNING: truncated frame header",
-                        file=sys.stderr,
-                    )
+                    truncated = "header"
                     break
                 length = struct.unpack("!I", header)[0]
                 payload = f.read(length)
                 if len(payload) < length:
-                    print(
-                        "[TraceML] WARNING: truncated frame payload",
-                        file=sys.stderr,
-                    )
+                    truncated = "payload"
                     break
                 record = decoder.decode(payload)
                 print(json.dumps(record, indent=2))
+                records += 1
         except Exception as exc:
             _log_launcher_exception(f"inspect failed for {path}", exc)
             print(
@@ -1560,6 +1649,15 @@ def run_inspect(args: argparse.Namespace) -> None:
                 file=sys.stderr,
             )
             raise SystemExit(1)
+    if truncated is not None:
+        # The complete records above are still printed; a cut-off frame,
+        # such as a process killed mid-write, fails the command.
+        print(
+            f"[TraceML] ERROR: truncated frame {truncated} after "
+            f"{records} records in {path}",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
 
 
 _CI_POLICY_EXIT_CODES = {

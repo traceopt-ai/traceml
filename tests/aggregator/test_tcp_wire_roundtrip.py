@@ -75,6 +75,7 @@ def _make_aggregator(
     agg._drain_lock = threading.Lock()
     agg._tcp_server = tcp_server
     agg._sqlite_writer = writer
+    agg._export_worker = None
     return agg
 
 
@@ -82,7 +83,7 @@ def _system_envelope(*, global_rank: int = 0) -> dict:
     """One canonical SystemSampler envelope built from real wire types."""
     sample = SystemSample(
         sample_idx=1,
-        timestamp=time.time(),
+        timestamp_unix_ns=time.time_ns(),
         cpu_percent=12.5,
         ram_used=1_000_000.0,
         ram_total=8_000_000.0,
@@ -100,7 +101,6 @@ def _system_envelope(*, global_rank: int = 0) -> dict:
             "hostname": "test-host",
             "pid": 4242,
             "sampler": "SystemSampler",
-            "timestamp": time.time(),
         },
         "body": {"tables": {"SystemTable": [sample.to_wire()]}},
     }

@@ -28,36 +28,14 @@ NA = "n/a"
 _BYTES_PER_GB = float(1024**3)
 
 
-def gb_si(value: Any) -> Optional[float]:
-    """Bytes as decimal gigabytes (10^9), or ``None``.
-
-    Distinct from :func:`gb`, which divides by 1024**3. The System card
-    has always used this one and the Process card the other, so the same
-    device renders 7.4% apart on one page depending on the card. Keeping
-    both under names that say which is which is deliberate: collapsing
-    them would move a user-visible number inside a file move. The
-    unification is tracked separately.
-    """
-    if value is None:
-        return None
-    try:
-        return float(value) / 1e9
-    except (TypeError, ValueError, OverflowError):
-        # OverflowError is in the list because the helper this replaced
-        # caught everything: an integer too large for a float returned
-        # None rather than crashing the card. SQLite cannot produce one
-        # (INTEGER is 64-bit), but the equivalence should not depend on
-        # that.
-        return None
-
-
 def gb(value: Any) -> Optional[float]:
-    """Bytes as gigabytes, or ``None`` when the value is not a number."""
+    """Bytes as GiB (1024**3), or ``None`` when the value is not a number."""
     if value is None:
         return None
     try:
         return float(value) / _BYTES_PER_GB
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # An integer too large for a float renders as absence, not a crash.
         return None
 
 
@@ -72,10 +50,10 @@ def num(value: Any, fmt: str = "{:.0f}") -> str:
 
 
 def format_gb_pair(used_bytes: Any, total_bytes: Any) -> Tuple[str, str]:
-    """A level against its capacity: ``('6.3', '/ 16.1 GB')``.
+    """A level against its capacity: ``('6.3', '/ 16.1 GiB')``.
 
     A measured value never renders as "0.0": a trainer process holding
-    27 MB is a real reading, and printing it with one decimal makes it
+    27 MiB is a real reading, and printing it with one decimal makes it
     indistinguishable from the marker this module uses for absence.
     Sub-gigabyte levels keep two decimals instead.
     """
@@ -85,9 +63,9 @@ def format_gb_pair(used_bytes: Any, total_bytes: Any) -> Tuple[str, str]:
     shown = f"{used:.2f}" if 0 < used < 1 else f"{used:.1f}"
     total = gb(total_bytes)
     if total is None or total <= 0:
-        return (shown, "GB")
+        return (shown, "GiB")
     total_s = f"{total:.0f}" if total >= 100 else f"{total:.1f}"
-    return (shown, f"/ {total_s} GB")
+    return (shown, f"/ {total_s} GiB")
 
 
 def format_span(seconds: Optional[float]) -> str:
@@ -165,7 +143,6 @@ __all__ = [
     "NA",
     "format_age",
     "format_gb_pair",
-    "gb_si",
     "format_percent",
     "format_span",
     "format_elapsed",

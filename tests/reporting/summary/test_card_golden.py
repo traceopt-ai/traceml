@@ -1901,8 +1901,8 @@ GOLDENS = {
 |  Step Time           200.4 ms  100%                           ||                                                                                         |
 |  ├─ Input Wait       128.0 ms   64%  ◀  cause                 ||                                                                                         |
 |  ├─ Compute           68.0 ms   34%                           ||  avg per-step peak           avg                                                        |
-|  │  ├─ Forward        24.0 ms   12%                           ||  Allocated                   2.9 GB                                                     |
-|  │  ├─ Backward       38.0 ms   19%                           ||  Reserved                    3.2 GB                                                     |
+|  │  ├─ Forward        24.0 ms   12%                           ||  Allocated                   2.7 GiB                                                    |
+|  │  ├─ Backward       38.0 ms   19%                           ||  Reserved                    3.0 GiB                                                    |
 |  │  └─ Optimizer       6.0 ms    3%                           ||                                                                                         |
 |  ├─ H2D                0.4 ms   <1%                           ||                                                                                         |
 |  └─ Residual           3.6 ms    2%                           ||                                                                                         |
@@ -1913,9 +1913,9 @@ GOLDENS = {
 |                                                               ||                                                                                         |
 |                         avg                                   ||                       avg                                                               |
 |  CPU                    18%                                   ||  CPU capacity         14%                                                               |
-|  RAM used               6.2 GB (19%)                          ||  RSS used             3.1 GB (10%)                                                      |
-|  GPU util               24%                                   ||  CUDA allocated       2.9 GB                                                            |
-|  GPU memory/device      3.3 GB (21%)                          ||  CUDA reserved        3.2 GB (20%)                                                      |
+|  RAM used               5.8 GiB (19%)                         ||  RSS used             2.9 GiB (10%)                                                     |
+|  GPU util               24%                                   ||  CUDA allocated       2.7 GiB                                                           |
+|  GPU memory/device      3.1 GiB (21%)                         ||  CUDA reserved        3.0 GiB (20%)                                                     |
 |  GPU temperature        42C                                   ||                                                                                         |
 |  GPU power              58W                                   ||                                                                                         |
 |                                                                                                                                                          |
@@ -1936,8 +1936,8 @@ GOLDENS = {
 |  Step Time           191.0 ms  100%                           ||                                                                                         |
 |  ├─ Input Wait         2.1 ms    1%                           ||                                                                                         |
 |  ├─ Compute          185.0 ms   97%                           ||  avg per-step peak           avg                                                        |
-|  │  ├─ Forward        65.0 ms   34%                           ||  Allocated                   2.9 GB                                                     |
-|  │  ├─ Backward      110.0 ms   58%                           ||  Reserved                    3.2 GB                                                     |
+|  │  ├─ Forward        65.0 ms   34%                           ||  Allocated                   2.7 GiB                                                    |
+|  │  ├─ Backward      110.0 ms   58%                           ||  Reserved                    3.0 GiB                                                    |
 |  │  └─ Optimizer      10.0 ms    5%                           ||                                                                                         |
 |  ├─ H2D                1.9 ms    1%                           ||                                                                                         |
 |  └─ Residual           2.0 ms    1%                           ||                                                                                         |
@@ -1948,9 +1948,9 @@ GOLDENS = {
 |                                                               ||                                                                                         |
 |                         avg                                   ||                       avg                                                               |
 |  CPU                    42%                                   ||  CPU capacity         14%                                                               |
-|  RAM used               6.2 GB (19%)                          ||  RSS used             3.1 GB (10%)                                                      |
-|  GPU util               92%                                   ||  CUDA allocated       2.9 GB                                                            |
-|  GPU memory/device      2.8 GB (17%)                          ||  CUDA reserved        3.2 GB (20%)                                                      |
+|  RAM used               5.8 GiB (19%)                         ||  RSS used             2.9 GiB (10%)                                                     |
+|  GPU util               92%                                   ||  CUDA allocated       2.7 GiB                                                           |
+|  GPU memory/device      2.6 GiB (17%)                         ||  CUDA reserved        3.0 GiB (20%)                                                     |
 |  GPU temperature        61C                                   ||                                                                                         |
 |  GPU power              210W                                  ||                                                                                         |
 |                                                                                                                                                          |
@@ -1968,20 +1968,20 @@ GOLDENS = {
 |  Next: Increase workers, prefetch, or storage throughput.                                                                                                |
 |                                                                                                                                                          |
 |  STEP TIMING (Window Average), GPU Clock                      ||  STEP MEMORY: MEMORY CREEP  (WARNING)                                                   |
-|  Step Time           200.4 ms  100%                           ||  Evidence: Memory creep +1.2 GB (18.0%) · R0/N0                                         |
+|  Step Time           200.4 ms  100%                           ||  Evidence: Memory creep +1.1 GiB (18.0%) · R0/N0                                        |
 |  ├─ Input Wait       128.0 ms   64%  ◀  cause                 ||                                                                                         |
 |  ├─ Compute           68.0 ms   34%                           ||  avg per-step peak           avg                                                        |
-|  ├─ H2D                0.4 ms   <1%                           ||  Allocated                   3.9 GB                                                     |
-|  └─ Residual           3.6 ms    2%                           ||  Reserved                    4.6 GB                                                     |
+|  ├─ H2D                0.4 ms   <1%                           ||  Allocated                   3.6 GiB                                                    |
+|  └─ Residual           3.6 ms    2%                           ||  Reserved                    4.3 GiB                                                    |
 |                                                                                                                                                          |
 |  SYSTEM METRICS: NORMAL                                       ||  PROCESS METRICS: NORMAL                                                                |
 |                                                               ||                                                                                         |
 |                                                               ||                                                                                         |
 |                         avg                                   ||                       avg                                                               |
 |  CPU                    18%                                   ||  CPU capacity         14%                                                               |
-|  GPU util               88%                                   ||  RSS used             3.1 GB (10%)                                                      |
-|  GPU temperature        42C                                   ||  CUDA allocated       2.9 GB                                                            |
-|                                                               ||  CUDA reserved        3.2 GB (20%)                                                      |
+|  GPU util               88%                                   ||  RSS used             2.9 GiB (10%)                                                     |
+|  GPU temperature        42C                                   ||  CUDA allocated       2.7 GiB                                                           |
+|                                                               ||  CUDA reserved        3.0 GiB (20%)                                                     |
 |                                                                                                                                                          |
 |                                                                                                                                                          |
 |  Other findings:                                                                                                                                         |
@@ -2003,17 +2003,17 @@ GOLDENS = {
 |  Step Time           240.0 ms  100%                           ||                                                                                         |
 |  ├─ Input Wait         3.1 ms    1%                           ||                                                                                         |
 |  ├─ Compute          120.3 ms   50%                           ||  avg per-step peak           avg                                                        |
-|  ├─ H2D                1.2 ms   <1%                           ||  Allocated                   2.9 GB                                                     |
-|  └─ Residual         115.4 ms   48%                           ||  Reserved                    3.2 GB                                                     |
+|  ├─ H2D                1.2 ms   <1%                           ||  Allocated                   2.7 GiB                                                    |
+|  └─ Residual         115.4 ms   48%                           ||  Reserved                    3.0 GiB                                                    |
 |                                                                                                                                                          |
 |  SYSTEM METRICS: LOW GPU UTIL                                 ||  PROCESS METRICS: NORMAL                                                                |
 |  Evidence: GPU utilization averaged 22%.                      ||                                                                                         |
 |                                                               ||                                                                                         |
 |                         avg                                   ||                       avg                                                               |
 |  CPU                    17%                                   ||  CPU capacity         14%                                                               |
-|  GPU util               22%                                   ||  RSS used             3.1 GB (10%)                                                      |
-|  GPU temperature        44C                                   ||  CUDA allocated       2.9 GB                                                            |
-|                                                               ||  CUDA reserved        3.2 GB (20%)                                                      |
+|  GPU util               22%                                   ||  RSS used             2.9 GiB (10%)                                                     |
+|  GPU temperature        44C                                   ||  CUDA allocated       2.7 GiB                                                           |
+|                                                               ||  CUDA reserved        3.0 GiB (20%)                                                     |
 |                                                                                                                                                          |
 |                                                                                                                                                          |
 |  Full evidence: logs/bert_finetune/final_summary.json  (--html-report)                                                                                   |
@@ -2040,7 +2040,7 @@ GOLDENS = {
 |                                                               ||                                                                                         |
 |                         avg                                   ||                       avg                                                               |
 |  CPU                    25%                                   ||  CPU capacity         14%                                                               |
-|                                                               ||  RSS used             3.1 GB (10%)                                                      |
+|                                                               ||  RSS used             2.9 GiB (10%)                                                     |
 |                                                                                                                                                          |
 |                                                                                                                                                          |
 |  Full evidence: logs/session_20260806_090618/final_summary.json  (--html-report)                                                                         |
@@ -2063,9 +2063,9 @@ GOLDENS = {
 |                                                               ||                                                                                         |
 |                         avg                                   ||                       avg                                                               |
 |  CPU                    17%                                   ||  CPU capacity         14%                                                               |
-|  GPU util               31%                                   ||  RSS used             3.1 GB (10%)                                                      |
-|                                                               ||  CUDA allocated       2.9 GB                                                            |
-|                                                               ||  CUDA reserved        3.2 GB (20%)                                                      |
+|  GPU util               31%                                   ||  RSS used             2.9 GiB (10%)                                                     |
+|                                                               ||  CUDA allocated       2.7 GiB                                                           |
+|                                                               ||  CUDA reserved        3.0 GiB (20%)                                                     |
 |                                                                                                                                                          |
 |                                                                                                                                                          |
 |  Full evidence: logs/quickstart/final_summary.json  (--html-report)                                                                                      |
@@ -2088,9 +2088,9 @@ GOLDENS = {
 |                                                               ||                                                                                         |
 |                                                               ||                       avg                                                               |
 |                                                               ||  CPU capacity         14%                                                               |
-|                                                               ||  RSS used             3.1 GB (10%)                                                      |
-|                                                               ||  CUDA allocated       2.9 GB                                                            |
-|                                                               ||  CUDA reserved        3.2 GB (20%)                                                      |
+|                                                               ||  RSS used             2.9 GiB (10%)                                                     |
+|                                                               ||  CUDA allocated       2.7 GiB                                                           |
+|                                                               ||  CUDA reserved        3.0 GiB (20%)                                                     |
 |                                                                                                                                                          |
 |                                                                                                                                                          |
 |  Full evidence: logs/quickstart/final_summary.json  (--html-report)                                                                                      |
@@ -2110,8 +2110,8 @@ GOLDENS = {
 |  Step Time           303.7 ms  100%                           ||                                                                                         |
 |  ├─ Input Wait         3.8 ms    1%                           ||                                                                                         |
 |  ├─ Compute          259.5 ms   85%                           ||  avg per-step peak           median rank avg     worst rank avg                         |
-|  │  ├─ Forward        80.0 ms   26%                           ||  Allocated                   8.5 GB              9.4 GB, R2/N1                          |
-|  │  ├─ Backward      169.5 ms   56%                           ||  Reserved                    8.9 GB              9.8 GB, R2/N1                          |
+|  │  ├─ Forward        80.0 ms   26%                           ||  Allocated                   7.9 GiB             8.8 GiB, R2/N1                         |
+|  │  ├─ Backward      169.5 ms   56%                           ||  Reserved                    8.3 GiB             9.1 GiB, R2/N1                         |
 |  │  └─ Optimizer      10.0 ms    3%                           ||                                                                                         |
 |  ├─ H2D                1.1 ms   <1%                           ||                                                                                         |
 |  └─ Residual          39.3 ms   13%                           ||                                                                                         |
@@ -2122,9 +2122,9 @@ GOLDENS = {
 |                                                               ||                                                                                         |
 |                         median node avg   worst node avg      ||                       median rank avg   worst rank avg                                  |
 |  CPU                    18%               26%, N1             ||  CPU capacity         12%               81%, R2/N1                                      |
-|  RAM used               16.0 GB (27%)     20.8 GB (35%), N1   ||  RSS used             3.1 GB (10%)      5.4 GB (17%), R1/N0                             |
-|  GPU util               9%                9%, N1              ||  CUDA allocated       2.9 GB            4.6 GB, R3/N1                                   |
-|  GPU memory/device      5.0 GB (31%)      7.0 GB (44%), N1    ||  CUDA reserved        3.2 GB (20%)      6.8 GB (43%), R3/N1                             |
+|  RAM used               14.9 GiB (27%)    19.4 GiB (35%), N1  ||  RSS used             2.9 GiB (10%)     5.0 GiB (17%), R1/N0                            |
+|  GPU util               9%                9%, N1              ||  CUDA allocated       2.7 GiB           4.3 GiB, R3/N1                                  |
+|  GPU memory/device      4.7 GiB (31%)     6.5 GiB (44%), N1   ||  CUDA reserved        3.0 GiB (20%)     6.3 GiB (43%), R3/N1                            |
 |  GPU temperature        58C               70C, N1             ||                                                                                         |
 |  GPU power              220W              280W, N1            ||                                                                                         |
 |                                                                                                                                                          |
@@ -2146,8 +2146,8 @@ GOLDENS = {
 |  Step Time           152.1 ms  100%                           ||                                                                                         |
 |  ├─ Input Wait         2.0 ms    1%                           ||                                                                                         |
 |  ├─ Compute          145.2 ms   95%                           ||  avg per-step peak           median rank avg     worst rank avg                         |
-|  │  ├─ Forward        50.0 ms   33%                           ||  Allocated                   8.7 GB              8.8 GB, R2/N0                          |
-|  │  ├─ Backward       85.2 ms   56%                           ||  Reserved                    9.0 GB              9.1 GB, R2/N0                          |
+|  │  ├─ Forward        50.0 ms   33%                           ||  Allocated                   8.1 GiB             8.2 GiB, R2/N0                         |
+|  │  ├─ Backward       85.2 ms   56%                           ||  Reserved                    8.4 GiB             8.5 GiB, R2/N0                         |
 |  │  └─ Optimizer      10.0 ms    7%                           ||                                                                                         |
 |  ├─ H2D                1.6 ms    1%                           ||                                                                                         |
 |  └─ Residual           3.3 ms    2%                           ||                                                                                         |
@@ -2158,9 +2158,9 @@ GOLDENS = {
 |                                                               ||                                                                                         |
 |                         avg                                   ||                       median rank avg   worst rank avg                                  |
 |  CPU                    38%                                   ||  CPU capacity         12%               81%, R2/N0                                      |
-|  RAM used               18.4 GB (31%)                         ||  RSS used             3.1 GB (10%)      5.4 GB (17%), R1/N0                             |
-|  GPU util               94%                                   ||  CUDA allocated       2.9 GB            4.6 GB, R3/N0                                   |
-|  GPU memory/device      6.0 GB (38%)                          ||  CUDA reserved        3.2 GB (20%)      6.8 GB (43%), R3/N0                             |
+|  RAM used               17.1 GiB (31%)                        ||  RSS used             2.9 GiB (10%)     5.0 GiB (17%), R1/N0                            |
+|  GPU util               94%                                   ||  CUDA allocated       2.7 GiB           4.3 GiB, R3/N0                                  |
+|  GPU memory/device      5.6 GiB (38%)                         ||  CUDA reserved        3.0 GiB (20%)     6.3 GiB (43%), R3/N0                            |
 |  GPU temperature        64C                                   ||                                                                                         |
 |  GPU power              240W                                  ||                                                                                         |
 |                                                                                                                                                          |
@@ -2181,17 +2181,17 @@ GOLDENS = {
 |  Step Time            34.2 ms  100%                           ||                                                                                         |
 |  ├─ Input Wait         2.5 ms    7%                           ||                                                                                         |
 |  ├─ Compute           29.4 ms   86%                           ||  avg per-step peak           avg                                                        |
-|  └─ Residual           2.3 ms    7%                           ||  Allocated                   18.8 MB                                                    |
-|  DataLoader fetch: 2.5 ms (CPU, supplemental)                 ||  Reserved                    23.1 MB                                                    |
+|  └─ Residual           2.3 ms    7%                           ||  Allocated                   18.0 MiB                                                   |
+|  DataLoader fetch: 2.5 ms (CPU, supplemental)                 ||  Reserved                    22.0 MiB                                                   |
 |                                                                                                                                                          |
 |  SYSTEM METRICS: LOW GPU UTIL                                 ||  PROCESS METRICS: NORMAL                                                                |
 |  Evidence: GPU utilization averaged 0.2%.                     ||                                                                                         |
 |                                                               ||                                                                                         |
 |                         avg                                   ||                       avg                                                               |
 |  CPU                    0%                                    ||  CPU capacity         14%                                                               |
-|  RAM used               4.0 GB (2%)                           ||  RSS used             3.1 GB (10%)                                                      |
-|  GPU util               0%                                    ||  CUDA allocated       2.9 GB                                                            |
-|  GPU memory/device      0.5 GB (3%)                           ||  CUDA reserved        3.2 GB (20%)                                                      |
+|  RAM used               3.7 GiB (2%)                          ||  RSS used             2.9 GiB (10%)                                                     |
+|  GPU util               0%                                    ||  CUDA allocated       2.7 GiB                                                           |
+|  GPU memory/device      0.5 GiB (3%)                          ||  CUDA reserved        3.0 GiB (20%)                                                     |
 |  GPU temperature        34C                                   ||                                                                                         |
 |                                                                                                                                                          |
 |                                                                                                                                                          |
@@ -2212,8 +2212,8 @@ GOLDENS = {
 |  Step Time             5.2 ms  100%                           ||                                                                                         |
 |  ├─ Input Wait         0.6 ms   11%                           ||                                                                                         |
 |  ├─ Compute            3.8 ms   74%                           ||  avg per-step peak           median rank avg     worst rank avg                         |
-|  │  ├─ Forward         1.3 ms   25%                           ||  Allocated                   18.8 MB             21.0 MB, R0/N0                         |
-|  │  ├─ Backward        2.2 ms   42%                           ||  Reserved                    23.1 MB             25.1 MB, R0/N0                         |
+|  │  ├─ Forward         1.3 ms   25%                           ||  Allocated                   18.0 MiB            20.0 MiB, R0/N0                        |
+|  │  ├─ Backward        2.2 ms   42%                           ||  Reserved                    22.0 MiB            24.0 MiB, R0/N0                        |
 |  │  └─ Optimizer       0.3 ms    6%                           ||                                                                                         |
 |  ├─ H2D                0.1 ms    2%                           ||                                                                                         |
 |  └─ Residual           0.7 ms   14%  ◀  cause                 ||                                                                                         |
@@ -2224,9 +2224,9 @@ GOLDENS = {
 |                                                               ||                                                                                         |
 |                         avg                                   ||                       median rank avg   worst rank avg                                  |
 |  CPU                    2%                                    ||  CPU capacity         12%               81%, R2/N0                                      |
-|  GPU util               7%                                    ||  RSS used             3.1 GB (10%)      5.4 GB (17%), R1/N0                             |
-|                                                               ||  CUDA allocated       2.9 GB            4.6 GB, R3/N0                                   |
-|                                                               ||  CUDA reserved        3.2 GB (20%)      6.8 GB (43%), R3/N0                             |
+|  GPU util               7%                                    ||  RSS used             2.9 GiB (10%)     5.0 GiB (17%), R1/N0                            |
+|                                                               ||  CUDA allocated       2.7 GiB           4.3 GiB, R3/N0                                  |
+|                                                               ||  CUDA reserved        3.0 GiB (20%)     6.3 GiB (43%), R3/N0                            |
 |                                                                                                                                                          |
 |                                                                                                                                                          |
 |  Full evidence: logs/session_20260806_101837_1b81f7/final_summary.json  (--html-report)                                                                  |
@@ -2246,17 +2246,17 @@ GOLDENS = {
 |                                                               ||                                                                                         |
 |                                                               ||                                                                                         |
 |                                                               ||  avg per-step peak           median rank avg     worst rank avg                         |
-|                                                               ||  Allocated                                       5.0 GB, R1/N0                          |
-|                                                               ||  Reserved                                        6.0 GB, R1/N0                          |
+|                                                               ||  Allocated                                       4.7 GiB, R1/N0                         |
+|                                                               ||  Reserved                                        5.6 GiB, R1/N0                         |
 |                                                                                                                                                          |
 |  SYSTEM METRICS: NORMAL · 2/2 nodes                           ||  PROCESS METRICS: NORMAL · 4/4 ranks                                                    |
 |                                                               ||                                                                                         |
 |                                                               ||                                                                                         |
 |                         median node avg   worst node avg      ||                       median rank avg   worst rank avg                                  |
 |  CPU                    10%               30%, N0             ||  CPU capacity         12%               81%, R2/N1                                      |
-|  RAM used               6.0 GB (20%)      10.0 GB (30%), N1   ||  RSS used             3.1 GB (10%)      5.4 GB (17%), R1/N0                             |
-|  GPU util               85%               85%, N1             ||  CUDA allocated       2.9 GB            4.6 GB, R3/N1                                   |
-|  GPU memory/device      2.0 GB (12%)      6.0 GB (38%), N0    ||  CUDA reserved        3.2 GB (20%)      6.8 GB (43%), R3/N1                             |
+|  RAM used               5.6 GiB (20%)     9.3 GiB (30%), N1   ||  RSS used             2.9 GiB (10%)     5.0 GiB (17%), R1/N0                            |
+|  GPU util               85%               85%, N1             ||  CUDA allocated       2.7 GiB           4.3 GiB, R3/N1                                  |
+|  GPU memory/device      1.9 GiB (12%)     5.6 GiB (38%), N0   ||  CUDA reserved        3.0 GiB (20%)     6.3 GiB (43%), R3/N1                            |
 |  GPU temperature        50C               70C, N0             ||                                                                                         |
 |  GPU power              220W              280W, N0            ||                                                                                         |
 |                                                                                                                                                          |
@@ -2278,8 +2278,8 @@ GOLDENS = {
 |  Step Time           100.0 ms  100%                           ||                                                                                         |
 |  ├─ Input Wait        10.0 ms   10%                           ||                                                                                         |
 |  ├─ Compute           80.0 ms   80%                           ||  avg per-step peak           median rank avg     worst rank avg                         |
-|  │  ├─ Forward        20.0 ms   20%                           ||  Allocated                   3.0 GB              3.0 GB, R3/N1                          |
-|  │  ├─ Backward       50.0 ms   50%                           ||  Reserved                    4.0 GB              4.0 GB, R3/N1                          |
+|  │  ├─ Forward        20.0 ms   20%                           ||  Allocated                   2.8 GiB             2.8 GiB, R3/N1                         |
+|  │  ├─ Backward       50.0 ms   50%                           ||  Reserved                    3.7 GiB             3.7 GiB, R3/N1                         |
 |  │  └─ Optimizer      10.0 ms   10%                           ||                                                                                         |
 |  ├─ H2D                2.0 ms    2%                           ||                                                                                         |
 |  └─ Residual           8.0 ms    8%                           ||                                                                                         |
@@ -2290,9 +2290,9 @@ GOLDENS = {
 |                                                               ||                                                                                         |
 |                         median node avg   worst node avg      ||                       median rank avg   worst rank avg                                  |
 |  CPU                    10%               30%, N0             ||  CPU capacity         12%               81%, R2/N1                                      |
-|  RAM used               6.0 GB (20%)      10.0 GB (30%), N1   ||  RSS used             3.1 GB (10%)      5.4 GB (17%), R1/N0                             |
-|  GPU util               85%               85%, N1             ||  CUDA allocated       2.9 GB            4.6 GB, R3/N1                                   |
-|  GPU memory/device      2.0 GB (12%)      6.0 GB (38%), N0    ||  CUDA reserved        3.2 GB (20%)      6.8 GB (43%), R3/N1                             |
+|  RAM used               5.6 GiB (20%)     9.3 GiB (30%), N1   ||  RSS used             2.9 GiB (10%)     5.0 GiB (17%), R1/N0                            |
+|  GPU util               85%               85%, N1             ||  CUDA allocated       2.7 GiB           4.3 GiB, R3/N1                                  |
+|  GPU memory/device      1.9 GiB (12%)     5.6 GiB (38%), N0   ||  CUDA reserved        3.0 GiB (20%)     6.3 GiB (43%), R3/N1                            |
 |  GPU temperature        50C               70C, N0             ||                                                                                         |
 |  GPU power              220W              280W, N0            ||                                                                                         |
 |                                                                                                                                                          |
@@ -2314,8 +2314,8 @@ GOLDENS = {
 |  Step Time           100.0 ms  100%                           ||                                                                                         |
 |  ├─ Input Wait        10.0 ms   10%                           ||                                                                                         |
 |  ├─ Compute           80.0 ms   80%                           ||  avg per-step peak           median rank avg     worst rank avg                         |
-|  │  ├─ Forward        20.0 ms   20%                           ||  Allocated                   3.0 GB              5.0 GB, R1/N0                          |
-|  │  ├─ Backward       50.0 ms   50%                           ||  Reserved                    4.0 GB              6.0 GB, R1/N0                          |
+|  │  ├─ Forward        20.0 ms   20%                           ||  Allocated                   2.8 GiB             4.7 GiB, R1/N0                         |
+|  │  ├─ Backward       50.0 ms   50%                           ||  Reserved                    3.7 GiB             5.6 GiB, R1/N0                         |
 |  │  └─ Optimizer      10.0 ms   10%                           ||                                                                                         |
 |  ├─ H2D                2.0 ms    2%                           ||                                                                                         |
 |  └─ Residual           8.0 ms    8%                           ||                                                                                         |
@@ -2326,9 +2326,9 @@ GOLDENS = {
 |                                                               ||                                                                                         |
 |                         median node avg   worst node avg      ||                       median rank avg   worst rank avg                                  |
 |  CPU                    10%               30%, N0             ||  CPU capacity         12%               81%, R2/N1                                      |
-|  RAM used               6.0 GB (20%)      10.0 GB (30%), N1   ||  RSS used             3.1 GB (10%)      5.4 GB (17%), R1/N0                             |
-|  GPU util               85%               85%, N1             ||  CUDA allocated       2.9 GB            4.6 GB, R3/N1                                   |
-|  GPU memory/device      2.0 GB (12%)      6.0 GB (38%), N0    ||  CUDA reserved        3.2 GB (20%)      6.8 GB (43%), R3/N1                             |
+|  RAM used               5.6 GiB (20%)     9.3 GiB (30%), N1   ||  RSS used             2.9 GiB (10%)     5.0 GiB (17%), R1/N0                            |
+|  GPU util               85%               85%, N1             ||  CUDA allocated       2.7 GiB           4.3 GiB, R3/N1                                  |
+|  GPU memory/device      1.9 GiB (12%)     5.6 GiB (38%), N0   ||  CUDA reserved        3.0 GiB (20%)     6.3 GiB (43%), R3/N1                            |
 |  GPU temperature        50C               70C, N0             ||                                                                                         |
 |  GPU power              220W              280W, N0            ||                                                                                         |
 |                                                                                                                                                          |
@@ -2349,8 +2349,8 @@ GOLDENS = {
 |  Step Time            10.0 ms  100%                           ||                                                                                         |
 |  ├─ Input Wait         0.0 ms    0%                           ||                                                                                         |
 |  ├─ Compute           10.0 ms  100%                           ||  avg per-step peak           avg                                                        |
-|  │  ├─ Forward         0.0 ms    0%                           ||  Allocated                   0.0 MB                                                     |
-|  │  ├─ Backward       10.0 ms  100%                           ||  Reserved                    0.0 MB                                                     |
+|  │  ├─ Forward         0.0 ms    0%                           ||  Allocated                   0.0 MiB                                                    |
+|  │  ├─ Backward       10.0 ms  100%                           ||  Reserved                    0.0 MiB                                                    |
 |  │  └─ Optimizer       0.0 ms    0%                           ||                                                                                         |
 |  ├─ H2D                0.0 ms    0%                           ||                                                                                         |
 |  └─ Residual           0.0 ms    0%                           ||                                                                                         |
@@ -2361,7 +2361,7 @@ GOLDENS = {
 |                                                               ||                                                                                         |
 |                         avg                                   ||                       avg                                                               |
 |  CPU                    0%                                    ||  CPU capacity         0%                                                                |
-|  RAM used               0.0 MB (0%)                           ||  RSS used             0.0 MB (0%)                                                       |
+|  RAM used               0.0 MiB (0%)                          ||  RSS used             0.0 MiB (0%)                                                      |
 |  GPU util               0%                                    ||                                                                                         |
 |  GPU temperature        0C                                    ||                                                                                         |
 |                                                                                                                                                          |
@@ -2405,8 +2405,8 @@ GOLDENS = {
 |  Step Time           100.0 ms  100%                           ||                                                                                         |
 |  ├─ Input Wait         5.0 ms    5%                           ||                                                                                         |
 |  ├─ Compute           70.0 ms   70%                           ||  avg per-step peak           avg                                                        |
-|  │  ├─ Forward        20.0 ms   20%                           ||  Allocated                   2.0 GB                                                     |
-|  │  ├─ Backward       45.0 ms   45%                           ||  Reserved                    2.4 GB                                                     |
+|  │  ├─ Forward        20.0 ms   20%                           ||  Allocated                   1.9 GiB                                                    |
+|  │  ├─ Backward       45.0 ms   45%                           ||  Reserved                    2.2 GiB                                                    |
 |  │  └─ Optimizer       5.0 ms    5%                           ||                                                                                         |
 |  ├─ H2D               20.0 ms   20%  ◀  cause                 ||                                                                                         |
 |  └─ Residual           5.0 ms    5%                           ||                                                                                         |
@@ -2416,9 +2416,9 @@ GOLDENS = {
 |                                                               ||                                                                                         |
 |                         avg                                   ||                       avg                                                               |
 |  GPU util               72%                                   ||  CPU capacity         14%                                                               |
-|                                                               ||  RSS used             3.1 GB (10%)                                                      |
-|                                                               ||  CUDA allocated       2.9 GB                                                            |
-|                                                               ||  CUDA reserved        3.2 GB (20%)                                                      |
+|                                                               ||  RSS used             2.9 GiB (10%)                                                     |
+|                                                               ||  CUDA allocated       2.7 GiB                                                           |
+|                                                               ||  CUDA reserved        3.0 GiB (20%)                                                     |
 |                                                                                                                                                          |
 |                                                                                                                                                          |
 |  Full evidence: logs/h2d-bound/final_summary.json  (--html-report)                                                                                       |
@@ -2437,8 +2437,8 @@ GOLDENS = {
 |  Step Time           100.0 ms  100%                           ||                                                                                         |
 |  ├─ Input Wait         1.0 ms    1%                           ||                                                                                         |
 |  ├─ Compute           95.0 ms   95%  ◀  cause                 ||  avg per-step peak           avg                                                        |
-|  │  ├─ Forward        20.0 ms   20%                           ||  Allocated                   2.0 GB                                                     |
-|  │  ├─ Backward       65.0 ms   65%                           ||  Reserved                    2.4 GB                                                     |
+|  │  ├─ Forward        20.0 ms   20%                           ||  Allocated                   1.9 GiB                                                    |
+|  │  ├─ Backward       65.0 ms   65%                           ||  Reserved                    2.2 GiB                                                    |
 |  │  └─ Optimizer      10.0 ms   10%                           ||                                                                                         |
 |  ├─ H2D                1.0 ms    1%                           ||                                                                                         |
 |  └─ Residual           3.0 ms    3%                           ||                                                                                         |
@@ -2448,9 +2448,9 @@ GOLDENS = {
 |                                                               ||                                                                                         |
 |                         avg                                   ||                       avg                                                               |
 |  GPU util               95%                                   ||  CPU capacity         14%                                                               |
-|                                                               ||  RSS used             3.1 GB (10%)                                                      |
-|                                                               ||  CUDA allocated       2.9 GB                                                            |
-|                                                               ||  CUDA reserved        3.2 GB (20%)                                                      |
+|                                                               ||  RSS used             2.9 GiB (10%)                                                     |
+|                                                               ||  CUDA allocated       2.7 GiB                                                           |
+|                                                               ||  CUDA reserved        3.0 GiB (20%)                                                     |
 |                                                                                                                                                          |
 |                                                                                                                                                          |
 |  Full evidence: logs/compute-bound/final_summary.json  (--html-report)                                                                                   |
@@ -2470,8 +2470,8 @@ GOLDENS = {
 |  Step Time           100.0 ms  100%                           ||                                                                                         |
 |  ├─ Input Wait        10.0 ms   10%                           ||                                                                                         |
 |  ├─ Compute           80.0 ms   80%                           ||  avg per-step peak           median rank avg     worst rank avg                         |
-|  │  ├─ Forward        20.0 ms   20%                           ||  Allocated                   3.0 GB              5.0 GB, R1/N0                          |
-|  │  ├─ Backward       50.0 ms   50%                           ||  Reserved                    4.0 GB              6.0 GB, R1/N0                          |
+|  │  ├─ Forward        20.0 ms   20%                           ||  Allocated                   2.8 GiB             4.7 GiB, R1/N0                         |
+|  │  ├─ Backward       50.0 ms   50%                           ||  Reserved                    3.7 GiB             5.6 GiB, R1/N0                         |
 |  │  └─ Optimizer      10.0 ms   10%                           ||                                                                                         |
 |  ├─ H2D                2.0 ms    2%                           ||                                                                                         |
 |  └─ Residual           8.0 ms    8%                           ||                                                                                         |
@@ -2482,9 +2482,9 @@ GOLDENS = {
 |                                                               ||                                                                                         |
 |                         median node avg   worst node avg      ||                       median rank avg   worst rank avg                                  |
 |  CPU                    10%               30%, N0             ||  CPU capacity         12%               81%, R2/N1                                      |
-|  RAM used               6.0 GB (20%)      10.0 GB (30%), N1   ||  RSS used             3.1 GB (10%)      5.4 GB (17%), R1/N0                             |
-|  GPU util               85%               85%, N1             ||  CUDA allocated       2.9 GB            4.6 GB, R3/N1                                   |
-|  GPU memory/device      2.0 GB (12%)      6.0 GB (38%), N0    ||  CUDA reserved        3.2 GB (20%)      6.8 GB (43%), R3/N1                             |
+|  RAM used               5.6 GiB (20%)     9.3 GiB (30%), N1   ||  RSS used             2.9 GiB (10%)     5.0 GiB (17%), R1/N0                            |
+|  GPU util               85%               85%, N1             ||  CUDA allocated       2.7 GiB           4.3 GiB, R3/N1                                  |
+|  GPU memory/device      1.9 GiB (12%)     5.6 GiB (38%), N0   ||  CUDA reserved        3.0 GiB (20%)     6.3 GiB (43%), R3/N1                            |
 |  GPU temperature        50C               70C, N0             ||                                                                                         |
 |  GPU power              220W              280W, N0            ||                                                                                         |
 |                                                                                                                                                          |
@@ -2506,8 +2506,8 @@ GOLDENS = {
 |  Step Time           100.0 ms  100%                           ||                                                                                         |
 |  ├─ Input Wait        10.0 ms   10%                           ||                                                                                         |
 |  ├─ Compute           80.0 ms   80%                           ||  avg per-step peak           median rank avg     worst rank avg                         |
-|  │  ├─ Forward        20.0 ms   20%                           ||  Allocated                   3.0 GB              5.0 GB, R1/N0                          |
-|  │  ├─ Backward       50.0 ms   50%                           ||  Reserved                    4.0 GB              6.0 GB, R1/N0                          |
+|  │  ├─ Forward        20.0 ms   20%                           ||  Allocated                   2.8 GiB             4.7 GiB, R1/N0                         |
+|  │  ├─ Backward       50.0 ms   50%                           ||  Reserved                    3.7 GiB             5.6 GiB, R1/N0                         |
 |  │  └─ Optimizer      10.0 ms   10%                           ||                                                                                         |
 |  ├─ H2D                2.0 ms    2%                           ||                                                                                         |
 |  └─ Residual           8.0 ms    8%                           ||                                                                                         |
@@ -2518,9 +2518,9 @@ GOLDENS = {
 |                                                               ||                                                                                         |
 |                         median node avg   worst node avg      ||                       median rank avg   worst rank avg                                  |
 |  CPU                    10%               30%, N0             ||  CPU capacity         12%               81%, R2/N1                                      |
-|  RAM used               6.0 GB (20%)      10.0 GB (30%), N1   ||  RSS used             3.1 GB (10%)      5.4 GB (17%), R1/N0                             |
-|  GPU util               85%               85%, N1             ||  CUDA allocated       2.9 GB            4.6 GB, R3/N1                                   |
-|  GPU memory/device      2.0 GB (12%)      6.0 GB (38%), N0    ||  CUDA reserved        3.2 GB (20%)      6.8 GB (43%), R3/N1                             |
+|  RAM used               5.6 GiB (20%)     9.3 GiB (30%), N1   ||  RSS used             2.9 GiB (10%)     5.0 GiB (17%), R1/N0                            |
+|  GPU util               85%               85%, N1             ||  CUDA allocated       2.7 GiB           4.3 GiB, R3/N1                                  |
+|  GPU memory/device      1.9 GiB (12%)     5.6 GiB (38%), N0   ||  CUDA reserved        3.0 GiB (20%)     6.3 GiB (43%), R3/N1                            |
 |  GPU temperature        50C               70C, N0             ||                                                                                         |
 |  GPU power              220W              280W, N0            ||                                                                                         |
 |                                                                                                                                                          |
@@ -2542,8 +2542,8 @@ GOLDENS = {
 |  Step Time           100.0 ms  100%                           ||                                                                                         |
 |  ├─ Input Wait        10.0 ms   10%                           ||                                                                                         |
 |  ├─ Compute           80.0 ms   80%                           ||  avg per-step peak           median rank avg     worst rank avg                         |
-|  │  ├─ Forward        20.0 ms   20%                           ||  Allocated                   3.0 GB              5.0 GB, R1/N0                          |
-|  │  ├─ Backward       50.0 ms   50%                           ||  Reserved                    4.0 GB              6.0 GB, R1/N0                          |
+|  │  ├─ Forward        20.0 ms   20%                           ||  Allocated                   2.8 GiB             4.7 GiB, R1/N0                         |
+|  │  ├─ Backward       50.0 ms   50%                           ||  Reserved                    3.7 GiB             5.6 GiB, R1/N0                         |
 |  │  └─ Optimizer      10.0 ms   10%                           ||                                                                                         |
 |  ├─ H2D                2.0 ms    2%                           ||                                                                                         |
 |  └─ Residual           8.0 ms    8%                           ||                                                                                         |
@@ -2554,9 +2554,9 @@ GOLDENS = {
 |                                                               ||                                                                                         |
 |                         median node avg   worst node avg      ||                       median rank avg   worst rank avg                                  |
 |  CPU                    10%               30%, N0             ||  CPU capacity         12%               81%, R2/N1                                      |
-|  RAM used               6.0 GB (20%)      10.0 GB (30%), N1   ||  RSS used             3.1 GB (10%)      5.4 GB (17%), R1/N0                             |
-|  GPU util               85%               85%, N1             ||  CUDA allocated       2.9 GB            4.6 GB, R3/N1                                   |
-|  GPU memory/device      2.0 GB (12%)      6.0 GB (38%), N0    ||  CUDA reserved        3.2 GB (20%)      6.8 GB (43%), R3/N1                             |
+|  RAM used               5.6 GiB (20%)     9.3 GiB (30%), N1   ||  RSS used             2.9 GiB (10%)     5.0 GiB (17%), R1/N0                            |
+|  GPU util               85%               85%, N1             ||  CUDA allocated       2.7 GiB           4.3 GiB, R3/N1                                  |
+|  GPU memory/device      1.9 GiB (12%)     5.6 GiB (38%), N0   ||  CUDA reserved        3.0 GiB (20%)     6.3 GiB (43%), R3/N1                            |
 |  GPU temperature        50C               70C, N0             ||                                                                                         |
 |  GPU power              220W              280W, N0            ||                                                                                         |
 |                                                                                                                                                          |
@@ -2579,8 +2579,8 @@ GOLDENS = {
 |  Step Time           100.0 ms  100%                           ||                                                                                         |
 |  ├─ Input Wait        10.0 ms   10%                           ||                                                                                         |
 |  ├─ Compute           80.0 ms   80%                           ||  avg per-step peak           median rank avg     worst rank avg                         |
-|  │  ├─ Forward        20.0 ms   20%                           ||  Allocated                   3.0 GB              5.0 GB, R1/N0                          |
-|  │  ├─ Backward       50.0 ms   50%                           ||  Reserved                    4.0 GB              6.0 GB, R1/N0                          |
+|  │  ├─ Forward        20.0 ms   20%                           ||  Allocated                   2.8 GiB             4.7 GiB, R1/N0                         |
+|  │  ├─ Backward       50.0 ms   50%                           ||  Reserved                    3.7 GiB             5.6 GiB, R1/N0                         |
 |  │  └─ Optimizer      10.0 ms   10%                           ||                                                                                         |
 |  ├─ H2D                2.0 ms    2%                           ||                                                                                         |
 |  └─ Residual           8.0 ms    8%                           ||                                                                                         |
@@ -2591,9 +2591,9 @@ GOLDENS = {
 |                                                               ||                                                                                         |
 |                         median node avg   worst node avg      ||                       median rank avg   worst rank avg                                  |
 |  CPU                    10%               30%, N0             ||  CPU capacity         12%               81%, R2/N1                                      |
-|  RAM used               6.0 GB (20%)      10.0 GB (30%), N1   ||  RSS used             3.1 GB (10%)      5.4 GB (17%), R1/N0                             |
-|  GPU util               85%               85%, N1             ||  CUDA allocated       2.9 GB            4.6 GB, R3/N1                                   |
-|  GPU memory/device      2.0 GB (12%)      6.0 GB (38%), N0    ||  CUDA reserved        3.2 GB (20%)      6.8 GB (43%), R3/N1                             |
+|  RAM used               5.6 GiB (20%)     9.3 GiB (30%), N1   ||  RSS used             2.9 GiB (10%)     5.0 GiB (17%), R1/N0                            |
+|  GPU util               85%               85%, N1             ||  CUDA allocated       2.7 GiB           4.3 GiB, R3/N1                                  |
+|  GPU memory/device      1.9 GiB (12%)     5.6 GiB (38%), N0   ||  CUDA reserved        3.0 GiB (20%)     6.3 GiB (43%), R3/N1                            |
 |  GPU temperature        50C               70C, N0             ||                                                                                         |
 |  GPU power              220W              280W, N0            ||                                                                                         |
 |                                                                                                                                                          |
@@ -2611,9 +2611,9 @@ GOLDENS = {
 |                                                               ||                                                                                         |
 |                         avg                                   ||                       avg                                                               |
 |  CPU                    18%                                   ||  CPU capacity         14%                                                               |
-|  RAM used               6.2 GB (19%)                          ||  RSS used             3.1 GB (10%)                                                      |
-|  GPU util               76%                                   ||  CUDA allocated       2.9 GB                                                            |
-|  GPU memory/device      10.3 GB (64%)                         ||  CUDA reserved        3.2 GB (20%)                                                      |
+|  RAM used               5.8 GiB (19%)                         ||  RSS used             2.9 GiB (10%)                                                     |
+|  GPU util               76%                                   ||  CUDA allocated       2.7 GiB                                                           |
+|  GPU memory/device      9.6 GiB (64%)                         ||  CUDA reserved        3.0 GiB (20%)                                                     |
 |  GPU temperature        61C                                   ||                                                                                         |
 |                                                                                                                                                          |
 |                                                                                                                                                          |
@@ -2634,9 +2634,9 @@ GOLDENS = {
 |                                                               ||                                                                                         |
 |                         avg                                   ||                       median rank avg   worst rank avg                                  |
 |  CPU                    18%                                   ||  CPU capacity         12%               81%, R2/N0                                      |
-|  RAM used               6.2 GB (19%)                          ||  RSS used             3.1 GB (10%)      5.4 GB (17%), R1/N0                             |
-|  GPU util               14%                                   ||  CUDA allocated       2.9 GB            4.6 GB, R3/N0                                   |
-|  GPU memory/device      3.3 GB (21%)                          ||  CUDA reserved        3.2 GB (20%)      6.8 GB (43%), R3/N0                             |
+|  RAM used               5.8 GiB (19%)                         ||  RSS used             2.9 GiB (10%)     5.0 GiB (17%), R1/N0                            |
+|  GPU util               14%                                   ||  CUDA allocated       2.7 GiB           4.3 GiB, R3/N0                                  |
+|  GPU memory/device      3.1 GiB (21%)                         ||  CUDA reserved        3.0 GiB (20%)     6.3 GiB (43%), R3/N0                            |
 |  GPU temperature        42C                                   ||                                                                                         |
 |                                                                                                                                                          |
 |                                                                                                                                                          |
@@ -2656,9 +2656,9 @@ GOLDENS = {
 |                                                               ||                                                                                         |
 |                         avg                                   ||                       avg                                                               |
 |  CPU                    64%                                   ||  CPU capacity         14%                                                               |
-|  RAM used               30.1 GB (94%)                         ||  RSS used             3.1 GB (10%)                                                      |
-|  GPU util               81%                                   ||  CUDA allocated       2.9 GB                                                            |
-|  GPU memory/device      14.9 GB (93%)                         ||  CUDA reserved        3.2 GB (20%)                                                      |
+|  RAM used               28.0 GiB (94%)                        ||  RSS used             2.9 GiB (10%)                                                     |
+|  GPU util               81%                                   ||  CUDA allocated       2.7 GiB                                                           |
+|  GPU memory/device      13.9 GiB (93%)                        ||  CUDA reserved        3.0 GiB (20%)                                                     |
 |  GPU temperature        79C                                   ||                                                                                         |
 |                                                                                                                                                          |
 |                                                                                                                                                          |
@@ -2679,9 +2679,9 @@ GOLDENS = {
 |                                                               ||                                                                                         |
 |                         median node avg   worst node avg      ||                       median rank avg   worst rank avg                                  |
 |  CPU                    10%               30%, N0             ||  CPU capacity         12%               81%, R2/N1                                      |
-|  RAM used               6.0 GB (20%)      10.0 GB (30%), N1   ||  RSS used             3.1 GB (10%)      5.4 GB (17%), R1/N0                             |
-|  GPU util               85%               85%, N1             ||  CUDA allocated       2.9 GB            4.6 GB, R3/N1                                   |
-|  GPU memory/device      2.0 GB (12%)      6.0 GB (38%), N0    ||  CUDA reserved        3.2 GB (20%)      6.8 GB (43%), R3/N1                             |
+|  RAM used               5.6 GiB (20%)     9.3 GiB (30%), N1   ||  RSS used             2.9 GiB (10%)     5.0 GiB (17%), R1/N0                            |
+|  GPU util               85%               85%, N1             ||  CUDA allocated       2.7 GiB           4.3 GiB, R3/N1                                  |
+|  GPU memory/device      1.9 GiB (12%)     5.6 GiB (38%), N0   ||  CUDA reserved        3.0 GiB (20%)     6.3 GiB (43%), R3/N1                            |
 |  GPU temperature        50C               70C, N0             ||                                                                                         |
 |  GPU power              220W              280W, N0            ||                                                                                         |
 |                                                                                                                                                          |
@@ -2701,7 +2701,7 @@ GOLDENS = {
 |                                                               ||                                                                                         |
 |                         avg                                   ||                       avg                                                               |
 |  CPU                    7%                                    ||  CPU capacity         14%                                                               |
-|  RAM used               8.3 GB (32%)                          ||  RSS used             3.1 GB (10%)                                                      |
+|  RAM used               7.7 GiB (32%)                         ||  RSS used             2.9 GiB (10%)                                                     |
 |                                                                                                                                                          |
 |                                                                                                                                                          |
 |  Next: Wrap your step with trace_step(model), then traceml run.                                                                                          |
@@ -3287,13 +3287,15 @@ def test_multi_process_step_memory_uses_reserved_selected_rows() -> None:
     text = card_to_plain(_card(**_coherent_multi_inputs()))
 
     assert (
-        "Allocated                   3.0 GB              5.0 GB, R1/N0" in text
+        "Allocated                   2.8 GiB             4.7 GiB, R1/N0"
+        in text
     )
     assert (
-        "Reserved                    4.0 GB              6.0 GB, R1/N0" in text
+        "Reserved                    3.7 GiB             5.6 GiB, R1/N0"
+        in text
     )
-    assert "999.0 GB" not in text
-    assert "888.0 GB" not in text
+    assert "930.4 GiB" not in text
+    assert "827.0 GiB" not in text
 
 
 def test_multi_process_step_memory_falls_back_to_allocated_selectors() -> None:
@@ -3302,13 +3304,15 @@ def test_multi_process_step_memory_falls_back_to_allocated_selectors() -> None:
     )
 
     assert (
-        "Allocated                   3.0 GB              5.0 GB, R1/N0" in text
+        "Allocated                   2.8 GiB             4.7 GiB, R1/N0"
+        in text
     )
     assert (
-        "Reserved                    4.0 GB              6.0 GB, R1/N0" in text
+        "Reserved                    3.7 GiB             5.6 GiB, R1/N0"
+        in text
     )
-    assert "999.0 GB" not in text
-    assert "888.0 GB" not in text
+    assert "930.4 GiB" not in text
+    assert "827.0 GiB" not in text
 
 
 def test_multi_process_step_memory_keeps_metric_rows_when_points_share_a_rank() -> (
@@ -3317,10 +3321,12 @@ def test_multi_process_step_memory_keeps_metric_rows_when_points_share_a_rank() 
     text = plain("run_multi_duplicate_memory_pair")
 
     assert (
-        "Allocated                   3.0 GB              3.0 GB, R3/N1" in text
+        "Allocated                   2.8 GiB             2.8 GiB, R3/N1"
+        in text
     )
     assert (
-        "Reserved                    4.0 GB              4.0 GB, R3/N1" in text
+        "Reserved                    3.7 GiB             3.7 GiB, R3/N1"
+        in text
     )
 
 
@@ -3339,10 +3345,12 @@ def test_multi_process_step_memory_preserves_selected_zero_values() -> None:
     text = card_to_plain(_card(**inputs))
 
     assert (
-        "Allocated                   0.0 MB              0.0 MB, R1/N0" in text
+        "Allocated                   0.0 MiB             0.0 MiB, R1/N0"
+        in text
     )
     assert (
-        "Reserved                    0.0 MB              0.0 MB, R1/N0" in text
+        "Reserved                    0.0 MiB             0.0 MiB, R1/N0"
+        in text
     )
 
 
@@ -3357,8 +3365,8 @@ def test_multi_process_step_memory_omits_missing_selected_rows() -> None:
 
     assert "STEP MEMORY: BALANCED" in text
     assert "avg per-step peak" not in text
-    assert "999.0 GB" not in text
-    assert "888.0 GB" not in text
+    assert "930.4 GiB" not in text
+    assert "827.0 GiB" not in text
 
 
 def test_rendering_does_not_mutate_summary_inputs() -> None:
@@ -3375,26 +3383,28 @@ def test_partial_rank_payload_reports_missing_coherent_rows() -> None:
 
     assert "STEP TIMING unavailable: selected rank row missing." in text
     assert (
-        "Allocated                                       5.0 GB, R1/N0" in text
+        "Allocated                                       4.7 GiB, R1/N0"
+        in text
     )
     assert (
-        "Reserved                                        6.0 GB, R1/N0" in text
+        "Reserved                                        5.6 GiB, R1/N0"
+        in text
     )
-    assert "999.0 GB" not in text
-    assert "888.0 GB" not in text
+    assert "930.4 GiB" not in text
+    assert "827.0 GiB" not in text
 
 
 def test_resource_blocks_preserve_measured_zero_and_omit_null() -> None:
     text = plain("run_measured_zero_and_null")
 
     assert "CPU                    0%" in text
-    assert "RAM used               0.0 MB (0%)" in text
+    assert "RAM used               0.0 MiB (0%)" in text
     assert "GPU util               0%" in text
     assert "GPU temperature        0C" in text
     assert "CPU capacity         0%" in text
-    assert "RSS used             0.0 MB (0%)" in text
-    assert "Allocated                   0.0 MB" in text
-    assert "Reserved                    0.0 MB" in text
+    assert "RSS used             0.0 MiB (0%)" in text
+    assert "Allocated                   0.0 MiB" in text
+    assert "Reserved                    0.0 MiB" in text
     assert "GPU memory" not in text
     assert "CUDA" not in text
     assert "n/a" not in text
@@ -3431,16 +3441,16 @@ def test_multi_node_system_table_uses_stored_points_and_coherent_pairs() -> (
     assert "SYSTEM METRICS: HIGH GPU PWR  (WARNING) · 2/4 nodes" in text
     assert "median node avg   worst node avg" in text
     assert "CPU                    10%               30%, N0" in text
-    assert "RAM used               6.0 GB (20%)      10.0 GB (30%), N1" in text
-    assert "GPU memory/device      2.0 GB (12%)      6.0 GB (38%), N0" in text
+    assert "RAM used               5.6 GiB (20%)     9.3 GiB (30%), N1" in text
+    assert "GPU memory/device      1.9 GiB (12%)     5.6 GiB (38%), N0" in text
     assert "GPU power              220W              280W, N0" in text
     system_block = text[
         text.index("SYSTEM METRICS:") : text.index("STEP MEMORY:")
     ]
-    assert "999.0 GB" not in system_block
-    assert "888.0 GB" not in system_block
-    assert "777.0 GB" not in text
-    assert "666.0 GB" not in text
+    assert "930.4 GiB" not in system_block
+    assert "827.0 GiB" not in system_block
+    assert "723.6 GiB" not in text
+    assert "620.3 GiB" not in text
 
 
 def test_high_power_table_keeps_stored_diagnosis_evidence() -> None:
@@ -3469,9 +3479,9 @@ PROCESS METRICS: HIGH PROCESS RSS  (WARNING)
 Evidence: RSS peak 91.2% · R0/N0
                      avg
 CPU capacity         14%
-RSS used             3.1 GB (10%)
-CUDA allocated       2.9 GB
-CUDA reserved        3.2 GB (20%)"""
+RSS used             2.9 GiB (10%)
+CUDA allocated       2.7 GiB
+CUDA reserved        3.0 GiB (20%)"""
 
 
 def test_multi_rank_process_warning_block_matches_exact_layout() -> None:
@@ -3498,9 +3508,9 @@ PROCESS METRICS: RANK GPU MEMORY IMBALANCE  (WARNING) · 4/4 ranks
 Evidence: CUDA reserved imbalance 54.4% · R3/N0
                      median rank avg   worst rank avg
 CPU capacity         12%               81%, R2/N0
-RSS used             3.1 GB (10%)      5.4 GB (17%), R1/N0
-CUDA allocated       2.9 GB            4.6 GB, R3/N0
-CUDA reserved        3.2 GB (20%)      6.8 GB (43%), R3/N0"""
+RSS used             2.9 GiB (10%)     5.0 GiB (17%), R1/N0
+CUDA allocated       2.7 GiB           4.3 GiB, R3/N0
+CUDA reserved        3.0 GiB (20%)     6.3 GiB (43%), R3/N0"""
 
 
 @pytest.mark.parametrize(
@@ -3718,10 +3728,14 @@ def test_multi_rank_process_table_uses_coherent_rows_and_metric_scopes() -> (
     text = plain("run_multi_healthy")
 
     assert "CPU capacity         12%               81%, R2/N0" in text
-    assert "RSS used             3.1 GB (10%)      5.4 GB (17%), R1/N0" in text
-    assert "CUDA allocated       2.9 GB            4.6 GB, R3/N0" in text
-    assert "CUDA reserved        3.2 GB (20%)      6.8 GB (43%), R3/N0" in text
-    for crossed_value in ("999.0 GB", "888.0 GB", "777.0 GB", "666.0 GB"):
+    assert (
+        "RSS used             2.9 GiB (10%)     5.0 GiB (17%), R1/N0" in text
+    )
+    assert "CUDA allocated       2.7 GiB           4.3 GiB, R3/N0" in text
+    assert (
+        "CUDA reserved        3.0 GiB (20%)     6.3 GiB (43%), R3/N0" in text
+    )
+    for crossed_value in ("930.4 GiB", "827.0 GiB", "723.6 GiB", "620.3 GiB"):
         assert crossed_value not in text
 
 
@@ -3782,7 +3796,7 @@ def test_non_normal_resource_blocks_show_stored_trigger_and_scope() -> None:
         metric="peak_reserved",
         ranks=[1],
         evidence={
-            "overall_abs_delta_bytes": 1.2e9,
+            "overall_abs_delta_bytes": 1.2 * 1024**3,
             "overall_worst_growth_pct": 0.18,
         },
     )
@@ -3793,7 +3807,7 @@ def test_non_normal_resource_blocks_show_stored_trigger_and_scope() -> None:
 
     assert "GPU power averaged 83.7% of limit. · N0/G2" in text
     assert "Evidence: CPU capacity 390.0%" in text
-    assert "Evidence: Memory creep +1.2 GB (18.0%) · R1/N0" in text
+    assert "Evidence: Memory creep +1.2 GiB (18.0%) · R1/N0" in text
 
 
 @pytest.mark.parametrize(
@@ -3828,11 +3842,11 @@ def test_non_normal_resource_blocks_show_stored_trigger_and_scope() -> None:
                 metric="peak_allocated",
                 ranks=[1],
                 evidence={
-                    "overall_abs_delta_bytes": 50.0e6,
+                    "overall_abs_delta_bytes": 50 * 1024**2,
                     "overall_worst_growth_pct": 0.075,
                 },
             ),
-            "Evidence: Memory rising +50.0 MB (7.5%) · R1/N0",
+            "Evidence: Memory rising +50.0 MiB (7.5%) · R1/N0",
         ),
         (
             _issue(
@@ -4093,26 +4107,26 @@ def test_other_findings_skip_section_primaries_and_keep_later_issues() -> None:
 
 
 def test_step_memory_falls_back_to_megabytes() -> None:
-    # A sub-0.1 GB footprint must not render as "0.0 GB".
+    # A sub-0.1 GiB footprint must not render as "0.0 GiB".
     text = plain("run_single_gpu_on_shared_host")
-    assert "Allocated                   18.8 MB" in text
-    assert "Reserved                    23.1 MB" in text
-    assert "0.0 GB" not in text
+    assert "Allocated                   18.0 MiB" in text
+    assert "Reserved                    22.0 MiB" in text
+    assert "0.0 GiB" not in text
     multi = plain("run_multi_residual_heavy")
     assert (
-        "Allocated                   18.8 MB             21.0 MB, R0/N0"
+        "Allocated                   18.0 MiB            20.0 MiB, R0/N0"
         in multi
     )
     assert (
-        "Reserved                    23.1 MB             25.1 MB, R0/N0"
+        "Reserved                    22.0 MiB            24.0 MiB, R0/N0"
         in multi
     )
 
 
 def test_step_memory_keeps_gigabytes_above_the_threshold() -> None:
     text = plain("run_healthy")
-    assert "Allocated                   2.9 GB" in text
-    assert "Reserved                    3.2 GB" in text
+    assert "Allocated                   2.7 GiB" in text
+    assert "Reserved                    3.0 GiB" in text
 
 
 @pytest.mark.parametrize("name", sorted(CASES))

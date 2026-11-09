@@ -37,7 +37,7 @@ def publish_runtime_environment_once(info: RuntimeEnvironmentInfo) -> bool:
 
     row = {
         "seq": 0,
-        "ts": time.time(),
+        "timestamp_unix_ns": time.time_ns(),
         **info.to_record(),
     }
     try:

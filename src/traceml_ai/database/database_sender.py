@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import time
 from typing import Any, Optional, Protocol
 
 from traceml_ai.loggers.error_log import get_error_logger
@@ -54,7 +53,6 @@ class DBIncrementalSender:
 
     {
         "meta": {
-            "rank": <int>,
             "global_rank": <int>,
             "local_rank": <int>,
             "world_size": <int>,
@@ -63,7 +61,6 @@ class DBIncrementalSender:
             "hostname": <str>,
             "pid": <int>,
             "sampler": <str>,
-            "timestamp": <float>,
             "session_id": <str | None>,
             "run_nonce": <str | None>,
             "session_source": <"explicit" | "generated" | None>
@@ -82,54 +79,37 @@ class DBIncrementalSender:
         db: AppendOnlyDatabase,
         sampler_name: str,
         sender: Optional[Any] = None,
-        rank: Optional[int] = None,
         max_rows_per_flush: int = -1,
     ) -> None:
         """
         Initialize the incremental sender.
 
-        ``rank`` is usually attached by TelemetryPublisher after sampler
-        construction. New runtime code should attach the global rank so
-        downstream storage can group multi-node telemetry without collisions.
+        The complete runtime identity is attached by ``TelemetryPublisher``
+        after sampler construction.
         """
         self.db = db
         self.sampler_name = str(sampler_name)
         self.sender = sender
-        self.rank = rank
         self.identity: Optional[SenderIdentity] = None
         self.max_rows_per_flush = int(max_rows_per_flush)
 
         self._last_sent_seq: dict[str, int] = {}
         self.logger = get_error_logger("DBIncrementalSender")
 
-    def _payload_rank(self) -> int:
-        """
-        Return the globally unique rank for outbound payloads.
-
-        A missing rank means the sender was not attached by the runtime
-        publisher. Failing fast here prevents malformed telemetry from reaching
-        the aggregator with ``rank=None``.
-        """
-        if self.rank is None:
-            raise RuntimeError(
-                "DBIncrementalSender requires an attached runtime rank before "
-                "collecting payloads."
-            )
-        return int(self.rank)
-
     def _payload_identity(self) -> SenderIdentity:
         """
         Return the rank identity for outbound payloads.
 
-        ``identity`` is attached by TelemetryPublisher. The ``rank`` fallback
-        keeps direct unit-test and legacy construction paths working, but new
-        runtime payloads should always include explicit global/local rank.
+        ``identity`` is attached by TelemetryPublisher before telemetry is
+        collected. Requiring the complete identity prevents local/global rank
+        collisions in multi-node jobs.
         """
         if self.identity is not None:
             return self.identity
-
-        rank = self._payload_rank()
-        return SenderIdentity(global_rank=rank, local_rank=rank)
+        raise RuntimeError(
+            "DBIncrementalSender requires an attached runtime identity before "
+            "collecting payloads."
+        )
 
     def collect_payload(self) -> dict | None:
         """
@@ -173,7 +153,6 @@ class DBIncrementalSender:
             identity=identity,
             sampler_name=self.sampler_name,
             tables=tables_payload,
-            timestamp=time.time(),
         )
 
     def flush(self) -> None:

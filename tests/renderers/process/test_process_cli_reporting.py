@@ -26,8 +26,8 @@ from traceml_ai.renderers.process.computer import ProcessMetricsComputer
 from traceml_ai.renderers.process.dashboard_compute import (
     ProcessDashboardComputer,
 )
-from traceml_ai.renderers.process.reporting import read_rank_clock
 from traceml_ai.renderers.process.renderer import ProcessRenderer
+from traceml_ai.renderers.process.reporting import read_rank_clock
 from traceml_ai.renderers.process.repository import ProcessRepository
 
 T0 = 1_700_000_000.0
@@ -40,12 +40,14 @@ def _run(db, *, ranks=2, samples=60, cadence_s=2.0, dies=None):
             if dies is not None and rank == dies[0] and seq > dies[1]:
                 continue
             db.insert(
-                recv_ts_ns=int((T0 + seq * cadence_s) * 1e9),
+                observed_timestamp_unix_ns=int((T0 + seq * cadence_s) * 1e9),
                 rank=rank,
                 global_rank=rank,
                 node_rank=0,
                 seq=seq,
-                sample_ts_s=T0 + seq * cadence_s,
+                timestamp_unix_ns=round(
+                    (T0 + seq * cadence_s) * 1_000_000_000
+                ),
                 cpu_percent=200.0 + 100.0 * rank,
                 cpu_logical_core_count=8,
                 ram_used_bytes=2.0 * GB,
@@ -74,7 +76,7 @@ def test_cli_snapshot_names_the_rank_that_stopped(process_db):
     assert by_rank[0]["freshness"] == "fresh"
     assert by_rank[0]["age_s"] == pytest.approx(0.0)
     assert by_rank[1]["freshness"] == "stale"
-    # Seq 20 arrived at T0+40 s, the newest arrival is T0+120 s.
+    # Seq 20 was observed at T0+40 s; the newest observation is T0+120 s.
     assert by_rank[1]["age_s"] == pytest.approx(80.0)
     assert by_rank[1]["last_seen_s"] == pytest.approx(T0 + 40.0)
 
@@ -151,12 +153,12 @@ def test_held_figures_never_bring_back_the_status_they_were_read_with(
 
     for seq in range(21, 61):
         process_db.insert(
-            recv_ts_ns=int((T0 + seq * 2.0) * 1e9),
+            observed_timestamp_unix_ns=int((T0 + seq * 2.0) * 1e9),
             rank=0,
             global_rank=0,
             node_rank=0,
             seq=seq,
-            sample_ts_s=T0 + seq * 2.0,
+            timestamp_unix_ns=round((T0 + seq * 2.0) * 1_000_000_000),
             cpu_percent=200.0,
         )
     monkeypatch.setattr(
@@ -308,11 +310,11 @@ def test_an_older_row_with_a_garbage_global_rank_moves_no_verdict(
     """
     _run(process_db, dies=(1, 20))
     process_db.insert(
-        recv_ts_ns=int((T0 + 2.0) * 1e9),
+        observed_timestamp_unix_ns=int((T0 + 2.0) * 1e9),
         rank=0,
         global_rank="not-a-rank",
         seq=1,
-        sample_ts_s=T0 + 2.0,
+        timestamp_unix_ns=round((T0 + 2.0) * 1_000_000_000),
         cpu_percent=1.0,
     )
 
@@ -342,19 +344,19 @@ def test_unparseable_global_rank_falls_back_to_the_rank_cell(process_db):
     """
     _run(process_db, ranks=3)
     process_db.insert(
-        recv_ts_ns=int((T0 + 40.0) * 1e9),
+        observed_timestamp_unix_ns=int((T0 + 40.0) * 1e9),
         rank=3,
         global_rank="garbage",
         seq=20,
-        sample_ts_s=T0 + 40.0,
+        timestamp_unix_ns=round((T0 + 40.0) * 1_000_000_000),
         cpu_percent=100.0,
     )
     process_db.insert(
-        recv_ts_ns=int((T0 + 120.0) * 1e9),
+        observed_timestamp_unix_ns=int((T0 + 120.0) * 1e9),
         rank=None,
         global_rank="junk",
         seq=60,
-        sample_ts_s=T0 + 120.0,
+        timestamp_unix_ns=round((T0 + 120.0) * 1_000_000_000),
         cpu_percent=1.0,
     )
 
@@ -382,11 +384,11 @@ def test_a_fallen_back_row_joins_its_rank_window_in_sample_order(
     """
     _run(process_db)
     process_db.insert(
-        recv_ts_ns=int((T0 + 101.0) * 1e9),
+        observed_timestamp_unix_ns=int((T0 + 101.0) * 1e9),
         rank=0,
         global_rank="garbage",
         seq=50,
-        sample_ts_s=T0 + 101.0,
+        timestamp_unix_ns=round((T0 + 101.0) * 1_000_000_000),
         cpu_percent=1.0,
     )
     repo = ProcessRepository(db_path=process_db.path)
@@ -394,10 +396,12 @@ def test_a_fallen_back_row_joins_its_rank_window_in_sample_order(
         clock = read_rank_clock(
             repo,
             conn,
-            newest_ts=repo.newest_sample_ts(conn),
+            newest_timestamp_unix_ns=repo.newest_timestamp_unix_ns(conn),
             configured_interval_s=2.0,
         )
 
-    stamps = [row["sample_ts_s"] for row in clock.by_rank[0]]
+    stamps = [
+        row["timestamp_unix_ns"] / 1_000_000_000 for row in clock.by_rank[0]
+    ]
     assert T0 + 101.0 in stamps
     assert stamps == sorted(stamps)

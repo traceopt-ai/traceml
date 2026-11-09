@@ -13,7 +13,7 @@ from traceml_ai.diagnostics.registry import (
     ModelDiagnosticContext,
 )
 from traceml_ai.diagnostics.step_memory import LIVE_STEP_MEMORY_POLICY
-from traceml_ai.renderers.step_memory.schema import (
+from traceml_ai.measurements.step_memory import (
     StepMemoryCombinedCoverage,
     StepMemoryCombinedMetric,
     StepMemoryCombinedSeries,

@@ -42,7 +42,7 @@ class SamplerSpec:
     factory: SamplerFactory
     profiles: Optional[tuple[str, ...]] = None
     modes: Optional[tuple[str, ...]] = None
-    rank_zero_only: bool = False
+    node_leader_only: bool = False
     drain_on_recording_stop: bool = False
 
     def enabled_for(
@@ -50,15 +50,19 @@ class SamplerSpec:
         *,
         profile: str,
         mode: str,
-        is_ddp: bool,
         local_rank: int,
+        world_size: int = 1,
     ) -> bool:
         """Return True when this sampler should run for the rank context."""
         if self.profiles is not None and profile not in self.profiles:
             return False
         if self.modes is not None and mode not in self.modes:
             return False
-        if self.rank_zero_only and is_ddp and int(local_rank) != 0:
+        if (
+            self.node_leader_only
+            and int(world_size) > 1
+            and int(local_rank) != 0
+        ):
             return False
         return True
 
@@ -69,7 +73,7 @@ def _spec(
     *,
     profiles: Optional[Iterable[str]] = None,
     modes: Optional[Iterable[str]] = None,
-    rank_zero_only: bool = False,
+    node_leader_only: bool = False,
     drain_on_recording_stop: bool = False,
 ) -> tuple[str, SamplerSpec]:
     """Build one registry item with the key stored inside the spec."""
@@ -78,7 +82,7 @@ def _spec(
         factory=factory,
         profiles=tuple(profiles) if profiles is not None else None,
         modes=tuple(modes) if modes is not None else None,
-        rank_zero_only=rank_zero_only,
+        node_leader_only=node_leader_only,
         drain_on_recording_stop=bool(drain_on_recording_stop),
     )
     return key, spec
@@ -86,7 +90,7 @@ def _spec(
 
 DEFAULT_SAMPLER_REGISTRY: Registry[SamplerSpec] = Registry(
     [
-        _spec("system", SystemSampler, rank_zero_only=True),
+        _spec("system", SystemSampler, node_leader_only=True),
         _spec(
             "runtime_environment",
             RuntimeEnvironmentSampler,
@@ -113,8 +117,8 @@ def select_sampler_specs(
     *,
     profile: str,
     mode: str,
-    is_ddp: bool,
     local_rank: int,
+    world_size: int = 1,
     registry: Registry[SamplerSpec] = DEFAULT_SAMPLER_REGISTRY,
 ) -> tuple[SamplerSpec, ...]:
     """Select sampler specs without instantiating sampler classes."""
@@ -126,8 +130,8 @@ def select_sampler_specs(
         if spec.enabled_for(
             profile=normalized_profile,
             mode=normalized_mode,
-            is_ddp=bool(is_ddp),
             local_rank=int(local_rank),
+            world_size=int(world_size),
         )
     )
 
@@ -136,8 +140,8 @@ def build_samplers(
     *,
     profile: str,
     mode: str,
-    is_ddp: bool,
     local_rank: int,
+    world_size: int = 1,
     registry: Registry[SamplerSpec] = DEFAULT_SAMPLER_REGISTRY,
     logger=None,
 ) -> list[BaseSampler]:
@@ -147,8 +151,8 @@ def build_samplers(
     for spec in select_sampler_specs(
         profile=profile,
         mode=mode,
-        is_ddp=is_ddp,
         local_rank=local_rank,
+        world_size=world_size,
         registry=registry,
     ):
         try:

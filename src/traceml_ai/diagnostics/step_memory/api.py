@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Literal, Optional, Sequence, cast
 
 from traceml_ai.diagnostics.common import DiagnosticResult
-from traceml_ai.renderers.step_memory.schema import StepMemoryCombinedMetric
+from traceml_ai.measurements.step_memory import StepMemoryCombinedMetric
 
 from ..common import BaseDiagnosis, Severity, validate_confidence
 from .policy import (
