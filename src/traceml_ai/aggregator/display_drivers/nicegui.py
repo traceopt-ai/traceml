@@ -51,6 +51,7 @@ Aggregator contract (required by trace_aggregator)
 from __future__ import annotations
 
 import importlib
+import os
 import sys
 import threading
 import time
@@ -437,7 +438,10 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
             # Reclaim a client's subscribers + timer when its browser leaves,
             # so reconnects don't leak (TRA-68).
             app.on_disconnect(self._handle_disconnect)
+            # Unset keeps NiceGUI's default bind. Containers set
+            # TRACEML_DASHBOARD_HOST=0.0.0.0 so a published port reaches it.
             ui.run(
+                host=os.environ.get("TRACEML_DASHBOARD_HOST") or None,
                 port=self._port,
                 reload=False,
                 show=self._show,
