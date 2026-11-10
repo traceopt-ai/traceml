@@ -33,6 +33,10 @@ from traceml_ai.loggers.error_log import get_error_logger
 _MIN_INTERVAL_SEC = 0.01
 
 
+class ExporterStartupError(RuntimeError):
+    """Raised when a required exporter does not open successfully."""
+
+
 @dataclass(frozen=True)
 class ExportStats:
     """
@@ -108,6 +112,7 @@ class ExportWorker:
         )
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
+        self._startup_event = threading.Event()
         self._thread = threading.Thread(
             target=self._run,
             name="TraceML-ExportWorker",
@@ -120,6 +125,7 @@ class ExportWorker:
         self._deadline: Optional[float] = None
         self._opened = False
         self._closed = False
+        self._startup_error: Optional[str] = None
 
         self._written = 0
         self._dropped = 0
@@ -143,10 +149,31 @@ class ExportWorker:
             except Exception as exc:
                 start_error = exc
         if start_error is not None:
+            with self._lock:
+                self._failed = True
+                self._startup_error = (
+                    f"export worker thread did not start: {start_error!r}"
+                )
+            self._startup_event.set()
             self._log_error(
                 "[TraceML] export worker thread did not start: "
                 f"{start_error!r}"
             )
+
+    def wait_until_ready(self, timeout_sec: float) -> None:
+        """Wait for ``open()`` and raise when exporter startup fails."""
+        timeout = max(0.0, float(timeout_sec))
+        if not self._startup_event.wait(timeout=timeout):
+            raise ExporterStartupError(
+                f"[TraceML] {self._name} did not finish opening within "
+                f"{timeout:g} seconds."
+            )
+        with self._lock:
+            opened = self._opened
+            startup_error = self._startup_error
+        if not opened:
+            message = startup_error or f"{self._name} did not open."
+            raise ExporterStartupError(f"[TraceML] {message}")
 
     def submit(self, payload: Any) -> None:
         """
@@ -255,9 +282,12 @@ class ExportWorker:
         """Open the exporter, disabling it if setup fails."""
         try:
             self._exporter.open()
-        except Exception as exc:
+        except (Exception, SystemExit) as exc:
+            failure = f"{self._name}.open failed: {exc!r}"
             with self._lock:
                 self._failed = True
+                self._startup_error = failure
+            self._startup_event.set()
             self._log_error(
                 f"[TraceML] {self._name}.open failed, export disabled: "
                 f"{exc!r}"
@@ -265,6 +295,7 @@ class ExportWorker:
             return
         with self._lock:
             self._opened = True
+        self._startup_event.set()
 
     def _before_deadline(self) -> bool:
         """True while the stop deadline has not passed."""

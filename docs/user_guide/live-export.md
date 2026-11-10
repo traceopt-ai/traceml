@@ -67,7 +67,12 @@ traceml run train.py --mode summary --exporter jsonl
 The aggregator remains active in both cases. It admits measurements, consumes
 rank-completion markers, and drains pending telemetry and exports within the
 existing shutdown bounds. Completion markers do not guarantee delivery or
-indicate that training succeeded. Export failures and losses remain warnings.
+indicate that training succeeded. In telemetry mode, the required exporter
+must open before the aggregator accepts workers; an initialization failure is
+an aggregator startup failure, so the default launcher policy does not start
+training. After training starts, export failures and losses remain warnings and
+do not replace the training exit code. In summary mode, export remains optional
+and its initialization failures are warnings because local analysis continues.
 
 For separately launched workers, configure both sides explicitly:
 
@@ -205,8 +210,10 @@ So every closing line of a run shows the same `dropped_batches`.
 
 ## When something was lost
 
-Export never fails the run.
-When the export did not write every record of the selected streams, `finalization_warning.json` in the run folder gets an `export` block.
+After training starts, export never changes the training outcome. Telemetry
+mode first requires its exporter to open successfully, as described above.
+When the export did not write every record of the selected streams,
+`finalization_warning.json` in the run folder gets an `export` block.
 The block holds `written_records`, `dropped_batches`, `failed_records`, `skipped_items` and `exporter_failed`.
 If export is the only problem, the file also says `"reason": "export_incomplete"`.
 If another warning already started the file, the `export` block is added to it.

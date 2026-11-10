@@ -192,6 +192,43 @@ def test_start_starts_the_export_worker_after_sqlite(tmp_path):
     assert calls == ["tcp", "sqlite", "export", "display", "loop"]
 
 
+def test_telemetry_opens_the_exporter_before_accepting_workers(tmp_path):
+    calls = []
+
+    class _Part:
+        def __init__(self, name):
+            self._name = name
+
+        def start(self):
+            calls.append(self._name)
+
+    class _RequiredExport(_Part):
+        def wait_until_ready(self, timeout_sec):
+            calls.append("export_ready")
+
+    agg = TraceMLAggregator(
+        logger=_Logger(),
+        stop_event=threading.Event(),
+        settings=_settings(tmp_path, "jsonl", mode="telemetry"),
+    )
+    agg._tcp_server = _Part("tcp")
+    agg._sqlite_writer = _Part("sqlite")
+    agg._export_worker = _RequiredExport("export")
+    agg._display_driver = _Part("display")
+    agg._thread = _Part("loop")
+
+    agg.start()
+
+    assert calls == [
+        "export",
+        "export_ready",
+        "tcp",
+        "sqlite",
+        "display",
+        "loop",
+    ]
+
+
 def test_jsonl_exporter_writes_admitted_step_time(tmp_path):
     agg = TraceMLAggregator(
         logger=_Logger(),

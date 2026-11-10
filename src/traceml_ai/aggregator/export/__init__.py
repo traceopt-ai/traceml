@@ -25,7 +25,11 @@ from traceml_ai.aggregator.export.records import (
     SystemRecord,
     records_from_payload,
 )
-from traceml_ai.aggregator.export.worker import ExportStats, ExportWorker
+from traceml_ai.aggregator.export.worker import (
+    ExporterStartupError,
+    ExportStats,
+    ExportWorker,
+)
 
 # Values the ``exporter`` setting accepts; the launcher validates against
 # this before any process starts and the aggregator resolves from it.
@@ -102,6 +106,7 @@ __all__ = [
     "SCHEMA_VERSION",
     "ExportStats",
     "ExportWorker",
+    "ExporterStartupError",
     "Exporter",
     "ExporterContext",
     "JsonExporter",

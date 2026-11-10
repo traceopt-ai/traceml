@@ -22,6 +22,7 @@ from traceml_ai.aggregator.export import (
     EXPORTER_NAMES,
     Exporter,
     ExporterContext,
+    ExporterStartupError,
     ExportStats,
     ExportWorker,
     JsonExporter,
@@ -64,6 +65,7 @@ _EXPORT_QUEUE_BUFFERED_ROUNDS = 10
 _EXPORT_STOP_BUDGET_FRACTION = 0.1
 _EXPORT_STOP_BUDGET_MIN_SEC = 0.5
 _EXPORT_STOP_BUDGET_MAX_SEC = 2.0
+_EXPORT_STARTUP_TIMEOUT_SEC = 10.0
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -320,18 +322,29 @@ class TraceMLAggregator:
         """
         Start the aggregator server, persistence layer, UI driver, and loop.
 
-        Start order matters:
-        1. TCP server must start first so workers can connect.
-        2. SQLite writer and export worker start before ingestion begins.
-        3. Display driver starts before periodic ticks.
-        4. Aggregator loop thread starts last.
+        In telemetry mode the required exporter opens before the TCP listener,
+        so the launcher cannot start training against an unusable sink. Other
+        modes retain the existing fail-open exporter behavior. SQLite and the
+        display driver start before ingestion, and the aggregator loop starts
+        last.
 
         Startup failures should propagate so the launcher can fail fast rather
         than running in a partially initialized state.
         """
+        require_exporter = self._settings.mode == "telemetry"
+        if require_exporter:
+            # Validation guarantees telemetry has an export worker. Keep this
+            # guard defensive for programmatic construction.
+            if self._export_worker is None:
+                raise ExporterStartupError(
+                    "[TraceML] telemetry mode has no export worker."
+                )
+            self._export_worker.start()
+            self._export_worker.wait_until_ready(_EXPORT_STARTUP_TIMEOUT_SEC)
+
         self._tcp_server.start()
         self._sqlite_writer.start()
-        if self._export_worker is not None:
+        if self._export_worker is not None and not require_exporter:
             self._export_worker.start()
         self._display_driver.start()
 
@@ -357,10 +370,11 @@ class TraceMLAggregator:
         multi-node telemetry can arrive, closes SQLite before summary generation,
         and treats a missing summary as an error in summary mode. The export
         worker, when configured, gets its own slice of the timeout after the
-        TCP server stops and before SQLite closes; export losses are reported
-        as a warning and never fail the run. The export counts are read again
-        after SQLite finalize, so an exporter call that was still running at
-        the export deadline is counted when it has finished by then.
+        TCP server stops and before SQLite closes. After startup, export losses
+        are reported as a warning and never fail training. The export counts
+        are read again after SQLite finalize, so an exporter call that was
+        still running at the export deadline is counted when it has finished
+        by then.
         """
         deadline = time.monotonic() + max(0.0, float(timeout_sec))
         session_root = Path(str(self._settings.logs_dir)).resolve() / str(
