@@ -84,10 +84,11 @@ def read_traceml_env() -> Dict[str, Any]:
     - TRACEML_UI_MODE is preferred
     - TRACEML_MODE is still accepted
 
-     Supported display modes:
+     Supported execution modes:
     - cli
     - dashboard
     - summary
+    - telemetry (export without local history or analysis)
     """
     ui_mode = os.environ.get(
         "TRACEML_UI_MODE",
@@ -98,6 +99,9 @@ def read_traceml_env() -> Dict[str, Any]:
         "script_path": os.environ["TRACEML_SCRIPT_PATH"],
         "profile": os.environ.get("TRACEML_PROFILE", DEFAULT_PROFILE),
         "mode": ui_mode,
+        "history_enabled": (
+            os.environ.get("TRACEML_HISTORY_ENABLED", "1") == "1"
+        ),
         "interval": float(
             os.environ.get("TRACEML_INTERVAL", str(DEFAULT_INTERVAL_SEC))
         ),
@@ -170,6 +174,7 @@ def build_runtime_settings(cfg: Dict[str, Any]) -> TraceMLSettings:
     """
     return TraceMLSettings(
         mode=str(cfg["mode"]),
+        history_enabled=bool(cfg.get("history_enabled", True)),
         profile=str(cfg["profile"]),
         sampler_interval_sec=float(cfg["interval"]),
         enable_logging=bool(cfg["enable_logging"]),

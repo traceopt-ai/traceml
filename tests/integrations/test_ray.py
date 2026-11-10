@@ -118,6 +118,59 @@ def test_exporter_settings_reach_the_aggregator_only():
     assert worker.exporter_hostname is False
 
 
+def test_ray_telemetry_keeps_export_config_out_of_worker_wrapper(monkeypatch):
+    import traceml_ai.integrations.ray as integration
+
+    ray = Mock()
+    actor_factory = ray.remote.return_value.return_value
+    actor = actor_factory.remote.return_value
+    endpoint = {"host": "10.0.0.9", "port": 34567, "session_id": "ray-run"}
+    actor.endpoint.remote.return_value = endpoint
+    ray.get.side_effect = lambda value: value
+    torch_trainer = Mock()
+    monkeypatch.setattr(
+        integration, "_require_ray", lambda: (ray, torch_trainer)
+    )
+    config = TraceMLRayConfig(
+        mode="telemetry",
+        session_id="ray-run",
+        exporter="private_adapter:make",
+        export_streams="all",
+        exporter_hostname=True,
+    )
+    integration.TraceMLTorchTrainer(
+        lambda _: None, traceml_config=config
+    ).fit()
+
+    actor_config = actor_factory.remote.call_args.args[0]
+    wrapper = torch_trainer.call_args.args[0]
+    assert actor_config == config
+    assert wrapper.config.exporter == ""
+    assert wrapper.config.export_streams == "step_time"
+    assert wrapper.config.exporter_hostname is False
+    worker = _build_worker_settings(
+        config=wrapper.config, endpoint=_endpoint_from_mapping(endpoint)
+    )
+    aggregator = _build_aggregator_settings(
+        config=config, connect_host="10.0.0.9"
+    )
+    assert worker.mode == aggregator.mode == "telemetry"
+    assert worker.history_enabled is aggregator.history_enabled is False
+
+
+def test_ray_telemetry_requires_exporter_before_actor_creation(monkeypatch):
+    import traceml_ai.integrations.ray as integration
+
+    ray = Mock()
+    monkeypatch.setattr(integration, "_require_ray", lambda: (ray, Mock()))
+    trainer = integration.TraceMLTorchTrainer(
+        lambda _: None, traceml_config=TraceMLRayConfig(mode="telemetry")
+    )
+    with pytest.raises(ValueError, match="requires a configured exporter"):
+        trainer.fit()
+    ray.remote.assert_not_called()
+
+
 def test_exporter_is_off_by_default():
     settings = _build_aggregator_settings(
         config=TraceMLRayConfig(session_id="ray-run"),

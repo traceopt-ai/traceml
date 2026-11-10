@@ -13,11 +13,18 @@ _STEPS = 4
 _RUN_NAME = "export-launch"
 
 _WORKLOAD = """
+import os
 import torch
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
 import traceml_ai as traceml
+
+assert "TRACEML_EXPORTER" not in os.environ
+assert "TRACEML_EXPORT_STREAMS" not in os.environ
+assert "TRACEML_EXPORTER_HOSTNAME" not in os.environ
+if os.environ.get("TRACEML_UI_MODE") == "telemetry":
+    assert os.environ["TRACEML_HISTORY_ENABLED"] == "0"
 
 STEPS = NUM_STEPS
 torch.manual_seed(0)
@@ -47,13 +54,18 @@ def _script(tmp_path):
     sys.platform == "win32",
     reason="The two-rank torchrun smoke path is not verified on Windows.",
 )
-def test_two_rank_run_exports_step_time_jsonl(tmp_path):
+@pytest.mark.parametrize("mode", ["summary", "telemetry"])
+def test_two_rank_run_exports_step_time_jsonl(tmp_path, mode):
     result = _run(
         tmp_path,
         _script(tmp_path),
         run_name=_RUN_NAME,
         nproc_per_node=2,
-        extra_env={"TRACEML_EXPORTER": "jsonl"},
+        mode=mode,
+        extra_env={
+            "TRACEML_EXPORTER": "jsonl",
+            "TRACEML_HISTORY_ENABLED": "1",
+        },
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
@@ -105,9 +117,18 @@ def test_two_rank_run_exports_step_time_jsonl(tmp_path):
             devices = events[f"_traceml_internal:{name}"]
             assert sum(value["cpu_ms"] for value in devices.values()) > 0
 
-    summary = json.loads((session_root / "final_summary.json").read_text())
-    metadata = summary["step_time"]["metadata"]
-    assert metadata["global_ranks_seen"] == 2
-    assert metadata["global_ranks_used"] == 2
-    assert "export" not in summary
-    assert not (session_root / "finalization_warning.json").exists()
+    if mode == "summary":
+        summary = json.loads((session_root / "final_summary.json").read_text())
+        metadata = summary["step_time"]["metadata"]
+        assert metadata["global_ranks_seen"] == 2
+        assert metadata["global_ranks_used"] == 2
+        assert "export" not in summary
+    else:
+        assert not list(session_root.glob("final_summary.*"))
+        assert not list((session_root / "aggregator").glob("telemetry*"))
+        assert not list(
+            (session_root / "aggregator").glob("final_summary_*.json")
+        )
+        manifest = json.loads((session_root / "manifest.json").read_text())
+        assert manifest["launch"]["history_enabled"] is False
+    assert not list((session_root / "aggregator").glob("finalization_*.json"))

@@ -18,6 +18,7 @@ from traceml_ai.launcher.commands import (
     run_with_tracing,
     validate_launch_args,
 )
+from traceml_ai.runtime.modes import DISPLAY_MODES, SUPPORTED_MODES
 from traceml_ai.runtime.settings import (
     DEFAULT_FINALIZE_TIMEOUT_SEC,
     DEFAULT_INTERVAL_SEC,
@@ -58,7 +59,11 @@ def _add_exporter_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _add_launch_args(parser: argparse.ArgumentParser) -> None:
+def _add_launch_args(
+    parser: argparse.ArgumentParser,
+    *,
+    modes: tuple[str, ...] = SUPPORTED_MODES,
+) -> None:
     """Add shared launch arguments for TraceML run commands."""
     parser.add_argument(
         "script", help="Path to the target Python training script."
@@ -67,13 +72,20 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         "--mode",
         type=str,
         default=None,
-        choices=["cli", "dashboard", "summary"],
+        choices=modes,
         help=(
             "TraceML mode. "
             "'summary': end-of-run report, supports single-node and "
             "multi-node multi-GPU. "
             "'cli' and 'dashboard': live views, intended for single-node "
-            "runs, including single-node multi-GPU. Default: summary."
+            "runs, including single-node multi-GPU. "
+            + (
+                "'telemetry': export without local history or analysis, "
+                "requires an exporter. "
+                if "telemetry" in modes
+                else ""
+            )
+            + "Default: summary."
         ),
     )
     parser.add_argument(
@@ -159,8 +171,8 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         type=float,
         default=None,
         help=(
-            "Maximum seconds TraceML waits at end of run to settle telemetry, "
-            "flush SQLite, checkpoint WAL, and write final summary artifacts. "
+            "Maximum seconds TraceML waits at end of run to settle telemetry "
+            "and finalize enabled export, history, and summary components. "
             f"Default: {DEFAULT_FINALIZE_TIMEOUT_SEC:g}."
         ),
     )
@@ -294,7 +306,7 @@ def build_parser() -> argparse.ArgumentParser:
         "watch",
         help="Run a script in lightweight watch mode (system and process telemetry only).",
     )
-    _add_launch_args(watch_parser)
+    _add_launch_args(watch_parser, modes=DISPLAY_MODES)
 
     run_parser = sub.add_parser(
         "run",
@@ -315,8 +327,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--mode",
         type=str,
         default=None,
-        choices=["cli", "dashboard", "summary"],
-        help="TraceML display mode for the aggregator. Default: summary.",
+        choices=SUPPORTED_MODES,
+        help=(
+            "Aggregator execution mode. Telemetry requires an exporter and "
+            "disables local history and analysis. Default: summary."
+        ),
     )
     serve_parser.add_argument(
         "--logs-dir",

@@ -311,6 +311,21 @@ TraceMLRayConfig(
 For example, ``export_streams="step_time,step_memory"`` adds peak memory per step and device.
 See [Live Export](../live-export.md) for the files each stream writes.
 
+For measurement export without local SQLite history, diagnostics, rendering, or
+final summaries:
+
+```python
+TraceMLRayConfig(mode="telemetry", exporter="jsonl")
+```
+
+The exporter runs only in the aggregator actor. Workers receive the execution
+mode and disabled-history setting without exporter destination configuration.
+`summary()` and `final_summary()` are unavailable in telemetry mode. Existing
+`mode="summary", exporter="jsonl"` configuration keeps export and local analysis
+enabled together. JSONL writes local files; direct platform delivery requires
+a suitable custom exporter. Ray retains its existing shutdown after `fit()`;
+completion markers do not guarantee delivery.
+
 The default ``mode="summary"`` is recommended for Ray because distributed worker
 logs are noisy. Use ``mode="cli"`` only when you specifically want live terminal
 rendering from the aggregator actor.

@@ -1,9 +1,9 @@
 """
-Summary-only display driver for TraceML.
+No-op live display driver for TraceML.
 
 This driver is intentionally a no-op for live rendering. It allows TraceML to
-run with full telemetry ingestion and history persistence while skipping any
-live terminal or browser UI.
+run without a live terminal or browser UI. The aggregator independently selects
+history persistence and report generation.
 
 Use cases
 ---------
@@ -29,11 +29,11 @@ from traceml_ai.runtime.settings import TraceMLSettings
 
 class SummaryDisplayDriver(BaseDisplayDriver):
     """
-    No-op display driver used for summary-only runs.
+    No-op display driver used for summary and telemetry-only runs.
 
     This driver deliberately does not allocate terminal UI or dashboard
-    resources. The aggregator still ingests telemetry, writes history, and
-    produces the final end-of-run summary during shutdown.
+    resources. History and summary generation are selected independently by
+    the aggregator; telemetry mode enables neither.
     """
 
     def __init__(

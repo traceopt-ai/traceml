@@ -34,6 +34,7 @@ from traceml_ai.aggregator.sqlite_writer import (
 )
 from traceml_ai.aggregator.summary_service import FinalSummaryService
 from traceml_ai.reporting.final import generate_summary
+from traceml_ai.runtime.modes import validate_aggregator_options
 from traceml_ai.runtime.settings import AggregatorEndpoint, TraceMLSettings
 from traceml_ai.sdk.protocol import (
     get_final_summary_json_path,
@@ -81,12 +82,13 @@ def _safe(logger: Any, label: str, fn: Callable[[], Any]) -> Any:
 
 
 class TraceMLFinalizationError(RuntimeError):
-    """Raised when summary-mode end-of-run finalization cannot complete."""
+    """Raised when headless end-of-run finalization cannot complete."""
 
 
 _DISPLAY_DRIVERS: Dict[str, Type[BaseDisplayDriver]] = {
     "cli": CLIDisplayDriver,
     "summary": SummaryDisplayDriver,
+    "telemetry": SummaryDisplayDriver,
 }
 
 
@@ -224,6 +226,9 @@ class TraceMLAggregator:
         stop_event: threading.Event,
         settings: TraceMLSettings,
     ) -> None:
+        validate_aggregator_options(
+            settings.mode, settings.exporter, settings.html_report
+        )
         self._logger = logger
         self._stop_event = stop_event
         self._settings = settings
@@ -283,17 +288,19 @@ class TraceMLAggregator:
                 streams=export_streams,
             )
 
-        self._summary_service = FinalSummaryService(
-            logger=self._logger,
-            session_root=session_root,
-            db_path=str(db_path),
-            flush_history=self._sqlite_writer.force_flush,
-            settle_telemetry=self._settle_telemetry,
-            write_html=bool(settings.html_report),
-            profile=str(settings.profile),
-            history_retention_s=float(settings.history_retention_s),
-            summary_lock=self._summary_lock,
-        )
+        self._summary_service: Optional[FinalSummaryService] = None
+        if settings.history_enabled:
+            self._summary_service = FinalSummaryService(
+                logger=self._logger,
+                session_root=session_root,
+                db_path=str(db_path),
+                flush_history=self._sqlite_writer.force_flush,
+                settle_telemetry=self._settle_telemetry,
+                write_html=bool(settings.html_report),
+                profile=str(settings.profile),
+                history_retention_s=float(settings.history_retention_s),
+                summary_lock=self._summary_lock,
+            )
 
         # Display driver owns renderer selection and layout mapping.
         driver_cls = _resolve_display_driver(settings.mode)
@@ -392,7 +399,11 @@ class TraceMLAggregator:
         )
 
         try:
-            sqlite_finalize_budget = self._sqlite_finalize_budget(remaining())
+            sqlite_finalize_budget = (
+                self._sqlite_finalize_budget(remaining())
+                if self._settings.history_enabled
+                else 0.0
+            )
             export_budget = (
                 self._export_stop_budget(remaining())
                 if export_worker is not None
@@ -538,7 +549,7 @@ class TraceMLAggregator:
                     ),
                 },
             )
-            if self._settings.mode == "summary":
+            if self._settings.mode in ("summary", "telemetry"):
                 raise
             self._logger.exception("[TraceML] Finalization failed")
 
@@ -950,25 +961,21 @@ class TraceMLAggregator:
             # Rate-limit the UI tick to interval_sec cadence.
             now = time.monotonic()
             if now - last_tick_ts >= interval_sec:
-                _safe(
-                    self._logger,
-                    "Final summary service poll failed",
-                    self._summary_service.poll,
-                )
-                _safe(
-                    self._logger,
-                    "Display driver tick failed",
-                    self._display_driver.tick,
-                )
+                self._tick()
                 last_tick_ts = now
 
         # Final drain and final display tick on shutdown.
         self._drain_tcp()
-        _safe(
-            self._logger,
-            "Final summary service poll failed",
-            self._summary_service.poll,
-        )
+        self._tick()
+
+    def _tick(self) -> None:
+        """Update configured local analysis and display components."""
+        if self._summary_service is not None:
+            _safe(
+                self._logger,
+                "Final summary service poll failed",
+                self._summary_service.poll,
+            )
         _safe(
             self._logger,
             "Display driver tick failed",

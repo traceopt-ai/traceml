@@ -24,6 +24,7 @@ def _run(
     disabled: bool = False,
     run_name: str = "hf-auto",
     command: str = "run",
+    mode: str = "summary",
     nproc_per_node: int = 1,
     extra_env: Optional[Mapping[str, str]] = None,
 ) -> subprocess.CompletedProcess[str]:
@@ -49,7 +50,7 @@ def _run(
         "traceml_ai.launcher.cli",
         command,
         "--mode",
-        "summary",
+        mode,
         "--logs-dir",
         str(tmp_path / "logs"),
         "--run-name",

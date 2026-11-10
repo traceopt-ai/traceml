@@ -59,11 +59,12 @@ def read_traceml_env() -> dict[str, Any]:
     - ``TRACEML_UI_MODE`` is preferred
     - ``TRACEML_MODE`` is still accepted
 
-    Supported display modes
+    Supported execution modes
     -----------------------
     - ``cli``: live terminal UI
     - ``dashboard``: NiceGUI browser UI
     - ``summary``: no live UI, final summary only
+    - ``telemetry``: export only, no local history or analysis
     """
 
     ui_mode = os.environ.get(
@@ -155,7 +156,7 @@ def run_aggregator(
     - starts only the aggregator (never a user training script)
     - prints the reachable endpoint
     - blocks until SIGINT/SIGTERM
-    - shuts down cleanly, preserving final-summary behavior
+    - shuts down cleanly, finalizing the configured export and analysis
     - logs fatal errors to its structured process-owned log
 
     Returns a process exit code (0 on clean shutdown, 1 on fatal error).

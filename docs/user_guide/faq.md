@@ -40,6 +40,25 @@ folder. Summary mode is the default for single-node and multi-node runs.
 
 See [Reading the Output](reading-output.md) for the report fields.
 
+## Which execution mode should I choose?
+
+| Mode | Behavior |
+| --- | --- |
+| `summary` (default) | Collect local history and generate the final diagnosis and reports. |
+| `cli` | Show a live terminal view; local history and final reports are enabled by default. |
+| `dashboard` | Show a live browser view; local history and final reports are enabled by default. |
+| `telemetry` | Export measurements without SQLite history, local diagnostics, UI, or summaries. Requires an exporter. |
+
+For telemetry without local analysis:
+
+```bash
+traceml run train.py --mode telemetry --exporter jsonl
+```
+
+`run` and `serve` accept telemetry mode; `watch` does not. JSONL writes local
+files. See [Live Export](live-export.md#export-without-local-analysis) for local
+file behavior, custom exporters, and separately launched workers.
+
 ## What is the difference between `watch` and `run`?
 
 Use `run` for step timing and training bottleneck diagnosis. It automatically
@@ -70,7 +89,8 @@ traceml run train.py --mode=dashboard
 ```
 
 Open `http://127.0.0.1:8765`. Use `--mode=cli` for a live terminal view instead.
-Multi-node runs use summary mode.
+Multi-node runs default to summary mode; telemetry mode exports measurements
+without local analysis.
 
 On a remote server, start the dashboard there and forward its port from your
 local terminal:
@@ -84,8 +104,8 @@ Then open the same URL locally.
 ## Does TraceML support DDP?
 
 Yes. TraceML reports per-rank timing and can identify input or compute
-stragglers. Single-node DDP supports summary, CLI, and dashboard modes;
-multi-node DDP uses summary mode.
+stragglers. Single-node DDP supports summary, CLI, dashboard, and telemetry
+modes. Multi-node DDP defaults to summary mode and also accepts telemetry mode.
 
 Use the [Distributed Training guide](distributed-training.md) and your
 framework's integration guide for launch settings.
@@ -96,9 +116,10 @@ aggregate memory-pressure and imbalance diagnoses may be inaccurate.
 
 ## Does TraceML support multi-node?
 
-Yes, for summary-mode DDP runs. Use matching launch settings and a shared
-`--logs-dir` on every node, with a different `--node-rank` on each node.
-Node 0 owns the aggregator and final reports.
+Yes, for DDP runs in summary or telemetry mode. Use matching launch settings and
+a shared `--logs-dir` on every node, with a different `--node-rank` on each node.
+Node 0 owns the aggregator and writes final reports when local history is
+enabled.
 
 Choose a fresh `--run-name` for each launch. TraceML refuses to overwrite an
 existing run folder. See [Distributed Training](distributed-training.md) for
@@ -238,7 +259,8 @@ Automatic trainer integrations manage their own step boundaries. See the
 ## What is the difference between `auto`, `manual`, and `selective`?
 
 These are `init()` instrumentation modes for explicit setup, separate from
-the launcher's `summary`, `cli`, and `dashboard` display modes.
+the `summary`, `cli`, `dashboard`, and `telemetry` execution modes. In Python,
+select execution behavior with `init(ui_mode=...)`.
 
 - `auto`: patch supported PyTorch operations inside your explicit step boundary.
 - `manual`: use explicit timing wrappers.

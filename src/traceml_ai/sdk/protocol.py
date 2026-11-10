@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from traceml_ai.runtime.identity import resolve_runtime_identity
+from traceml_ai.runtime.modes import resolve_history_enabled
 from traceml_ai.runtime.settings import DEFAULT_UI_MODE
 
 
@@ -117,8 +118,8 @@ def resolve_session_context_from_env() -> TraceMLSessionContext:
         os.environ.get("TRACEML_UI_MODE", "").strip()
         or os.environ.get("TRACEML_MODE", DEFAULT_UI_MODE).strip()
     )
-    history_enabled = (
-        os.environ.get("TRACEML_HISTORY_ENABLED", "1").strip() == "1"
+    history_enabled = resolve_history_enabled(
+        mode, os.environ.get("TRACEML_HISTORY_ENABLED", "1").strip() == "1"
     )
 
     if not session_id or not logs_dir:
