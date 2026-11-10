@@ -1552,11 +1552,21 @@ def _resolve_serve_settings(args: argparse.Namespace):
     cfg["export_streams"] = _require_known_export_streams(
         cfg.get("export_streams")
     )
+    cfg["history_enabled"] = resolve_history_enabled(
+        cfg["mode"], cfg["history_enabled"]
+    )
 
     try:
         validate_aggregator_options(cfg["mode"], cfg["exporter"], False)
     except ValueError as exc:
         raise SystemExit(str(exc)) from None
+
+    if cfg["mode"] == "summary" and not cfg["history_enabled"]:
+        raise SystemExit(
+            "[TraceML] ERROR: mode=summary requires history to be enabled. "
+            "Set history_enabled: true in traceml.yaml or "
+            "TRACEML_HISTORY_ENABLED=1."
+        )
 
     run_identity = RunIdentity.from_args(
         args,

@@ -999,6 +999,14 @@ def test_serve_telemetry_disables_history(monkeypatch, tmp_path):
     assert settings.exporter == "jsonl"
 
 
+def test_serve_summary_rejects_disabled_history(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TRACEML_HISTORY_ENABLED", "0")
+
+    with pytest.raises(SystemExit, match="mode=summary requires history"):
+        _resolve_serve_settings(build_parser().parse_args(["serve"]))
+
+
 def test_run_exporter_env_defaults_off(monkeypatch, tmp_path) -> None:
     env = _aggregator_env(monkeypatch, tmp_path)
 

@@ -74,7 +74,8 @@ training. After training starts, export failures and losses remain warnings and
 do not replace the training exit code. In summary mode, export remains optional
 and its initialization failures are warnings because local analysis continues.
 
-For separately launched workers, configure both sides explicitly:
+For separately launched workers, select telemetry mode on the worker when its
+code may call `traceml.summary()` or `traceml.final_summary()`:
 
 ```bash
 # Terminal 1
@@ -85,9 +86,13 @@ TRACEML_UI_MODE=telemetry TRACEML_SESSION_ID=my-run python train.py
 ```
 
 Alternatively, select `ui_mode="telemetry"` in the worker's `traceml.init()`.
-The standalone server does not negotiate execution mode with its workers;
-stop `serve` with Ctrl+C or SIGTERM after training ends. CLI-launched runs and
-Ray stop their aggregator through their existing lifecycle.
+Workers send measurements independently of this setting; the telemetry-mode
+server still exports them without SQLite history. Setting the worker mode makes
+summary API calls fail immediately instead of waiting for a service that the
+telemetry server intentionally does not run. The standalone server does not
+negotiate execution mode with its workers. Stop `serve` with Ctrl+C or SIGTERM
+after training ends. CLI-launched runs and Ray stop their aggregator through
+their existing lifecycle.
 
 JSONL remains a local-file exporter. Direct platform delivery requires an
 appropriate custom or remote exporter; telemetry mode does not add one.
