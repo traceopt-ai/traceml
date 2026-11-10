@@ -324,11 +324,12 @@ dashboard mode and open the published port in a browser:
 
 ```bash
 docker build -t traceml-demo .
-docker run --rm -p 8765:8765 traceml-demo \
-  traceml run examples/diagnosis/dataloader_bottleneck_demo.py --mode=dashboard --args --scenario slow
+docker run --rm -p 127.0.0.1:8765:8765 traceml-demo \
+  traceml run examples/diagnosis/dataloader_bottleneck_demo.py --mode=dashboard --args --scenario slow --epochs 20
 ```
 
-Then open <http://localhost:8765>.
+Open <http://localhost:8765> while the run is still active. `--epochs` sets
+how long the demo runs; raise it for more time.
 
 TraceML can also export a self-contained HTML report and send its compact
 summary to an existing W&B or MLflow run. See
