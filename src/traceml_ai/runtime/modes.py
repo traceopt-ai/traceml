@@ -21,16 +21,17 @@ def validate_aggregator_options(
     """Reject incompatible aggregator options before resources are started."""
     if mode not in SUPPORTED_MODES:
         raise ValueError(
-            f"[TraceML] Invalid mode {mode!r}. "
+            f"[TraceML] ERROR: Invalid mode {mode!r}. "
             f"Valid modes: {list(SUPPORTED_MODES)}"
         )
     if mode == "telemetry":
         if not str(exporter or "").strip():
             raise ValueError(
-                "[TraceML] mode=telemetry requires a configured exporter."
+                "[TraceML] ERROR: mode=telemetry requires a configured "
+                "exporter."
             )
         if html_report:
             raise ValueError(
-                "[TraceML] mode=telemetry does not support HTML reports "
+                "[TraceML] ERROR: mode=telemetry does not support HTML reports "
                 "because local history is disabled."
             )

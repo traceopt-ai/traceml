@@ -290,11 +290,11 @@ final telemetry health; in multi-node runs this is node 0. See
 ### Direct-launch configuration
 
 Runtime settings resolve from explicit `init()` arguments, environment
-variables, `traceml.yaml`, then built-in defaults. For display mode, the Python
+variables, `traceml.yaml`, then built-in defaults. For execution mode, the Python
 argument is `ui_mode`; `init(mode=...)` selects instrumentation behavior.
 
 `ui_mode="telemetry"` disables local history even when inherited settings enable
-it. Configure an exporter on the separately started aggregator; workers do not
+it. Configure an exporter on the aggregator process; workers do not
 need exporter configuration. Summary APIs fail immediately when local history
 is disabled, before writing a request or polling the aggregator. Their default
 `rank0_only=True` behavior still returns `None` on non-primary ranks.

@@ -486,8 +486,8 @@ def init(
         variable when not set explicitly.
     ui_mode:
         Execution mode ('cli', 'dashboard', 'summary', or 'telemetry').
-        Telemetry disables local history and analysis; the separately started
-        aggregator must have an exporter configured.
+        Telemetry disables local history and analysis; the aggregator process
+        must have an exporter configured.
         Resolved via the shared config resolver.
     interval:
         Sampler interval in seconds. Resolved via the shared config resolver.

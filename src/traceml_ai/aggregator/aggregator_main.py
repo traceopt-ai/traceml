@@ -60,7 +60,7 @@ def read_traceml_env() -> dict[str, Any]:
     - ``TRACEML_MODE`` is still accepted
 
     Supported execution modes
-    -----------------------
+    -------------------------
     - ``cli``: live terminal UI
     - ``dashboard``: NiceGUI browser UI
     - ``summary``: no live UI, final summary only

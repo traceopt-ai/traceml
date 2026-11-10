@@ -290,7 +290,7 @@ def init(
     ui_mode:
         Execution mode: ``"summary"``, ``"cli"``, ``"dashboard"``, or
         ``"telemetry"``. Telemetry disables local history and analysis;
-        configure an exporter on the separately started aggregator.
+        configure an exporter on the aggregator process.
     interval:
         Sampling interval in seconds for runtime telemetry.
     logs_dir:
