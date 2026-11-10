@@ -122,8 +122,8 @@ def final_summary(
     ctx = resolve_session_context_from_env()
     if not ctx.history_enabled:
         raise RuntimeError(
-            "TraceML final_summary() requires local history to be enabled. "
-            "Telemetry mode disables local history and summary generation."
+            "TraceML summary APIs require local history, but history is "
+            "disabled for this session."
         )
 
     existing = _load_existing_final_summary(

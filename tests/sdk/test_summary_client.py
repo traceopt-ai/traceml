@@ -30,20 +30,24 @@ def test_session_context_defaults_to_summary(monkeypatch, tmp_path):
 @pytest.mark.parametrize(
     "api", [summary_client.summary, summary_client.final_summary]
 )
-def test_telemetry_summary_fails_without_request_or_poll(
-    monkeypatch, tmp_path, api
+@pytest.mark.parametrize(
+    ("mode", "history_enabled"), [("telemetry", "1"), ("cli", "0")]
+)
+def test_history_disabled_summary_fails_without_request_or_poll(
+    monkeypatch, tmp_path, api, mode, history_enabled
 ):
     session_root = _configure_session(monkeypatch, tmp_path)
-    monkeypatch.setenv("TRACEML_UI_MODE", "telemetry")
+    monkeypatch.setenv("TRACEML_UI_MODE", mode)
+    monkeypatch.setenv("TRACEML_HISTORY_ENABLED", history_enabled)
     monkeypatch.setattr(summary_client, "is_primary_rank", lambda: True)
 
     def forbidden(*args, **kwargs):
-        raise AssertionError("telemetry must not request or poll a summary")
+        raise AssertionError("disabled history must not request or poll")
 
     monkeypatch.setattr(summary_client, "write_json_atomic", forbidden)
     monkeypatch.setattr(summary_client, "load_json_or_none", forbidden)
     with pytest.raises(
-        RuntimeError, match="Telemetry mode disables local history"
+        RuntimeError, match="summary APIs require local history"
     ):
         api()
     assert not get_final_summary_request_path(session_root).exists()
