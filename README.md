@@ -192,8 +192,8 @@ traceml run train.py \
 ```
 
 Node 0 starts the TraceML aggregator; other nodes join the same run.
-All nodes require a shared logs directory. Multi-node DDP uses summary mode;
-multi-node GPU support is experimental.
+All nodes require a shared logs directory. Multi-node DDP defaults to summary
+mode and also accepts telemetry mode; multi-node GPU support is experimental.
 
 When training finishes, TraceML aligns common steps across all ranks and
 nodes and points to the rank most likely holding up the run:

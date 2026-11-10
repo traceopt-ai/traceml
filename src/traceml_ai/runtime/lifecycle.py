@@ -108,7 +108,7 @@ class AggregatorHandle:
         )
 
     def stop(self, timeout_sec: float = DEFAULT_FINALIZE_TIMEOUT_SEC) -> None:
-        """Stop the aggregator once, flushing history and final summary."""
+        """Stop once, finalizing enabled export, history, and reports."""
         if self._stopped:
             return
         self._stopped = True

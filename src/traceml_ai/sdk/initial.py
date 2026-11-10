@@ -485,7 +485,9 @@ def init(
         runtime is started. Defaults to the ``TRACEML_DISABLED`` environment
         variable when not set explicitly.
     ui_mode:
-        Display/telemetry mode for this run ('cli', 'dashboard', or 'summary').
+        Execution mode ('cli', 'dashboard', 'summary', or 'telemetry').
+        Telemetry disables local history and analysis; the aggregator process
+        must have an exporter configured.
         Resolved via the shared config resolver.
     interval:
         Sampler interval in seconds. Resolved via the shared config resolver.

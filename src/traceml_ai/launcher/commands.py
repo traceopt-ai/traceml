@@ -70,6 +70,10 @@ from traceml_ai.regression.outcome import (
     write_guard_outcome,
 )
 from traceml_ai.runtime.launch_context import LaunchContext
+from traceml_ai.runtime.modes import (
+    resolve_history_enabled,
+    validate_aggregator_options,
+)
 from traceml_ai.runtime.session import get_session_id
 from traceml_ai.runtime.settings import (
     DEFAULT_FINALIZE_TIMEOUT_SEC,
@@ -745,6 +749,22 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     cfg["finalize_timeout_sec"] = float(
         cfg.get("finalize_timeout_sec") or DEFAULT_FINALIZE_TIMEOUT_SEC
     )
+    cfg["history_enabled"] = resolve_history_enabled(
+        cfg["mode"], cfg["history_enabled"]
+    )
+    if not exporter_supported and cfg["mode"] == "telemetry":
+        raise SystemExit(
+            "[TraceML] watch does not support mode=telemetry. "
+            "Use traceml run with an exporter."
+        )
+    try:
+        validate_aggregator_options(
+            cfg["mode"],
+            cfg["exporter"],
+            bool(getattr(args, "html_report", False)),
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from None
 
     # Cross-field validation after all sources are merged.
     if cfg["mode"] == "summary" and not cfg["history_enabled"]:
@@ -752,13 +772,6 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
             "[TraceML] ERROR: mode=summary requires history to be enabled. "
             "Remove --no-history (or set history_enabled: true in traceml.yaml) "
             "to enable final summary generation."
-        )
-
-    supported_modes = {"cli", "dashboard", "summary"}
-    if cfg["mode"] not in supported_modes:
-        raise SystemExit(
-            f"[TraceML] ERROR: invalid mode '{cfg['mode']}'. "
-            f"Valid modes: {sorted(supported_modes)}"
         )
 
     guard_contract = None
@@ -1399,7 +1412,9 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                             cfg["mode"] == "summary" and cfg["history_enabled"]
                         ),
                         summary_exists=(
-                            aggregator_started_at is not None
+                            cfg["mode"] == "summary"
+                            and cfg["history_enabled"]
+                            and aggregator_started_at is not None
                             and is_current_summary_artifact(
                                 session_root / "final_summary.json",
                                 aggregator_started_at=aggregator_started_at,
@@ -1537,6 +1552,21 @@ def _resolve_serve_settings(args: argparse.Namespace):
     cfg["export_streams"] = _require_known_export_streams(
         cfg.get("export_streams")
     )
+    cfg["history_enabled"] = resolve_history_enabled(
+        cfg["mode"], cfg["history_enabled"]
+    )
+
+    try:
+        validate_aggregator_options(cfg["mode"], cfg["exporter"], False)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from None
+
+    if cfg["mode"] == "summary" and not cfg["history_enabled"]:
+        raise SystemExit(
+            "[TraceML] ERROR: mode=summary requires history to be enabled. "
+            "Set history_enabled: true in traceml.yaml or "
+            "TRACEML_HISTORY_ENABLED=1."
+        )
 
     run_identity = RunIdentity.from_args(
         args,
@@ -1600,7 +1630,7 @@ def run_serve(args: argparse.Namespace) -> None:
     Starts only the aggregator; it never launches or wraps a user training
     script. Reuses ``aggregator_main.run_aggregator`` so it binds host/port,
     prints the reachable endpoint, blocks until SIGINT/SIGTERM, shuts down
-    cleanly, and preserves final-summary behavior.
+    cleanly, and finalizes the configured export and analysis.
     """
     _require_positive_interval(args)
     try:

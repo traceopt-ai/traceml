@@ -17,6 +17,7 @@ import pytest
 
 from traceml_ai.aggregator.export import (
     ExporterContext,
+    ExporterStartupError,
     ExportWorker,
     StepTimeRecord,
 )
@@ -54,9 +55,10 @@ class _Logger:
 class _TCP:
     def __init__(self, messages):
         self._messages = list(messages)
+        self.started = False
 
     def start(self):
-        return None
+        self.started = True
 
     def poll(self):
         while self._messages:
@@ -375,6 +377,30 @@ def test_failed_factory_run_records_the_loss(tmp_path, value, logged):
         "skipped_items": 0,
         "exporter_failed": True,
     }
+
+
+def test_telemetry_failed_factory_fails_before_tcp_start(tmp_path):
+    logger = _Logger()
+    agg = TraceMLAggregator(
+        logger=logger,
+        stop_event=threading.Event(),
+        settings=_settings(
+            tmp_path,
+            "no_such_module_xyz:make",
+            mode="telemetry",
+        ),
+    )
+    tcp = _TCP([])
+    agg._tcp_server = tcp
+
+    try:
+        with pytest.raises(ExporterStartupError, match="no_such_module_xyz"):
+            agg.start()
+    finally:
+        agg._export_worker.stop(timeout_sec=1.0)
+
+    assert tcp.started is False
+    assert agg._started is False
 
 
 @pytest.mark.parametrize(

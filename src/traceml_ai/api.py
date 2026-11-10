@@ -288,7 +288,9 @@ def init(
     disabled:
         Disable TraceML entirely for this process.
     ui_mode:
-        Display mode: ``"summary"``, ``"cli"``, or ``"dashboard"``.
+        Execution mode: ``"summary"``, ``"cli"``, ``"dashboard"``, or
+        ``"telemetry"``. Telemetry disables local history and analysis;
+        configure an exporter on the aggregator process.
     interval:
         Sampling interval in seconds for runtime telemetry.
     logs_dir:

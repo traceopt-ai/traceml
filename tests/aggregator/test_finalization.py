@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 import threading
 import time
 from pathlib import Path
@@ -578,7 +579,10 @@ def test_split_telemetry_payloads_duplicate_rank_is_idempotent(tmp_path):
     assert agg._finished_ranks_snapshot() == [0]
 
 
-def test_stop_writes_no_warning_when_all_ranks_finished(monkeypatch, tmp_path):
+@pytest.mark.parametrize("mode", ["summary", "telemetry"])
+def test_stop_writes_no_warning_when_all_ranks_finished(
+    monkeypatch, tmp_path, mode
+):
     control_messages = [
         build_rank_finished_payload(
             global_rank=rank, world_size=2, node_rank=0, hostname="worker"
@@ -590,6 +594,7 @@ def test_stop_writes_no_warning_when_all_ranks_finished(monkeypatch, tmp_path):
         writer=_Writer(_ok_result()),
         tcp=_TCP(messages=control_messages),
     )
+    agg._settings = replace(agg._settings, mode=mode)
     monkeypatch.setattr(
         trace_aggregator,
         "generate_summary",
@@ -601,7 +606,9 @@ def test_stop_writes_no_warning_when_all_ranks_finished(monkeypatch, tmp_path):
     agg_dir = tmp_path / "run" / "aggregator"
     assert not (agg_dir / "finalization_warning.json").exists()
     assert not (agg_dir / "finalization_error.json").exists()
-    assert get_final_summary_json_path(tmp_path / "run").is_file()
+    assert get_final_summary_json_path(tmp_path / "run").is_file() is (
+        mode == "summary"
+    )
 
 
 def test_stop_downgrades_post_write_summary_error_to_warning(
@@ -931,12 +938,13 @@ def test_export_budget_leaves_the_sqlite_budget_unchanged(
     assert runs[True][0] == [28.0]
 
 
-def test_export_losses_write_a_warning_without_failing_summary_mode(
-    monkeypatch, tmp_path
+@pytest.mark.parametrize("mode", ["summary", "telemetry"])
+def test_export_losses_write_a_warning_without_failing_headless_mode(
+    monkeypatch, tmp_path, mode
 ):
     stats = _export_stats(failed_records=3, exporter_failed=True)
     agg, _, _ = _export_aggregator(monkeypatch, tmp_path, stats=stats)
-    assert agg._settings.mode == "summary"
+    agg._settings = replace(agg._settings, mode=mode)
 
     agg.stop(timeout_sec=10.0)
 
@@ -1064,8 +1072,12 @@ def test_export_stats_reach_the_error_artifact(monkeypatch, tmp_path):
     assert error["export"]["written_records"] == 4
 
 
-def test_export_worker_stops_even_when_settle_raises(monkeypatch, tmp_path):
+@pytest.mark.parametrize("mode", ["summary", "telemetry"])
+def test_export_worker_stops_even_when_settle_raises(
+    monkeypatch, tmp_path, mode
+):
     agg, calls, _ = _export_aggregator(monkeypatch, tmp_path)
+    agg._settings = replace(agg._settings, mode=mode)
 
     def _settle(timeout_sec):
         raise RuntimeError("settle failed")
@@ -1076,19 +1088,27 @@ def test_export_worker_stops_even_when_settle_raises(monkeypatch, tmp_path):
         agg.stop(timeout_sec=10.0)
 
     assert calls == ["export_stop"]
+    error = json.loads(
+        (
+            tmp_path / "run" / "aggregator" / "finalization_error.json"
+        ).read_text()
+    )
+    assert error["error"] == "settle failed"
 
 
+@pytest.mark.parametrize("mode", ["cli", "telemetry"])
 def test_settle_runs_for_export_when_history_is_disabled(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, mode
 ):
     from dataclasses import replace
 
-    agg, calls, _ = _export_aggregator(monkeypatch, tmp_path)
-    agg._settings = replace(agg._settings, mode="cli", history_enabled=False)
+    agg, calls, budgets = _export_aggregator(monkeypatch, tmp_path)
+    agg._settings = replace(agg._settings, mode=mode, history_enabled=False)
 
     agg.stop(timeout_sec=10.0)
 
     assert calls == ["settle", "tcp_stop", "export_stop", "sqlite_finalize"]
+    assert budgets[0] == pytest.approx(9.0, abs=0.1)
 
 
 def test_settle_is_skipped_without_history_or_export(monkeypatch, tmp_path):

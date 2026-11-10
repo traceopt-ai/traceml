@@ -934,6 +934,79 @@ def test_run_passes_exporter_flags_to_the_aggregator_env(
     assert env["TRACEML_EXPORTER_HOSTNAME"] == "1"
 
 
+@pytest.mark.parametrize("source", ["env", "yaml"])
+def test_telemetry_overrides_inherited_history(monkeypatch, tmp_path, source):
+    if source == "env":
+        monkeypatch.setenv("TRACEML_UI_MODE", "telemetry")
+        monkeypatch.setenv("TRACEML_HISTORY_ENABLED", "1")
+        monkeypatch.setenv("TRACEML_EXPORTER", "jsonl")
+    else:
+        for key in (
+            "TRACEML_UI_MODE",
+            "TRACEML_HISTORY_ENABLED",
+            "TRACEML_EXPORTER",
+        ):
+            monkeypatch.delenv(key, raising=False)
+        (tmp_path / "traceml.yaml").write_text(
+            "mode: telemetry\nhistory_enabled: true\nexporter: jsonl\n"
+        )
+
+    env = _aggregator_env(monkeypatch, tmp_path, clear_exporter_env=False)
+    assert env["TRACEML_UI_MODE"] == "telemetry"
+    assert env["TRACEML_HISTORY_ENABLED"] == "0"
+    assert env["TRACEML_EXPORTER"] == "jsonl"
+
+
+@pytest.mark.parametrize(
+    ("command", "flags", "error"),
+    [
+        ("run", [], "requires a configured exporter"),
+        ("serve", [], "requires a configured exporter"),
+        ("run", ["--exporter", "jsonl", "--html-report"], "HTML reports"),
+    ],
+)
+def test_telemetry_rejects_conflicts_before_startup(
+    monkeypatch, tmp_path, command, flags, error
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TRACEML_EXPORTER", raising=False)
+    forbidden = _forbid_guard_launch_side_effects(monkeypatch)
+    script = tmp_path / "train.py"
+    script.write_text("pass\n")
+    argv = [command, "--mode", "telemetry", *flags]
+    if command == "run":
+        argv.append(str(script))
+    args = build_parser().parse_args(argv)
+    with pytest.raises(SystemExit, match=error):
+        if command == "run":
+            launch_process(str(script), args)
+        else:
+            _resolve_serve_settings(args)
+    for replacement in forbidden.values():
+        replacement.assert_not_called()
+    assert not (tmp_path / "logs").exists()
+
+
+def test_serve_telemetry_disables_history(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TRACEML_HISTORY_ENABLED", "1")
+    settings = _resolve_serve_settings(
+        build_parser().parse_args(
+            ["serve", "--mode", "telemetry", "--exporter", "jsonl"]
+        )
+    )
+    assert settings.history_enabled is False
+    assert settings.exporter == "jsonl"
+
+
+def test_serve_summary_rejects_disabled_history(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TRACEML_HISTORY_ENABLED", "0")
+
+    with pytest.raises(SystemExit, match="mode=summary requires history"):
+        _resolve_serve_settings(build_parser().parse_args(["serve"]))
+
+
 def test_run_exporter_env_defaults_off(monkeypatch, tmp_path) -> None:
     env = _aggregator_env(monkeypatch, tmp_path)
 
@@ -1407,6 +1480,11 @@ def test_run_rejects_duplicate_guard_before_manifest_or_processes(
     ("config_prefix", "launch_args", "match"),
     [
         ("mode: summary\n", ["--mode", "cli"], "require mode=summary"),
+        (
+            "mode: summary\n",
+            ["--mode", "telemetry", "--exporter", "jsonl"],
+            "require mode=summary",
+        ),
         (
             "mode: summary\n",
             ["--mode", "summary", "--no-history"],

@@ -12,9 +12,15 @@ import json
 import threading
 import time
 
+import pytest
+
 from traceml_ai.aggregator.export import worker as worker_module
 from traceml_ai.aggregator.export.json_exporter import JsonExporter
-from traceml_ai.aggregator.export.worker import ExportStats, ExportWorker
+from traceml_ai.aggregator.export.worker import (
+    ExporterStartupError,
+    ExportStats,
+    ExportWorker,
+)
 from traceml_ai.runtime.sender import SenderIdentity
 from traceml_ai.telemetry.envelope import build_telemetry_envelope
 
@@ -144,6 +150,18 @@ class _FailingOpenExporter(_RecordingExporter):
     def open(self) -> None:
         super().open()
         raise OSError("read-only file system")
+
+
+class _BlockingOpenExporter(_RecordingExporter):
+    def __init__(self) -> None:
+        super().__init__()
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def open(self) -> None:
+        super().open()
+        self.entered.set()
+        self.release.wait(timeout=1.0)
 
 
 class _FailingFlushExporter(_RecordingExporter):
@@ -382,6 +400,10 @@ def test_raising_open_is_logged_once_and_marks_failed() -> None:
     worker = ExportWorker(exporter, interval_sec=0.05, logger=logger)
     worker.start()
     try:
+        with pytest.raises(
+            ExporterStartupError, match="read-only file system"
+        ):
+            worker.wait_until_ready(timeout_sec=0.5)
         assert _wait_until(lambda: worker.stats().exporter_failed)
         worker.submit(_payload(1))
         assert _wait_until(lambda: worker.stats().failed_records == 1)
@@ -395,6 +417,21 @@ def test_raising_open_is_logged_once_and_marks_failed() -> None:
     assert len(logger.errors) == 1
     assert logger.errors[0].startswith("[TraceML]")
     assert "_FailingOpenExporter" in logger.errors[0]
+
+
+def test_wait_until_ready_is_bounded_while_open_is_blocked() -> None:
+    exporter = _BlockingOpenExporter()
+    worker = ExportWorker(exporter, logger=_FakeLogger())
+    worker.start()
+    try:
+        assert exporter.entered.wait(timeout=0.5)
+        with pytest.raises(ExporterStartupError, match="within 0.01 seconds"):
+            worker.wait_until_ready(timeout_sec=0.01)
+        exporter.release.set()
+        worker.wait_until_ready(timeout_sec=0.5)
+    finally:
+        exporter.release.set()
+        worker.stop(timeout_sec=0.5)
 
 
 def test_stop_without_start_drops_the_queue_and_calls_nothing() -> None:

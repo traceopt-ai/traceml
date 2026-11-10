@@ -192,6 +192,43 @@ def test_start_starts_the_export_worker_after_sqlite(tmp_path):
     assert calls == ["tcp", "sqlite", "export", "display", "loop"]
 
 
+def test_telemetry_opens_the_exporter_before_accepting_workers(tmp_path):
+    calls = []
+
+    class _Part:
+        def __init__(self, name):
+            self._name = name
+
+        def start(self):
+            calls.append(self._name)
+
+    class _RequiredExport(_Part):
+        def wait_until_ready(self, timeout_sec):
+            calls.append("export_ready")
+
+    agg = TraceMLAggregator(
+        logger=_Logger(),
+        stop_event=threading.Event(),
+        settings=_settings(tmp_path, "jsonl", mode="telemetry"),
+    )
+    agg._tcp_server = _Part("tcp")
+    agg._sqlite_writer = _Part("sqlite")
+    agg._export_worker = _RequiredExport("export")
+    agg._display_driver = _Part("display")
+    agg._thread = _Part("loop")
+
+    agg.start()
+
+    assert calls == [
+        "export",
+        "export_ready",
+        "tcp",
+        "sqlite",
+        "display",
+        "loop",
+    ]
+
+
 def test_jsonl_exporter_writes_admitted_step_time(tmp_path):
     agg = TraceMLAggregator(
         logger=_Logger(),
@@ -222,6 +259,77 @@ def test_jsonl_exporter_writes_admitted_step_time(tmp_path):
     assert not (
         tmp_path / "logs" / "run" / "aggregator" / "finalization_warning.json"
     ).exists()
+
+
+def test_telemetry_exports_without_sqlite_or_local_analysis(
+    monkeypatch, tmp_path
+):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("local analysis must not run in telemetry mode")
+
+    monkeypatch.setattr("sqlite3.connect", forbidden)
+    monkeypatch.setattr(
+        "traceml_ai.aggregator.trace_aggregator.FinalSummaryService", forbidden
+    )
+    monkeypatch.setattr(
+        "traceml_ai.aggregator.trace_aggregator.generate_summary", forbidden
+    )
+    settings = _settings(
+        tmp_path, "jsonl", mode="telemetry", history_enabled=True
+    )
+    agg = TraceMLAggregator(_Logger(), threading.Event(), settings)
+    agg._tcp_server = _TCP([[_step_time_payload(), _rank_finished()]])
+    monkeypatch.setattr(agg._sqlite_writer._thread, "start", forbidden)
+    monkeypatch.setattr(agg, "_sqlite_finalize_budget", forbidden)
+
+    agg._sqlite_writer.start()
+    agg._export_worker.start()
+    try:
+        agg._drain_tcp()
+        agg._tick()
+    finally:
+        agg.stop(timeout_sec=5.0)
+
+    assert settings.history_enabled is False
+    assert agg._sqlite_writer.stats()["enqueued"] == 0
+    assert agg._finished_ranks_snapshot() == [0]
+    session = tmp_path / "logs" / "run"
+    records = [
+        json.loads(line)
+        for line in (session / "aggregator" / "export" / "step_time.jsonl")
+        .read_text()
+        .splitlines()
+    ]
+    assert records[0]["step"] == 1
+    assert records[-1]["closing"] is True
+    assert records[-1]["written_records"] == 1
+    assert not list(session.glob("final_summary.*"))
+    assert not list((session / "aggregator").glob("finalization_*.json"))
+    assert not any(
+        Path(settings.db_path + suffix).exists()
+        for suffix in ("", "-wal", "-shm")
+    )
+
+
+@pytest.mark.parametrize(
+    ("exporter", "html_report", "error"),
+    [
+        ("", False, "requires a configured exporter"),
+        ("jsonl", True, "HTML reports"),
+    ],
+)
+def test_telemetry_rejects_invalid_aggregator_options(
+    tmp_path, exporter, html_report, error
+):
+    with pytest.raises(ValueError, match=error):
+        TraceMLAggregator(
+            _Logger(),
+            threading.Event(),
+            _settings(
+                tmp_path, exporter, mode="telemetry", html_report=html_report
+            ),
+        )
+    assert not (tmp_path / "logs").exists()
 
 
 def test_jsonl_exporter_keeps_the_hostname_when_asked(tmp_path):

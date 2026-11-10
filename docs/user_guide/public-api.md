@@ -104,6 +104,7 @@ TraceML installs the `traceml` command:
 traceml run train.py                  # training diagnosis and saved reports
 traceml run train.py --mode=cli       # live terminal view
 traceml run train.py --mode=dashboard # live browser view
+traceml run train.py --mode telemetry --exporter jsonl # export without local analysis
 traceml watch train.py                # system/process visibility
 traceml serve                         # standalone aggregator for direct launches
 ```
@@ -113,6 +114,12 @@ Dashboard mode requires `pip install "traceml-ai[dashboard]"`.
 Summary mode is the default for every topology. Live CLI and dashboard modes
 are intended for single-node runs. `watch` does not install automatic trainer
 instrumentation or provide step timing.
+
+`run` and `serve` also support `telemetry` mode. It requires an exporter and
+always disables SQLite history, local diagnostics, rendering, and summaries.
+It rejects HTML reports and regression guards. See
+[Live Export](live-export.md#export-without-local-analysis) for telemetry-only
+and export-plus-summary examples, including separately launched workers.
 
 Use `traceml run --help` for launch flags. See
 [Distributed Training](distributed-training.md) for multi-node commands,
@@ -158,7 +165,8 @@ a run killed between writes still exits 0.
 
 `run`, `watch`, and `serve` accept `--history-retention DURATION`. The default
 is `30m`; bare values are seconds, with `s`, `m`, `h`, and `d` suffixes accepted.
-Use `--no-history` on `run` or `watch` only with a live display mode.
+Use `--no-history` on `run` or `watch` with a live display mode; telemetry mode
+already forces history off.
 Summary mode, HTML reports, and summary APIs require history.
 
 The retention setting is also available as `history_retention` in
@@ -217,7 +225,7 @@ node-0 endpoint. Configure the expected world size to match your workers.
 | `--aggregator-bind-host` | Bind address; use `0.0.0.0` for multi-node. |
 | `--aggregator-port` | Telemetry port; default `29765`. |
 | `--nnodes` / `--nproc-per-node` | Expected world size for finalization. |
-| `--mode` | `summary` (default), `cli`, or `dashboard`. |
+| `--mode` | `summary` (default), `cli`, `dashboard`, or `telemetry` (requires an exporter). |
 | `--logs-dir` | Session log directory. |
 | `--run-name` / `--session-id` | Shared run identity; choose a fresh name. |
 | `--history-retention` | History duration; default `30m`. |
@@ -282,8 +290,14 @@ final telemetry health; in multi-node runs this is node 0. See
 ### Direct-launch configuration
 
 Runtime settings resolve from explicit `init()` arguments, environment
-variables, `traceml.yaml`, then built-in defaults. For display mode, the Python
+variables, `traceml.yaml`, then built-in defaults. For execution mode, the Python
 argument is `ui_mode`; `init(mode=...)` selects instrumentation behavior.
+
+`ui_mode="telemetry"` disables local history even when inherited settings enable
+it. Configure an exporter on the aggregator process; workers do not
+need exporter configuration. Summary APIs fail immediately when local history
+is disabled, before writing a request or polling the aggregator. Their default
+`rank0_only=True` behavior still returns `None` on non-primary ranks.
 
 Aggregator host and port resolve from explicit arguments, environment
 variables, then defaults. Run identity and aggregator endpoints are not read

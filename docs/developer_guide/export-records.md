@@ -301,7 +301,11 @@ An exporter that treats streams differently dispatches on `record.STREAM` or `ty
 It is one count for the whole worker, not one per stream, so the `jsonl` exporter writes the same value in every closing line.
 A closing line's `written_records`, by contrast, counts only the lines of its own file.
 A method may raise.
-The worker then logs the failure, stops using the exporter, and records the loss in `finalization_warning.json`.
+In telemetry mode, an `open` failure prevents the aggregator from accepting
+workers, so training does not start under the default launcher policy. In
+other modes, and for `write`, `flush`, or `close` failures after startup, the
+worker logs the failure, stops using the exporter, and records the loss in
+`finalization_warning.json`.
 
 Set the `exporter` setting to `module:factory` to use one.
 The value works in each place `jsonl` does.
@@ -325,15 +329,17 @@ Install the module, or put its directory on `PYTHONPATH`.
 - `include_hostname` tells the exporter whether to keep a record's `hostname` field, if present. It is set by `exporter_hostname`.
 - `streams` is the selected `STREAM` names, in the order of the record table above. A factory can use it to prepare one sink per stream.
 
-A factory failure never fails the run.
 The failures are an import error, a missing attribute, an exception or `SystemExit` from the module or the factory, and a factory that returns `None`.
 Each one is treated like an exporter whose `open` raised.
 The worker logs it once with the `[TraceML]` prefix, naming the value and the failure.
-The run continues, and `final_summary.json` is unchanged.
-`finalization_warning.json` records the loss.
-Its `export` block has `exporter_failed` set to `true`, and `failed_records` equals the records admitted.
+In telemetry mode this is a startup failure. In other modes the run continues,
+`final_summary.json` is unchanged, and `finalization_warning.json` records the
+loss. Its `export` block has `exporter_failed` set to `true`, and
+`failed_records` equals the records admitted.
 TraceML does not check the returned object up front.
-If it lacks one of the four methods, export fails when the worker first calls that method, and the loss is recorded the same way.
+If it lacks `open`, telemetry mode fails during startup. If it lacks another
+method, export fails when the worker first calls that method, and the loss is
+recorded the same way.
 
 This factory returns an exporter that writes every record as one JSON line to one file.
 Each line keeps the `stream` field from `to_dict()`, so a reader can tell the selected streams apart.

@@ -562,9 +562,17 @@ def start_training_process(
     if capture_output:
         popen_kwargs["stdout"] = subprocess.PIPE
         popen_kwargs["stderr"] = subprocess.PIPE
+    # Export destinations belong to the aggregator, never its training workers.
+    worker_env = env.copy()
+    for key in (
+        "TRACEML_EXPORTER",
+        "TRACEML_EXPORT_STREAMS",
+        "TRACEML_EXPORTER_HOSTNAME",
+    ):
+        worker_env.pop(key, None)
     return subprocess.Popen(
         train_cmd,
-        env=env,
+        env=worker_env,
         cwd=cwd,
         **process_group_kwargs(),
         **popen_kwargs,

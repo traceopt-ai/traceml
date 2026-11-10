@@ -37,6 +37,66 @@ A CLI flag beats the `TRACEML_*` environment variable, which beats `traceml.yaml
 With Ray, the fields on `TraceMLRayConfig` set it.
 Ray reads no environment variable and no `traceml.yaml` for it, so `exporter=""` means off.
 
+### Export without local analysis
+
+Choose `telemetry` mode to export measurements without a local SQLite database,
+diagnostics, live UI, or summary generation:
+
+```bash
+traceml run train.py --mode telemetry --exporter jsonl
+```
+
+Telemetry mode always disables local history, including when inherited
+configuration sets `history_enabled: true`. It requires an exporter and rejects
+HTML reports and regression guards. `traceml.summary()` and
+`traceml.final_summary()` are unavailable in this mode. `watch` does not support
+telemetry mode.
+
+Operational logs, run metadata, and launcher-captured training output may still
+be written locally. Raw sampler logging is controlled separately by
+`--enable-logging`, `TRACEML_ENABLE_LOGGING`, or `enable_logging` in
+`traceml.yaml`. It is off by default; enabling it also writes local `.msgpack`
+files, including in telemetry mode.
+
+To export measurements and retain local analysis and the final summary:
+
+```bash
+traceml run train.py --mode summary --exporter jsonl
+```
+
+The aggregator remains active in both cases. It admits measurements, consumes
+rank-completion markers, and drains pending telemetry and exports within the
+existing shutdown bounds. Completion markers do not guarantee delivery or
+indicate that training succeeded. In telemetry mode, the required exporter
+must open before the aggregator accepts workers; an initialization failure is
+an aggregator startup failure, so the default launcher policy does not start
+training. After training starts, export failures and losses remain warnings and
+do not replace the training exit code. In summary mode, export remains optional
+and its initialization failures are warnings because local analysis continues.
+
+For separately launched workers, select telemetry mode on the worker when its
+code may call `traceml.summary()` or `traceml.final_summary()`:
+
+```bash
+# Terminal 1
+traceml serve --mode telemetry --exporter jsonl --run-name my-run
+
+# Terminal 2: train.py calls traceml.init() and instruments its steps
+TRACEML_UI_MODE=telemetry TRACEML_SESSION_ID=my-run python train.py
+```
+
+Alternatively, select `ui_mode="telemetry"` in the worker's `traceml.init()`.
+Workers send measurements independently of this setting; the telemetry-mode
+server still exports them without SQLite history. Setting the worker mode makes
+summary API calls fail immediately instead of waiting for a service that the
+telemetry server intentionally does not run. The standalone server does not
+negotiate execution mode with its workers. Stop `serve` with Ctrl+C or SIGTERM
+after training ends. CLI-launched runs and Ray stop their aggregator through
+their existing lifecycle.
+
+JSONL remains a local-file exporter. Direct platform delivery requires an
+appropriate custom or remote exporter; telemetry mode does not add one.
+
 Lines carry no hostname by default, because the file may be uploaded elsewhere.
 To include `hostname` on records that have this field, use `--exporter-hostname`, `exporter_hostname: true` in YAML, `TRACEML_EXPORTER_HOSTNAME=1`, or `TraceMLRayConfig(exporter_hostname=True)`.
 For these records, a rank that sent no hostname gives `"hostname": null`.
@@ -155,8 +215,10 @@ So every closing line of a run shows the same `dropped_batches`.
 
 ## When something was lost
 
-Export never fails the run.
-When the export did not write every record of the selected streams, `finalization_warning.json` in the run folder gets an `export` block.
+After training starts, export never changes the training outcome. Telemetry
+mode first requires its exporter to open successfully, as described above.
+When the export did not write every record of the selected streams,
+`finalization_warning.json` in the run folder gets an `export` block.
 The block holds `written_records`, `dropped_batches`, `failed_records`, `skipped_items` and `exporter_failed`.
 If export is the only problem, the file also says `"reason": "export_incomplete"`.
 If another warning already started the file, the `export` block is added to it.
