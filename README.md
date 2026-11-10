@@ -319,6 +319,18 @@ pip install "traceml-ai[dashboard]"
 traceml run train.py --mode=dashboard
 ```
 
+To try the dashboard without installing anything, run the Docker demo in
+dashboard mode and open the published port in a browser:
+
+```bash
+docker build -t traceml-demo .
+docker run --rm -p 127.0.0.1:8765:8765 traceml-demo \
+  traceml run examples/diagnosis/dataloader_bottleneck_demo.py --mode=dashboard --args --scenario slow --epochs 20
+```
+
+Open <http://localhost:8765> while the run is still active. `--epochs` sets
+how long the demo runs; raise it for more time.
+
 TraceML can also export a self-contained HTML report and send its compact
 summary to an existing W&B or MLflow run. See
 [W&B and MLflow](https://traceopt-ai.github.io/traceml/user_guide/integrations/wandb-mlflow/)
