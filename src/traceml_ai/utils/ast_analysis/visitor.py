@@ -570,6 +570,9 @@ class PatternVisitor(ast.NodeVisitor):
             self.trainer_train_called = True
             self.phase_hints.add("train")
 
+        if any(name.startswith(p) for p in _LIGHTNING_PREFIXES):
+            return
+
         leaf = name.rsplit(".", 1)[-1]
         if name in _HF_TRAINER_CLASSES or leaf in {
             n.rsplit(".", 1)[-1] for n in _HF_TRAINER_CLASSES

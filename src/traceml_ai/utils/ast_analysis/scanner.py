@@ -55,6 +55,8 @@ _HF_TRAINER_CLASSES = {
     "RewardTrainer",
 }
 
+_LIGHTNING_PREFIXES = ("pytorch_lightning", "lightning.pytorch", "lightning")
+
 
 def analyze_script(script_path: str) -> CodeFindings:
     """Return best-effort findings for *script_path*.
@@ -239,7 +241,9 @@ def _absorb_hf_training_args(
             continue
 
         name = fqn(node, imports)
-        if name is None:
+        if name is None or any(
+            name.startswith(p) for p in _LIGHTNING_PREFIXES
+        ):
             continue
         leaf = name.rsplit(".", 1)[-1]
 
