@@ -66,6 +66,35 @@ that automatic DataLoader instrumentation cannot observe. When TraceML is
 disabled, each wrapper is an identity no-op. Otherwise, invalid targets raise
 their documented `TypeError` before initialization and ownership are checked.
 
+#### Validation loaders in a plain PyTorch loop
+
+With `mode="auto"`, TraceML times every PyTorch `DataLoader` in the process
+and charges a fetch to the next training step. A validation loader iterated
+between training steps therefore adds its whole pass to that step's Input
+Wait. The Hugging Face and Lightning integrations keep evaluation fetches out
+on their own; a plain loop can use selective mode instead. Turn the automatic
+DataLoader patch off, keep the other phases on, and wrap only the training
+loader and the optimizer, which selective mode does not time on its own. With
+the patch off, `wrap_dataloader_fetch` accepts a PyTorch `DataLoader`:
+
+```python
+traceml.init(
+    mode="selective",
+    patch_dataloader=False,
+    patch_forward=True,
+    patch_backward=True,
+    patch_h2d=True,
+)
+train_loader = traceml.wrap_dataloader_fetch(train_loader)
+optimizer = traceml.wrap_optimizer(optimizer)
+```
+
+The loop itself stays as it was, with each training step inside
+`traceml.trace_step(model)`. The validation loader is then not timed at all,
+and Input Wait covers only the training loader. The DataLoader patch is off
+for the whole process, so wrap every other loader a training step draws from
+as well.
+
 ::: traceml_ai.api.wrap_dataloader_fetch
     options:
       show_root_heading: true
