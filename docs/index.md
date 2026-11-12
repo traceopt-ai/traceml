@@ -30,9 +30,10 @@ or [Hugging Face Trainer](https://github.com/traceopt-ai/traceml/blob/main/noteb
 The launcher instruments standard [Hugging Face Trainer](user_guide/integrations/huggingface.md),
 [PyTorch Lightning](user_guide/integrations/lightning.md), and
 [RF-DETR object detection](user_guide/integrations/rfdetr.md) training automatically.
-For a [plain PyTorch loop](user_guide/quickstart.md#custom-pytorch-loop), mark the
-step boundary in your script. See the [integration guides](user_guide/integrations.md)
-for other setups.
+For a [plain PyTorch loop](user_guide/quickstart.md#custom-pytorch-loop), add
+`traceml.init(mode="auto")` and wrap each training step with
+`traceml.trace_step(model)` before using the launcher. See the
+[integration guides](user_guide/integrations.md) for other setups.
 
 ## Investigate and compare
 
