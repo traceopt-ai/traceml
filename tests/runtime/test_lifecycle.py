@@ -205,3 +205,62 @@ def test_start_runtime_fail_open_registers_noop_handle(
         assert "[TraceML]" in capsys.readouterr().err  # detached loudly
     finally:
         lifecycle._ACTIVE_RUNTIME_HANDLE = None
+
+
+@pytest.mark.parametrize("session_id", [".", "..", "a/../..", "/outside"])
+def test_start_aggregator_rejects_session_id_outside_logs_dir(
+    monkeypatch, tmp_path, session_id: str
+) -> None:
+    build = Mock()
+    monkeypatch.setattr(lifecycle, "_build_aggregator", build)
+
+    with pytest.raises(ValueError, match="session_id"):
+        lifecycle.start_aggregator(
+            TraceMLSettings(
+                mode="summary",
+                logs_dir=str(tmp_path / "logs"),
+                session_id=session_id,
+            )
+        )
+
+    build.assert_not_called()
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("session_id", [".", "..", "a/../.."])
+def test_start_runtime_rejects_session_id_outside_logs_dir(
+    monkeypatch, tmp_path, session_id: str
+) -> None:
+    monkeypatch.setattr(lifecycle, "TraceMLRuntime", _FakeRuntime)
+    settings = TraceMLSettings(
+        logs_dir=str(tmp_path / "logs"), session_id=session_id
+    )
+    lifecycle._ACTIVE_RUNTIME_HANDLE = None
+    try:
+        with pytest.raises(ValueError, match="session_id"):
+            lifecycle.start_runtime(settings, fail_open=False)
+
+        lifecycle._ACTIVE_RUNTIME_HANDLE = None
+        handle = lifecycle.start_runtime(settings, fail_open=True)
+        assert isinstance(handle.runtime, lifecycle.NoOpRuntime)
+    finally:
+        lifecycle._ACTIVE_RUNTIME_HANDLE = None
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("session_id", ["exp 1", "team/exp1"])
+def test_start_aggregator_keeps_session_ids_the_cli_would_refuse(
+    monkeypatch, tmp_path, session_id: str
+) -> None:
+    # Only ids whose folder leaves the logs dir are refused here; the CLI's
+    # single-segment rule is not imposed on existing Python API callers.
+    monkeypatch.setattr(lifecycle, "_build_aggregator", _FakeAggregator)
+
+    handle = lifecycle.start_aggregator(
+        TraceMLSettings(
+            mode="summary", logs_dir=str(tmp_path), session_id=session_id
+        )
+    )
+
+    assert handle.session_root == (tmp_path / session_id).resolve()
+    handle.stop()

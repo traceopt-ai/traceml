@@ -3754,6 +3754,37 @@ def test_run_identity_rejects_path_segments() -> None:
         RunIdentity.from_args(args)
 
 
+@pytest.mark.parametrize("name", [".", ".."])
+@pytest.mark.parametrize("flag", ["run_name", "session_id"])
+def test_run_identity_rejects_dot_segments(flag: str, name: str) -> None:
+    args = argparse.Namespace(run_name="", session_id="")
+    setattr(args, flag, name)
+
+    with pytest.raises(ValueError, match=r"cannot be '\.' or '\.\.'"):
+        RunIdentity.from_args(args)
+
+
+@pytest.mark.parametrize("name", [".", ".."])
+def test_serve_rejects_dot_run_name_before_writing(
+    tmp_path, monkeypatch, name: str
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    run_aggregator = Mock(return_value=0)
+    monkeypatch.setattr(
+        "traceml_ai.aggregator.aggregator_main.run_aggregator",
+        run_aggregator,
+    )
+    args = build_parser().parse_args(
+        ["serve", "--run-name", name, "--logs-dir", str(tmp_path / "logs")]
+    )
+
+    with pytest.raises(SystemExit, match=r"cannot be '\.' or '\.\.'"):
+        launcher_commands.run_serve(args)
+
+    run_aggregator.assert_not_called()
+    assert list(tmp_path.iterdir()) == []
+
+
 @pytest.mark.parametrize(
     ("extra", "enforced"),
     [
