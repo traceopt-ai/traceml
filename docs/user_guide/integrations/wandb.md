@@ -210,6 +210,8 @@ credentials, a bad key, an unreachable server or a run W&B refuses to create
 all stop the launch, and the launcher prints that training was not started.
 This holds under the default `--on-missing-aggregator=raise`; with `warn`,
 training starts without TraceML instead. Startup has a 10 second budget.
+The launcher names the cause: `exporter 'wandb' failed to start: <reason>`,
+and the run manifest records `telemetry_reason: exporter_startup_failed`.
 
 In `summary`, `cli` and `dashboard` modes export is optional, like every
 exporter: a startup failure prints one line, training runs without export,
@@ -226,12 +228,21 @@ without W&B access, use the `jsonl` exporter.
 
 ### Shutdown and recovery
 
-Each run's `finish()` is bounded to under 2 seconds at shutdown, so a slow
-network cannot hold the aggregator open. When it runs out, the run can show
-as crashed in W&B, `finalization_warning.json` records `exporter_failed`,
-and the run's files stay under
-`<logs-dir>/<run-name>/aggregator/export/wandb/run-*`. Upload them with
-`wandb sync` and the explicit paths:
+In `telemetry` mode each run's `finish()` gets up to 30 seconds at shutdown,
+and the runs finish in parallel. A finish on a normal network takes about
+2 seconds. The aggregator waits for the outcome before it writes
+`finalization_warning.json`, so a finish that times out or fails is
+recorded there as `exporter_failed`. The end-of-run deadline still bounds the
+wait (`--finalize-timeout-sec`). On Ctrl+C the launcher gives the aggregator
+5 seconds, and with Ray `TraceMLRayConfig(stop_timeout_sec=...)` must cover the
+finish; see [Live Export](../live-export.md).
+
+In `summary`, `cli` and `dashboard` modes each `finish()` is bounded to under
+2 seconds, so a slow network cannot hold the aggregator open, and a finish
+can be cut off. When it is, the run can show as crashed in W&B, and the run's
+files stay under `<logs-dir>/<run-name>/aggregator/export/wandb/run-*`. The
+same holds in telemetry mode when a finish runs out of time. Upload the files
+with `wandb sync` and the explicit paths:
 
 ```bash
 wandb sync --include-online logs/my-run/aggregator/export/wandb/run-*
@@ -271,8 +282,8 @@ that received no row finishes as failed rather than finished.
 - With Ray, the credentials and both variables go into the aggregator
   actor's `runtime_env`. This path is documented, not tested, and the files
   for `wandb sync` sit on the actor's node.
-- If `traceml serve` does not stop with Ctrl+C after a failed startup, end
-  it with `kill -9`.
+- After a failed startup, Ctrl+C ends `traceml serve` while wandb shuts
+  down. If it still does not stop, end it with `kill -9`.
 - The exporter is a TraceML-maintained integration with the third-party
   `wandb` SDK (MIT license).
 
