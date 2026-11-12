@@ -267,6 +267,27 @@ def test_wandb_is_an_optional_extra() -> None:
     assert "wandb" in extra_names, "wandb not found in the wandb extra"
 
 
+def test_wandb_extra_requires_init_timeout_to_bound_the_backend() -> None:
+    """The wandb extra must carry the floor the live exporter needs.
+
+    From 0.28.2 init_timeout also bounds the backend's retries during run
+    initialization, so wandb.init returns against an unreachable server.
+    """
+    for requirement in _optional_dependencies("wandb"):
+        if _requirement_name(requirement) != "wandb":
+            continue
+
+        specifier = _version_specifier(requirement).replace(" ", "")
+        assert ">=0.28.2" in specifier, (
+            f"the wandb extra declares {requirement!r} without the 0.28.2 "
+            "floor from which init_timeout bounds the backend's retries "
+            "during run initialization"
+        )
+        return
+
+    pytest.fail("wandb not found in the wandb optional dependency group")
+
+
 def test_mlflow_extra_requires_skinny_with_the_full_package_pin() -> None:
     """The mlflow extra must accept both the skinny and the full package."""
     runtime_names = {

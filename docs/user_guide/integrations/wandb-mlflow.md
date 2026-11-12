@@ -16,7 +16,8 @@ use the setup in their
 
 The [W&B integration](wandb.md) publishes the diagnosis card and three
 comparison fields into your existing run with one call,
-`log_training_report()`.
+`log_training_report()`. To stream live step time into W&B while training
+runs, use the `wandb` exporter described on the same page.
 
 ## MLflow
 
@@ -52,7 +53,8 @@ does not provide a TensorBoard export adapter.
 - W&B, MLflow, and TensorBoard do not define TraceML's training boundaries.
   Use automatic trainer instrumentation or the explicit setup for your loop.
 - The W&B and MLflow helpers write the end-of-run diagnosis only, not live
-  per-step metrics.
+  per-step metrics. Live step time reaches W&B through the `wandb` exporter;
+  MLflow has no live exporter.
 - Request the final summary only after all training workers finish their work.
   It is a finalized report, not a live metrics stream.
 - Summary requests require an active TraceML session with retained history.
