@@ -45,6 +45,27 @@ the environment for a run or bug report.
 
 ### End-of-run summaries
 
+A call made while training is still running asks the aggregator for a fresh
+report. That report covers the telemetry that has reached the aggregator at
+that moment. The calling rank publishes its pending steps first, when its
+sampler responds within two seconds. Every other rank publishes its steps on
+its next sampler tick, which comes every 2 seconds by default (the `interval`
+setting of `init()`). Up to one interval of those steps can be missing. To
+include them, put every rank past its training loop with a barrier such as
+`torch.distributed.barrier()`. Then wait one sampler interval before the call.
+Each later call regenerates the report until the aggregator writes its final
+report at the end of the run.
+
+Each session shares one request and response file, so call it from one rank,
+as the default `rank0_only=True` does. Each call during training settles
+telemetry and regenerates the report. That costs about half a second plus
+generation time, so keep it out of the training loop.
+
+Once the run has ended and the aggregator has written its final report, that
+saved report is reused. A process without a live TraceML runtime, such as a
+post-run script, reads the saved `final_summary.json` without asking the
+aggregator. The report written at shutdown covers every rank.
+
 ::: traceml_ai.api.summary
     options:
       show_root_heading: true
