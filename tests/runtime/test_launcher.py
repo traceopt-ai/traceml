@@ -1075,7 +1075,7 @@ def test_run_rejects_an_unknown_exporter_before_launch(
 
     assert str(exc.value) == (
         "[TraceML] Unknown exporter: 'unsupported'. "
-        "Supported: ['jsonl'] or 'module:factory'"
+        "Supported: ['jsonl', 'wandb'] or 'module:factory'"
     )
     for replacement in forbidden.values():
         replacement.assert_not_called()
@@ -1153,7 +1153,7 @@ def test_run_rejects_a_malformed_factory_value(
 
     assert str(exc.value) == (
         f"[TraceML] Unknown exporter: {value.strip()!r}. "
-        "Supported: ['jsonl'] or 'module:factory'"
+        "Supported: ['jsonl', 'wandb'] or 'module:factory'"
     )
 
 
@@ -1166,6 +1166,20 @@ def test_run_passes_a_factory_value_without_importing_it(
 
     assert env["TRACEML_EXPORTER"] == "mod:make"
     assert "mod" not in sys.modules
+
+
+def test_run_accepts_the_wandb_exporter_without_importing_wandb(
+    monkeypatch, tmp_path
+) -> None:
+    # Any ``import wandb`` in the launcher would raise.
+    monkeypatch.setitem(sys.modules, "wandb", None)
+
+    env = _aggregator_env(
+        monkeypatch, tmp_path, "--mode", "telemetry", "--exporter", "wandb"
+    )
+
+    assert env["TRACEML_EXPORTER"] == "wandb"
+    assert env["TRACEML_EXPORT_STREAMS"] == "step_time"
 
 
 def test_run_passes_a_dotted_factory_module(monkeypatch, tmp_path) -> None:
