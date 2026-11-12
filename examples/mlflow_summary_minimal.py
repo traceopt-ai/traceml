@@ -18,6 +18,10 @@ Use ``--log-final-summary`` to also attach the full report::
 
 At the end of the run, numeric ``traceml.summary()`` values are logged as
 MLflow metrics and diagnosis strings as MLflow tags.
+
+To publish the diagnosis card into the run as well, use
+``traceml_ai.integrations.mlflow.log_training_report()``; see
+``examples/mlflow_report_minimal.py``.
 """
 
 from __future__ import annotations
