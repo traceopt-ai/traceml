@@ -1327,3 +1327,67 @@ def test_telemetry_records_a_close_that_never_returns(monkeypatch, tmp_path):
     assert warning["export"]["close_error"].startswith(
         "exporter close did not finish within "
     )
+
+
+@pytest.mark.parametrize("start_fails", [True, False])
+def test_run_aggregator_restores_the_signal_handlers(
+    monkeypatch, tmp_path, start_fails
+):
+    import signal
+
+    class _Handle:
+        endpoint = AggregatorEndpoint(host="127.0.0.1", port=1, session_id="r")
+
+        def stop(self, timeout_sec):
+            return None
+
+    def fake_start_aggregator(settings, logger, stop_event):
+        if start_fails:
+            raise RuntimeError("exporter did not open")
+        stop_event.set()
+        return _Handle()
+
+    def previous(signum, frame):
+        return None
+
+    monkeypatch.setenv("TRACEML_LOGS_DIR", str(tmp_path))
+    monkeypatch.setenv("TRACEML_SESSION_ID", "run")
+    monkeypatch.setattr(
+        aggregator_main, "start_aggregator", fake_start_aggregator
+    )
+    originals = {
+        sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)
+    }
+    try:
+        for sig in originals:
+            signal.signal(sig, previous)
+
+        code = aggregator_main.run_aggregator(
+            TraceMLSettings(logs_dir=str(tmp_path), session_id="run"),
+            logger=Mock(),
+        )
+
+        assert code == (1 if start_fails else 0)
+        assert signal.getsignal(signal.SIGINT) is previous
+        assert signal.getsignal(signal.SIGTERM) is previous
+    finally:
+        for sig, handler in originals.items():
+            signal.signal(sig, handler)
+
+
+def test_a_handler_installed_outside_python_is_left_alone():
+    import signal
+
+    original = signal.getsignal(signal.SIGTERM)
+    try:
+        installed = aggregator_main._install_signal_handlers(threading.Event())
+        traceml_handler = signal.getsignal(signal.SIGTERM)
+
+        # signal.getsignal reports a C-level handler as None.
+        aggregator_main._restore_signal_handlers({signal.SIGTERM: None})
+
+        assert signal.getsignal(signal.SIGTERM) is traceml_handler
+        assert callable(traceml_handler)
+    finally:
+        aggregator_main._restore_signal_handlers(installed)
+        signal.signal(signal.SIGTERM, original)
