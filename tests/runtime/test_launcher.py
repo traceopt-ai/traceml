@@ -4095,3 +4095,123 @@ def test_strict_exporter_startup_failure_is_reported_as_such(
             "training was not started." in stderr
         )
     start_training.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("mode_args", "timeout"),
+    [
+        (["--mode", "telemetry", "--exporter", "jsonl"], 25.0),
+        (["--mode", "summary"], 15.0),
+    ],
+)
+def test_non_owner_wait_covers_the_exporter_startup_in_telemetry_mode(
+    monkeypatch, tmp_path, mode_args, timeout
+) -> None:
+    script = tmp_path / "train.py"
+    script.write_text("print('train')\n", encoding="utf-8")
+    args = build_parser().parse_args(
+        [
+            "run",
+            str(script),
+            *mode_args,
+            "--logs-dir",
+            str(tmp_path / "logs"),
+            "--aggregator-host",
+            "telemetry.internal",
+            "--nnodes",
+            "2",
+            "--node-rank",
+            "1",
+            "--run-name",
+            "strict-run",
+        ]
+    )
+    wait = Mock(return_value=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(launcher_commands, "install_shutdown_handlers", Mock())
+    monkeypatch.setattr(launcher_commands, "wait_for_tcp_listen", wait)
+    monkeypatch.setattr(launcher_commands, "start_training_process", Mock())
+
+    with pytest.raises(SystemExit):
+        launch_process(str(script), args)
+
+    assert wait.call_args.kwargs["timeout_sec"] == timeout
+
+
+@pytest.mark.parametrize(
+    ("mode_args", "timeout"),
+    [
+        (["--mode", "telemetry", "--exporter", "jsonl"], 25.0),
+        (["--mode", "summary"], 15.0),
+    ],
+)
+def test_owner_wait_covers_the_exporter_startup_in_telemetry_mode(
+    monkeypatch, tmp_path, mode_args, timeout
+) -> None:
+    script = tmp_path / "train.py"
+    script.write_text("print('train')\n", encoding="utf-8")
+    args = build_parser().parse_args(
+        [
+            "run",
+            str(script),
+            *mode_args,
+            "--logs-dir",
+            str(tmp_path / "logs"),
+            "--run-name",
+            "strict-run",
+            "--aggregator-port",
+            "43171",
+        ]
+    )
+    aggregator = Mock(pid=10, returncode=1)
+    aggregator.poll.return_value = 1
+    aggregator_output = Mock()
+    aggregator_output.finish.return_value = ProcessOutputResult(
+        stdout_path=None,
+        stderr_path=None,
+        stderr_tail=b"",
+        warning=None,
+    )
+    wait = Mock(return_value=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(launcher_commands, "install_shutdown_handlers", Mock())
+    monkeypatch.setattr(
+        launcher_commands, "ensure_aggregator_port_free", Mock()
+    )
+    monkeypatch.setattr(
+        launcher_commands,
+        "start_aggregator_process",
+        Mock(return_value=aggregator),
+    )
+    monkeypatch.setattr(
+        launcher_commands,
+        "_start_aggregator_output",
+        Mock(return_value=aggregator_output),
+    )
+    monkeypatch.setattr(launcher_commands, "wait_for_tcp_listen", wait)
+    monkeypatch.setattr(launcher_commands, "terminate_process_group", Mock())
+    monkeypatch.setattr(launcher_commands, "start_training_process", Mock())
+    monkeypatch.setattr(
+        launcher_commands, "write_code_manifest", Mock(return_value=None)
+    )
+    monkeypatch.setattr(
+        launcher_commands,
+        "write_run_manifest",
+        Mock(return_value=tmp_path / "manifest.json"),
+    )
+    monkeypatch.setattr(launcher_commands, "update_run_manifest", Mock())
+
+    with pytest.raises(SystemExit):
+        launch_process(str(script), args)
+
+    assert wait.call_args.kwargs["proc"] is aggregator
+    assert wait.call_args.kwargs["timeout_sec"] == timeout
+
+
+def test_launcher_export_startup_timeout_matches_its_aggregator_twin():
+    from traceml_ai.aggregator import trace_aggregator
+
+    assert (
+        launcher_commands._EXPORT_STARTUP_TIMEOUT_SEC
+        == trace_aggregator._EXPORT_STARTUP_TIMEOUT_SEC
+    )
