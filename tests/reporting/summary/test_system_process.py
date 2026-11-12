@@ -113,7 +113,7 @@ def _system_rows(conn, rows, *, ts_values=(10.0, 11.0)) -> None:
             )
 
 
-def test_rows_without_node_rank_stay_one_node_per_host(tmp_path):
+def test_rows_without_node_rank_share_one_unknown_node(tmp_path):
     db_path = tmp_path / "system.db"
     with summary_database(db_path) as conn:
         _system_rows(
@@ -121,19 +121,16 @@ def test_rows_without_node_rank_stay_one_node_per_host(tmp_path):
             [
                 (0, None, 1, 1, "host-a"),
                 (1, None, 1, 1, "host-a"),
-                (2, None, 1, 1, "host-b"),
             ],
         )
 
     result = SystemSummarySection().build(str(db_path))
 
-    # A global rank is not a node rank, so it no longer labels a node, and
-    # different hosts are not merged into one.
+    # A global rank is not a node rank, so it no longer labels a node.
     rows = result.payload["groups"]["rows"]
-    assert sorted(rows) == ["unknown@host-a", "unknown@host-b"]
-    assert all(row["identity"]["node_rank"] is None for row in rows.values())
-    assert result.payload["metadata"]["nodes_observed"] == 2
-    assert result.payload["metadata"]["gpus_observed"] == 2
+    assert sorted(rows) == ["unknown"]
+    assert rows["unknown"]["identity"]["node_rank"] is None
+    assert result.payload["metadata"]["nodes_observed"] == 1
 
 
 def test_multi_node_card_marks_a_node_without_a_rank():
@@ -141,7 +138,7 @@ def test_multi_node_card_marks_a_node_without_a_rank():
 
     assert _fmt_node_idx("3") == "n3"
     assert _fmt_node_idx("-1") == "n-1"
-    assert _fmt_node_idx("unknown@host-b") == "n?"
+    assert _fmt_node_idx("unknown") == "n?"
     assert _fmt_node_idx(None) == "n/a"
 
 

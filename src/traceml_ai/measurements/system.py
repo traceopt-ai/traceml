@@ -241,11 +241,9 @@ def _sample_key(row: _SampleRow | _GpuRow) -> _SampleKey:
 
 def _node_label(row: _SampleRow) -> str:
     # A global rank is not a node rank, so a row without one is an unknown
-    # node. Its hostname still keeps different machines apart.
+    # node.
     if row.node_rank is not None:
         return str(int(row.node_rank))
-    if row.hostname:
-        return f"unknown@{row.hostname}"
     return "unknown"
 
 
