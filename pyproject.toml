@@ -107,6 +107,13 @@ wandb = [
     "wandb",
 ]
 
+mlflow = [
+    # The full mlflow package pins mlflow-skinny to its own version from
+    # 2.15 on, so either install satisfies this. Skinny alone has no SQLite
+    # store and needs a remote tracking URI.
+    "mlflow-skinny>=2.15",
+]
+
 docs = [
     "mkdocs>=1.6",
     "mkdocs-material>=9.5",
