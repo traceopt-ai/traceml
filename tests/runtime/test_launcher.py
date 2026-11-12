@@ -3983,3 +3983,115 @@ def test_launcher_prints_the_foreign_run_warning_in_cli_mode(
 
     err = capsys.readouterr().err.splitlines()
     assert err.count(_FOREIGN_WARNING) == 1
+
+
+@pytest.mark.parametrize("marker", [True, False])
+def test_strict_exporter_startup_failure_is_reported_as_such(
+    monkeypatch, tmp_path, capsys, marker
+) -> None:
+    script = tmp_path / "train.py"
+    script.write_text("print('train')\n", encoding="utf-8")
+    args = build_parser().parse_args(
+        [
+            "run",
+            str(script),
+            "--mode",
+            "telemetry",
+            "--exporter",
+            "wandb",
+            "--logs-dir",
+            str(tmp_path / "logs"),
+            "--run-name",
+            "strict-run",
+            "--aggregator-port",
+            "43170",
+        ]
+    )
+    aggregator_dir = tmp_path / "logs" / "strict-run" / "aggregator"
+    aggregator = Mock(pid=10, returncode=1)
+    aggregator.poll.return_value = 1
+
+    def start_aggregator(**kwargs):
+        if marker:
+            aggregator_dir.mkdir(parents=True, exist_ok=True)
+            (aggregator_dir / "exporter_startup_failed.json").write_text(
+                json.dumps(
+                    {
+                        "status": "error",
+                        "failed_at": launcher_commands.utc_now_iso(),
+                        "reason": "exporter_startup_failed",
+                        "exporter": "wandb",
+                        "error": "[TraceML] WandbExporter.open failed: "
+                        "ValueError('[TraceML] No API key configured')",
+                    }
+                ),
+                encoding="utf-8",
+            )
+        return aggregator
+
+    aggregator_output = Mock()
+    aggregator_output.finish.return_value = ProcessOutputResult(
+        stdout_path=None,
+        stderr_path=aggregator_dir / "process.stderr.log",
+        stderr_tail=b"",
+        warning=None,
+    )
+    start_training = Mock()
+    update_manifest = Mock()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(launcher_commands, "install_shutdown_handlers", Mock())
+    monkeypatch.setattr(
+        launcher_commands, "ensure_aggregator_port_free", Mock()
+    )
+    monkeypatch.setattr(
+        launcher_commands, "start_aggregator_process", start_aggregator
+    )
+    monkeypatch.setattr(
+        launcher_commands,
+        "_start_aggregator_output",
+        Mock(return_value=aggregator_output),
+    )
+    monkeypatch.setattr(
+        launcher_commands, "wait_for_tcp_listen", Mock(return_value=False)
+    )
+    monkeypatch.setattr(launcher_commands, "terminate_process_group", Mock())
+    monkeypatch.setattr(
+        launcher_commands, "start_training_process", start_training
+    )
+    monkeypatch.setattr(
+        launcher_commands, "write_code_manifest", Mock(return_value=None)
+    )
+    monkeypatch.setattr(
+        launcher_commands,
+        "write_run_manifest",
+        Mock(return_value=tmp_path / "manifest.json"),
+    )
+    monkeypatch.setattr(
+        launcher_commands, "update_run_manifest", update_manifest
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        launch_process(str(script), args)
+
+    assert exc.value.code == 1
+    stderr = capsys.readouterr().err
+    reason = update_manifest.call_args.kwargs["telemetry_reason"]
+    if marker:
+        assert reason == "exporter_startup_failed"
+        assert (
+            "[TraceML] ERROR: exporter 'wandb' failed to start: "
+            "WandbExporter.open failed: ValueError('No API key "
+            "configured') (exit=1); training was not started." in stderr
+        )
+        (error_line,) = [
+            line for line in stderr.splitlines() if "failed to start" in line
+        ]
+        assert error_line.count("[TraceML]") == 1
+        assert "not reachable" not in stderr
+    else:
+        assert reason == "aggregator_not_ready"
+        assert (
+            "aggregator was not reachable at 127.0.0.1:43170 (exit=1); "
+            "training was not started." in stderr
+        )
+    start_training.assert_not_called()
