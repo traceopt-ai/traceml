@@ -35,8 +35,11 @@ def _add_exporter_args(parser: argparse.ArgumentParser) -> None:
         help=(
             "Write live telemetry records as JSON Lines, one file per "
             "stream, under <logs-dir>/<run-name>/aggregator/export/ "
-            "(jsonl), or load a custom exporter from module:factory in "
-            "the aggregator process. Default: off."
+            "(jsonl); stream step time into one Weights & Biases run per "
+            "rank (wandb; needs the traceml-ai[wandb] extra, W&B "
+            "credentials, WANDB_ENTITY and WANDB_PROJECT); or load a "
+            "custom exporter from module:factory in the aggregator "
+            "process. Default: off."
         ),
     )
     parser.add_argument(

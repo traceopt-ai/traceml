@@ -33,7 +33,7 @@ from traceml_ai.aggregator.export.worker import (
 
 # Values the ``exporter`` setting accepts; the launcher validates against
 # this before any process starts and the aggregator resolves from it.
-EXPORTER_NAMES = ("jsonl",)
+EXPORTER_NAMES = ("jsonl", "wandb")
 
 _FACTORY_VALUE = re.compile(
     r"^\s*([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s*:\s*([A-Za-z_]\w*)\s*$"

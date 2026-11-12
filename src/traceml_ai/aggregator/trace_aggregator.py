@@ -29,6 +29,10 @@ from traceml_ai.aggregator.export import (
     parse_export_streams,
     parse_exporter_factory,
 )
+from traceml_ai.aggregator.export.wandb_exporter import (
+    _FINISH_JOIN_GRACE_SEC,
+    WandbExporter,
+)
 from traceml_ai.aggregator.sqlite_writer import (
     SQLiteWriterConfig,
     SQLiteWriterSimple,
@@ -66,6 +70,12 @@ _EXPORT_STOP_BUDGET_FRACTION = 0.1
 _EXPORT_STOP_BUDGET_MIN_SEC = 0.5
 _EXPORT_STOP_BUDGET_MAX_SEC = 2.0
 _EXPORT_STARTUP_TIMEOUT_SEC = 10.0
+# Each W&B run's finish() bound: the export stop cap less a short drain and
+# the exporter's own join grace, so the exporter stops waiting, and a finish
+# timeout lands, inside the worker's join and is counted.
+_WANDB_FINISH_TIMEOUT_SEC = (
+    _EXPORT_STOP_BUDGET_MAX_SEC - 0.25 - _FINISH_JOIN_GRACE_SEC
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -175,7 +185,10 @@ def _load_exporter_factory(value: str, context: ExporterContext) -> Exporter:
 
 
 def _resolve_exporter(
-    settings: TraceMLSettings, session_root: Path
+    settings: TraceMLSettings,
+    session_root: Path,
+    *,
+    expected_world_size: int = 1,
 ) -> Optional[Tuple[Exporter, Tuple[str, ...]]]:
     """
     Return the export sink ``settings.exporter`` names and the record
@@ -184,7 +197,9 @@ def _resolve_exporter(
     A value with a colon names a factory, imported here in the aggregator
     process and called with an ``ExporterContext``; a factory that fails
     gives an exporter whose ``open`` raises. An unknown plain name or an
-    unknown stream name raises.
+    unknown stream name raises, and so does a stream selection the named
+    built-in exporter cannot export. ``expected_world_size`` is the number
+    of ranks the ``wandb`` exporter creates runs for up front.
     """
     name = str(settings.exporter or "").strip()
     if not name:
@@ -203,6 +218,22 @@ def _resolve_exporter(
             context.export_dir,
             include_hostname=context.include_hostname,
             streams=streams,
+        )
+        return sink, streams
+    if name == "wandb":
+        # Outside telemetry mode nothing waits on open(), so wandb keeps its
+        # own init timeout instead of the startup budget.
+        sink = WandbExporter(
+            context.export_dir,
+            run_name=context.session_root.name,
+            expected_world_size=expected_world_size,
+            streams=streams,
+            startup_timeout_sec=(
+                _EXPORT_STARTUP_TIMEOUT_SEC
+                if settings.mode == "telemetry"
+                else None
+            ),
+            finish_timeout_sec=_WANDB_FINISH_TIMEOUT_SEC,
         )
         return sink, streams
     raise ValueError(
@@ -279,7 +310,11 @@ class TraceMLAggregator:
         # logs it once and the warning artifact records the loss; the run
         # continues.
         self._export_worker: Optional[ExportWorker] = None
-        resolved_export = _resolve_exporter(settings, session_root)
+        resolved_export = _resolve_exporter(
+            settings,
+            session_root,
+            expected_world_size=self._expected_world_size,
+        )
         if resolved_export is not None:
             export_sink, export_streams = resolved_export
             self._export_worker = ExportWorker(
