@@ -198,6 +198,7 @@ def start_aggregator(
 ) -> AggregatorHandle:
     """Start a TraceML aggregator in the current process."""
     session_id = str(settings.session_id or "default")
+    _check_session_id(settings.logs_dir, session_id)
     normalized = replace(settings, session_id=session_id)
     _apply_settings_env(normalized)
 
@@ -249,6 +250,17 @@ def start_aggregator(
     )
 
 
+def _check_session_id(logs_dir: Any, session_id: str) -> None:
+    """Refuse a session id whose run folder is not inside ``logs_dir``."""
+    root = Path(str(logs_dir)).resolve()
+    run_dir = (root / session_id).resolve()
+    if root not in run_dir.parents:
+        raise ValueError(
+            f"TraceML session_id {session_id!r} must name a folder inside "
+            f"logs_dir ({root})."
+        )
+
+
 def start_runtime(
     settings: TraceMLSettings,
     *,
@@ -269,6 +281,7 @@ def start_runtime(
         return handle
 
     try:
+        _check_session_id(normalized.logs_dir, normalized.session_id)
         runtime = TraceMLRuntime(settings=normalized)
         runtime.start()
         handle = RuntimeHandle(runtime)
