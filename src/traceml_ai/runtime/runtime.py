@@ -33,6 +33,8 @@ from .settings import TraceMLSettings
 # join timeout by the same amount.
 _STOP_DRAIN_MAX_SEC = 2.0
 _STOP_DRAIN_POLL_SEC = 0.02
+# How often a flush waiter re-checks that the loop is still running.
+_FLUSH_POLL_SEC = 0.05
 
 
 def _safe(logger, label: str, fn: Callable[[], Any]) -> Any:
@@ -75,6 +77,16 @@ class TraceMLRuntime:
 
         # Stop event shared by all internal threads in this process
         self._stop_event = threading.Event()
+        # Ends the sampler loop's wait before its interval is over. stop()
+        # sets it too, so the loop still notices a stop at once.
+        self._wake_event = threading.Event()
+        # Numbers loop ticks and records the last one that published and the
+        # last one that raised, so a flush can wait for a tick that began
+        # after its request and learn how it ended.
+        self._tick_cond = threading.Condition()
+        self._ticks_started = 0
+        self._last_published_tick = 0
+        self._last_failed_tick = 0
 
         # Samplers (all ranks)
         self._samplers = self._build_samplers()
@@ -221,6 +233,28 @@ class TraceMLRuntime:
             time.sleep(min(_STOP_DRAIN_POLL_SEC, remaining))
             self._tick(drain_samplers)
 
+    def _counted_tick(self, tick: Callable[[], None]) -> None:
+        """Run one loop tick and record whether it published or raised."""
+        with self._tick_cond:
+            self._ticks_started += 1
+            tick_id = self._ticks_started
+        published = False
+        try:
+            tick()
+            published = True
+        finally:
+            with self._tick_cond:
+                if published:
+                    self._last_published_tick = tick_id
+                else:
+                    self._last_failed_tick = tick_id
+                self._tick_cond.notify_all()
+
+    def _wait_for_next_tick(self) -> None:
+        """Wait one sampler interval, or less when woken by flush or stop."""
+        self._wake_event.wait(float(self._settings.sampler_interval_sec))
+        self._wake_event.clear()
+
     def _sampler_loop(self) -> None:
         """Sampler loop (all ranks)."""
         while not self._stop_event.is_set():
@@ -228,19 +262,17 @@ class TraceMLRuntime:
             if status == TraceMLRecordingStatus.COMPLETE:
                 return
             if status == TraceMLRecordingStatus.DRAINING:
-                self._drain_recording_samplers()
+                self._counted_tick(self._drain_recording_samplers)
                 if (
                     get_trace_recording_state().status
                     == TraceMLRecordingStatus.COMPLETE
                 ):
                     return
-                self._stop_event.wait(
-                    float(self._settings.sampler_interval_sec)
-                )
+                self._wait_for_next_tick()
                 continue
 
-            self._tick()
-            self._stop_event.wait(float(self._settings.sampler_interval_sec))
+            self._counted_tick(self._tick)
+            self._wait_for_next_tick()
 
         status = get_trace_recording_state().status
         if status == TraceMLRecordingStatus.RECORDING:
@@ -266,6 +298,59 @@ class TraceMLRuntime:
             self._logger.exception("[TraceML] Sampler thread start failed")
             raise RuntimeError("Failed to start TraceML sampler thread") from e
 
+    @property
+    def stopped(self) -> bool:
+        """True once ``stop()`` has been called."""
+        return self._stop_event.is_set()
+
+    def flush_pending_telemetry(self, timeout_sec: float) -> bool:
+        """
+        Wake the sampler loop so it publishes this rank's pending telemetry.
+
+        Returns True once a tick that began after this call has handed its
+        batch to the exporter, and also at once when recording is complete,
+        since the final drain has then already published everything.
+        Returns False when that tick raised, when ``timeout_sec`` passes
+        first, or when the loop is stopping, stopped, or ended otherwise.
+        The calling thread only signals the loop and waits; sampling stays
+        on the sampler thread. Never raises, and never blocks longer than
+        ``timeout_sec``.
+        """
+        try:
+            deadline = time.monotonic() + max(0.0, float(timeout_sec))
+            with self._tick_cond:
+                target = self._ticks_started + 1
+            self._wake_event.set()
+            with self._tick_cond:
+                while self._last_published_tick < target:
+                    if self._last_failed_tick >= target:
+                        return False
+                    if self._recording_complete():
+                        return True
+                    if (
+                        self._stop_event.is_set()
+                        or not self._sampler_thread.is_alive()
+                    ):
+                        return False
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0.0:
+                        return False
+                    self._tick_cond.wait(min(remaining, _FLUSH_POLL_SEC))
+            return True
+        except Exception as e:
+            self._logger.error(
+                f"[TraceML] flush_pending_telemetry failed: {e}"
+            )
+            return False
+
+    @staticmethod
+    def _recording_complete() -> bool:
+        """True once the final recording drain left nothing pending."""
+        return (
+            get_trace_recording_state().status
+            == TraceMLRecordingStatus.COMPLETE
+        )
+
     def stop(self) -> None:
         """
         Stop TraceML runtime and release resources (best effort).
@@ -276,6 +361,7 @@ class TraceMLRuntime:
         - Drains the export queue and closes the TCP client (bounded)
         """
         self._stop_event.set()
+        self._wake_event.set()
 
         # stop sampler; its stop drain may use up to _STOP_DRAIN_MAX_SEC
         self._sampler_thread.join(

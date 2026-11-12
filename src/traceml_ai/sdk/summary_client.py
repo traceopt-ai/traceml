@@ -6,6 +6,7 @@ APIs. It does not generate summaries locally. Instead, it requests a fresh
 summary from the aggregator process and reads the published summary artifact.
 """
 
+import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -25,6 +26,10 @@ from traceml_ai.sdk.protocol import (
 )
 from traceml_ai.sdk.summary_projection import compact_summary
 from traceml_ai.utils.atomic_io import write_json_atomic
+
+# Upper bound on how long a summary call waits for this rank's sampler to
+# publish its pending steps before it asks the aggregator.
+_FLUSH_TIMEOUT_SEC = 2.0
 
 
 def _read_text_or_empty(path: Path) -> str:
@@ -60,6 +65,19 @@ def _print_summary_text(
     except Exception:
         pass
     print(text)
+
+
+def _live_runtime_handle() -> Any:
+    """Return this process's live TraceML runtime handle, or None."""
+    try:
+        from traceml_ai.runtime.lifecycle import get_active_runtime_handle
+
+        handle = get_active_runtime_handle()
+        if handle is not None and handle.is_live:
+            return handle
+    except Exception:
+        pass
+    return None
 
 
 def _load_existing_final_summary(
@@ -126,12 +144,26 @@ def final_summary(
             "disabled for this session."
         )
 
-    existing = _load_existing_final_summary(
-        ctx.session_root,
-        print_text=print_text,
-    )
-    if existing is not None:
-        return existing
+    handle = _live_runtime_handle()
+    if handle is None:
+        # No training runs in this process, so a saved report can answer.
+        existing = _load_existing_final_summary(
+            ctx.session_root,
+            print_text=print_text,
+        )
+        if existing is not None:
+            return existing
+    else:
+        # Training is still running: publish this rank's steps since its
+        # last sampler tick, then ask the aggregator for a fresh report.
+        flush_timeout = min(float(timeout_sec), _FLUSH_TIMEOUT_SEC)
+        if not handle.flush_pending_telemetry(flush_timeout):
+            print(
+                "[TraceML] WARNING: this rank's sampler did not publish "
+                f"within {flush_timeout:g}s, so its pending steps may be "
+                "missing from the summary.",
+                file=sys.stderr,
+            )
 
     request = build_final_summary_request()
     request_path = get_final_summary_request_path(ctx.session_root)
@@ -161,6 +193,12 @@ def final_summary(
                 raise RuntimeError(
                     f"Final summary JSON could not be read: {summary_json_path}"
                 )
+
+            # The aggregator returned an earlier summary after a failed
+            # refresh.
+            warning = response.get("warning")
+            if warning:
+                print(f"[TraceML] WARNING: {warning}", file=sys.stderr)
 
             if print_text:
                 summary_txt_path = response.get("summary_txt_path")
