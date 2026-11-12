@@ -77,6 +77,9 @@ class FinalSummaryResponse:
     summary_json_path: Optional[str] = None
     summary_txt_path: Optional[str] = None
     error: Optional[str] = None
+    # Set on an OK response that returns an earlier summary after a failed
+    # refresh; older clients ignore it.
+    warning: Optional[str] = None
 
 
 def utc_now_iso() -> str:

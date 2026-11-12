@@ -117,6 +117,7 @@ def _make_aggregator(tmp_path: Path, *, writer: _Writer, tcp: _TCP):
     agg._foreign_senders = {}
     agg._drain_lock = threading.Lock()
     agg._summary_lock = threading.Lock()
+    agg._final_summary_written = False
     agg._thread = _StoppedThread()
     agg._display_driver = _Display()
     agg._tcp_server = tcp
@@ -609,6 +610,38 @@ def test_stop_writes_no_warning_when_all_ranks_finished(
     assert get_final_summary_json_path(tmp_path / "run").is_file() is (
         mode == "summary"
     )
+
+
+def test_summary_is_final_only_after_stop_rewrites_it(
+    monkeypatch,
+    tmp_path,
+):
+    control_messages = [
+        build_rank_finished_payload(
+            global_rank=rank, world_size=2, node_rank=0, hostname="worker"
+        )
+        for rank in (0, 1)
+    ]
+    agg = _make_aggregator(
+        tmp_path,
+        writer=_Writer(_ok_result()),
+        tcp=_TCP(messages=control_messages),
+    )
+    monkeypatch.setattr(
+        trace_aggregator,
+        "generate_summary",
+        lambda *args, **kwargs: _write_fake_summary(tmp_path),
+    )
+    # An in-training report exists and every rank has finished, but the
+    # end-of-run report has not been written yet.
+    _write_fake_summary(tmp_path)
+    agg._drain_tcp()
+    assert sorted(agg._finished_ranks) == [0, 1]
+    assert agg._summary_finalized() is False
+
+    agg.stop(timeout_sec=0.5)
+
+    assert agg._summary_finalized() is True
 
 
 def test_stop_downgrades_post_write_summary_error_to_warning(

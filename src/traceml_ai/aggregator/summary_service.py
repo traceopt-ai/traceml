@@ -41,6 +41,7 @@ class FinalSummaryService:
         write_html: bool = False,
         profile: str = "run",
         summary_lock: Optional[threading.Lock] = None,
+        summary_finalized: Optional[Callable[[], bool]] = None,
     ) -> None:
         self._logger = logger
         self._session_root = Path(session_root).resolve()
@@ -54,6 +55,9 @@ class FinalSummaryService:
         # Shared with the aggregator's end-of-run generation, so it cannot run
         # between this service's existence check and its generation.
         self._summary_lock = summary_lock or threading.Lock()
+        # True once the end-of-run summary has been written. None keeps the
+        # older behaviour of always reusing an existing artifact.
+        self._summary_finalized = summary_finalized
 
     def poll(self) -> None:
         """
@@ -82,9 +86,11 @@ class FinalSummaryService:
         Flush history, generate a fresh summary, and publish the response.
         """
         response_path = get_final_summary_response_path(self._session_root)
+        had_summary = False
 
         try:
-            if self._summary_exists():
+            had_summary = self._summary_exists()
+            if had_summary and self._can_reuse_summary():
                 self._write_ok_response(response_path, request_id=request_id)
                 self._last_request_id = request_id
                 return
@@ -115,6 +121,19 @@ class FinalSummaryService:
             except Exception:
                 pass
 
+            if had_summary and self._summary_is_readable():
+                # The refresh failed, but the earlier report is still valid.
+                self._write_ok_response(
+                    response_path,
+                    request_id=request_id,
+                    warning=(
+                        "Returned the previous summary because the refresh "
+                        f"failed ({exc})"
+                    ),
+                )
+                self._last_request_id = request_id
+                return
+
             response = FinalSummaryResponse(
                 request_id=request_id,
                 status="error",
@@ -130,8 +149,25 @@ class FinalSummaryService:
         """Return True when the canonical JSON artifact already exists."""
         return get_final_summary_json_path(self._session_root).is_file()
 
+    def _summary_is_readable(self) -> bool:
+        """Return True when the canonical JSON artifact parses."""
+        path = get_final_summary_json_path(self._session_root)
+        return load_json_or_none(path) is not None
+
+    def _can_reuse_summary(self) -> bool:
+        """
+        Return True when an existing artifact can answer a request.
+
+        Until the end-of-run summary is written, an existing artifact can be
+        an earlier report that misses later telemetry, so each request
+        regenerates it instead.
+        """
+        if self._summary_finalized is None:
+            return True
+        return bool(self._summary_finalized())
+
     def _settle_before_generation(self, timeout_sec: float) -> bool:
-        """Best-effort telemetry settle before first summary generation."""
+        """Best-effort telemetry settle before summary generation."""
         if self._settle_telemetry is not None:
             return bool(self._settle_telemetry(float(timeout_sec)))
         return bool(self._flush_history(float(timeout_sec)))
@@ -141,6 +177,7 @@ class FinalSummaryService:
         response_path: Path,
         *,
         request_id: str,
+        warning: Optional[str] = None,
     ) -> None:
         """Publish an OK response pointing at canonical summary artifacts."""
         response = FinalSummaryResponse(
@@ -154,5 +191,6 @@ class FinalSummaryService:
                 get_final_summary_txt_path(self._session_root)
             ),
             error=None,
+            warning=warning,
         )
         write_json_atomic(response_path, response_to_json(response))
