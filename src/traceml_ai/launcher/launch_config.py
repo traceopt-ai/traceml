@@ -231,6 +231,9 @@ class RunIdentity:
                 "--run-name must be a single path segment, not a path."
             )
 
+        if resolved in {".", ".."}:
+            raise ValueError("--run-name cannot be '.' or '..'.")
+
         if not _RUN_NAME_RE.match(resolved):
             raise ValueError(
                 "--run-name may contain only letters, numbers, '.', '_', "
