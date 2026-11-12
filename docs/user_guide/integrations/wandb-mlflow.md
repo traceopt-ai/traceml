@@ -149,9 +149,10 @@ shows the same initialization and final-summary API without requiring a tracker.
   remain enabled; this guide does not provide a TensorBoard export adapter.
 - A summary requested while training runs covers the telemetry that has
   reached the aggregator at that moment. The calling rank publishes its
-  pending steps first. The last sampler interval of other ranks can be
-  missing. To include it, put every rank past its loop with a barrier, then
-  wait one sampler interval before the call.
+  pending steps first. It waits for its own queued GPU work before that, so
+  its own steps are complete up to the call. The last sampler interval of
+  other ranks can be missing. To include it, put every rank past its loop
+  with a barrier, then wait one sampler interval before the call.
 - Summary requests require an active TraceML session with retained history.
   They can raise `RuntimeError` if history is unavailable, the aggregator
   reports an error, or the request times out.

@@ -48,11 +48,13 @@ the environment for a run or bug report.
 A call made while training is still running asks the aggregator for a fresh
 report. That report covers the telemetry that has reached the aggregator at
 that moment. The calling rank publishes its pending steps first, when its
-sampler responds within two seconds. Every other rank publishes its steps on
-its next sampler tick, which comes every 2 seconds by default (the `interval`
-setting of `init()`). Up to one interval of those steps can be missing. To
-include them, put every rank past its training loop with a barrier such as
-`torch.distributed.barrier()`. Then wait one sampler interval before the call.
+sampler responds within two seconds. Before that, it waits for its own queued
+GPU work, so its own steps are complete up to the call. Every other rank
+publishes its steps on its next sampler tick, which comes every 2 seconds by
+default (the `interval` setting of `init()`). Up to one interval of those
+steps can be missing. To include them, put every rank past its training loop
+with a barrier such as `torch.distributed.barrier()`. Then wait one sampler
+interval before the call.
 Each later call regenerates the report until the aggregator writes its final
 report at the end of the run.
 

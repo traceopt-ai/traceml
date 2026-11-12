@@ -6,6 +6,7 @@
 
 """Per-rank TraceML runtime agent."""
 
+import sys
 import threading
 import time
 from typing import Any, Callable, List, Optional
@@ -303,6 +304,28 @@ class TraceMLRuntime:
         """True once ``stop()`` has been called."""
         return self._stop_event.is_set()
 
+    def _synchronize_caller_cuda(self) -> None:
+        """
+        Wait for this rank's queued GPU work, on the caller's thread.
+
+        The step-time sampler resolves a step only once its CUDA end event
+        has completed. Waiting here lets those events resolve in the tick
+        that follows. It costs one device synchronize at report time.
+        Torch is reached only through ``sys.modules``: a process that never
+        imported torch has no CUDA work queued, and this module stays
+        importable without torch. Never raises; a failure is logged.
+        """
+        torch = sys.modules.get("torch")
+        if torch is None:
+            return
+        try:
+            if torch.cuda.is_available() and torch.cuda.is_initialized():
+                torch.cuda.synchronize()
+        except Exception as e:
+            self._logger.error(
+                f"[TraceML] CUDA synchronize before flush failed: {e}"
+            )
+
     def flush_pending_telemetry(self, timeout_sec: float) -> bool:
         """
         Wake the sampler loop so it publishes this rank's pending telemetry.
@@ -312,11 +335,16 @@ class TraceMLRuntime:
         since the final drain has then already published everything.
         Returns False when that tick raised, when ``timeout_sec`` passes
         first, or when the loop is stopping, stopped, or ended otherwise.
+        The caller's queued CUDA work is synchronized first so the tick can
+        resolve this rank's step timings; other ranks are not affected.
+        ``timeout_sec`` starts after that synchronize, so the wait for the
+        tick keeps its full budget however long the GPU tail takes.
         The calling thread only signals the loop and waits; sampling stays
         on the sampler thread. Never raises, and never blocks longer than
-        ``timeout_sec``.
+        the device synchronize plus ``timeout_sec``.
         """
         try:
+            self._synchronize_caller_cuda()
             deadline = time.monotonic() + max(0.0, float(timeout_sec))
             with self._tick_cond:
                 target = self._ticks_started + 1
