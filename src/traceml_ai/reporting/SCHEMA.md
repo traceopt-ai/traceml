@@ -394,6 +394,9 @@ Fallback evidence types are:
 - Section-specific details such as `scope`, `samples_used`, `steps_used`,
   `note`, and `confidence` belong in `evidence`.
 - `groups.rows` contains row data only: `identity` and `metrics`.
+- System `groups.rows` are keyed by node rank. Samples that carry no
+  node rank share one row keyed `unknown`, whose `identity.node_rank` is
+  `null`.
 - Row-level diagnosis is intentionally omitted for now.
 - `global.average`, `global.median`, `global.worst`, and
   `groups.rows[*].metrics` must use exactly `metadata.section_metric_names`.

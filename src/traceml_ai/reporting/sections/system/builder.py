@@ -36,6 +36,7 @@ from traceml_ai.reporting.summaries.summary_formatting import (
     duration_from_bounds,
     format_optional,
 )
+from traceml_ai.reporting.topology import topology_mode_from_identities
 
 SYSTEM_METRIC_NAMES = [
     "cpu_percent",
@@ -51,12 +52,14 @@ SYSTEM_METRIC_NAMES = [
 
 
 def _system_mode(cluster: SystemClusterSummary) -> str:
-    """Return the topology mode represented by the System summary."""
-    if cluster.observed_nodes <= 0:
-        return "no_data"
-    if cluster.expected_nodes <= 1 and cluster.observed_nodes <= 1:
-        return "single_node"
-    return "multi_node"
+    """Return the topology mode by the rule every other section uses."""
+    identities = cluster.sample_identities or tuple(
+        node.identity for node in cluster.nodes.values()
+    )
+    return topology_mode_from_identities(
+        identities,
+        has_data=cluster.observed_nodes > 0,
+    )
 
 
 def _gpu_mem_percent_from_summaries(
@@ -224,7 +227,13 @@ def _fmt_temp(value: Optional[float]) -> str:
 
 
 def _fmt_node_idx(value: Any) -> str:
-    return "n/a" if value is None else f"n{value}"
+    if value is None:
+        return "n/a"
+    # A node without a node rank has a non-numeric label.
+    try:
+        return f"n{int(value)}"
+    except (TypeError, ValueError):
+        return "n?"
 
 
 def _card_stats(

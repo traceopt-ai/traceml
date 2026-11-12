@@ -102,6 +102,9 @@ class SystemClusterSummary:
     aggregate: SystemSummaryAgg
     nodes: Dict[str, SystemNodeSummary]
     expected_nodes: int
+    # One identity per selected sample, so topology sees every row's world
+    # size rather than only the last sample of each node.
+    sample_identities: tuple[SystemNodeIdentity, ...] = ()
 
     @property
     def observed_nodes(self) -> int:
@@ -237,9 +240,11 @@ def _sample_key(row: _SampleRow | _GpuRow) -> _SampleKey:
 
 
 def _node_label(row: _SampleRow) -> str:
+    # A global rank is not a node rank, so a row without one is an unknown
+    # node.
     if row.node_rank is not None:
         return str(int(row.node_rank))
-    return str(int(row.global_rank or 0))
+    return "unknown"
 
 
 def _node_identity(rows: list[_SampleRow]) -> SystemNodeIdentity:
@@ -556,6 +561,9 @@ def _load_cluster_summary(
         aggregate=_aggregate_samples(samples, gpu_rollups_by_key),
         nodes=nodes,
         expected_nodes=_expected_nodes(samples),
+        sample_identities=tuple(
+            dict.fromkeys(_node_identity([row]) for row in samples)
+        ),
     )
 
 
