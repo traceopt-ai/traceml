@@ -280,3 +280,33 @@ def test_severity_tier_incomplete_data_is_neutral() -> None:
         == "neutral"
     )
     assert severity_tier({"severity": "info", "kind": "BALANCED"}) == "good"
+
+
+def test_render_banner_info_primary_uses_info_class(make_payload) -> None:
+    payload = make_payload(
+        schema_version=1.5,
+        primary_diagnosis={
+            "kind": "INSUFFICIENT_STEP_TIME_DATA",
+            "status": "INSUFFICIENT STEP-TIME DATA",
+            "severity": "info",
+            "summary": (
+                "Not enough completed step-time samples were available "
+                "for a stable performance diagnosis."
+            ),
+            "action": "Run for more steps or ensure step timing is recorded.",
+        },
+    )
+
+    banner = render_banner(payload)
+
+    assert 'class="banner info"' in banner
+    assert '<span class="kind">INSUFFICIENT STEP-TIME DATA</span>' in banner
+
+
+def test_stylesheet_styles_the_info_banner_tier() -> None:
+    from traceml_ai.reporting.html.style import STYLESHEET
+
+    # Info-tier verdicts need an accent and a filled chip; without them the
+    # white chip text sits on a transparent background and is invisible.
+    assert ".banner.info {" in STYLESHEET
+    assert ".banner.info .kind { background:var(--info);}" in STYLESHEET
