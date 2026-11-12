@@ -103,6 +103,10 @@ deepspeed = [
     "deepspeed>=0.10.0",
 ]
 
+wandb = [
+    "wandb",
+]
+
 docs = [
     "mkdocs>=1.6",
     "mkdocs-material>=9.5",

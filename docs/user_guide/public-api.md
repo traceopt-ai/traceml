@@ -415,3 +415,13 @@ setup. See the [Ray Train guide](integrations/ray.md).
     options:
       show_root_heading: true
       show_source: false
+
+## Experiment trackers
+
+Tracker helpers publish TraceML's end-of-run diagnosis into a run you
+already own. See the [Weights & Biases guide](integrations/wandb.md).
+
+::: traceml_ai.integrations.wandb.log_training_report
+    options:
+      show_root_heading: true
+      show_source: false
