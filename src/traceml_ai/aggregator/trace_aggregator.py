@@ -86,6 +86,9 @@ _EXPORT_TELEMETRY_DRAIN_MARGIN_SEC = 1.0
 # its share: the settle's quiet window is 0.5 s and the ranks' finish
 # markers arrive within a sampler interval.
 _TELEMETRY_SETTLE_FLOOR_SEC = 2.0
+# Written under aggregator/ when a telemetry exporter fails to open; twin of
+# EXPORTER_STARTUP_FAILED_NAME in launcher/manifest.py, which reads it.
+_EXPORTER_STARTUP_FAILED_NAME = "exporter_startup_failed.json"
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -335,11 +338,18 @@ class TraceMLAggregator:
         # logs it once and the warning artifact records the loss; the run
         # continues.
         self._export_worker: Optional[ExportWorker] = None
-        resolved_export = _resolve_exporter(
-            settings,
-            session_root,
-            expected_world_size=self._expected_world_size,
-        )
+        try:
+            resolved_export = _resolve_exporter(
+                settings,
+                session_root,
+                expected_world_size=self._expected_world_size,
+            )
+        except Exception as exc:
+            # An exporter that cannot be built stops the aggregator before
+            # it listens, like one that fails to open, so it leaves the same
+            # marker and the launcher names the cause.
+            self._write_exporter_startup_marker(exc)
+            raise
         # The close bound the exporter was built with; None when it has none,
         # and then telemetry mode's stop keeps the ordinary export slice.
         self._export_finish_timeout_sec: Optional[float] = None
@@ -395,7 +405,10 @@ class TraceMLAggregator:
         last.
 
         Startup failures should propagate so the launcher can fail fast rather
-        than running in a partially initialized state.
+        than running in a partially initialized state. A telemetry exporter
+        that fails to open first leaves
+        ``aggregator/exporter_startup_failed.json`` so the launcher can name
+        the cause.
         """
         require_exporter = self._settings.mode == "telemetry"
         if require_exporter:
@@ -406,7 +419,13 @@ class TraceMLAggregator:
                     "[TraceML] telemetry mode has no export worker."
                 )
             self._export_worker.start()
-            self._export_worker.wait_until_ready(_EXPORT_STARTUP_TIMEOUT_SEC)
+            try:
+                self._export_worker.wait_until_ready(
+                    _EXPORT_STARTUP_TIMEOUT_SEC
+                )
+            except ExporterStartupError as exc:
+                self._write_exporter_startup_marker(exc)
+                raise
 
         self._tcp_server.start()
         self._sqlite_writer.start()
@@ -509,7 +528,11 @@ class TraceMLAggregator:
                 0.0, remaining() - sqlite_finalize_budget - export_budget
             )
             try:
-                if self._settings.history_enabled or export_worker is not None:
+                # A run whose start() failed never took training telemetry,
+                # so there are no ranks to settle and nothing to warn about.
+                if self._started and (
+                    self._settings.history_enabled or export_worker is not None
+                ):
                     warning_payload = self._settle_end_of_run_telemetry(
                         settle_budget
                     )
@@ -638,7 +661,7 @@ class TraceMLAggregator:
                     "Summary mode finished without final_summary.json."
                 )
 
-            if warning_payload is not None:
+            if self._started and warning_payload is not None:
                 self._write_finalization_artifact(
                     session_root,
                     "finalization_warning.json",
@@ -1047,6 +1070,26 @@ class TraceMLAggregator:
                 filename,
                 exc,
             )
+
+    def _write_exporter_startup_marker(self, exc: BaseException) -> None:
+        """
+        Record an exporter that could not be built, or that failed to open
+        in telemetry mode (best effort).
+        """
+        session_root = Path(str(self._settings.logs_dir)).resolve() / str(
+            self._settings.session_id or "default"
+        )
+        self._write_finalization_artifact(
+            session_root,
+            _EXPORTER_STARTUP_FAILED_NAME,
+            {
+                "status": "error",
+                "failed_at": utc_now_iso(),
+                "reason": "exporter_startup_failed",
+                "exporter": str(self._settings.exporter or "").strip(),
+                "error": str(exc),
+            },
+        )
 
     def _settle_telemetry(self, timeout_sec: float) -> bool:
         """
