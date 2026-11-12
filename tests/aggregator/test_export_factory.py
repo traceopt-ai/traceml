@@ -490,3 +490,13 @@ def test_an_exporter_that_cannot_be_built_writes_the_marker(
     assert marker["exporter"] == "wandb"
     assert "step_time stream only" in marker["error"]
     assert not list(aggregator_dir.glob("finalization_*.json"))
+
+
+def test_startup_marker_name_matches_its_launcher_twin():
+    from traceml_ai.aggregator import trace_aggregator
+    from traceml_ai.launcher import manifest
+
+    assert (
+        trace_aggregator._EXPORTER_STARTUP_FAILED_NAME
+        == manifest.EXPORTER_STARTUP_FAILED_NAME
+    )

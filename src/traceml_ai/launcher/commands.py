@@ -93,6 +93,10 @@ SINGLE_NODE_DEFAULT_MODE = DEFAULT_UI_MODE
 MULTI_NODE_DEFAULT_MODE = DEFAULT_UI_MODE
 _FAILURE_EXCERPT_BYTES = 8 * 1024
 _FAILURE_EXCERPT_LINES = 40
+# Telemetry mode opens the exporter before the aggregator listens. Twin of
+# _EXPORT_STARTUP_TIMEOUT_SEC in aggregator/trace_aggregator.py, kept here so
+# the launcher does not import the aggregator.
+_EXPORT_STARTUP_TIMEOUT_SEC = 10.0
 # Start of the line TraceMLAggregator prints at stop when it dropped payloads
 # stamped for another run.
 _FOREIGN_RUN_WARNING = "[TraceML] WARNING: ignored "
@@ -1185,11 +1189,17 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                 mode=str(cfg["mode"]),
             )
             print(f"[TraceML] Aggregator PID: {agg_proc.pid}")
+            # In telemetry mode the exporter opens before the aggregator
+            # listens; a failure still ends the wait early through proc.
             ready = wait_for_tcp_listen(
                 host=aggregator_cfg.connect_host,
                 port=aggregator_cfg.port,
                 proc=agg_proc,
-                timeout_sec=DEFAULT_TCP_READY_TIMEOUT_SEC,
+                timeout_sec=(
+                    DEFAULT_TCP_READY_TIMEOUT_SEC + _EXPORT_STARTUP_TIMEOUT_SEC
+                    if cfg["mode"] == "telemetry"
+                    else DEFAULT_TCP_READY_TIMEOUT_SEC
+                ),
             )
             if not ready:
                 telemetry_startup_reason = "aggregator_not_ready"
@@ -1202,7 +1212,11 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         ready = wait_for_tcp_listen(
             host=aggregator_cfg.connect_host,
             port=aggregator_cfg.port,
-            timeout_sec=DEFAULT_TCP_READY_TIMEOUT_SEC,
+            timeout_sec=(
+                DEFAULT_TCP_READY_TIMEOUT_SEC + _EXPORT_STARTUP_TIMEOUT_SEC
+                if cfg["mode"] == "telemetry"
+                else DEFAULT_TCP_READY_TIMEOUT_SEC
+            ),
         )
         if not ready:
             telemetry_startup_reason = "aggregator_not_ready"
