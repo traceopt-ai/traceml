@@ -67,6 +67,9 @@ python -m pip install -e ".[torch]"
 traceml run examples/quickstart.py --args --steps 20
 ```
 
+To try automatic instrumentation without your own script, follow the
+[Hugging Face Trainer example](https://github.com/traceopt-ai/traceml/blob/version_0.5.2/examples/README.md#start-here).
+
 ## Read the diagnosis and saved report
 
 When training finishes, TraceML prints a verdict, the supporting measurements,
