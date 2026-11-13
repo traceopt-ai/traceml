@@ -248,3 +248,20 @@ def test_hf_extra_requires_supported_transformers() -> None:
         return
 
     pytest.fail("transformers not found in the hf optional dependency group")
+
+
+def test_wandb_is_an_optional_extra() -> None:
+    """wandb installs through the wandb extra, never the base install."""
+    runtime_names = {
+        _requirement_name(requirement)
+        for requirement in _runtime_dependencies()
+    }
+    assert (
+        "wandb" not in runtime_names
+    ), "wandb belongs in the wandb extra, not the base install"
+
+    extra_names = {
+        _requirement_name(requirement)
+        for requirement in _optional_dependencies("wandb")
+    }
+    assert "wandb" in extra_names, "wandb not found in the wandb extra"
