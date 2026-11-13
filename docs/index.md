@@ -8,9 +8,10 @@ hide:
 TraceML breaks down training step time into input wait, data transfer, forward,
 backward, and optimizer work. If you use a [supported trainer](#choose-your-training-setup),
 launch your existing script with `traceml run train.py`.
+{: .traceml-lead }
 
-[Quickstart](user_guide/quickstart.md){ .md-button style="background: var(--md-default-fg-color); color: var(--md-default-bg-color); border-color: var(--md-default-fg-color); margin-inline-end: 0.6rem" }
-[Read a diagnosis](user_guide/reading-output.md#start-with-the-diagnosis){ style="color: inherit; text-decoration: underline" }
+[Quickstart](user_guide/quickstart.md){ .md-button .md-button--primary }
+[Read a diagnosis](user_guide/reading-output.md#start-with-the-diagnosis){ .traceml-secondary-link }
 
 ## Example diagnosis
 
