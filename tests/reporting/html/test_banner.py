@@ -306,7 +306,10 @@ def test_render_banner_info_primary_uses_info_class(make_payload) -> None:
 def test_stylesheet_styles_the_info_banner_tier() -> None:
     from traceml_ai.reporting.html.style import STYLESHEET
 
-    # Info-tier verdicts need an accent and a filled chip; without them the
-    # white chip text sits on a transparent background and is invisible.
+    # The page background token gives the filled chip readable text in both
+    # themes.
     assert ".banner.info {" in STYLESHEET
-    assert ".banner.info .kind { background:var(--info);}" in STYLESHEET
+    assert (
+        ".banner.info .kind { background:var(--info); color:var(--bg);}"
+        in STYLESHEET
+    )

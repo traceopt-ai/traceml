@@ -55,7 +55,7 @@ STYLESHEET = """
   .banner.crit .kind { background:var(--crit);}
   .banner.warn .kind { background:var(--warn);}
   .banner.good .kind { background:var(--good);}
-  .banner.info .kind { background:var(--info);}
+  .banner.info .kind { background:var(--info); color:var(--bg);}
   .banner.neutral .kind { background:var(--neutral);}
   .banner h2 { display:inline; font-size:17px; margin:0; font-weight:650; }
   .banner p { margin:8px 0 0; }
