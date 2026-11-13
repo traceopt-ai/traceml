@@ -419,9 +419,15 @@ setup. See the [Ray Train guide](integrations/ray.md).
 ## Experiment trackers
 
 Tracker helpers publish TraceML's end-of-run diagnosis into a run you
-already own. See the [Weights & Biases guide](integrations/wandb.md).
+already own. See the [Weights & Biases guide](integrations/wandb.md) and the
+[MLflow guide](integrations/mlflow.md).
 
 ::: traceml_ai.integrations.wandb.log_training_report
+    options:
+      show_root_heading: true
+      show_source: false
+
+::: traceml_ai.integrations.mlflow.log_training_report
     options:
       show_root_heading: true
       show_source: false
