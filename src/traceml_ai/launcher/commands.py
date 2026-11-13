@@ -38,6 +38,7 @@ from traceml_ai.launcher.manifest import (
     is_current_summary_artifact,
     node_artifact_dir,
     read_current_finalization_reason,
+    read_exporter_startup_failure,
     update_run_manifest,
     utc_now_iso,
     write_code_manifest,
@@ -92,6 +93,10 @@ SINGLE_NODE_DEFAULT_MODE = DEFAULT_UI_MODE
 MULTI_NODE_DEFAULT_MODE = DEFAULT_UI_MODE
 _FAILURE_EXCERPT_BYTES = 8 * 1024
 _FAILURE_EXCERPT_LINES = 40
+# Telemetry mode opens the exporter before the aggregator listens. Twin of
+# _EXPORT_STARTUP_TIMEOUT_SEC in aggregator/trace_aggregator.py, kept here so
+# the launcher does not import the aggregator.
+_EXPORT_STARTUP_TIMEOUT_SEC = 10.0
 # Start of the line TraceMLAggregator prints at stop when it dropped payloads
 # stamped for another run.
 _FOREIGN_RUN_WARNING = "[TraceML] WARNING: ignored "
@@ -388,6 +393,8 @@ def _print_telemetry_footer(
         message = "Telemetry unavailable: aggregator port was already in use."
     elif reason == "aggregator_not_ready":
         message = "Telemetry unavailable: aggregator was not reachable."
+    elif reason == "exporter_startup_failed":
+        message = "Telemetry unavailable: exporter could not start."
     elif reason == "aggregator_exited_early":
         suffix = (
             f" (exit code {aggregator_exit_code})"
@@ -989,6 +996,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     telemetry_available = False
     telemetry_startup_reason: Optional[str] = None
     port_conflict_detail: Optional[str] = None
+    exporter_failure_detail: Optional[str] = None
     guard_outcome_written = False
     guard_training_result: Optional[GuardTrainingResult] = None
 
@@ -1181,11 +1189,17 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                 mode=str(cfg["mode"]),
             )
             print(f"[TraceML] Aggregator PID: {agg_proc.pid}")
+            # In telemetry mode the exporter opens before the aggregator
+            # listens; a failure still ends the wait early through proc.
             ready = wait_for_tcp_listen(
                 host=aggregator_cfg.connect_host,
                 port=aggregator_cfg.port,
                 proc=agg_proc,
-                timeout_sec=DEFAULT_TCP_READY_TIMEOUT_SEC,
+                timeout_sec=(
+                    DEFAULT_TCP_READY_TIMEOUT_SEC + _EXPORT_STARTUP_TIMEOUT_SEC
+                    if cfg["mode"] == "telemetry"
+                    else DEFAULT_TCP_READY_TIMEOUT_SEC
+                ),
             )
             if not ready:
                 telemetry_startup_reason = "aggregator_not_ready"
@@ -1198,7 +1212,11 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         ready = wait_for_tcp_listen(
             host=aggregator_cfg.connect_host,
             port=aggregator_cfg.port,
-            timeout_sec=DEFAULT_TCP_READY_TIMEOUT_SEC,
+            timeout_sec=(
+                DEFAULT_TCP_READY_TIMEOUT_SEC + _EXPORT_STARTUP_TIMEOUT_SEC
+                if cfg["mode"] == "telemetry"
+                else DEFAULT_TCP_READY_TIMEOUT_SEC
+            ),
         )
         if not ready:
             telemetry_startup_reason = "aggregator_not_ready"
@@ -1213,6 +1231,25 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
             agg_proc = None
         finish_aggregator_output()
         _print_aggregator_stderr_path(confirmed_aggregator_stderr_path)
+        if (
+            telemetry_startup_reason == "aggregator_not_ready"
+            and owns_aggregator
+            and aggregator_started_at is not None
+        ):
+            # The aggregator records an exporter that failed to open, so a
+            # bad credential is not reported as an unreachable port.
+            exporter_failure = read_exporter_startup_failure(
+                aggregator_dir, aggregator_started_at=aggregator_started_at
+            )
+            if exporter_failure is not None:
+                telemetry_startup_reason = "exporter_startup_failed"
+                # The reason nests the exporter's own prefixed text; the line
+                # printed below carries the prefix once.
+                error = exporter_failure["error"].replace("[TraceML] ", "")
+                exporter_failure_detail = (
+                    f"exporter {exporter_failure['exporter']!r} failed to "
+                    f"start: {error or 'no reason recorded'}"
+                )
 
         if missing_aggregator_policy == "raise":
             if manifest_path is not None:
@@ -1238,6 +1275,8 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                 failure = port_conflict_detail or (
                     "aggregator port was already in use by another process"
                 )
+            elif exporter_failure_detail is not None:
+                failure = exporter_failure_detail
             else:
                 failure = (
                     "aggregator was not reachable at "
@@ -1257,6 +1296,8 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
             unavailable_detail = port_conflict_detail or (
                 "aggregator port was already in use by another process"
             )
+        elif exporter_failure_detail is not None:
+            unavailable_detail = exporter_failure_detail
         else:
             unavailable_detail = "aggregator was not available"
         print(

@@ -219,6 +219,27 @@ class ExportWorker:
             self._log_error(f"[TraceML] export worker stop failed: {exc!r}")
             return self.stats()
 
+    def wait_closed(self, timeout_sec: float) -> bool:
+        """
+        Wait up to ``timeout_sec`` for the worker thread to end; never
+        raises.
+
+        The thread closes the exporter last, so True means ``close`` has
+        returned or the thread died, and ``stats()`` is final. A worker
+        whose thread never ran returns True at once. Meant for after
+        ``stop()``; before it the thread keeps running until the timeout.
+        """
+        try:
+            with self._lock:
+                thread_started = self._thread_started
+            if not thread_started:
+                return True
+            self._thread.join(timeout=max(0.0, float(timeout_sec)))
+            return not self._thread.is_alive()
+        except Exception as exc:
+            self._log_error(f"[TraceML] export worker wait failed: {exc!r}")
+            return False
+
     def _stop(self, timeout_sec: float) -> ExportStats:
         budget = max(0.0, float(timeout_sec))
         with self._lock:

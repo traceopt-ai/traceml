@@ -176,6 +176,16 @@ class _FailingCloseExporter(_RecordingExporter):
         raise OSError("close failed")
 
 
+class _SlowCloseExporter(_RecordingExporter):
+    def __init__(self, delay: float) -> None:
+        super().__init__()
+        self._delay = delay
+
+    def close(self, *, dropped_batches: int = 0) -> None:
+        time.sleep(self._delay)
+        super().close(dropped_batches=dropped_batches)
+
+
 def _wait_until(pred, timeout: float = 2.0, interval: float = 0.01) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -553,3 +563,38 @@ def test_json_exporter_hostname_through_the_worker(tmp_path) -> None:
     assert lines[0]["hostname"] == "host-a"
     assert lines[-1]["closing"] is True
     assert lines[-1]["written_records"] == 1
+
+
+def test_wait_closed_waits_for_a_close_that_outlasts_stop() -> None:
+    exporter = _SlowCloseExporter(0.5)
+    worker = ExportWorker(exporter, interval_sec=60.0, logger=_FakeLogger())
+    worker.start()
+    worker.stop(timeout_sec=0.1)
+    assert exporter.close_calls == 0
+
+    assert worker.wait_closed(timeout_sec=2.0) is True
+    assert exporter.close_calls == 1
+
+
+def test_wait_closed_is_bounded() -> None:
+    exporter = _SlowCloseExporter(1.0)
+    worker = ExportWorker(exporter, interval_sec=60.0, logger=_FakeLogger())
+    worker.start()
+    worker.stop(timeout_sec=0.0)
+
+    start = time.monotonic()
+    assert worker.wait_closed(timeout_sec=0.2) is False
+    assert time.monotonic() - start < 0.35
+    assert worker.wait_closed(timeout_sec=2.0) is True
+    assert exporter.close_calls == 1
+
+
+def test_wait_closed_without_a_thread_returns_at_once() -> None:
+    exporter = _RecordingExporter()
+    worker = ExportWorker(exporter, logger=_FakeLogger())
+    worker.stop(timeout_sec=1.0)
+
+    start = time.monotonic()
+    assert worker.wait_closed(timeout_sec=5.0) is True
+    assert time.monotonic() - start < 0.1
+    assert exporter.open_calls == 0
