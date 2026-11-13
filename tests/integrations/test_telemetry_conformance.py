@@ -144,6 +144,8 @@ def _run_huggingface() -> set[str]:
             logging_steps=1,
             use_cpu=not torch.cuda.is_available(),
             save_strategy="no",
+            # An installed wandb must never turn this run into a login.
+            report_to="none",
         )
         Trainer(
             model=model,

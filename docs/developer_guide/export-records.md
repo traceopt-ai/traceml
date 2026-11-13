@@ -291,6 +291,7 @@ Its only fields are `observed_timestamp_unix_ns`, `rank`, `timestamp_unix_ns` an
 ## Custom exporters
 
 A custom exporter receives the same records as the built-in `jsonl` exporter, those of the selected streams.
+The built-in `wandb` exporter in `traceml_ai.aggregator.export.wandb_exporter` is a worked example of a remote sink on the same interface.
 It implements the `Exporter` interface from `traceml_ai.aggregator.export`: `open()`, `write(records)`, `flush()` and `close(*, dropped_batches=0)`.
 The export worker calls all four from its own background thread, and the calls never overlap.
 It calls `open` once, then `write` and `flush` zero or more times, then `close` once.

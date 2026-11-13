@@ -56,8 +56,10 @@ traceml run train.py --mode telemetry --exporter jsonl
 ```
 
 `run` and `serve` accept telemetry mode; `watch` does not. JSONL writes local
-files. See [Live Export](live-export.md#export-without-local-analysis) for local
-file behavior, custom exporters, and separately launched workers.
+files; `--exporter wandb` streams step time into Weights & Biases instead (see
+the [W&B guide](integrations/wandb.md#send-step-time-to-weights-biases)). See
+[Live Export](live-export.md#export-without-local-analysis) for local file
+behavior, custom exporters, and separately launched workers.
 
 ## What is the difference between `watch` and `run`?
 

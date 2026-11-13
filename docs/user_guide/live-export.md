@@ -11,7 +11,9 @@ At shutdown, TraceML waits briefly for pending records to be written.
 ## Switching it on
 
 Export is off by default.
-The built-in exporter is `jsonl`.
+There are two built-in exporters.
+`jsonl` writes the local files this page describes.
+`wandb` streams step time into Weights & Biases, one run per rank; [Send step time to Weights & Biases](integrations/wandb.md#send-step-time-to-weights-biases) covers its setup and behavior.
 A custom exporter is selected by setting `exporter` to a `module:factory` value, described in [Custom exporters](../developer_guide/export-records.md#custom-exporters).
 Pick whichever layer fits your setup:
 
@@ -94,8 +96,9 @@ negotiate execution mode with its workers. Stop `serve` with Ctrl+C or SIGTERM
 after training ends. CLI-launched runs and Ray stop their aggregator through
 their existing lifecycle.
 
-JSONL remains a local-file exporter. Direct platform delivery requires an
-appropriate custom or remote exporter; telemetry mode does not add one.
+JSONL remains a local-file exporter. For delivery to a platform, use the
+built-in `wandb` exporter or a custom exporter; telemetry mode works with
+either.
 
 Lines carry no hostname by default, because the file may be uploaded elsewhere.
 To include `hostname` on records that have this field, use `--exporter-hostname`, `exporter_hostname: true` in YAML, `TRACEML_EXPORTER_HOSTNAME=1`, or `TraceMLRayConfig(exporter_hostname=True)`.
