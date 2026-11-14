@@ -45,28 +45,17 @@ the environment for a run or bug report.
 
 ### End-of-run summaries
 
-A call made while training is still running asks the aggregator for a fresh
-report. That report covers the telemetry that has reached the aggregator at
-that moment. The calling rank publishes its pending steps first, when its
-sampler responds within two seconds. Before that, it waits for its own queued
-GPU work, so its own steps are complete up to the call. Every other rank
-publishes its steps on its next sampler tick, which comes every 2 seconds by
-default (the `interval` setting of `init()`). Up to one interval of those
-steps can be missing. To include them, put every rank past its training loop
-with a barrier such as `torch.distributed.barrier()`. Then wait one sampler
-interval before the call.
-Each later call regenerates the report until the aggregator writes its final
-report at the end of the run.
+During training, `traceml.final_summary()` requests a best-effort snapshot of
+the data the aggregator has received. TraceML tries to send pending
+measurements from the calling rank first. For example, a call at step 400
+might report 395 steps analyzed if CUDA events for the last five steps are
+still pending or their measurements have yet to reach the aggregator.
 
 Each session shares one request and response file, so call it from one rank,
-as the default `rank0_only=True` does. Each call during training settles
-telemetry and regenerates the report. That costs about half a second plus
-generation time, so keep it out of the training loop.
+as the default `rank0_only=True` does. Regenerating the report adds overhead,
+so request it outside the training loop.
 
-Once the run has ended and the aggregator has written its final report, that
-saved report is reused. A process without a live TraceML runtime, such as a
-post-run script, reads the saved `final_summary.json` without asking the
-aggregator. The report written at shutdown covers every rank.
+After shutdown, calls reuse the saved `final_summary.json` when available.
 
 ::: traceml_ai.api.summary
     options:
