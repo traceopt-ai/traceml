@@ -264,3 +264,37 @@ def test_start_aggregator_keeps_session_ids_the_cli_would_refuse(
 
     assert handle.session_root == (tmp_path / session_id).resolve()
     handle.stop()
+
+
+class _FlushableRuntime:
+    """Runtime stand-in that tracks stop state and flush calls."""
+
+    def __init__(self) -> None:
+        self.stopped = False
+        self.flushes: list[float] = []
+
+    def flush_pending_telemetry(self, timeout_sec: float) -> bool:
+        self.flushes.append(timeout_sec)
+        return True
+
+    def stop(self) -> None:
+        self.stopped = True
+
+
+def test_runtime_handle_flushes_only_a_live_runtime() -> None:
+    runtime = _FlushableRuntime()
+    handle = lifecycle.RuntimeHandle(runtime)  # type: ignore[arg-type]
+
+    assert handle.is_live
+    assert handle.flush_pending_telemetry(1.5) is True
+    assert runtime.flushes == [1.5]
+
+    # The CLI executor stops the runtime itself, not through the handle.
+    runtime.stop()
+    assert not handle.is_live
+    assert handle.flush_pending_telemetry(1.5) is False
+    assert runtime.flushes == [1.5]
+
+    noop = lifecycle.RuntimeHandle(lifecycle.NoOpRuntime())
+    assert not noop.is_live
+    assert noop.flush_pending_telemetry(1.5) is False

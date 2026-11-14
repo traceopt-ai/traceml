@@ -45,6 +45,18 @@ the environment for a run or bug report.
 
 ### End-of-run summaries
 
+During training, `traceml.final_summary()` requests a best-effort snapshot of
+the data the aggregator has received. TraceML tries to send pending
+measurements from the calling rank first. For example, a call at step 400
+might report 395 steps analyzed if CUDA events for the last five steps are
+still pending or their measurements have yet to reach the aggregator.
+
+Each session shares one request and response file, so call it from one rank,
+as the default `rank0_only=True` does. Regenerating the report adds overhead,
+so request it outside the training loop.
+
+After shutdown, calls reuse the saved `final_summary.json` when available.
+
 ::: traceml_ai.api.summary
     options:
       show_root_heading: true

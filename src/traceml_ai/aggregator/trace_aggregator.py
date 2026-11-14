@@ -243,6 +243,8 @@ class TraceMLAggregator:
         self._drain_lock = threading.Lock()
         # Orders this class's end-of-run generation with the request path.
         self._summary_lock = threading.Lock()
+        # Set once stop() has written the end-of-run summary.
+        self._final_summary_written = False
 
         # TCP server: aggregator listens for rank-local agents.
         self._tcp_server = TCPServer(
@@ -302,6 +304,7 @@ class TraceMLAggregator:
                 profile=str(settings.profile),
                 history_retention_s=float(settings.history_retention_s),
                 summary_lock=self._summary_lock,
+                summary_finalized=self._summary_finalized,
             )
 
         # Display driver owns renderer selection and layout mapping.
@@ -511,6 +514,7 @@ class TraceMLAggregator:
                     if summary_error is not None:
                         raise refresh_error from summary_error
                     raise refresh_error
+                self._final_summary_written = True
 
                 if summary_error is not None:
                     # A refreshed artifact makes this error nonfatal, so this
@@ -720,6 +724,10 @@ class TraceMLAggregator:
         if not isinstance(generated_at, str) or not generated_at.strip():
             return None
         return generated_at
+
+    def _summary_finalized(self) -> bool:
+        """Return True once stop() has written the end-of-run summary."""
+        return self._final_summary_written
 
     def _finished_ranks_snapshot(self) -> List[int]:
         """Return a sorted snapshot of finished global ranks (lock-safe).

@@ -123,6 +123,26 @@ class RuntimeHandle:
     runtime: TraceMLRuntime | NoOpRuntime
     _stopped: bool = False
 
+    @property
+    def is_live(self) -> bool:
+        """True while a real runtime runs here and has not been stopped.
+
+        The CLI executor stops the runtime directly rather than through this
+        handle, so the runtime's own state decides. A no-op runtime is never
+        live.
+        """
+        return not self._stopped and not getattr(self.runtime, "stopped", True)
+
+    def flush_pending_telemetry(self, timeout_sec: float) -> bool:
+        """Ask a live runtime to publish its pending telemetry now.
+
+        Returns False without waiting when the runtime is not live. See
+        ``TraceMLRuntime.flush_pending_telemetry``.
+        """
+        if not self.is_live:
+            return False
+        return bool(self.runtime.flush_pending_telemetry(float(timeout_sec)))
+
     def stop(self) -> None:
         if self._stopped:
             return

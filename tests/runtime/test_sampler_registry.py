@@ -1,5 +1,9 @@
+import sys
 import threading
 import time
+import types
+
+import pytest
 
 from traceml_ai.core import Registry
 from traceml_ai.runtime import runtime as runtime_module
@@ -573,3 +577,295 @@ def test_build_samplers_continues_after_constructor_failure() -> None:
         "FakeSampler",
     ]
     assert len(logger.exceptions) == 1
+
+
+class _SignallingPublisher(_FakePublisher):
+    """Records publishes; can hold one publish until it is released."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.published_event = threading.Event()
+        self.hold_from = None
+        self.release = threading.Event()
+        self.raise_next = False
+
+    def attach_senders(self, samplers) -> None:
+        return None
+
+    def send_control(self, payload) -> None:
+        return None
+
+    def publish(self, samplers) -> None:
+        if (
+            self.hold_from is not None
+            and len(self.published) >= self.hold_from
+        ):
+            self.release.wait(timeout=10.0)
+        if self.raise_next:
+            self.raise_next = False
+            raise RuntimeError("publish boom")
+        super().publish(samplers)
+        self.published_event.set()
+
+
+def _live_runtime(monkeypatch, tmp_path, publisher) -> TraceMLRuntime:
+    """Build a real runtime whose loop waits 60 s between ticks."""
+    monkeypatch.setattr(
+        runtime_module, "build_samplers", lambda **kwargs: [_FakeSampler()]
+    )
+    monkeypatch.setattr(runtime_module, "TCPClient", lambda config: None)
+    monkeypatch.setattr(
+        runtime_module,
+        "TelemetryExporter",
+        lambda **kwargs: type(
+            "_Exporter", (), {"start": lambda s: None, "stop": lambda s: None}
+        )(),
+    )
+    monkeypatch.setattr(
+        runtime_module, "TelemetryPublisher", lambda **kwargs: publisher
+    )
+    configure_trace_recording()
+    return TraceMLRuntime(
+        TraceMLSettings(
+            sampler_interval_sec=60.0,
+            logs_dir=str(tmp_path),
+            session_id="flush-test",
+        )
+    )
+
+
+def test_flush_pending_telemetry_wakes_the_loop_to_publish(
+    monkeypatch, tmp_path
+) -> None:
+    publisher = _SignallingPublisher()
+    runtime = _live_runtime(monkeypatch, tmp_path, publisher)
+    runtime.start()
+    try:
+        assert publisher.published_event.wait(timeout=5.0)
+        assert len(publisher.published) == 1
+
+        started = time.monotonic()
+        assert runtime.flush_pending_telemetry(5.0) is True
+        elapsed = time.monotonic() - started
+
+        # The loop sleeps 60 s between ticks; the flush cut that short.
+        assert elapsed < 5.0
+        assert len(publisher.published) == 2
+    finally:
+        runtime.stop()
+        configure_trace_recording()
+
+
+def test_flush_pending_telemetry_is_bounded_by_its_timeout(
+    monkeypatch, tmp_path
+) -> None:
+    publisher = _SignallingPublisher()
+    publisher.hold_from = 1
+    runtime = _live_runtime(monkeypatch, tmp_path, publisher)
+    runtime.start()
+    try:
+        assert publisher.published_event.wait(timeout=5.0)
+
+        started = time.monotonic()
+        assert runtime.flush_pending_telemetry(0.2) is False
+        elapsed = time.monotonic() - started
+
+        assert 0.2 <= elapsed < 1.0
+    finally:
+        publisher.release.set()
+        runtime.stop()
+        configure_trace_recording()
+
+
+def test_flush_pending_telemetry_returns_false_after_stop(
+    monkeypatch, tmp_path
+) -> None:
+    publisher = _SignallingPublisher()
+    runtime = _live_runtime(monkeypatch, tmp_path, publisher)
+    runtime.start()
+    assert publisher.published_event.wait(timeout=5.0)
+
+    started = time.monotonic()
+    runtime.stop()
+    # The stop wakes the loop instead of waiting out its 60 s interval.
+    assert time.monotonic() - started < 5.0
+    published = len(publisher.published)
+
+    started = time.monotonic()
+    assert runtime.flush_pending_telemetry(5.0) is False
+    assert time.monotonic() - started < 0.5
+    assert len(publisher.published) == published
+    configure_trace_recording()
+
+
+# The raising publish ends the sampler thread, as it does without a flush.
+@pytest.mark.filterwarnings(
+    "ignore::pytest.PytestUnhandledThreadExceptionWarning"
+)
+def test_flush_pending_telemetry_returns_false_when_the_tick_raises(
+    monkeypatch, tmp_path
+) -> None:
+    publisher = _SignallingPublisher()
+    runtime = _live_runtime(monkeypatch, tmp_path, publisher)
+    runtime.start()
+    try:
+        assert publisher.published_event.wait(timeout=5.0)
+        publisher.raise_next = True
+
+        started = time.monotonic()
+        assert runtime.flush_pending_telemetry(1.0) is False
+        assert time.monotonic() - started < 1.0
+    finally:
+        runtime.stop()
+        configure_trace_recording()
+
+
+def _completed_runtime(monkeypatch, tmp_path) -> TraceMLRuntime:
+    """Start a runtime whose recording finished and whose loop has ended."""
+    runtime = _live_runtime(monkeypatch, tmp_path, _SignallingPublisher())
+    configure_trace_recording(max_steps=1)
+    mark_trace_step_flushed(1)
+    runtime.start()
+    runtime._sampler_thread.join(timeout=5.0)
+    assert not runtime._sampler_thread.is_alive()
+    assert (
+        get_trace_recording_state().status == TraceMLRecordingStatus.COMPLETE
+    )
+    return runtime
+
+
+def test_flush_pending_telemetry_is_true_once_recording_is_complete(
+    monkeypatch, tmp_path
+) -> None:
+    runtime = _completed_runtime(monkeypatch, tmp_path)
+    try:
+        started = time.monotonic()
+        assert runtime.flush_pending_telemetry(5.0) is True
+        assert time.monotonic() - started < 0.5
+    finally:
+        runtime.stop()
+        configure_trace_recording()
+
+
+def _fake_torch(
+    *, available: bool = True, initialized: bool = True, on_sync=None
+) -> types.ModuleType:
+    """Build a torch stand-in whose ``cuda`` calls are recorded."""
+    calls: list[str] = []
+
+    def is_available() -> bool:
+        calls.append("is_available")
+        return available
+
+    def is_initialized() -> bool:
+        calls.append("is_initialized")
+        return initialized
+
+    def synchronize() -> None:
+        calls.append("synchronize")
+        if on_sync is not None:
+            on_sync()
+
+    torch = types.ModuleType("torch")
+    torch.cuda = types.SimpleNamespace(
+        is_available=is_available,
+        is_initialized=is_initialized,
+        synchronize=synchronize,
+    )
+    torch.calls = calls
+    return torch
+
+
+def _started_runtime(monkeypatch, tmp_path, publisher) -> TraceMLRuntime:
+    """Start a live runtime and wait for its first publish."""
+    runtime = _live_runtime(monkeypatch, tmp_path, publisher)
+    runtime.start()
+    assert publisher.published_event.wait(timeout=5.0)
+    assert len(publisher.published) == 1
+    return runtime
+
+
+def test_flush_synchronizes_cuda_before_waking_the_loop(
+    monkeypatch, tmp_path
+) -> None:
+    publisher = _SignallingPublisher()
+    published_at_sync: list[int] = []
+    torch = _fake_torch(
+        on_sync=lambda: published_at_sync.append(len(publisher.published))
+    )
+    runtime = _started_runtime(monkeypatch, tmp_path, publisher)
+    monkeypatch.setitem(sys.modules, "torch", torch)
+    try:
+        assert runtime.flush_pending_telemetry(5.0) is True
+        assert torch.calls.count("synchronize") == 1
+        # The flushed tick had not published when the sync ran.
+        assert published_at_sync == [1]
+        assert len(publisher.published) == 2
+
+        assert runtime.flush_pending_telemetry(5.0) is True
+        assert torch.calls.count("synchronize") == 2
+    finally:
+        runtime.stop()
+        configure_trace_recording()
+
+
+@pytest.mark.parametrize("torch_entry", ["absent", "blocked"])
+def test_flush_without_torch_imported_still_publishes(
+    monkeypatch, tmp_path, torch_entry
+) -> None:
+    publisher = _SignallingPublisher()
+    runtime = _started_runtime(monkeypatch, tmp_path, publisher)
+    if torch_entry == "absent":
+        monkeypatch.delitem(sys.modules, "torch", raising=False)
+    else:
+        # How the torch-free tests block the import.
+        monkeypatch.setitem(sys.modules, "torch", None)
+    logger = _FakeLogger()
+    runtime._logger = logger
+    try:
+        assert runtime.flush_pending_telemetry(5.0) is True
+        assert len(publisher.published) == 2
+        assert logger.errors == []
+    finally:
+        runtime.stop()
+        configure_trace_recording()
+
+
+def test_flush_skips_cuda_sync_when_cuda_is_not_initialized(
+    monkeypatch, tmp_path
+) -> None:
+    publisher = _SignallingPublisher()
+    torch = _fake_torch(available=True, initialized=False)
+    runtime = _started_runtime(monkeypatch, tmp_path, publisher)
+    monkeypatch.setitem(sys.modules, "torch", torch)
+    try:
+        assert runtime.flush_pending_telemetry(5.0) is True
+        assert "is_initialized" in torch.calls
+        assert "synchronize" not in torch.calls
+        assert len(publisher.published) == 2
+    finally:
+        runtime.stop()
+        configure_trace_recording()
+
+
+def test_flush_logs_a_failed_cuda_sync_and_still_publishes(
+    monkeypatch, tmp_path
+) -> None:
+    def _raise() -> None:
+        raise RuntimeError("sync boom")
+
+    publisher = _SignallingPublisher()
+    torch = _fake_torch(on_sync=_raise)
+    runtime = _started_runtime(monkeypatch, tmp_path, publisher)
+    monkeypatch.setitem(sys.modules, "torch", torch)
+    logger = _FakeLogger()
+    runtime._logger = logger
+    try:
+        assert runtime.flush_pending_telemetry(5.0) is True
+        assert len(publisher.published) == 2
+        assert logger.errors == [
+            "[TraceML] CUDA synchronize before flush failed: sync boom"
+        ]
+    finally:
+        runtime.stop()
+        configure_trace_recording()

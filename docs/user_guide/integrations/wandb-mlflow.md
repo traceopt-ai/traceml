@@ -94,7 +94,8 @@ if full is not None:
 ```
 
 `final_summary()` returns the complete structured report; `summary()` returns
-its compact projection. Later calls reuse the saved final report.
+its compact projection. During training, each call requests a fresh snapshot.
+After shutdown, calls reuse the saved report.
 
 ## Advanced: custom PyTorch loops
 
@@ -145,8 +146,9 @@ shows the same initialization and final-summary API without requiring a tracker.
 - TraceML does not export to trackers automatically. The snippets above log
   results through W&B and MLflow's own APIs. Existing TensorBoard logging can
   remain enabled; this guide does not provide a TensorBoard export adapter.
-- Request the final summary only after all training workers finish their work.
-  It is a finalized report, not a live metrics stream.
+- A summary requested during training is a best-effort snapshot. An uploaded
+  report can cover fewer steps than the run reached when you requested it.
+  See [End-of-run summaries](../public-api.md#end-of-run-summaries).
 - Summary requests require an active TraceML session with retained history.
   They can raise `RuntimeError` if history is unavailable, the aggregator
   reports an error, or the request times out.

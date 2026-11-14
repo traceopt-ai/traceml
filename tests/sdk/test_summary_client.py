@@ -2,11 +2,13 @@ import json
 
 import pytest
 
+from traceml_ai.runtime import lifecycle
 from traceml_ai.sdk import summary_client
 from traceml_ai.sdk.protocol import (
     FinalSummaryRequest,
     get_final_summary_json_path,
     get_final_summary_request_path,
+    get_final_summary_response_path,
     get_final_summary_txt_path,
     resolve_session_context_from_env,
 )
@@ -208,3 +210,165 @@ def test_final_summary_still_requests_generation_when_artifact_missing(
         summary_client.final_summary(timeout_sec=0.01, poll_interval_sec=0.01)
 
     assert get_final_summary_request_path(session_root).exists()
+
+
+class _FakeRuntimeHandle:
+    def __init__(self, calls, *, is_live, flush_result=True):
+        self.calls = calls
+        self.is_live = is_live
+        self.flush_result = flush_result
+
+    def flush_pending_telemetry(self, timeout_sec):
+        self.calls.append(("flush", timeout_sec))
+        return self.flush_result
+
+
+def _answer_requests_like_the_aggregator(
+    monkeypatch, session_root, calls, warning=None
+):
+    """Answer each written request with a freshly generated summary."""
+    real_write = summary_client.write_json_atomic
+
+    def write_and_answer(path, payload):
+        real_write(path, payload)
+        calls.append(("request", payload["request_id"]))
+        get_final_summary_json_path(session_root).write_text(
+            json.dumps({"schema_version": "fresh"}),
+            encoding="utf-8",
+        )
+        real_write(
+            get_final_summary_response_path(session_root),
+            {
+                "request_id": payload["request_id"],
+                "status": "ok",
+                "summary_json_path": str(
+                    get_final_summary_json_path(session_root)
+                ),
+                "warning": warning,
+            },
+        )
+
+    monkeypatch.setattr(summary_client, "write_json_atomic", write_and_answer)
+
+
+def test_live_runtime_flushes_then_requests_despite_existing_artifact(
+    monkeypatch,
+    tmp_path,
+):
+    session_root = _configure_session(monkeypatch, tmp_path)
+    session_root.mkdir(parents=True)
+    get_final_summary_json_path(session_root).write_text(
+        json.dumps({"schema_version": "stale"}),
+        encoding="utf-8",
+    )
+    calls = []
+    handle = _FakeRuntimeHandle(calls, is_live=True)
+    monkeypatch.setattr(lifecycle, "get_active_runtime_handle", lambda: handle)
+    _answer_requests_like_the_aggregator(monkeypatch, session_root, calls)
+
+    result = summary_client.final_summary(timeout_sec=5.0)
+
+    assert result == {"schema_version": "fresh"}
+    assert [name for name, _ in calls] == ["flush", "request"]
+    assert 0.0 < calls[0][1] <= 5.0
+
+
+def test_stopped_runtime_reuses_existing_artifact_without_flush(
+    monkeypatch,
+    tmp_path,
+):
+    session_root = _configure_session(monkeypatch, tmp_path)
+    session_root.mkdir(parents=True)
+    get_final_summary_json_path(session_root).write_text(
+        json.dumps({"schema_version": "final"}),
+        encoding="utf-8",
+    )
+    calls = []
+    handle = _FakeRuntimeHandle(calls, is_live=False)
+    monkeypatch.setattr(lifecycle, "get_active_runtime_handle", lambda: handle)
+
+    result = summary_client.final_summary()
+
+    assert result == {"schema_version": "final"}
+    assert calls == []
+    assert not get_final_summary_request_path(session_root).exists()
+
+
+def test_failed_flush_warns_once_and_still_requests(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    session_root = _configure_session(monkeypatch, tmp_path)
+    session_root.mkdir(parents=True)
+    calls = []
+    handle = _FakeRuntimeHandle(calls, is_live=True, flush_result=False)
+    monkeypatch.setattr(lifecycle, "get_active_runtime_handle", lambda: handle)
+    _answer_requests_like_the_aggregator(monkeypatch, session_root, calls)
+
+    result = summary_client.final_summary(timeout_sec=5.0)
+
+    assert result == {"schema_version": "fresh"}
+    assert [name for name, _ in calls] == ["flush", "request"]
+    lines = [
+        line
+        for line in capsys.readouterr().err.splitlines()
+        if line.startswith("[TraceML]")
+    ]
+    assert len(lines) == 1
+    assert "pending steps may be missing" in lines[0]
+
+
+def test_response_warning_is_printed_once_and_summary_returned(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    session_root = _configure_session(monkeypatch, tmp_path)
+    session_root.mkdir(parents=True)
+    calls = []
+    handle = _FakeRuntimeHandle(calls, is_live=True)
+    monkeypatch.setattr(lifecycle, "get_active_runtime_handle", lambda: handle)
+    _answer_requests_like_the_aggregator(
+        monkeypatch,
+        session_root,
+        calls,
+        warning="Returned the previous summary because the refresh failed",
+    )
+
+    result = summary_client.final_summary(timeout_sec=5.0)
+
+    assert result == {"schema_version": "fresh"}
+    err = capsys.readouterr().err
+    assert err.count("refresh failed") == 1
+    assert "[TraceML]" in err
+
+
+def test_completed_recording_requests_without_a_flush_warning(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    from tests.runtime.test_sampler_registry import _completed_runtime
+    from traceml_ai.runtime.state import configure_trace_recording
+
+    session_root = _configure_session(monkeypatch, tmp_path)
+    session_root.mkdir(parents=True)
+    runtime = _completed_runtime(monkeypatch, tmp_path)
+    try:
+        handle = lifecycle.RuntimeHandle(runtime)
+        monkeypatch.setattr(
+            lifecycle, "get_active_runtime_handle", lambda: handle
+        )
+        calls = []
+        _answer_requests_like_the_aggregator(monkeypatch, session_root, calls)
+        capsys.readouterr()
+
+        result = summary_client.final_summary(timeout_sec=5.0)
+
+        assert result == {"schema_version": "fresh"}
+        assert [name for name, _ in calls] == ["request"]
+        assert "[TraceML]" not in capsys.readouterr().err
+    finally:
+        runtime.stop()
+        configure_trace_recording()
