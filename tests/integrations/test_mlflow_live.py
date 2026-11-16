@@ -20,7 +20,7 @@ mlflow = pytest.importorskip("mlflow")
 from tests.reporting.html.conftest import _make_payload  # noqa: E402
 from traceml_ai.integrations import mlflow as helper  # noqa: E402
 
-_ARTIFACT = "traceml/training-report.html"
+_ARTIFACT = "traceml/diagnosis_card.html"
 
 
 def _payload():

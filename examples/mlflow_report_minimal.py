@@ -29,11 +29,11 @@ The run is stored in ``mlflow.db`` in the current directory. View it with::
 The loop reads its batches from a ``DataLoader``, so TraceML measures input
 wait as well as forward, backward and optimizer time. At the end of the run,
 ``log_training_report()`` logs the compact diagnosis card to the run as the
-artifact ``traceml/training-report.html``: the verdict, coverage, the phase
-bar and the step time, input wait and compute averages. It also logs
-``traceml/step_time/step_time_ms`` and ``traceml/step_time/input_wait_ms``
-as metrics and ``traceml/primary/status`` as a tag, so runs can be compared
-by them.
+artifact ``traceml/diagnosis_card.html``: a coverage line, the verdict chip,
+a Why line, the Next step and a step-timing tree with the cause marked. It
+also logs ``traceml/step_time/step_time_ms`` and
+``traceml/step_time/input_wait_ms`` as metrics and ``traceml/primary/status``
+as a tag, so runs can be compared by them.
 """
 
 from __future__ import annotations

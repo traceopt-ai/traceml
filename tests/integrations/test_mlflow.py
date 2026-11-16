@@ -19,7 +19,6 @@ import pytest
 import traceml_ai
 from tests.reporting.html.conftest import _make_payload
 from traceml_ai.integrations import mlflow as helper
-from traceml_ai.sdk.summary_projection import tracker_comparison_fields
 
 _SRC_ROOT = str(Path(traceml_ai.__file__).resolve().parents[1])
 
@@ -225,7 +224,7 @@ def test_explicit_run_and_client_write_one_batch_and_one_card(
     run_id, html, path = _only_text(client)
     assert run_id == "run-1"
     assert path == helper.MLFLOW_REPORT_ARTIFACT
-    assert path == "traceml/training-report.html"
+    assert path == "traceml/diagnosis_card.html"
     assert html.startswith("<!DOCTYPE html>")
     assert "Input wait dominates the step." in html
     assert session.calls == [{}]
@@ -363,35 +362,23 @@ def test_nan_average_is_omitted_and_zero_is_kept(session, mlflow):
     assert metrics[_WAIT_KEY].value == 0.0
 
 
-def test_comparison_fields_skip_an_int_beyond_float_range():
-    # math.isfinite raises OverflowError on such an int; the shared
-    # projection both tracker helpers use must skip it instead.
-    payload = _payload()
-    payload["step_time"]["global"]["average"]["step_time_ms"] = 10**400
+def test_card_render_failure_warns_and_writes_nothing(
+    session, mlflow, monkeypatch, capsys
+):
+    # The render runs before either write, so the helper writes nothing.
+    def unrenderable(payload):
+        raise OverflowError("int too large to convert to float")
 
-    fields = tracker_comparison_fields(payload)
-
-    assert _STEP_KEY not in fields
-    assert fields[_WAIT_KEY] == 20.0
-    assert fields[_STATUS_KEY] == "INPUT-BOUND"
-
-
-def test_card_render_failure_warns_and_writes_nothing(session, mlflow, capsys):
-    # The card renderer cannot draw an int beyond float range. The render
-    # runs before either write, so the helper writes nothing.
-    average = session.payload["step_time"]["global"]["average"]
-    average["step_time_ms"] = 10**400
+    monkeypatch.setattr(helper, "render_training_report", unrenderable)
     client = _FakeClient()
 
     assert helper.log_training_report("run-1", client=client) is False
 
     assert client.batches == [] and client.texts == []
-    err = capsys.readouterr().err.strip().splitlines()
-    assert len(err) == 1
-    assert err[0].startswith(
+    assert capsys.readouterr().err.strip().splitlines() == [
         "[TraceML] MLflow: could not render the diagnosis card "
-        "(OverflowError): "
-    )
+        "(OverflowError): int too large to convert to float"
+    ]
 
 
 def test_status_is_cut_to_the_tag_value_limit(session, mlflow):
@@ -476,17 +463,59 @@ def test_missing_mlflow_prints_the_install_hint(session, monkeypatch, capsys):
     assert session.calls == []
 
 
-def test_final_summary_runtime_error_propagates(session, mlflow, monkeypatch):
+def test_summary_timeout_warns_and_returns_false(
+    session, mlflow, monkeypatch, capsys
+):
     def fail(**kwargs):
-        raise RuntimeError("Timed out waiting for TraceML final summary")
+        raise RuntimeError(
+            "Timed out waiting for TraceML final summary from the aggregator."
+        )
 
     monkeypatch.setattr(helper.summary_client, "final_summary", fail)
     client = _FakeClient()
 
-    with pytest.raises(RuntimeError, match="Timed out"):
-        helper.log_training_report("run-1", client=client)
+    assert helper.log_training_report("run-1", client=client) is False
 
+    assert capsys.readouterr().err.strip().splitlines() == [
+        "[TraceML] MLflow: Timed out waiting for TraceML final summary from "
+        "the aggregator. Skipping the diagnosis report."
+    ]
     assert client.got == ["run-1"]
+    assert client.batches == [] and client.texts == []
+
+
+def test_aggregator_error_warns_and_returns_false(
+    session, mlflow, monkeypatch, capsys
+):
+    def fail(**kwargs):
+        raise RuntimeError("TraceML aggregator reported an error: disk full")
+
+    monkeypatch.setattr(helper.summary_client, "final_summary", fail)
+    client = _FakeClient()
+
+    assert helper.log_training_report("run-1", client=client) is False
+
+    assert capsys.readouterr().err.strip().splitlines() == [
+        "[TraceML] MLflow: TraceML aggregator reported an error: disk full. "
+        "Skipping the diagnosis report."
+    ]
+    assert client.batches == [] and client.texts == []
+
+
+def test_summary_error_without_text_names_the_exception(
+    session, mlflow, monkeypatch, capsys
+):
+    def fail(**kwargs):
+        raise RuntimeError()
+
+    monkeypatch.setattr(helper.summary_client, "final_summary", fail)
+    client = _FakeClient()
+
+    assert helper.log_training_report("run-1", client=client) is False
+
+    assert capsys.readouterr().err.strip().splitlines() == [
+        "[TraceML] MLflow: RuntimeError. Skipping the diagnosis report."
+    ]
     assert client.batches == [] and client.texts == []
 
 
@@ -514,8 +543,10 @@ def test_payload_without_primary_diagnosis_logs_the_card_and_no_tag(
     assert "NO PRIMARY DIAGNOSIS" in html
 
 
-def test_explicit_payload_skips_the_session_checks(mlflow, monkeypatch):
-    monkeypatch.setattr(helper, "is_primary_rank", _forbidden)
+def test_explicit_payload_skips_the_telemetry_check_and_fetch(
+    mlflow, monkeypatch
+):
+    monkeypatch.setattr(helper, "is_primary_rank", lambda: True)
     monkeypatch.setattr(helper, "resolve_session_context_from_env", _forbidden)
     monkeypatch.setattr(helper.summary_client, "final_summary", _forbidden)
     client = _FakeClient()
@@ -527,3 +558,22 @@ def test_explicit_payload_skips_the_session_checks(mlflow, monkeypatch):
         is True
     )
     assert len(client.texts) == 1
+
+
+def test_explicit_payload_on_non_primary_rank_writes_nothing(
+    mlflow, monkeypatch, capsys
+):
+    monkeypatch.setattr(helper, "is_primary_rank", lambda: False)
+    monkeypatch.setattr(helper, "resolve_session_context_from_env", _forbidden)
+    monkeypatch.setattr(helper.summary_client, "final_summary", _forbidden)
+    client = _FakeClient()
+
+    assert (
+        helper.log_training_report(
+            "run-1", client=client, final_summary=_payload()
+        )
+        is False
+    )
+
+    assert client.got == [] and client.batches == [] and client.texts == []
+    assert capsys.readouterr().err == ""

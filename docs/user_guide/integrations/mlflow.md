@@ -35,6 +35,11 @@ Call `log_training_report()` once after training finishes. With no
 arguments it writes into `mlflow.active_run()`, or else into
 `mlflow.last_active_run()`, the run that last ended in this thread.
 
+A report requested before TraceML shuts down is a best-effort snapshot. For
+example, a request at step 400 may cover only 395 steps if GPU timings are
+still pending or the latest measurements haven't reached the aggregator. If
+the summary is unavailable, TraceML warns and skips publishing the report.
+
 ### A run you know by id
 
 Pass the run id, and the tracking URI when it is not the global one:
@@ -117,9 +122,10 @@ mlflow ui --backend-store-uri sqlite:///mlflow.db
 ## What lands in the run
 
 - **Diagnosis card.** A compact HTML card is logged as the artifact
-  `traceml/training-report.html`. The run's Artifacts tab renders it inline.
-  The verdict comes first, then coverage, the phase bar and three Step Time
-  averages. Links inside the card do not open from the MLflow UI.
+  `traceml/diagnosis_card.html`. The run's Artifacts tab renders it inline.
+  A coverage line comes first, then the verdict chip, a Why line and the
+  suggested Next step. Below them is a step-timing tree with the cause
+  marked. Links inside the card do not open from the MLflow UI.
 - **Two metrics.** `traceml/step_time/step_time_ms` and
   `traceml/step_time/input_wait_ms` are logged at step 0. The run's charts
   group them under a `traceml/step_time` section, where a single-point
@@ -136,10 +142,10 @@ runs table can filter and sort runs by them.
 - It writes through `MlflowClient` only. It never creates, resumes, ends or
   deletes a run, and never changes the run description.
 - It warns instead of raising. A missing `mlflow` install, a store it cannot
-  open, a missing run or a failed write prints one `[TraceML] MLflow:` line
-  to stderr and returns `False`. It returns `True` when every write it had
-  to make succeeded. A summary with no comparison values gets the card
-  only.
+  open, a missing run, a failed summary request, a card it cannot render or
+  a failed write prints one `[TraceML] MLflow:` line to stderr and returns
+  `False`. It returns `True` when every write it had to make succeeded. A
+  summary with no comparison values gets the card only.
 - A finished, failed or killed run still accepts the report. A deleted run
   is refused.
 - It writes synchronously even when `MLFLOW_ENABLE_ASYNC_LOGGING=true`, so
@@ -153,24 +159,22 @@ runs table can filter and sort runs by them.
   such as `./mlruns` is refused unless `MLFLOW_ALLOW_FILE_STORE=true`.
 - With `mlflow-skinny` only, point it at a tracking server. Skinny cannot
   open a local SQLite store.
-- When it requests the summary itself, it writes from the primary rank
-  only. On other ranks it returns `False` without requesting a summary, so
-  you can call it on every rank.
+- It writes from global rank 0 only, also for a payload passed with
+  `final_summary=`. On other ranks it returns `False` without requesting a
+  summary, so you can call it on every rank.
 - When it requests the summary itself, it needs a mode that keeps local
   history. In `telemetry` mode TraceML keeps no history and generates no
   summary, so the helper prints one line and returns `False`.
-- A payload passed with `final_summary=` skips both checks. It is written
-  wherever the helper is called, so pass it from one rank only.
 - Once it has read the run, it requests the summary. When no TraceML
-  session is available, or the summary request fails, it then raises the
-  same `RuntimeError` as `traceml.final_summary()`. Pass `final_summary=`
-  with a saved payload to publish an existing report.
+  session is available, the aggregator reports an error, or the request
+  times out after 30 seconds, it prints one line and returns `False`. Pass
+  `final_summary=` with a saved payload to publish an existing report.
 
 ## Limitations
 
 - The helper does not define training boundaries. Use automatic trainer
   instrumentation or the explicit setup for your loop.
-- Call it after training finishes. The card is a finalized report, not a
+- Call it after training finishes. The card is an end-of-run report, not a
   live metric.
 - `mlflow.last_active_run()` sees only runs started through the fluent API
   in the same thread. Pass `run_id=` otherwise.

@@ -12,10 +12,9 @@ through ``MlflowClient`` only, and never creates, resumes, ends or deletes
 that run. It reads no credentials beyond what MLflow itself resolves.
 
 The helper is best-effort: a missing ``mlflow`` install, a tracking store
-that cannot be reached, a missing or deleted run or a failed write prints
-one ``[TraceML]`` line to stderr and returns ``False``. Only the documented
-``RuntimeError`` of ``traceml.final_summary()`` propagates once a run is
-resolved, as it does when that API is called directly.
+that cannot be reached, a missing or deleted run, a failed summary request,
+a card it cannot render or a failed write prints one ``[TraceML]`` line to
+stderr and returns ``False``.
 """
 
 from __future__ import annotations
@@ -38,7 +37,7 @@ from traceml_ai.sdk.summary_projection import tracker_comparison_fields
 
 # The run-relative artifact path of the card. The MLflow UI renders a
 # ``.html`` artifact inline.
-MLFLOW_REPORT_ARTIFACT = "traceml/training-report.html"
+MLFLOW_REPORT_ARTIFACT = "traceml/diagnosis_card.html"
 
 _STATUS_KEY = "traceml/primary/status"
 # The tag value length every MLflow store accepts.
@@ -67,13 +66,30 @@ def _log_mlflow_error(message: str, exc: Exception) -> None:
     _warn(f"{message}: {exc}")
 
 
+def _skip_failed_summary(exc: Exception) -> None:
+    """Record a failed summary request and warn that the report is skipped."""
+    try:
+        log_internal_exception(
+            get_error_logger("MlflowIntegration"),
+            "[TraceML] could not request the final summary",
+            exc,
+        )
+    except Exception:
+        pass
+    text = str(exc).strip() or type(exc).__name__
+    if not text.endswith("."):
+        text = f"{text}."
+    _warn(f"{text} Skipping the diagnosis report.")
+
+
 def _history_disabled() -> bool:
     """Return whether this session keeps no local history.
 
     Uses the same session context ``final_summary()`` checks, so the helper
-    can skip before requesting a summary that would only raise. A missing
+    can skip before requesting a summary that would only fail. A missing
     session context is not decided here: it falls through to run
-    resolution, and ``final_summary()`` reports it when a run exists.
+    resolution, and the failed summary request reports it when a run
+    exists.
     """
     try:
         context = resolve_session_context_from_env()
@@ -188,7 +204,7 @@ def log_training_report(
     run.
 
     Call it after training finishes. It logs the compact diagnosis card as
-    the artifact ``traceml/training-report.html``, the metrics
+    the artifact ``traceml/diagnosis_card.html``, the metrics
     ``traceml/step_time/step_time_ms`` and
     ``traceml/step_time/input_wait_ms`` at step 0, and the tag
     ``traceml/primary/status``. A run that already finished, failed or was
@@ -197,7 +213,8 @@ def log_training_report(
     The helper writes through ``MlflowClient`` only. It never creates,
     resumes, ends or deletes a run. Problems it can recover from print one
     ``[TraceML]`` line to stderr and return ``False``; it does not raise for
-    them.
+    them. A report requested during training is a best-effort snapshot and
+    can cover fewer steps than the run has reached.
 
     Parameters
     ----------
@@ -226,19 +243,19 @@ def log_training_report(
         averages) gets the card only, and the result is still ``True``.
         ``False`` on non-primary ranks, in telemetry mode, without
         ``mlflow``, without a reachable store, without a writable run, when
-        the card cannot be rendered, or when either write failed.
+        the summary request fails, when the card cannot be rendered, or
+        when either write failed.
 
-    Raises
-    ------
-    RuntimeError
-        Propagated unchanged from ``traceml.final_summary()``, which is
-        requested only once the run has been read: when the payload is
-        omitted and no TraceML session context is available, the
-        aggregator reports an error, or the request times out.
+        The helper publishes on global rank 0 only, also for a payload
+        passed with ``final_summary=``. The telemetry-mode check runs only
+        when the helper fetches the summary itself. That request is made
+        once the run has been read; it fails when no TraceML session
+        context is available, the aggregator reports an error, or the
+        request times out.
     """
+    if not is_primary_rank():
+        return False
     if final_summary is None:
-        if not is_primary_rank():
-            return False
         if _history_disabled():
             _warn(
                 "the diagnosis report needs local history; telemetry mode "
@@ -266,7 +283,11 @@ def log_training_report(
 
     payload = final_summary
     if payload is None:
-        payload = summary_client.final_summary()
+        try:
+            payload = summary_client.final_summary()
+        except Exception as exc:
+            _skip_failed_summary(exc)
+            return False
     if payload is None:
         return False
 
