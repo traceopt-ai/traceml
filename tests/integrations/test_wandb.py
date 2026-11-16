@@ -276,14 +276,6 @@ def test_missing_session_with_run_warns_and_returns_false(
     assert run.logged == [] and run.summary.updates == []
 
 
-def test_missing_final_summary_returns_false(session, run):
-    session.payload = None
-
-    assert helper.log_training_report() is False
-
-    assert run.logged == [] and run.summary.updates == []
-
-
 def test_summary_timeout_warns_and_returns_false(
     session, run, monkeypatch, capsys
 ):
@@ -497,3 +489,76 @@ def test_comparison_fields_skip_an_int_beyond_float_range():
     assert _STEP_KEY not in fields
     assert fields[_WAIT_KEY] == 20.0
     assert fields[_STATUS_KEY] == "INPUT-BOUND"
+
+
+def test_multiline_summary_error_warns_on_one_line(
+    session, run, monkeypatch, capsys
+):
+    def fail(**kwargs):
+        raise RuntimeError("aggregator failed\nretry later")
+
+    monkeypatch.setattr(helper.summary_client, "final_summary", fail)
+
+    assert helper.log_training_report() is False
+
+    err = capsys.readouterr().err.strip().splitlines()
+    assert err == [
+        "[TraceML] W&B: aggregator failed retry later. "
+        "Skipping the diagnosis report."
+    ]
+
+
+def test_unprintable_summary_error_still_warns_and_returns_false(
+    session, run, monkeypatch, capsys
+):
+    class Unprintable(RuntimeError):
+        def __str__(self):
+            raise ValueError("no text")
+
+    def fail(**kwargs):
+        raise Unprintable()
+
+    monkeypatch.setattr(helper.summary_client, "final_summary", fail)
+
+    assert helper.log_training_report() is False
+
+    err = capsys.readouterr().err.strip().splitlines()
+    assert err == [
+        "[TraceML] W&B: Unprintable. Skipping the diagnosis report."
+    ]
+    assert run.logged == [] and run.summary.updates == []
+
+
+def test_unavailable_summary_warns_and_returns_false(
+    session, run, monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        helper.summary_client, "final_summary", lambda **kwargs: None
+    )
+
+    assert helper.log_training_report() is False
+
+    err = capsys.readouterr().err.strip().splitlines()
+    assert err == [
+        "[TraceML] W&B: the TraceML summary is unavailable. "
+        "Skipping the diagnosis report."
+    ]
+    assert run.logged == [] and run.summary.updates == []
+
+
+def test_oversized_average_is_left_out_but_the_card_publishes(monkeypatch):
+    # Real renderer and real field selection together: a two-rank card reads
+    # the median rank's row, and the shared selection drops the oversized
+    # average instead of recording it as a number.
+    monkeypatch.setitem(sys.modules, "wandb", _fake_wandb(run=None))
+    monkeypatch.setattr(helper, "is_primary_rank", lambda: True)
+    payload = _payload()
+    payload["step_time"]["global"]["average"]["step_time_ms"] = 10**400
+    explicit = _FakeRun()
+
+    assert helper.log_training_report(explicit, final_summary=payload) is True
+
+    assert len(explicit.logged) == 1
+    (fields,) = explicit.summary.updates
+    assert "traceml/step_time/step_time_ms" not in fields
+    assert fields == tracker_comparison_fields(payload)
