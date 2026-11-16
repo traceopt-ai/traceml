@@ -19,7 +19,10 @@ import pytest
 import traceml_ai
 from tests.reporting.html.conftest import _make_payload
 from traceml_ai.integrations import wandb as helper
-from traceml_ai.sdk.summary_projection import compact_summary
+from traceml_ai.sdk.summary_projection import (
+    compact_summary,
+    tracker_comparison_fields,
+)
 
 _SRC_ROOT = str(Path(traceml_ai.__file__).resolve().parents[1])
 
@@ -28,6 +31,7 @@ _KEYS = (
     "traceml/step_time/step_time_ms",
     "traceml/step_time/input_wait_ms",
 )
+_STATUS_KEY, _STEP_KEY, _WAIT_KEY = _KEYS
 
 
 class _FakeHtml:
@@ -249,8 +253,8 @@ def test_missing_session_without_run_warns_and_returns_false(
     assert session.calls == []
 
 
-def test_missing_session_with_run_raises_from_final_summary(
-    session, run, monkeypatch
+def test_missing_session_with_run_warns_and_returns_false(
+    session, run, monkeypatch, capsys
 ):
     monkeypatch.setattr(
         helper, "resolve_session_context_from_env", _no_session_context
@@ -262,9 +266,12 @@ def test_missing_session_with_run_raises_from_final_summary(
 
     monkeypatch.setattr(helper.summary_client, "final_summary", no_session)
 
-    with pytest.raises(RuntimeError, match="session context"):
-        helper.log_training_report()
+    assert helper.log_training_report() is False
 
+    assert capsys.readouterr().err.strip().splitlines() == [
+        "[TraceML] W&B: TraceML session context is not available. "
+        "Skipping the diagnosis report."
+    ]
     assert session.calls == [{}]
     assert run.logged == [] and run.summary.updates == []
 
@@ -277,15 +284,39 @@ def test_missing_final_summary_returns_false(session, run):
     assert run.logged == [] and run.summary.updates == []
 
 
-def test_final_summary_runtime_error_propagates(session, run, monkeypatch):
+def test_summary_timeout_warns_and_returns_false(
+    session, run, monkeypatch, capsys
+):
     def fail(**kwargs):
-        raise RuntimeError("Timed out waiting for TraceML final summary")
+        raise RuntimeError(
+            "Timed out waiting for TraceML final summary from the aggregator."
+        )
 
     monkeypatch.setattr(helper.summary_client, "final_summary", fail)
 
-    with pytest.raises(RuntimeError, match="Timed out"):
-        helper.log_training_report()
+    assert helper.log_training_report() is False
 
+    err = capsys.readouterr().err.strip().splitlines()
+    assert len(err) == 1
+    assert "Timed out waiting for TraceML final summary" in err[0]
+    assert "Skipping the diagnosis report." in err[0]
+    assert run.logged == [] and run.summary.updates == []
+
+
+def test_aggregator_error_warns_and_returns_false(
+    session, run, monkeypatch, capsys
+):
+    def fail(**kwargs):
+        raise RuntimeError("TraceML aggregator reported an error: disk full")
+
+    monkeypatch.setattr(helper.summary_client, "final_summary", fail)
+
+    assert helper.log_training_report() is False
+
+    assert capsys.readouterr().err.strip().splitlines() == [
+        "[TraceML] W&B: TraceML aggregator reported an error: disk full. "
+        "Skipping the diagnosis report."
+    ]
     assert run.logged == [] and run.summary.updates == []
 
 
@@ -296,6 +327,16 @@ def test_summary_keys_are_the_projection_keys(session, run):
     (written,) = run.summary.updates
     assert set(written) == set(_KEYS)
     assert written == {key: projected[key] for key in _KEYS}
+
+
+def test_written_fields_are_the_shared_comparison_fields(session, run):
+    average = session.payload["step_time"]["global"]["average"]
+    average["step_time_ms"] = math.nan
+
+    assert helper.log_training_report() is True
+
+    assert run.summary.updates == [tracker_comparison_fields(session.payload)]
+    assert helper.tracker_comparison_fields is tracker_comparison_fields
 
 
 def test_nan_average_is_omitted_and_zero_is_kept(session, run):
@@ -349,9 +390,9 @@ def test_payload_without_primary_diagnosis_still_logs_the_card(session, run):
     assert written["traceml/step_time/step_time_ms"] == 100.0
 
 
-def test_explicit_payload_skips_the_session_checks(monkeypatch):
+def test_explicit_payload_skips_the_telemetry_check_and_fetch(monkeypatch):
     monkeypatch.setitem(sys.modules, "wandb", _fake_wandb(run=None))
-    monkeypatch.setattr(helper, "is_primary_rank", _forbidden)
+    monkeypatch.setattr(helper, "is_primary_rank", lambda: True)
     monkeypatch.setattr(helper, "resolve_session_context_from_env", _forbidden)
     monkeypatch.setattr(helper.summary_client, "final_summary", _forbidden)
     explicit = _FakeRun()
@@ -360,6 +401,23 @@ def test_explicit_payload_skips_the_session_checks(monkeypatch):
         helper.log_training_report(explicit, final_summary=_payload()) is True
     )
     assert len(explicit.logged) == 1
+
+
+def test_explicit_payload_on_non_primary_rank_writes_nothing(
+    monkeypatch, capsys
+):
+    monkeypatch.setitem(sys.modules, "wandb", _fake_wandb(run=None))
+    monkeypatch.setattr(helper, "is_primary_rank", lambda: False)
+    monkeypatch.setattr(helper, "resolve_session_context_from_env", _forbidden)
+    monkeypatch.setattr(helper.summary_client, "final_summary", _forbidden)
+    explicit = _FakeRun()
+
+    assert (
+        helper.log_training_report(explicit, final_summary=_payload()) is False
+    )
+
+    assert explicit.logged == [] and explicit.summary.updates == []
+    assert capsys.readouterr().err == ""
 
 
 def test_summary_without_fields_logs_the_card_only(session, run, capsys):
@@ -380,6 +438,7 @@ def test_summary_without_fields_logs_the_card_only(session, run, capsys):
 )
 def test_old_or_malformed_payload_never_raises(payload, monkeypatch, capsys):
     monkeypatch.setitem(sys.modules, "wandb", _fake_wandb(run=None))
+    monkeypatch.setattr(helper, "is_primary_rank", lambda: True)
     explicit = _FakeRun()
 
     result = helper.log_training_report(explicit, final_summary=payload)
@@ -396,12 +455,17 @@ def test_unrenderable_payload_returns_false_and_writes_nothing(
     monkeypatch, capsys
 ):
     monkeypatch.setitem(sys.modules, "wandb", _fake_wandb(run=None))
-    explicit = _FakeRun()
-    payload = _payload()
-    # An int beyond float range: the card renderer raises OverflowError.
-    payload["step_time"]["global"]["average"]["step_time_ms"] = 10**400
+    monkeypatch.setattr(helper, "is_primary_rank", lambda: True)
 
-    assert helper.log_training_report(explicit, final_summary=payload) is False
+    def unrenderable(payload):
+        raise OverflowError("int too large to convert to float")
+
+    monkeypatch.setattr(helper, "render_training_report", unrenderable)
+    explicit = _FakeRun()
+
+    assert (
+        helper.log_training_report(explicit, final_summary=_payload()) is False
+    )
 
     assert explicit.logged == [] and explicit.summary.updates == []
     assert capsys.readouterr().err.strip().splitlines() == [
@@ -414,9 +478,22 @@ def test_summary_fields_drop_an_int_beyond_float_range():
     payload = _payload()
     payload["step_time"]["global"]["average"]["input_wait_ms"] = 10**400
 
-    fields = helper._summary_fields(payload)
+    fields = tracker_comparison_fields(payload)
 
     assert fields == {
         "traceml/primary/status": "INPUT-BOUND",
         "traceml/step_time/step_time_ms": 100.0,
     }
+
+
+def test_comparison_fields_skip_an_int_beyond_float_range():
+    # math.isfinite raises OverflowError on such an int; the shared
+    # projection both tracker helpers use must skip it instead.
+    payload = _payload()
+    payload["step_time"]["global"]["average"]["step_time_ms"] = 10**400
+
+    fields = tracker_comparison_fields(payload)
+
+    assert _STEP_KEY not in fields
+    assert fields[_WAIT_KEY] == 20.0
+    assert fields[_STATUS_KEY] == "INPUT-BOUND"

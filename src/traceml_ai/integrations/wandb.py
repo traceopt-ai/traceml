@@ -12,16 +12,12 @@ configures or finishes that run, and it reads no credentials. The live
 per-step export is a separate concern, owned by the ``wandb`` exporter.
 
 The helper is best-effort: a missing ``wandb`` install, a missing run, a
-payload it cannot render or a failed write prints one ``[TraceML]`` line to
-stderr and returns ``False``.
-Only the documented ``RuntimeError`` of ``traceml.final_summary()``
-propagates once a run is resolved, as it does when that API is called
-directly.
+failed summary request, a payload it cannot render or a failed write prints
+one ``[TraceML]`` line to stderr and returns ``False``.
 """
 
 from __future__ import annotations
 
-import math
 import sys
 from typing import Any, Dict, Mapping, Optional
 
@@ -35,19 +31,10 @@ from traceml_ai.sdk.protocol import (
     is_primary_rank,
     resolve_session_context_from_env,
 )
-from traceml_ai.sdk.summary_projection import TRACKER_PREFIX, compact_summary
+from traceml_ai.sdk.summary_projection import tracker_comparison_fields
 
 # The workspace media key the card is logged under.
 WANDB_PANEL_KEY = "traceml/diagnosis_card"
-
-# The compact-summary fields copied into the run summary, which W&B shows as
-# runs-table columns. Names come from the projection, never retyped.
-_SUMMARY_KEYS = (
-    f"{TRACKER_PREFIX}/primary/status",
-    f"{TRACKER_PREFIX}/step_time/step_time_ms",
-    f"{TRACKER_PREFIX}/step_time/input_wait_ms",
-)
-_NUMERIC_KEYS = frozenset(_SUMMARY_KEYS[1:])
 
 _INSTALL_HINT = 'pip install "traceml-ai[wandb]"'
 
@@ -76,13 +63,30 @@ def _log_wandb_error(message: str, exc: Exception) -> None:
     _warn(f"{message}: {detail}")
 
 
+def _skip_failed_summary(exc: Exception) -> None:
+    """Record a failed summary request and warn that the report is skipped."""
+    try:
+        log_internal_exception(
+            get_error_logger("WandbIntegration"),
+            "[TraceML] could not request the final summary",
+            exc,
+        )
+    except Exception:
+        pass
+    text = str(exc).strip() or type(exc).__name__
+    if not text.endswith("."):
+        text = f"{text}."
+    _warn(f"{text} Skipping the diagnosis report.")
+
+
 def _history_disabled() -> bool:
     """Return whether this session keeps no local history.
 
     Uses the same session context ``final_summary()`` checks, so the helper
-    can skip before requesting a summary that would only raise. A missing
+    can skip before requesting a summary that would only fail. A missing
     session context is not decided here: it falls through to run
-    resolution, and ``final_summary()`` reports it when a run exists.
+    resolution, and the failed summary request reports it when a run
+    exists.
     """
     try:
         context = resolve_session_context_from_env()
@@ -110,34 +114,6 @@ def _resolve_run(run: Any) -> Any:
             "or pass the run with run=."
         )
     return active
-
-
-def _is_finite_number(value: Any) -> bool:
-    """Return whether ``value`` is a finite int or float, never raising.
-
-    An int beyond float range makes ``math.isfinite`` raise
-    ``OverflowError``, so the conversion is guarded.
-    """
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return False
-    try:
-        return math.isfinite(float(value))
-    except (OverflowError, TypeError, ValueError):
-        return False
-
-
-def _summary_fields(payload: Mapping[str, Any]) -> Dict[str, Any]:
-    """Return the three comparison fields present in the compact summary."""
-    compact = compact_summary(payload) or {}
-    fields: Dict[str, Any] = {}
-    for key in _SUMMARY_KEYS:
-        if key not in compact:
-            continue
-        value = compact[key]
-        if key in _NUMERIC_KEYS and not _is_finite_number(value):
-            continue
-        fields[key] = value
-    return fields
 
 
 def _write_summary(run: Any, fields: Dict[str, Any]) -> bool:
@@ -180,7 +156,9 @@ def log_training_report(
 
     The helper never creates or finishes a run and reads no credentials.
     Problems it can recover from print one ``[TraceML]`` line to stderr and
-    return ``False``; it does not raise for them.
+    return ``False``; it does not raise for them. A report requested during
+    training is a best-effort snapshot and can cover fewer steps than the
+    run has reached.
 
     Parameters
     ----------
@@ -200,26 +178,19 @@ def log_training_report(
         A summary with no diagnosis and no Step Time averages gets the
         card only and still returns ``True``. ``False`` on non-primary
         ranks, in telemetry mode, without a run, without ``wandb``, when
-        the payload cannot be rendered, or when a write failed.
+        the summary request fails, when the payload cannot be rendered, or
+        when a write failed.
 
-        The primary-rank and telemetry-mode checks run only when the
-        helper fetches the summary itself. A payload passed with
-        ``final_summary=`` skips both checks and is written wherever the
-        helper is called, so pass it from one rank only.
-
-    Raises
-    ------
-    RuntimeError
-        Propagated unchanged from ``traceml.final_summary()``, which is
-        requested only once a run has been resolved: when the payload is
-        omitted and no TraceML session context is available, the
-        aggregator reports an error, or the request times out. Without a
-        run, a missing session context gives the usual missing-run warning
-        and ``False``.
+        The helper publishes on global rank 0 only, also for a payload
+        passed with ``final_summary=``. The telemetry-mode check runs only
+        when the helper fetches the summary itself. That request is made
+        once a run has been resolved; it fails when no TraceML session
+        context is available, the aggregator reports an error, or the
+        request times out.
     """
+    if not is_primary_rank():
+        return False
     if final_summary is None:
-        if not is_primary_rank():
-            return False
         if _history_disabled():
             _warn(
                 "the diagnosis report needs local history; telemetry mode "
@@ -233,13 +204,17 @@ def log_training_report(
 
     payload = final_summary
     if payload is None:
-        payload = summary_client.final_summary()
+        try:
+            payload = summary_client.final_summary()
+        except Exception as exc:
+            _skip_failed_summary(exc)
+            return False
     if payload is None:
         return False
 
     try:
         html = render_training_report(payload)
-        fields = _summary_fields(payload)
+        fields = tracker_comparison_fields(payload)
     except Exception as exc:
         _log_wandb_error("could not build the diagnosis report", exc)
         return False

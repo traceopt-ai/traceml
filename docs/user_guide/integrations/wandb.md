@@ -30,6 +30,11 @@ setup stays as it is.
 Call `log_training_report()` once after training finishes, while the W&B run
 is still open. With no arguments it writes into the active `wandb.run`.
 
+A report requested before TraceML shuts down is a best-effort snapshot. For
+example, a request at step 400 may cover only 395 steps if GPU timings are
+still pending or the latest measurements haven't reached the aggregator. If
+the summary is unavailable, TraceML warns and skips publishing the report.
+
 ### Hugging Face Trainer
 
 The Trainer's W&B callback keeps its run open after `train()` returns, so call
@@ -91,9 +96,10 @@ WANDB_MODE=offline traceml run examples/wandb_report_minimal.py --args --steps 2
 
 - **Diagnosis card.** A compact HTML card is logged under
   `traceml/diagnosis_card`. W&B shows it as a media panel in the run
-  workspace. The verdict comes first, because a workspace panel shows about
-  330 by 180 px before you expand it. Below it are coverage, the phase bar
-  and three Step Time averages.
+  workspace. A workspace panel shows about 330 by 180 px before you expand
+  it, so the verdict sits near the top. A coverage line comes first, then
+  the verdict chip, a Why line and the suggested Next step. Below them is a
+  step-timing tree with the cause marked.
 - **Summary fields.** `traceml/primary/status`,
   `traceml/step_time/step_time_ms` and `traceml/step_time/input_wait_ms` are
   written to the run summary. They appear as columns in the runs table, so
@@ -105,23 +111,21 @@ WANDB_MODE=offline traceml run examples/wandb_report_minimal.py --args --steps 2
 - It never creates, configures or finishes a run. It reads no credentials
   and never calls `wandb.init()` or `wandb.login()`.
 - It warns instead of raising. A missing `wandb` install, a missing run, a
-  payload it cannot render or a failed write prints one `[TraceML] W&B:` line
-  to stderr and returns `False`.
+  failed summary request, a payload it cannot render or a failed write
+  prints one `[TraceML] W&B:` line to stderr and returns `False`.
 - It returns `True` when every write that had something to write succeeded.
   A summary with no diagnosis and no Step Time averages gets the card only
   and still returns `True`.
-- When it fetches the summary itself, it writes from the primary rank only.
-  On other ranks it returns `False` without requesting a summary, so you can
-  call it on every rank.
+- It writes from global rank 0 only, also for a payload passed with
+  `final_summary=`. On other ranks it returns `False` without requesting a
+  summary, so you can call it on every rank.
 - When it fetches the summary itself, it needs a mode that keeps local
   history. In `telemetry` mode TraceML keeps no history and generates no
   summary, so the helper prints one line and returns `False`.
-- A payload passed with `final_summary=` skips both checks. It is written
-  wherever the helper is called, so pass it from one rank only.
 - Once it has a run, it requests the summary. When no TraceML session is
-  available, or the summary request fails, it then raises the same
-  `RuntimeError` as `traceml.final_summary()`. Pass `final_summary=` with a
-  saved payload to publish an existing report.
+  available, the aggregator reports an error, or the request times out after
+  30 seconds, it prints one line and returns `False`. Pass `final_summary=`
+  with a saved payload to publish an existing report.
 
 ## Live per-step export
 
@@ -134,7 +138,7 @@ built-in JSON Lines exporter.
 
 - The helper does not define training boundaries. Use automatic trainer
   instrumentation or the explicit setup for your loop.
-- Call it after training finishes. The card is a finalized report, not a
+- Call it after training finishes. The card is an end-of-run report, not a
   live metric.
 - The repository tests the helper against a stand-in `wandb` module. No real
   W&B client runs in CI.

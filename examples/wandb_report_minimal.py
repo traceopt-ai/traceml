@@ -25,8 +25,8 @@ Set ``WANDB_MODE=offline`` to try it without a W&B account::
 The loop reads its batches from a ``DataLoader``, so TraceML measures input
 wait as well as forward, backward and optimizer time. At the end of the run,
 ``log_training_report()`` logs the compact diagnosis card to the run as
-``traceml/diagnosis_card``: the verdict, coverage, the phase bar and the step
-time, input wait and compute averages. It also writes
+``traceml/diagnosis_card``: a coverage line, the verdict chip, a Why line,
+the Next step and a step-timing tree with the cause marked. It also writes
 ``traceml/primary/status``, ``traceml/step_time/step_time_ms`` and
 ``traceml/step_time/input_wait_ms`` to the run summary, where they appear as
 runs-table columns.
