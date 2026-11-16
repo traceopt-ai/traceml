@@ -13,19 +13,12 @@ payload types and the real card, without a browser.
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
 
 pytest.importorskip("nicegui")
 
-from traceml_ai.aggregator.display_drivers.nicegui_sections.pages import (  # noqa: E402
-    _remember_system_gpu_availability,
-)
 from traceml_ai.aggregator.display_drivers.nicegui_sections.step_memory_section import (  # noqa: E402,E501
     build_step_memory_section,
-    has_step_memory_data,
-    should_show_step_memory_card,
     update_step_memory_section,
 )
 from traceml_ai.measurements.step_memory import (  # noqa: E402
@@ -39,55 +32,6 @@ from traceml_ai.renderers.step_memory.schema import (  # noqa: E402
 )
 
 GIB = float(1024**3)
-
-
-def test_system_gpu_status_stays_unknown_until_a_sample_arrives() -> None:
-    state = {"gpu_available": None}
-    _remember_system_gpu_availability(
-        state, SimpleNamespace(window_len=0, gpu_available=False)
-    )
-    assert state["gpu_available"] is None
-
-    _remember_system_gpu_availability(
-        state, SimpleNamespace(window_len=1, gpu_available=False)
-    )
-    assert state["gpu_available"] is False
-
-    _remember_system_gpu_availability(
-        state, SimpleNamespace(window_len=0, gpu_available=False)
-    )
-    assert state["gpu_available"] is False
-
-
-def test_step_memory_card_visibility_waits_for_gpu_status_and_keeps_data() -> (
-    None
-):
-    assert should_show_step_memory_card(
-        gpu_available=None, has_memory_data=False
-    )
-    assert not should_show_step_memory_card(
-        gpu_available=False, has_memory_data=False
-    )
-    assert should_show_step_memory_card(
-        gpu_available=False, has_memory_data=True
-    )
-    assert should_show_step_memory_card(
-        gpu_available=True, has_memory_data=False
-    )
-
-
-def test_cached_step_memory_view_counts_as_data_when_metrics_are_missing() -> (
-    None
-):
-    panel = {"_last": object()}
-
-    assert has_step_memory_data(None, panel)
-    assert has_step_memory_data([], panel)
-
-
-def test_missing_step_memory_panel_does_not_count_as_cached_data() -> None:
-    assert not has_step_memory_data(None, None)
-    assert not has_step_memory_data([], {})
 
 
 def _metric(
@@ -193,3 +137,63 @@ def test_the_preferred_metric_wins_over_list_order() -> None:
 
     assert panel["chart"].options["series"][0]["data"] == [2.0, 2.5, 3.0]
     assert panel["kpis"]["peak"].content.startswith("3.00")
+
+
+_NO_GPU = "No GPU detected. Step memory uses torch-based GPU memory telemetry."
+
+
+def _panel_in_cell() -> dict:
+    """The card inside its dashboard cell, as the page hands it over."""
+    from nicegui import ui
+
+    with ui.element("div"):
+        cell = ui.element("div")
+        with cell:
+            panel = build_step_memory_section()
+    panel["container"] = cell
+    return panel
+
+
+def test_a_cpu_only_run_hides_the_card_cell() -> None:
+    """With no GPU the card has nothing to show, so its cell leaves the row."""
+    panel = _panel_in_cell()
+    update_step_memory_section(
+        panel, StepMemoryCombinedResult(metrics=[], status_message=_NO_GPU)
+    )
+
+    assert panel["container"].visible is False
+
+
+def test_the_card_stays_while_it_waits_for_a_first_sample() -> None:
+    """No GPU verdict yet, so the card keeps its place."""
+    panel = _panel_in_cell()
+    update_step_memory_section(
+        panel,
+        StepMemoryCombinedResult(
+            metrics=[], status_message="No complete memory metrics available"
+        ),
+    )
+
+    assert panel["container"].visible is True
+
+
+def test_a_drawn_chart_keeps_the_card_after_a_no_gpu_status() -> None:
+    """A chart already on screen is not taken away."""
+    panel = _panel_in_cell()
+    update_step_memory_section(panel, _result(_metric()))
+    update_step_memory_section(
+        panel, StepMemoryCombinedResult(metrics=[], status_message=_NO_GPU)
+    )
+
+    assert panel["container"].visible is True
+
+
+def test_memory_data_brings_a_hidden_card_back() -> None:
+    panel = _panel_in_cell()
+    update_step_memory_section(
+        panel, StepMemoryCombinedResult(metrics=[], status_message=_NO_GPU)
+    )
+    update_step_memory_section(panel, _result(_metric()))
+
+    assert panel["container"].visible is True
+    assert panel["win"].text == "3 aligned steps"

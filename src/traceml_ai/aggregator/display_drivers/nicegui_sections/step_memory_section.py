@@ -58,18 +58,11 @@ def _gb_list(values: List[float]) -> List[float]:
     return [float(v) / BYTES_PER_GB for v in values] if values else []
 
 
-def should_show_step_memory_card(
-    *, gpu_available: Optional[bool], has_memory_data: bool
-) -> bool:
-    """Keep the card until GPU absence is confirmed, or while it has data."""
-    return gpu_available is not False or has_memory_data
-
-
-def has_step_memory_data(metrics: Any, panel: Any) -> bool:
-    """Keep the card visible when the renderer still has its last chart view."""
-    if metrics:
-        return True
-    return isinstance(panel, dict) and panel.get("_last") is not None
+def _show_cell(panel: Dict[str, Any], visible: bool) -> None:
+    """Show or hide the dashboard cell the page placed this card in."""
+    cell = panel.get("container")
+    if cell is not None and cell.visible != visible:
+        cell.set_visibility(visible)
 
 
 @dataclass(frozen=True)
@@ -265,10 +258,15 @@ def update_step_memory_section(
                 panel["hint"].text = (
                     "No GPU present, so step memory is unavailable."
                 )
+                # Nothing drawn yet: the card has nothing to show on this
+                # run, so its cell leaves the row.
+                if panel.get("_last") is None:
+                    _show_cell(panel, False)
                 return
             view = panel.get("_last")
         if view is None:
             return
+        _show_cell(panel, True)
         panel["_last"] = view
         panel["hint"].text = ""
 

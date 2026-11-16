@@ -30,8 +30,6 @@ from .model_diagnostics_section import (
 from .process_section import build_process_section, update_process_section
 from .step_memory_section import (
     build_step_memory_section,
-    has_step_memory_data,
-    should_show_step_memory_card,
     update_step_memory_section,
 )
 from .system_section import build_system_section, update_system_section
@@ -41,14 +39,6 @@ def _cell(flex: str):
     return ui.element("div").style(
         f"flex:{flex}; min-width:300px; display:flex; flex-direction:column;"
     )
-
-
-def _remember_system_gpu_availability(state, data) -> None:
-    """Record GPU status only after the system payload has evidence."""
-    if getattr(data, "gpu_available", False):
-        state["gpu_available"] = True
-    elif getattr(data, "window_len", 0):
-        state["gpu_available"] = False
 
 
 def define_pages(cls):
@@ -62,39 +52,6 @@ def define_pages(cls):
     @ui.page("/")
     def main_page():
         ui.add_head_html(theme.head_html())
-        dashboard_state = {
-            "gpu_available": None,
-            "step_memory_has_data": False,
-            "step_memory_panel": None,
-        }
-
-        def _sync_step_memory_visibility():
-            panel = dashboard_state["step_memory_panel"]
-            if panel is None:
-                return
-            visible = should_show_step_memory_card(
-                gpu_available=dashboard_state["gpu_available"],
-                has_memory_data=dashboard_state["step_memory_has_data"],
-            )
-            panel["container"].set_visibility(visible)
-
-        def _update_system(cards, data):
-            update_system_section(cards, data)
-            # ``gpu_available=False`` is only conclusive after a sample; the
-            # empty pre-sample payload uses the same default value.
-            _remember_system_gpu_availability(dashboard_state, data)
-            _sync_step_memory_visibility()
-
-        def _update_step_memory(cards, data):
-            update_step_memory_section(cards, data)
-            metrics = getattr(data, "metrics", None)
-            if metrics is None and isinstance(data, dict):
-                metrics = data.get("metrics")
-            dashboard_state["step_memory_has_data"] = has_step_memory_data(
-                metrics, dashboard_state.get("step_memory_panel")
-            )
-            _sync_step_memory_visibility()
-
         with (
             ui.column()
             .classes("w-full")
@@ -152,7 +109,9 @@ def define_pages(cls):
                         PROCESS_LAYOUT, cards, update_process_section
                     )
 
-            cls.subscribe_layout(SYSTEM_LAYOUT, system_cards, _update_system)
+            cls.subscribe_layout(
+                SYSTEM_LAYOUT, system_cards, update_system_section
+            )
 
             # Row 3: Step Memory | Diagnostics (training runs only)
             if "step_memory" in shown or "model_diagnostics" in shown:
@@ -162,16 +121,15 @@ def define_pages(cls):
                     .style("gap:16px; flex-wrap:wrap;")
                 ):
                     if "step_memory" in shown:
-                        step_memory_container = _cell("1.3")
-                        with step_memory_container:
+                        with _cell("1.3") as cell:
                             cards = build_step_memory_section()
-                        cards["container"] = step_memory_container
-                        dashboard_state["step_memory_panel"] = cards
-                        cls.subscribe_layout(
-                            MODEL_MEMORY_LAYOUT,
-                            cards,
-                            _update_step_memory,
-                        )
+                            # The card hides this cell on a run with no GPU.
+                            cards["container"] = cell
+                            cls.subscribe_layout(
+                                MODEL_MEMORY_LAYOUT,
+                                cards,
+                                update_step_memory_section,
+                            )
                     if "model_diagnostics" in shown:
                         with _cell("1"):
                             diag_cards = build_model_diagnostics_section()
