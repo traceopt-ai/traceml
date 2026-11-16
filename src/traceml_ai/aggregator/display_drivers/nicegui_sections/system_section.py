@@ -246,6 +246,18 @@ def _num(value: Any, fmt: str = "{:.0f}") -> str:
     return fmt.format(float(value)) if value is not None else NA
 
 
+def power_value_text(now: Optional[float], limit: Optional[float]) -> str:
+    """The current power reading, with its limit when one is reported.
+
+    Empty when there is no reading, so the heading never shows a made-up 0.
+    """
+    if now is None:
+        return ""
+    if limit:
+        return f"{now:.0f} / {limit:.0f} W"
+    return f"{now:.0f} W"
+
+
 def rows_html(
     gpus: Sequence[GpuRow],
     power_series: List[Dict[str, Any]],
@@ -467,6 +479,13 @@ def build_system_section() -> Dict[str, Any]:
         with panel["power_head"]:
             panel["power_label"] = ui.label("gpu power · per GPU").classes(
                 "estlabel"
+            )
+            # On a one-GPU run the current reading sits here, at the right
+            # edge like the CPU value, in place of the per-GPU row.
+            ui.element("div").style("flex:1;")
+            panel["power_value"] = ui.label("").style(
+                f"{_MONO} font-size:13px; font-weight:600; "
+                "color:var(--ink);"
             )
         panel["power_chart"] = ui.echart(
             charting.multi_line_options(" W")
@@ -735,6 +754,7 @@ def _update_power_chart(
     if layout != "gpu":
         # Only a waiting card shows this slot; a CPU-only card hides it.
         panel["power_label"].text = "gpu power"
+        panel["power_value"].text = ""
         panel["power_placeholder"].text = (
             "waiting for data" if layout == "waiting" else ""
         )
@@ -742,6 +762,13 @@ def _update_power_chart(
 
     gpu_power = roll.gpu_power
     limit = gpu_power.limit if gpu_power else None
+    # One GPU: its current reading beside the chart replaces the per-GPU
+    # row that leaves the card. With several GPUs the rows carry it.
+    if len(roll.gpus) == 1:
+        now = gpu_power.now if gpu_power else None
+        panel["power_value"].text = power_value_text(now, limit)
+    else:
+        panel["power_value"].text = ""
     pseries = list(series.gpu_power)
     flat = [value for item in pseries for value in (item.get("values") or [])]
     chart = panel["power_chart"]
@@ -849,11 +876,14 @@ def _update_power_chart(
     chart.style("display:block;")
     chart.update()
 
-    head = (
-        f"gpu power · per GPU vs {float(limit):.0f} W limit"
-        if limit is not None
-        else "gpu power · per GPU"
-    )
+    single = len(roll.gpus) == 1
+    if single:
+        # The value beside the chart already carries the limit.
+        head = "gpu power"
+    elif limit is not None:
+        head = f"gpu power · per GPU vs {float(limit):.0f} W limit"
+    else:
+        head = "gpu power · per GPU"
     if whole_run:
         window = format_window(float(run[0].get("window_s") or 0.0))
         panel["power_label"].text = f"{head} · recent history" + (
@@ -861,9 +891,15 @@ def _update_power_chart(
         )
         panel["power_label"].tooltip(
             f"Available history, {format_span(run_span)[5:]}. "
-            "Solid lines show each "
-            f"GPU's average power every {window}; faint lines show the "
-            "lowest reading during the same interval."
+            + (
+                f"The solid line shows the GPU's average power every "
+                f"{window}; the faint line shows the lowest reading "
+                "during the same interval."
+                if single
+                else f"Solid lines show each GPU's average power every "
+                f"{window}; faint lines show the lowest reading during "
+                "the same interval."
+            )
         )
     else:
         span_words = format_span(span)
@@ -871,8 +907,9 @@ def _update_power_chart(
             f"{head} · {span_words}" if span_words else head
         )
         panel["power_label"].tooltip(
-            "Recent power readings for each GPU, compared with its power "
-            "limit."
+            "Recent power readings for "
+            + ("the GPU" if single else "each GPU")
+            + ", compared with its power limit."
         )
 
 
@@ -892,6 +929,13 @@ def _update_gpu_rows(
         return
 
     gpus = list(roll.gpus)
+    # One GPU has nothing to compare against: its row would repeat the
+    # tiles and its sparkline would repeat the power chart, so the rows
+    # leave the card. Shown again if more GPUs report.
+    if len(gpus) == 1:
+        panel["rows"].style("display:none;")
+        return
+    panel["rows"].style("display:block;")
     pseries = list(series.gpu_power)
     over = roll.rows_over
     if should_auto_open(prev_over=panel["_over"], over=over):
