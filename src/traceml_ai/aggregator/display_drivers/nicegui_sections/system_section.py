@@ -246,6 +246,18 @@ def _num(value: Any, fmt: str = "{:.0f}") -> str:
     return fmt.format(float(value)) if value is not None else NA
 
 
+def power_value_text(now: Optional[float], limit: Optional[float]) -> str:
+    """The current power reading, with its limit when one is reported.
+
+    Empty when there is no reading, so the heading never shows a made-up 0.
+    """
+    if now is None:
+        return ""
+    if limit:
+        return f"{now:.0f} / {limit:.0f} W"
+    return f"{now:.0f} W"
+
+
 def rows_html(
     gpus: Sequence[GpuRow],
     power_series: List[Dict[str, Any]],
@@ -467,6 +479,13 @@ def build_system_section() -> Dict[str, Any]:
         with panel["power_head"]:
             panel["power_label"] = ui.label("gpu power · per GPU").classes(
                 "estlabel"
+            )
+            # On a one-GPU run the current reading sits here, at the right
+            # edge like the CPU value, in place of the per-GPU row.
+            ui.element("div").style("flex:1;")
+            panel["power_value"] = ui.label("").style(
+                f"{_MONO} font-size:13px; font-weight:600; "
+                "color:var(--ink);"
             )
         panel["power_chart"] = ui.echart(
             charting.multi_line_options(" W")
@@ -735,6 +754,7 @@ def _update_power_chart(
     if layout != "gpu":
         # Only a waiting card shows this slot; a CPU-only card hides it.
         panel["power_label"].text = "gpu power"
+        panel["power_value"].text = ""
         panel["power_placeholder"].text = (
             "waiting for data" if layout == "waiting" else ""
         )
@@ -742,6 +762,13 @@ def _update_power_chart(
 
     gpu_power = roll.gpu_power
     limit = gpu_power.limit if gpu_power else None
+    # One GPU: its current reading beside the chart replaces the per-GPU
+    # row that leaves the card. With several GPUs the rows carry it.
+    if len(roll.gpus) == 1:
+        now = gpu_power.now if gpu_power else None
+        panel["power_value"].text = power_value_text(now, limit)
+    else:
+        panel["power_value"].text = ""
     pseries = list(series.gpu_power)
     flat = [value for item in pseries for value in (item.get("values") or [])]
     chart = panel["power_chart"]
