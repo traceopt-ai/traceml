@@ -876,11 +876,14 @@ def _update_power_chart(
     chart.style("display:block;")
     chart.update()
 
-    head = (
-        f"gpu power · per GPU vs {float(limit):.0f} W limit"
-        if limit is not None
-        else "gpu power · per GPU"
-    )
+    single = len(roll.gpus) == 1
+    if single:
+        # The value beside the chart already carries the limit.
+        head = "gpu power"
+    elif limit is not None:
+        head = f"gpu power · per GPU vs {float(limit):.0f} W limit"
+    else:
+        head = "gpu power · per GPU"
     if whole_run:
         window = format_window(float(run[0].get("window_s") or 0.0))
         panel["power_label"].text = f"{head} · recent history" + (
@@ -888,9 +891,15 @@ def _update_power_chart(
         )
         panel["power_label"].tooltip(
             f"Available history, {format_span(run_span)[5:]}. "
-            "Solid lines show each "
-            f"GPU's average power every {window}; faint lines show the "
-            "lowest reading during the same interval."
+            + (
+                f"The solid line shows the GPU's average power every "
+                f"{window}; the faint line shows the lowest reading "
+                "during the same interval."
+                if single
+                else f"Solid lines show each GPU's average power every "
+                f"{window}; faint lines show the lowest reading during "
+                "the same interval."
+            )
         )
     else:
         span_words = format_span(span)
@@ -898,8 +907,9 @@ def _update_power_chart(
             f"{head} · {span_words}" if span_words else head
         )
         panel["power_label"].tooltip(
-            "Recent power readings for each GPU, compared with its power "
-            "limit."
+            "Recent power readings for "
+            + ("the GPU" if single else "each GPU")
+            + ", compared with its power limit."
         )
 
 

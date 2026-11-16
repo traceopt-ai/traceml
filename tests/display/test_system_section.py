@@ -395,9 +395,9 @@ def test_whole_run_charts_share_one_clock_axis() -> None:
         panel["cpu_label_tip"].text
     )
     assert panel["cpu_label_tip"].text.endswith(CPU_DEFINITION)
+    # One GPU: the value beside the chart carries the limit.
     assert panel["power_label"].text == (
-        "gpu power · per GPU vs 70 W limit · recent history · "
-        "average and lowest every 2 min"
+        "gpu power · recent history · average and lowest every 2 min"
     )
     assert "min," not in panel["cpu_label"].text
 
@@ -1605,3 +1605,27 @@ def test_a_one_gpu_card_that_goes_waiting_drops_its_power_value() -> None:
 
     assert panel["gpu_layout"] == "waiting"
     assert panel["power_value"].text == ""
+
+
+def test_one_gpu_power_heading_leaves_the_limit_to_the_value() -> None:
+    """With one GPU there is no 'per GPU', and the value carries the limit.
+
+    The heading returns to its per-GPU form when a second GPU reports.
+    """
+    from nicegui import ui
+
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section import (  # noqa: E501
+        build_system_section,
+        update_system_section,
+    )
+
+    with ui.element("div"):
+        panel = build_system_section()
+    update_system_section(panel, as_payload(_gpu_payload(_gpus()[:1])))
+    assert panel["power_label"].text == "gpu power · last 3 min"
+    assert panel["power_value"].text == "66 / 70 W"
+
+    update_system_section(panel, as_payload(_gpu_payload(_gpus())))
+    assert panel["power_label"].text == (
+        "gpu power · per GPU vs 70 W limit · last 3 min"
+    )
