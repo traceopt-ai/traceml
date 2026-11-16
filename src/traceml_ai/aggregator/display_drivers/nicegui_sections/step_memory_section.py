@@ -65,6 +65,13 @@ def should_show_step_memory_card(
     return gpu_available is not False or has_memory_data
 
 
+def has_step_memory_data(metrics: Any, panel: Any) -> bool:
+    """Keep the card visible when the renderer still has its last chart view."""
+    if metrics:
+        return True
+    return isinstance(panel, dict) and panel.get("_last") is not None
+
+
 @dataclass(frozen=True)
 class _Stats:
     last: float

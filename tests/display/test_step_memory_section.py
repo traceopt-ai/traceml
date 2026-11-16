@@ -24,6 +24,7 @@ from traceml_ai.aggregator.display_drivers.nicegui_sections.pages import (  # no
 )
 from traceml_ai.aggregator.display_drivers.nicegui_sections.step_memory_section import (  # noqa: E402,E501
     build_step_memory_section,
+    has_step_memory_data,
     should_show_step_memory_card,
     update_step_memory_section,
 )
@@ -73,6 +74,20 @@ def test_step_memory_card_visibility_waits_for_gpu_status_and_keeps_data() -> (
     assert should_show_step_memory_card(
         gpu_available=True, has_memory_data=False
     )
+
+
+def test_cached_step_memory_view_counts_as_data_when_metrics_are_missing() -> (
+    None
+):
+    panel = {"_last": object()}
+
+    assert has_step_memory_data(None, panel)
+    assert has_step_memory_data([], panel)
+
+
+def test_missing_step_memory_panel_does_not_count_as_cached_data() -> None:
+    assert not has_step_memory_data(None, None)
+    assert not has_step_memory_data([], {})
 
 
 def _metric(

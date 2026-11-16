@@ -30,6 +30,7 @@ from .model_diagnostics_section import (
 from .process_section import build_process_section, update_process_section
 from .step_memory_section import (
     build_step_memory_section,
+    has_step_memory_data,
     should_show_step_memory_card,
     update_step_memory_section,
 )
@@ -89,7 +90,9 @@ def define_pages(cls):
             metrics = getattr(data, "metrics", None)
             if metrics is None and isinstance(data, dict):
                 metrics = data.get("metrics")
-            dashboard_state["step_memory_has_data"] = bool(metrics)
+            dashboard_state["step_memory_has_data"] = has_step_memory_data(
+                metrics, dashboard_state.get("step_memory_panel")
+            )
             _sync_step_memory_visibility()
 
         with (
