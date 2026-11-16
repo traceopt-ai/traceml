@@ -31,6 +31,7 @@ from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section impor
     gpu_layout,
     odd_ones_out,
     power_axis_bounds,
+    power_value_text,
     rows_html,
     should_auto_open,
     sparkline_svg,
@@ -1513,3 +1514,94 @@ def test_the_cpu_value_is_the_median_of_the_samples_drawn(tmp_path) -> None:
     assert panel["cpu_value"].text == f"{statistics.median(window):.0f}%"
     assert panel["cpu_value"].text != f"{window[-1]:.0f}%"
     assert panel["cpu_value_name"].text == "median · last 3 min"
+
+
+def test_power_value_reads_the_reading_and_its_limit() -> None:
+    """The one-GPU heading value: reading / limit, the reading alone, or nothing."""
+    assert power_value_text(66.4, 70.0) == "66 / 70 W"
+    assert power_value_text(66.0, None) == "66 W"
+    # No reading is left blank rather than printed as 0 W.
+    assert power_value_text(None, 70.0) == ""
+
+
+def _gpu_payload(gpus: list) -> dict:
+    """A GPU payload carrying exactly these rows, with one power series each."""
+    return {
+        "window_len": 2,
+        "gpu_available": True,
+        "rollups": {
+            "cpu": {"now": 9.0, "p50": 8.0},
+            "ram": {"now": 9.0 * GIB, "total": 200.0 * GIB},
+            "gpu_util": {"now": 99.0, "p50": 99.0},
+            "gpu_power": {"now": 66.0, "p50": 66.0, "limit": 70.0},
+            "gpus": gpus,
+        },
+        "series": {
+            "x_time": [
+                "2026-08-21T10:00:00+00:00",
+                "2026-08-21T10:03:20+00:00",
+            ],
+            "cpu": [8.0, 9.0],
+            "gpu_power": [
+                {"gpu_idx": g["gpu_idx"], "values": [66.0, 68.0]} for g in gpus
+            ],
+        },
+    }
+
+
+def test_one_gpu_shows_its_power_beside_the_chart_and_no_rows() -> None:
+    """With one GPU there is nothing to compare, so the rows leave the card.
+
+    The current reading moves beside the power chart, which stays.
+    """
+    from nicegui import ui
+
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section import (  # noqa: E501
+        build_system_section,
+        update_system_section,
+    )
+
+    with ui.element("div"):
+        panel = build_system_section()
+    update_system_section(panel, as_payload(_gpu_payload(_gpus()[:1])))
+
+    assert _display(panel["rows"]) == "none"
+    assert _display(panel["power_chart"]) == "block"
+    assert panel["power_value"].text == "66 / 70 W"
+
+
+def test_several_gpus_keep_their_rows_and_no_single_value() -> None:
+    """The rows return when a second GPU reports, and carry the readings."""
+    from nicegui import ui
+
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section import (  # noqa: E501
+        build_system_section,
+        update_system_section,
+    )
+
+    with ui.element("div"):
+        panel = build_system_section()
+    update_system_section(panel, as_payload(_gpu_payload(_gpus()[:1])))
+    update_system_section(panel, as_payload(_gpu_payload(_gpus())))
+
+    assert _display(panel["rows"]) == "block"
+    assert panel["power_value"].text == ""
+
+
+def test_a_one_gpu_card_that_goes_waiting_drops_its_power_value() -> None:
+    """A held-over reading must not sit beside 'waiting for data'."""
+    from nicegui import ui
+
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section import (  # noqa: E501
+        build_system_section,
+        update_system_section,
+    )
+
+    with ui.element("div"):
+        panel = build_system_section()
+    update_system_section(panel, as_payload(_gpu_payload(_gpus()[:1])))
+    empty = {"window_len": 0, "gpu_available": False, "rollups": {}}
+    update_system_section(panel, as_payload(empty))
+
+    assert panel["gpu_layout"] == "waiting"
+    assert panel["power_value"].text == ""
