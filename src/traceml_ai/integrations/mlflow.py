@@ -76,7 +76,11 @@ def _skip_failed_summary(exc: Exception) -> None:
         )
     except Exception:
         pass
-    text = str(exc).strip() or type(exc).__name__
+    try:
+        text = " ".join(str(exc).split())
+    except Exception:
+        text = ""
+    text = text or type(exc).__name__
     if not text.endswith("."):
         text = f"{text}."
     _warn(f"{text} Skipping the diagnosis report.")
@@ -288,8 +292,12 @@ def log_training_report(
         except Exception as exc:
             _skip_failed_summary(exc)
             return False
-    if payload is None:
-        return False
+        if payload is None:
+            _warn(
+                "the TraceML summary is unavailable. Skipping the diagnosis "
+                "report."
+            )
+            return False
 
     html = _render_card(payload)
     if html is None:

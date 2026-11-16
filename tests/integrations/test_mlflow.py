@@ -519,13 +519,17 @@ def test_summary_error_without_text_names_the_exception(
     assert client.batches == [] and client.texts == []
 
 
-def test_missing_final_summary_returns_false(session, mlflow):
+def test_unavailable_summary_warns_and_returns_false(session, mlflow, capsys):
     session.payload = None
     client = _FakeClient()
 
     assert helper.log_training_report("run-1", client=client) is False
 
     assert client.batches == [] and client.texts == []
+    assert capsys.readouterr().err.strip().splitlines() == [
+        "[TraceML] MLflow: the TraceML summary is unavailable. "
+        "Skipping the diagnosis report."
+    ]
 
 
 def test_payload_without_primary_diagnosis_logs_the_card_and_no_tag(
@@ -577,3 +581,41 @@ def test_explicit_payload_on_non_primary_rank_writes_nothing(
 
     assert client.got == [] and client.batches == [] and client.texts == []
     assert capsys.readouterr().err == ""
+
+
+def test_multiline_summary_error_warns_on_one_line(
+    session, mlflow, monkeypatch, capsys
+):
+    def fail(**kwargs):
+        raise RuntimeError("aggregator failed\nretry later")
+
+    monkeypatch.setattr(helper.summary_client, "final_summary", fail)
+    client = _FakeClient()
+
+    assert helper.log_training_report("run-1", client=client) is False
+
+    assert capsys.readouterr().err.strip().splitlines() == [
+        "[TraceML] MLflow: aggregator failed retry later. "
+        "Skipping the diagnosis report."
+    ]
+
+
+def test_unprintable_summary_error_still_warns_and_returns_false(
+    session, mlflow, monkeypatch, capsys
+):
+    class Unprintable(RuntimeError):
+        def __str__(self):
+            raise ValueError("no text")
+
+    def fail(**kwargs):
+        raise Unprintable()
+
+    monkeypatch.setattr(helper.summary_client, "final_summary", fail)
+    client = _FakeClient()
+
+    assert helper.log_training_report("run-1", client=client) is False
+
+    assert client.batches == [] and client.texts == []
+    assert capsys.readouterr().err.strip().splitlines() == [
+        "[TraceML] MLflow: Unprintable. Skipping the diagnosis report."
+    ]
