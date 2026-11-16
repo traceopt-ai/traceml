@@ -86,9 +86,12 @@ _INHERITED_RUN_ENV = (
 # Time kept back from the startup budget so a failure is reported before
 # the aggregator's own wait for ``open`` runs out.
 _STARTUP_MARGIN_SEC = 1.0
-# A rank beyond the expected world size gets a run only while the exporter
-# holds fewer runs than this many times the expected world size, or than
-# the record's own world size if larger, and never more than _MAX_RUNS.
+# The exporter never holds more than _MAX_RUNS runs, and a rank at or above
+# _MAX_RUNS never gets one. The cap applies at startup too: ``open`` creates
+# runs only for the ranks below it. A rank first seen later, beyond the
+# expected world size, gets a run only while the exporter holds fewer runs
+# than _LAZY_RUN_CAP_FACTOR times the expected world size, or than the
+# record's own world size if larger.
 _LAZY_RUN_CAP_FACTOR = 2
 _MAX_RUNS = 1024
 # How long a failed startup waits for the runs it created to finish, so the
@@ -234,7 +237,11 @@ class WandbExporter:
     rank ``r``'s run is named ``"<run_name> rank <r>"``.
     ``expected_world_size`` runs are created in ``open``; a record from a
     higher rank below its own ``world_size`` creates that rank's run on
-    first sight, up to twice ``expected_world_size`` runs in total.
+    first sight, up to twice ``expected_world_size`` runs in total. No
+    more than ``_MAX_RUNS`` runs are ever created, at startup too: when
+    ``expected_world_size`` exceeds it, ``open`` creates runs for the
+    ranks below ``_MAX_RUNS`` only and prints one stderr line, and the
+    records of every higher rank are skipped and counted.
     ``streams`` must select ``step_time`` alone. ``startup_timeout_sec``
     bounds ``open`` and each later run creation; None leaves wandb's own
     timeouts in place, for modes where nothing waits on ``open``.
@@ -288,7 +295,8 @@ class WandbExporter:
 
     def open(self) -> None:
         """
-        Set wandb up without prompting, then create one run per rank.
+        Set wandb up without prompting, then create one run per rank, for
+        the ranks below ``_MAX_RUNS`` only.
 
         Raises when export cannot start: wandb missing or already set up in
         this process, ``WANDB_ENTITY`` or ``WANDB_PROJECT`` unset, a
@@ -355,7 +363,15 @@ class WandbExporter:
         self._wandb = wandb
         self._entity = entity
         self._project = project
-        self._create_runs(range(self._expected_world_size), init_timeout)
+        if self._expected_world_size > _MAX_RUNS:
+            _warn(
+                f"the configured world size {self._expected_world_size} "
+                f"exceeds the limit of {_MAX_RUNS} runs; ranks {_MAX_RUNS} "
+                "and above get no W&B run, and their records are skipped "
+                "and counted."
+            )
+        startup_ranks = min(self._expected_world_size, _MAX_RUNS)
+        self._create_runs(range(startup_ranks), init_timeout)
         self._opened = True
 
         url = _group_url(self._runs[min(self._runs)], self._run_name)
@@ -756,7 +772,7 @@ class WandbExporter:
         if self._skipped_records:
             _warn(
                 f"skipped {self._skipped_records} step-time records without "
-                "a usable rank or step."
+                "a usable rank or step, or from a rank with no W&B run."
             )
         exit_codes = {
             rank: 1 if self._write_failed or not self._rows.get(rank) else 0

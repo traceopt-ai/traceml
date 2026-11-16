@@ -172,7 +172,9 @@ without it, back-to-back jobs share one session and their runs collide.
 - **One run per rank.** Rank `r` gets a new run named `<run-name> rank <r>`.
   All of them sit in one group named after the TraceML run, with job type
   `traceml`, so the group page shows every rank as one line per chart.
-  W&B therefore counts one run per rank for each training run.
+  W&B therefore counts one run per rank for each training run. The
+  exporter creates at most 1024 runs; ranks 1024 and above get no run, and
+  their records are skipped and counted.
 - **One history row per step.** Each step a rank reports becomes one row
   in that rank's run, plotted against the hidden `traceml/step` axis.
   A step reported twice is logged twice.
@@ -202,9 +204,10 @@ gradient accumulation, one step sums several forward and backward calls.
 At the end of the run each run's summary gets three counts:
 `traceml/export_written_records` (rows logged to that run),
 `traceml/export_dropped_batches` and `traceml/export_skipped_records`
-(records without a rank or step, or from a rank outside the run's world
-size). The full loss report stays local in `finalization_warning.json`. A
-written record means one handed to the W&B SDK.
+(records without a rank or step, or from a rank that has no run: outside
+the run's world size, or at or above the 1024-run limit).
+The full loss report stays local in `finalization_warning.json`.
+A written record means one handed to the W&B SDK.
 
 ### When it cannot start
 

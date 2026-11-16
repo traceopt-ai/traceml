@@ -951,6 +951,84 @@ def test_an_unexpected_rank_beyond_the_run_cap_is_skipped(
     assert runs[0].summary["traceml/export_skipped_records"] == 1
 
 
+def _count_init_threads(monkeypatch):
+    names = []
+    original = threading.Thread
+
+    class CountingThread(original):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            if self.name.startswith("TraceML-WandbInit-"):
+                names.append(self.name)
+
+    monkeypatch.setattr(module.threading, "Thread", CountingThread)
+    return names
+
+
+def _cap_warnings(err):
+    return [
+        line for line in err.splitlines() if "exceeds the limit of" in line
+    ]
+
+
+def test_open_caps_the_startup_runs_and_threads_at_the_limit(
+    tmp_path, env, fake, monkeypatch, capsys
+):
+    monkeypatch.setattr(module, "_MAX_RUNS", 3)
+    init_threads = _count_init_threads(monkeypatch)
+    exporter = _exporter(tmp_path, world=5)
+
+    exporter.open()
+
+    assert sorted(_runs_by_rank(fake)) == [0, 1, 2]
+    assert len(_calls(fake, "init")) == 3
+    assert len(init_threads) == 3
+    assert _cap_warnings(capsys.readouterr().err) == [
+        "[TraceML] W&B: the configured world size 5 exceeds the limit of 3 "
+        "runs; ranks 3 and above get no W&B run, and their records are "
+        "skipped and counted."
+    ]
+
+
+def test_a_rank_at_or_above_the_startup_cap_is_skipped_and_counted(
+    tmp_path, env, fake, monkeypatch
+):
+    monkeypatch.setattr(module, "_MAX_RUNS", 3)
+    exporter = _exporter(tmp_path, world=5)
+    exporter.open()
+    init_calls = len(_calls(fake, "init"))
+
+    exporter.write(
+        [
+            _record(rank=3, step=1, world_size=5),
+            _record(rank=4, step=1, world_size=None),
+            _record(rank=0, step=1, world_size=5),
+        ]
+    )
+    exporter.close()
+
+    assert len(_calls(fake, "init")) == init_calls
+    runs = _runs_by_rank(fake)
+    assert sorted(runs) == [0, 1, 2]
+    assert len(runs[0].logged) == 1
+    assert runs[0].summary["traceml/export_skipped_records"] == 2
+
+
+@pytest.mark.parametrize("world", [2, 3])
+def test_a_world_size_within_the_limit_opens_as_before(
+    tmp_path, env, fake, monkeypatch, capsys, world
+):
+    monkeypatch.setattr(module, "_MAX_RUNS", 3)
+    init_threads = _count_init_threads(monkeypatch)
+    exporter = _exporter(tmp_path, world=world)
+
+    exporter.open()
+
+    assert sorted(_runs_by_rank(fake)) == list(range(world))
+    assert len(init_threads) == world
+    assert _cap_warnings(capsys.readouterr().err) == []
+
+
 def test_a_failed_lazy_run_marks_the_export_failed(tmp_path, env, fake):
     exporter = _exporter(tmp_path, world=1)
     exporter.open()
