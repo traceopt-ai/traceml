@@ -58,6 +58,13 @@ def _gb_list(values: List[float]) -> List[float]:
     return [float(v) / BYTES_PER_GB for v in values] if values else []
 
 
+def should_show_step_memory_card(
+    *, gpu_available: Optional[bool], has_memory_data: bool
+) -> bool:
+    """Keep the card until GPU absence is confirmed, or while it has data."""
+    return gpu_available is not False or has_memory_data
+
+
 @dataclass(frozen=True)
 class _Stats:
     last: float

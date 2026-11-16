@@ -13,12 +13,18 @@ payload types and the real card, without a browser.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 pytest.importorskip("nicegui")
 
+from traceml_ai.aggregator.display_drivers.nicegui_sections.pages import (  # noqa: E402
+    _remember_system_gpu_availability,
+)
 from traceml_ai.aggregator.display_drivers.nicegui_sections.step_memory_section import (  # noqa: E402,E501
     build_step_memory_section,
+    should_show_step_memory_card,
     update_step_memory_section,
 )
 from traceml_ai.measurements.step_memory import (  # noqa: E402
@@ -32,6 +38,41 @@ from traceml_ai.renderers.step_memory.schema import (  # noqa: E402
 )
 
 GIB = float(1024**3)
+
+
+def test_system_gpu_status_stays_unknown_until_a_sample_arrives() -> None:
+    state = {"gpu_available": None}
+    _remember_system_gpu_availability(
+        state, SimpleNamespace(window_len=0, gpu_available=False)
+    )
+    assert state["gpu_available"] is None
+
+    _remember_system_gpu_availability(
+        state, SimpleNamespace(window_len=1, gpu_available=False)
+    )
+    assert state["gpu_available"] is False
+
+    _remember_system_gpu_availability(
+        state, SimpleNamespace(window_len=0, gpu_available=False)
+    )
+    assert state["gpu_available"] is False
+
+
+def test_step_memory_card_visibility_waits_for_gpu_status_and_keeps_data() -> (
+    None
+):
+    assert should_show_step_memory_card(
+        gpu_available=None, has_memory_data=False
+    )
+    assert not should_show_step_memory_card(
+        gpu_available=False, has_memory_data=False
+    )
+    assert should_show_step_memory_card(
+        gpu_available=False, has_memory_data=True
+    )
+    assert should_show_step_memory_card(
+        gpu_available=True, has_memory_data=False
+    )
 
 
 def _metric(
