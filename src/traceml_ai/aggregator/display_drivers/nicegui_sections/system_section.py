@@ -892,6 +892,13 @@ def _update_gpu_rows(
         return
 
     gpus = list(roll.gpus)
+    # One GPU has nothing to compare against: its row would repeat the
+    # tiles and its sparkline would repeat the power chart, so the rows
+    # leave the card. Shown again if more GPUs report.
+    if len(gpus) == 1:
+        panel["rows"].style("display:none;")
+        return
+    panel["rows"].style("display:block;")
     pseries = list(series.gpu_power)
     over = roll.rows_over
     if should_auto_open(prev_over=panel["_over"], over=over):
