@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import argparse
+import signal
 
 from traceml_ai.launcher.commands import (
     run_compare,
@@ -24,6 +25,8 @@ from traceml_ai.runtime.settings import (
     DEFAULT_INTERVAL_SEC,
 )
 from traceml_ai.telemetry.retention import parse_history_retention
+
+_STDOUT_COMMANDS = frozenset({"compare", "view", "inspect"})
 
 
 def _add_exporter_args(parser: argparse.ArgumentParser) -> None:
@@ -495,10 +498,19 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _stop_quietly_on_closed_stdout() -> None:
+    sigpipe = getattr(signal, "SIGPIPE", None)
+    if sigpipe is not None:
+        signal.signal(sigpipe, signal.SIG_DFL)
+
+
 def main() -> None:
     """CLI entrypoint for the TraceML launcher."""
     parser = build_parser()
     args = parser.parse_args()
+
+    if args.command in _STDOUT_COMMANDS:
+        _stop_quietly_on_closed_stdout()
 
     if args.command in {"watch", "run"}:
         validate_launch_args(args)
