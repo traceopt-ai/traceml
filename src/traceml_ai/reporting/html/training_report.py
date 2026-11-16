@@ -25,6 +25,7 @@ from traceml_ai import __version__
 
 from ..terminal_card.card import summary_header_coverage
 from ..terminal_card.common import (
+    analysis_window,
     as_mapping,
     plural,
     resolve_multi_process,
@@ -120,11 +121,16 @@ def _verdict(
     return "".join(parts)
 
 
-def _caption(tree: StepTimingTree, *, multi: bool) -> str:
+def _caption(
+    tree: StepTimingTree, step_time: Mapping[str, Any], *, multi: bool
+) -> str:
     parts = ["Step timing"]
     if multi:
         parts.append(esc(tree.selection))
-    parts.append(esc(_CLOCK_TEXT.get(tree.clock, tree.clock)))
+    # Name the clock only when the summary stored one; the shared tree
+    # reads a missing clock as GPU, which the card must not claim.
+    if analysis_window(step_time).get("diagnosis_clock"):
+        parts.append(esc(_CLOCK_TEXT.get(tree.clock, tree.clock)))
     return f'<p class="cap">{" &middot; ".join(parts)}</p>'
 
 
@@ -156,7 +162,8 @@ def _timing(
             f'<td class="ms">{fmt_ms_compact(row.value_ms)}</td>'
             f"{cause}</tr>"
         )
-    return f"{_caption(tree, multi=multi)}<table>{''.join(rows)}</table>"
+    caption = _caption(tree, step_time, multi=multi)
+    return f"{caption}<table>{''.join(rows)}</table>"
 
 
 def _footer(source_label: Optional[str]) -> str:

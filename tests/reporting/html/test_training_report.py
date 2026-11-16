@@ -360,6 +360,17 @@ def test_clock_is_named_for_its_source(
     assert f'<p class="cap">Step timing &middot; {text}</p>' in out
 
 
+def test_clock_is_left_out_when_the_summary_stores_none(
+    make_payload, make_section
+) -> None:
+    payload = _payload(make_payload, make_section)
+    payload["step_time"]["global"]["window"].pop("diagnosis_clock", None)
+    out = render_training_report(payload)
+    assert '<p class="cap">Step timing</p>' in out
+    assert "CUDA events" not in out
+    assert "wall clock" not in out
+
+
 def test_headline_is_the_terminal_why(make_payload, make_section) -> None:
     payload = _payload(make_payload, make_section)
     payload["step_time"]["diagnosis"]["share_pct"] = 0.97
