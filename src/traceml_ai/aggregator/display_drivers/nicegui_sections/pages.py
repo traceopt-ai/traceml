@@ -121,8 +121,10 @@ def define_pages(cls):
                     .style("gap:16px; flex-wrap:wrap;")
                 ):
                     if "step_memory" in shown:
-                        with _cell("1.3"):
+                        with _cell("1.3") as cell:
                             cards = build_step_memory_section()
+                            # The card hides this cell on a run with no GPU.
+                            cards["container"] = cell
                             cls.subscribe_layout(
                                 MODEL_MEMORY_LAYOUT,
                                 cards,
