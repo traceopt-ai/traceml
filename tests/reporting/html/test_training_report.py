@@ -1,6 +1,9 @@
 """Compact diagnosis card rendered into tracker runs (W&B, MLflow)."""
 
+import re
 from html.parser import HTMLParser
+
+import pytest
 
 from traceml_ai import __version__
 from traceml_ai.reporting.html import render_training_report
@@ -9,6 +12,7 @@ from traceml_ai.reporting.html.textutils import fmt_ms_compact
 from traceml_ai.reporting.sections.step_time.builder import (
     STEP_TIME_METRIC_NAMES,
 )
+from traceml_ai.reporting.terminal_card.step_time import run_why_and_next
 
 _HOST = "gpu-host-secret-17"
 
@@ -145,6 +149,46 @@ def _parses(text: str) -> bool:
     return True
 
 
+class _Text(HTMLParser):
+    """Collect visible text outside <style>."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.parts = []
+        self._style = False
+
+    def handle_starttag(self, tag, attrs) -> None:
+        self._style = self._style or tag == "style"
+
+    def handle_endtag(self, tag) -> None:
+        if tag == "style":
+            self._style = False
+
+    def handle_data(self, data) -> None:
+        if not self._style:
+            self.parts.append(data)
+
+
+def _text(out: str) -> str:
+    parser = _Text()
+    parser.feed(out)
+    return " ".join(parser.parts)
+
+
+_TREE_ROW = re.compile(
+    r'<tr><td class="lbl">([^<]*)</td><td class="ms">([^<]*)</td>'
+    r'(<td class="cause [a-z]+">◀ cause</td>)?</tr>'
+)
+
+
+def _tree(out: str):
+    return [(m.group(1), m.group(2)) for m in _TREE_ROW.finditer(out)]
+
+
+def _caused(out: str):
+    return [m.group(1) for m in _TREE_ROW.finditer(out) if m.group(3)]
+
+
 def test_card_is_a_self_contained_document(make_payload, make_section) -> None:
     out = render_training_report(_payload(make_payload, make_section))
     assert out.startswith("<!DOCTYPE html>")
@@ -196,25 +240,161 @@ def test_input_bound_card_shows_the_decided_verdict(
     )
 
 
-def test_input_bound_card_shows_coverage_line(
+def test_coverage_line_states_run_ranks_and_steps_once(
     make_payload, make_section
 ) -> None:
     out = render_training_report(_payload(make_payload, make_section))
     assert (
-        '<p class="cov">mock-slow &middot; 1 rank &middot; 60 common steps '
-        "&middot; steps 1–60 &middot; CPU clock</p>"
+        '<p class="cov">mock-slow &middot; 1 rank &middot; '
+        "60 steps analyzed</p>"
     ) in out
+    assert len(re.findall(r"\b60\b", _text(out))) == 1
+    assert "common steps" not in out
+    assert "steps 1–60" not in out
 
 
-def test_input_bound_card_shows_phase_bar_and_three_rows(
+def test_card_draws_no_phase_bar_legend_or_share(
     make_payload, make_section
 ) -> None:
     out = render_training_report(_payload(make_payload, make_section))
-    assert "<svg" in out
-    assert "input wait 154.0&thinsp;ms" in out
-    assert "<tr><td>Step time</td><td>158.8&thinsp;ms</td></tr>" in out
-    assert "<tr><td>Input wait</td><td>154.0&thinsp;ms</td></tr>" in out
-    assert "<tr><td>Compute</td><td>4.2&thinsp;ms</td></tr>" in out
+    assert "<svg" not in out
+    assert "legend" not in out
+    assert "DataLoader fetch" not in out
+    assert "%" not in _text(out).replace("97.0%", "")
+
+
+def test_tree_rows_appear_in_terminal_order_with_glyphs(
+    make_payload, make_section
+) -> None:
+    out = render_training_report(_payload(make_payload, make_section))
+    assert _tree(out) == [
+        ("Step Time", "158.8&thinsp;ms"),
+        ("├─ Input Wait", "154.0&thinsp;ms"),
+        ("├─ Compute", "4.2&thinsp;ms"),
+        ("│  ├─ Forward", "0.8&thinsp;ms"),
+        ("│  ├─ Backward", "1.7&thinsp;ms"),
+        ("│  └─ Optimizer", "1.6&thinsp;ms"),
+        ("└─ Residual", "0.7&thinsp;ms"),
+    ]
+    assert '<p class="cap">Step timing &middot; CPU wall clock</p>' in out
+
+
+@pytest.mark.parametrize(
+    ("kind", "severity", "label"),
+    [
+        ("INPUT_BOUND", "crit", "├─ Input Wait"),
+        ("COMPUTE_BOUND", "info", "├─ Compute"),
+        ("RESIDUAL_HEAVY", "warn", "└─ Residual"),
+        ("H2D_BOUND", "warn", "├─ H2D"),
+    ],
+)
+def test_cause_marker_sits_on_the_bound_phase(
+    make_payload, make_section, kind, severity, label
+) -> None:
+    primary = dict(_INPUT_BOUND, kind=kind, severity=severity)
+    average = dict(_INPUT_BOUND_AVERAGE, h2d_ms=0.4)
+    out = render_training_report(
+        _payload(make_payload, make_section, primary=primary, average=average)
+    )
+    assert _caused(out) == [label]
+    assert f'<td class="cause {severity}">◀ cause</td>' in out
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "INPUT_STRAGGLER",
+        "COMPUTE_STRAGGLER",
+        "H2D_STRAGGLER",
+        "STRAGGLER",
+        "NO_CLEAR_PERFORMANCE_BOTTLENECK",
+    ],
+)
+def test_no_cause_marker_for_stragglers_or_no_clear_bottleneck(
+    make_payload, make_section, kind
+) -> None:
+    primary = dict(_INPUT_BOUND, kind=kind, severity="warn")
+    out = render_training_report(
+        _payload(make_payload, make_section, primary=primary)
+    )
+    assert _tree(out)
+    assert _caused(out) == []
+    assert "cause" not in _text(out)
+
+
+def test_multi_rank_tree_reads_the_median_rank_row(make_payload) -> None:
+    payload = make_payload(primary_diagnosis=_INPUT_BOUND)
+    step_time = payload["step_time"]
+    step_time["global"]["median"]["step_time_ms"] = {
+        "value": 101.0,
+        "idx": "1",
+    }
+    step_time["groups"]["rows"]["1"]["identity"]["node_rank"] = 0
+    step_time["global"]["window"] = {
+        "steps_analyzed": 40,
+        "diagnosis_clock": "gpu",
+    }
+    out = render_training_report(payload)
+    assert (
+        '<p class="cap">Step timing &middot; Median R1/N0 &middot; '
+        "CUDA events</p>"
+    ) in out
+    assert _tree(out) == [
+        ("Step Time", "101.0&thinsp;ms"),
+        ("├─ Input Wait", "21.0&thinsp;ms"),
+        ("└─ Compute", "75.0&thinsp;ms"),
+    ]
+    assert "20.0&thinsp;ms" not in out
+    assert "19.0&thinsp;ms" not in out
+
+
+@pytest.mark.parametrize(
+    ("clock", "text"), [("cpu", "CPU wall clock"), ("gpu", "CUDA events")]
+)
+def test_clock_is_named_for_its_source(
+    make_payload, make_section, clock, text
+) -> None:
+    payload = _payload(make_payload, make_section)
+    payload["step_time"]["global"]["window"]["diagnosis_clock"] = clock
+    out = render_training_report(payload)
+    assert f'<p class="cap">Step timing &middot; {text}</p>' in out
+
+
+def test_headline_is_the_terminal_why(make_payload, make_section) -> None:
+    payload = _payload(make_payload, make_section)
+    payload["step_time"]["diagnosis"]["share_pct"] = 0.97
+    why, _action = run_why_and_next(
+        payload["primary_diagnosis"], payload["step_time"]
+    )
+    assert why == "Input Wait took 97% of Step Time."
+    out = render_training_report(payload)
+    assert f"<h1>{why}</h1>" in out
+    assert _INPUT_BOUND["summary"] not in out
+
+
+def test_tree_error_renders_muted(make_payload) -> None:
+    payload = make_payload(primary_diagnosis=_INPUT_BOUND)
+    payload["step_time"]["global"]["median"]["step_time_ms"] = {
+        "value": None,
+        "idx": None,
+    }
+    out = render_training_report(payload)
+    assert (
+        '<p class="cap muted">STEP TIMING unavailable: no median rank was '
+        "selected.</p>"
+    ) in out
+    assert "<table>" not in out
+
+
+def test_missing_step_time_section_renders_not_available(
+    make_payload, make_section
+) -> None:
+    payload = _payload(make_payload, make_section)
+    del payload["step_time"]
+    out = render_training_report(payload)
+    assert '<p class="cap muted">Step timing not available.</p>' in out
+    assert "<table>" not in out
+    assert "steps analyzed" not in out
 
 
 def test_card_reuses_the_full_report_palette(
@@ -241,7 +421,8 @@ def test_insufficient_data_card_uses_info_tier_and_claims_no_share(
     assert 'class="chip info">INSUFFICIENT STEP-TIME DATA</span>' in out
     assert "Not enough completed step-time samples" in out
     assert "% of" not in out
-    assert "<svg" not in out
+    assert "<table>" not in out
+    assert "Step timing not available." in out
 
 
 def test_card_without_primary_diagnosis_shows_neutral_chip_only(
@@ -258,28 +439,28 @@ def test_card_without_primary_diagnosis_shows_neutral_chip_only(
     assert "Balanced memory." not in out
 
 
-def test_unmeasured_step_time_is_stated_once_in_the_table(
+def test_unmeasured_step_time_draws_no_tree(
     make_payload, make_section
 ) -> None:
     average = dict(_INPUT_BOUND_AVERAGE, step_time_ms=None)
     out = render_training_report(
         _payload(make_payload, make_section, average=average)
     )
-    assert "<svg" not in out
-    assert "Step time: Not measured" not in out
-    assert "<tr><td>Step time</td><td>Not measured</td></tr>" in out
-    assert out.count("Step time") == 1
+    assert "<table>" not in out
+    assert "Not measured" not in out
+    assert '<p class="cap muted">Step timing not available.</p>' in out
 
 
-def test_measured_zero_step_time_renders_zero_not_not_measured(
+def test_measured_zero_phase_renders_zero_and_unmeasured_is_omitted(
     make_payload, make_section
 ) -> None:
-    average = dict(_INPUT_BOUND_AVERAGE, step_time_ms=0.0)
+    average = dict(_INPUT_BOUND_AVERAGE, residual_ms=0.0, forward_ms=None)
     out = render_training_report(
         _payload(make_payload, make_section, average=average)
     )
-    assert "<tr><td>Step time</td><td>0.0&thinsp;ms</td></tr>" in out
-    assert "<tr><td>Step time</td><td>Not measured</td></tr>" not in out
+    assert ("└─ Residual", "0.0&thinsp;ms") in _tree(out)
+    assert "Forward" not in out
+    assert "Not measured" not in out
 
 
 def test_zero_steps_and_zero_ranks_are_stated_in_coverage(
@@ -300,8 +481,8 @@ def test_zero_steps_and_zero_ranks_are_stated_in_coverage(
     payload["process"]["groups"]["rows"] = {}
     out = render_training_report(payload)
     assert (
-        '<p class="cov">mock-slow &middot; 0/1 rank &middot; 0 common steps '
-        "&middot; CPU clock</p>"
+        '<p class="cov">mock-slow &middot; 0/1 rank &middot; '
+        "0 steps analyzed</p>"
     ) in out
 
 
@@ -315,18 +496,25 @@ def test_card_escapes_payload_strings(make_payload, make_section) -> None:
     assert "a &amp; b" in out
 
 
-def test_card_footer_states_version_schema_and_not_measured_rule(
+def test_card_footer_states_version_and_source_only(
     make_payload, make_section
 ) -> None:
-    out = render_training_report(_payload(make_payload, make_section))
-    assert f"Rendered by TraceML {__version__} &middot; schema 2.0" in out
-    assert "Not measured means no signal, not zero" in out
+    payload = _payload(make_payload, make_section)
+    out = render_training_report(payload)
+    assert f"<footer>Rendered by TraceML {__version__}</footer>" in out
+    assert "schema" not in out
+    assert "Not measured means" not in out
+    labelled = render_training_report(payload, source_label="W&B run")
+    assert (
+        f"<footer>Rendered by TraceML {__version__} &middot; "
+        "W&amp;B run</footer>"
+    ) in labelled
 
 
 def test_card_stays_compact(make_payload, make_section) -> None:
     out = render_training_report(_payload(make_payload, make_section))
-    assert "<svg" in out
-    assert len(out.encode("utf-8")) < 12_000
+    assert "<table>" in out
+    assert len(out.encode("utf-8")) < 8_000
 
 
 def test_fmt_ms_compact_marks_missing_values_not_measured() -> None:
