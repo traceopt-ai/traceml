@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, Mapping, Optional
 
 TRACKER_PREFIX = "traceml"
@@ -49,6 +50,15 @@ METRICS_BY_SECTION = {
 }
 
 SECTIONS = ("system", "process", "step_time", "step_memory")
+
+# The compact-summary fields a tracker helper copies into its run, so runs
+# can be sorted and compared by the verdict and the two step timings.
+_COMPARISON_KEYS = (
+    f"{TRACKER_PREFIX}/primary/status",
+    f"{TRACKER_PREFIX}/step_time/step_time_ms",
+    f"{TRACKER_PREFIX}/step_time/input_wait_ms",
+)
+_NUMERIC_COMPARISON_KEYS = frozenset(_COMPARISON_KEYS[1:])
 
 
 def _set_scalar(out: Dict[str, Any], key: str, value: Any) -> None:
@@ -105,9 +115,46 @@ def compact_summary(
     return out
 
 
+def _is_finite_number(value: Any) -> bool:
+    """Return whether a non-bool number converts to a finite float."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        # An int beyond float range raises OverflowError here.
+        number = float(value)
+    except (OverflowError, TypeError, ValueError):
+        return False
+    return math.isfinite(number)
+
+
+def tracker_comparison_fields(
+    payload: Optional[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    """Return the three run-comparison fields present in a final summary.
+
+    The keys are ``traceml/primary/status``,
+    ``traceml/step_time/step_time_ms`` and
+    ``traceml/step_time/input_wait_ms``, taken from ``compact_summary()``.
+    A field the summary does not carry is left out. A timing that is a bool,
+    not a number, or not convertible to a finite float is left out too, so a
+    tracker never records an unmeasured value as a number.
+    """
+    compact = compact_summary(payload) or {}
+    fields: Dict[str, Any] = {}
+    for key in _COMPARISON_KEYS:
+        if key not in compact:
+            continue
+        value = compact[key]
+        if key in _NUMERIC_COMPARISON_KEYS and not _is_finite_number(value):
+            continue
+        fields[key] = value
+    return fields
+
+
 __all__ = [
     "METRICS_BY_SECTION",
     "SECTIONS",
     "TRACKER_PREFIX",
     "compact_summary",
+    "tracker_comparison_fields",
 ]

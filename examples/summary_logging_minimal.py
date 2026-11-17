@@ -82,10 +82,9 @@ def main() -> None:
     for key, value in sorted(summary.items()):
         print(f"{key}: {value}")
 
-    # W&B:
-    # import wandb
-    # wandb.init(project="my-project")
-    # wandb.log(summary)
+    # W&B: publish the diagnosis card and comparison fields into your run.
+    # from traceml_ai.integrations.wandb import log_training_report
+    # log_training_report()
 
     # MLflow:
     # import mlflow

@@ -270,6 +270,29 @@
         "guide": "user_guide/integrations/wandb-mlflow.md",
         "issues": [323]
       }
+    },
+    {
+      "id": "wandb",
+      "stack": "Weights & Biases",
+      "setup": "Diagnosis report",
+      "recommended_api": "traceml_ai.integrations.wandb.log_training_report()",
+      "guide": "user_guide/integrations/wandb.md",
+      "tested_dependency_range": "The wandb extra declares wandb without a version floor; no W&B client is installed or run in CI.",
+      "coverage": {
+        "cpu": { "status": "Documented recipe", "detail": "unit-tested against a stand-in wandb; real client not run" },
+        "gpu": { "status": "Not applicable", "detail": "tracker export is device-independent" },
+        "single_process": { "status": "Documented recipe", "detail": "unit-tested against a stand-in wandb; no real client in CI" },
+        "multi_process": { "status": "Not claimed", "detail": "primary-rank skip is unit-tested; no matrix evidence" },
+        "multi_node": { "status": "Not claimed", "detail": "no matrix evidence" }
+      },
+      "emitted_signals": "No tracker telemetry is emitted during training; at the end of the run the helper logs the compact diagnosis card and three run-summary fields from the final summary.",
+      "example": "examples/wandb_report_minimal.py",
+      "validation_level": "documented recipe",
+      "limitations": {
+        "guide_label": "W&B guide",
+        "guide": "user_guide/integrations/wandb.md",
+        "issues": []
+      }
     }
   ]
 }

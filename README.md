@@ -332,7 +332,9 @@ Open <http://localhost:8765> while the run is still active. `--epochs` sets
 how long the demo runs; raise it for more time.
 
 TraceML can also export a self-contained HTML report and send its compact
-summary to an existing W&B or MLflow run. See
+summary to an existing W&B or MLflow run. For W&B,
+`traceml_ai.integrations.wandb.log_training_report()` publishes the diagnosis
+card into your run. See
 [W&B and MLflow](https://traceopt-ai.github.io/traceml/user_guide/integrations/wandb-mlflow/)
 and the [complete quickstart](https://traceopt-ai.github.io/traceml/user_guide/quickstart/).
 
