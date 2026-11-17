@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import html
+import math
 from typing import Any
 
 from ..summaries.summary_formatting import bytes_to_gb
@@ -101,4 +102,23 @@ def fmt_value(name: str, value: Any) -> str:
     return f"{value:,.2f}"
 
 
-__all__ = ["esc", "fmt_value", "metric_label"]
+def fmt_ms_compact(value: Any) -> str:
+    """
+    Format a millisecond value for the compact tracker card.
+
+    Missing, non-numeric, boolean, and non-finite values render as
+    ``Not measured`` (never ``0.0``); a measured zero renders as
+    ``0.0&thinsp;ms``. Units use a thin space, as in ``fmt_value``.
+    Returns HTML-safe text with entities already in place: do NOT pass it
+    through ``esc``, which would double-escape them.
+    """
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return "Not measured"
+    if not math.isfinite(value):
+        return "Not measured"
+    if 0 < value < 0.1:
+        return "&lt;0.1&thinsp;ms"
+    return f"{value:,.1f}&thinsp;ms"
+
+
+__all__ = ["esc", "fmt_ms_compact", "fmt_value", "metric_label"]

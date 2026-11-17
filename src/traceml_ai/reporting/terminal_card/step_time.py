@@ -13,6 +13,7 @@ same row; this module never combines independent per-metric medians.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from traceml_ai.reporting.terminal_card.common import (
@@ -335,28 +336,59 @@ def _source_float(source: Mapping[str, Any], metric: str) -> Optional[float]:
     return as_float(source.get(metric))
 
 
-def _median_rank_caption(
+def _median_rank_selection(
     step_time_summary: Mapping[str, Any], identity: Mapping[str, Any]
 ) -> str:
-    """Return the caption for the row selected by median Step Time."""
+    """Return the selection label for the row picked by median Step Time."""
     rank = as_int(identity.get("global_rank"))
     node = as_int(identity.get("node_rank"))
-    clock = clock_label(step_time_summary)
     if rank is None:
-        selection = "Median Rank Unavailable"
-    else:
-        if node is None:
-            node = as_int(
-                identity_for_rank(step_time_summary, rank).get("node_rank")
-            )
-        scope = format_scope(rank=rank, node=node)
-        selection = f"Median {scope}" if scope else "Median Rank Unavailable"
-    return f"STEP TIMING ({selection}), {clock} Clock"
+        return "Median Rank Unavailable"
+    if node is None:
+        node = as_int(
+            identity_for_rank(step_time_summary, rank).get("node_rank")
+        )
+    scope = format_scope(rank=rank, node=node)
+    return f"Median {scope}" if scope else "Median Rank Unavailable"
 
 
-def _compute_children(source: Mapping[str, Any]) -> List[Tuple[str, float]]:
-    """Return measured Compute children from the selected coherent row."""
-    children: List[Tuple[str, float]] = []
+@dataclass(frozen=True)
+class StepTimingRow:
+    """One drawn row of the Run step-timing tree.
+
+    ``glyph`` is the tree prefix exactly as the terminal card prints it,
+    including the ancestor column of Compute's children.
+    """
+
+    label: str
+    metric: str
+    depth: int
+    glyph: str
+    value_ms: float
+    is_cause: bool
+
+
+@dataclass(frozen=True)
+class StepTimingTree:
+    """The Run step-timing tree read from one coherent stored source.
+
+    ``rows`` is empty when ``error`` names why no source was selected, or
+    when the selected source has no positive Step Time. ``clock`` is the
+    raw stored diagnosis clock, ``CPU`` or ``GPU``.
+    """
+
+    rows: Tuple[StepTimingRow, ...]
+    selection: str
+    clock: str
+    error: Optional[str]
+    dataloader_fetch_ms: Optional[float]
+
+
+def _compute_child_rows(
+    source: Mapping[str, Any], *, later_sibling: bool
+) -> List[StepTimingRow]:
+    """Return coherent Forward/Backward/Optimizer rows below Compute."""
+    children: List[Tuple[str, str, float]] = []
     for label, metric in (
         ("Forward", "forward_ms"),
         ("Backward", "backward_ms"),
@@ -364,71 +396,35 @@ def _compute_children(source: Mapping[str, Any]) -> List[Tuple[str, float]]:
     ):
         value = _source_float(source, metric)
         if value is not None:
-            children.append((label, value))
-    return children
-
-
-def _tree_row_text(
-    label: str, *, ms_text: str, share: str, suffix: Optional[str]
-) -> str:
-    """Assemble one fixed-column timing tree row."""
-    text = f"{label:<{_TREE_LABEL_WIDTH}}{ms_text} ms  {share:>4}"
-    if suffix:
-        text = f"{text}  {suffix}"
-    return text
-
-
-def _append_compute_children(
-    doc: CardDoc,
-    *,
-    source: Mapping[str, Any],
-    step_time_ms: float,
-    later_sibling: bool,
-) -> None:
-    """Append coherent Forward/Backward/Optimizer rows below Compute."""
-    children = _compute_children(source)
-    for index, (label, value) in enumerate(children):
-        last = index == len(children) - 1
-        ancestor = "│  " if later_sibling else "   "
-        branch = "└─ " if last else "├─ "
-        doc.text(
-            _tree_row_text(
-                f"{ancestor}{branch}{label}",
-                ms_text=format_ms(value),
-                share=format_share(value, step_time_ms),
-                suffix=None,
+            children.append((label, metric, value))
+    ancestor = "│  " if later_sibling else "   "
+    rows: List[StepTimingRow] = []
+    for index, (label, metric, value) in enumerate(children):
+        branch = "└─ " if index == len(children) - 1 else "├─ "
+        rows.append(
+            StepTimingRow(
+                label=label,
+                metric=metric,
+                depth=2,
+                glyph=f"{ancestor}{branch}",
+                value_ms=value,
+                is_cause=False,
             )
         )
+    return rows
 
 
-def _culprit_suffix() -> str:
-    """Return the bound-phase culprit marker text."""
-    return f"{_MARKER}  cause"
-
-
-def build_run_step_time_pane(
-    primary: Mapping[str, Any],
-    step_time_summary: Mapping[str, Any],
-    *,
-    multi: bool,
-    width: int = 78,
-) -> CardDoc:
-    """Build the Run Step Timing pane from the selected stored timing row."""
-    doc = CardDoc(width=width)
-    source, row_identity, error = _timing_source(
-        step_time_summary, multi=multi
-    )
-    if error:
-        doc.wrapped(error, style=STYLE_DIM)
-        return doc
-
+def _tree_rows(
+    primary: Mapping[str, Any], source: Mapping[str, Any]
+) -> List[StepTimingRow]:
+    """Return the timing tree rows in terminal order, cause marked."""
     values = {
         metric: _source_float(source, metric)
         for _label, metric, _depth in _TREE_ROWS
     }
     total = values.get("step_time_ms")
     if total is None or total <= 0.0:
-        return doc
+        return []
 
     kind = str(primary.get("kind") or "")
     present = [
@@ -446,26 +442,103 @@ def build_run_step_time_pane(
         # Its culprit/victim evidence is already stated in Why.
         culprit_metric = None
 
-    culprit_style = severity_style(primary.get("severity"))
-    caption = (
-        _median_rank_caption(step_time_summary, row_identity)
-        if multi
-        else f"STEP TIMING (Window Average), {clock_label(step_time_summary)} Clock"
-    )
-    doc.text(caption, STYLE_BOLD)
-
+    rows: List[StepTimingRow] = []
     for label, metric, depth in present:
-        value = values[metric]
-        glyph = _tree_glyph(depth, last_by_depth.get(depth) == metric)
-        suffix = (
-            _culprit_suffix()
-            if metric == culprit_metric and metric != "step_time_ms"
-            else None
+        rows.append(
+            StepTimingRow(
+                label=label,
+                metric=metric,
+                depth=depth,
+                glyph=_tree_glyph(depth, last_by_depth.get(depth) == metric),
+                value_ms=float(values[metric] or 0.0),
+                is_cause=(
+                    metric == culprit_metric and metric != "step_time_ms"
+                ),
+            )
         )
+        if metric == "compute_ms":
+            rows.extend(
+                _compute_child_rows(
+                    source,
+                    later_sibling=any(
+                        values.get(name) is not None
+                        for name in ("h2d_ms", "residual_ms")
+                    ),
+                )
+            )
+    return rows
+
+
+def step_timing_tree(
+    primary: Mapping[str, Any],
+    step_time_summary: Mapping[str, Any],
+    *,
+    multi: bool,
+) -> StepTimingTree:
+    """Select the Run timing source once and return its drawn tree.
+
+    Shared by the terminal card and the compact tracker card, so both state
+    the same rows, order, selection and cause from the stored payload.
+    """
+    source, row_identity, error = _timing_source(
+        step_time_summary, multi=multi
+    )
+    selection = (
+        _median_rank_selection(step_time_summary, row_identity)
+        if multi
+        else "Window Average"
+    )
+    return StepTimingTree(
+        rows=() if error else tuple(_tree_rows(primary, source)),
+        selection=selection,
+        clock=clock_label(step_time_summary),
+        error=error,
+        dataloader_fetch_ms=_source_float(source, "dataloader_fetch_cpu_ms"),
+    )
+
+
+def _tree_row_text(
+    label: str, *, ms_text: str, share: str, suffix: Optional[str]
+) -> str:
+    """Assemble one fixed-column timing tree row."""
+    text = f"{label:<{_TREE_LABEL_WIDTH}}{ms_text} ms  {share:>4}"
+    if suffix:
+        text = f"{text}  {suffix}"
+    return text
+
+
+def _culprit_suffix() -> str:
+    """Return the bound-phase culprit marker text."""
+    return f"{_MARKER}  cause"
+
+
+def build_run_step_time_pane(
+    primary: Mapping[str, Any],
+    step_time_summary: Mapping[str, Any],
+    *,
+    multi: bool,
+    width: int = 78,
+) -> CardDoc:
+    """Build the Run Step Timing pane from the selected stored timing row."""
+    doc = CardDoc(width=width)
+    tree = step_timing_tree(primary, step_time_summary, multi=multi)
+    if tree.error:
+        doc.wrapped(tree.error, style=STYLE_DIM)
+        return doc
+    if not tree.rows:
+        return doc
+
+    # The first row is always Step Time: rows exist only when it is positive.
+    total = tree.rows[0].value_ms
+    culprit_style = severity_style(primary.get("severity"))
+    doc.text(f"STEP TIMING ({tree.selection}), {tree.clock} Clock", STYLE_BOLD)
+
+    for row in tree.rows:
+        suffix = _culprit_suffix() if row.is_cause else None
         text = _tree_row_text(
-            f"{glyph}{label}",
-            ms_text=format_ms(float(value or 0.0)),
-            share=format_share(value, total),
+            f"{row.glyph}{row.label}",
+            ms_text=format_ms(row.value_ms),
+            share=format_share(row.value_ms, total),
             suffix=suffix,
         )
         if suffix:
@@ -473,27 +546,21 @@ def build_run_step_time_pane(
         else:
             doc.text(text)
 
-        if metric == "compute_ms":
-            _append_compute_children(
-                doc,
-                source=source,
-                step_time_ms=total,
-                later_sibling=any(
-                    values.get(name) is not None
-                    for name in ("h2d_ms", "residual_ms")
-                ),
-            )
-
-    fetch = _source_float(source, "dataloader_fetch_cpu_ms")
-    if fetch is not None:
-        doc.text(f"DataLoader fetch: {fetch:.1f} ms (CPU, supplemental)")
+    if tree.dataloader_fetch_ms is not None:
+        doc.text(
+            f"DataLoader fetch: {tree.dataloader_fetch_ms:.1f} ms "
+            "(CPU, supplemental)"
+        )
     return doc
 
 
 __all__ = [
     "PHASE_SHARE_KINDS",
     "STRAGGLER_KINDS",
+    "StepTimingRow",
+    "StepTimingTree",
     "build_run_step_time_pane",
     "format_run_why",
     "run_why_and_next",
+    "step_timing_tree",
 ]
