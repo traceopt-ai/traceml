@@ -415,6 +415,9 @@ def _start_runtime_for_init(
         ),
         timeout_sec=connect_timeout_sec,
         poll_interval_sec=connect_retry_interval_sec,
+        # An older aggregator hangs up at once, so only a silent listener
+        # waits this long.
+        reply_timeout_sec=connect_timeout_sec,
     )
     if probe.status == lifecycle.PROBE_UNREACHABLE:
         raise RuntimeError(
@@ -424,15 +427,21 @@ def _start_runtime_for_init(
             "or call traceml.init(disabled=True) to run without tracing."
         )
     if probe.status == lifecycle.PROBE_REFUSED and probe.ack is not None:
-        differs = {"session_id": "session id", "run_nonce": "launch"}.get(
-            str(probe.ack.reason), str(probe.ack.reason)
-        )
+        if probe.ack.reason == "run_nonce":
+            why = (
+                f"another launch of run '{probe.ack.session_id}' "
+                "(TRACEML_RUN_NONCE differs; this process may have "
+                "inherited it from an earlier `traceml run`)"
+            )
+        else:
+            why = (
+                f"session '{probe.ack.session_id}', and this process uses "
+                f"'{settings.session_id}'"
+            )
         raise RuntimeError(
-            f"The TraceML aggregator at {host}:{port} serves another run "
-            f"(its session is '{probe.ack.session_id}', this process uses "
-            f"'{settings.session_id}'; the {differs} differs), so it would "
-            "drop this run's telemetry. Point init() at this run's "
-            "aggregator, or start this script with that session id."
+            f"The TraceML aggregator at {host}:{port} serves {why}, so it "
+            "would drop this run's telemetry. Point init() at this run's "
+            "aggregator, or give this script the matching session id."
         )
     if probe.status != lifecycle.PROBE_ADMITTED:
         if probe.status != lifecycle.PROBE_NO_REPLY:

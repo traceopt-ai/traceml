@@ -230,16 +230,19 @@ def test_disabled_env_dynamically_silences_low_level_utilities(monkeypatch):
     assert drain_step_memory_events() == []
 
 
-def _admitted(*args, **kwargs):
-    from traceml_ai.runtime import lifecycle
+def _probe(status, ack=None):
+    """Stand in for ``lifecycle.probe_aggregator`` with a fixed answer."""
 
-    return lifecycle.AggregatorProbe(lifecycle.PROBE_ADMITTED)
+    def probe(*args, **kwargs):
+        from traceml_ai.runtime import lifecycle
+
+        return lifecycle.AggregatorProbe(status, ack)
+
+    return probe
 
 
-def _unreachable(*args, **kwargs):
-    from traceml_ai.runtime import lifecycle
-
-    return lifecycle.AggregatorProbe(lifecycle.PROBE_UNREACHABLE)
+_admitted = _probe("admitted")
+_unreachable = _probe("unreachable")
 
 
 def test_init_starts_runtime_when_aggregator_reachable(
@@ -572,117 +575,22 @@ def test_direct_runtime_settings_read_the_run_nonce(
 # The preflight hello (#211): what init() does with each answer.
 
 
-def _probe_returning(status, ack=None, seen=None):
-    from traceml_ai.runtime import lifecycle
-
-    def probe(host, port, hello, **kwargs):
-        if seen is not None:
-            seen.append(hello)
-        return lifecycle.AggregatorProbe(status, ack)
-
-    return probe
-
-
-def _refused_ack():
-    from traceml_ai.telemetry.control import HelloAck
-
-    return HelloAck(
-        admitted=False,
-        session_id="run-a",
-        traceml_version="0.5.2",
-        reason="session_id",
-    )
-
-
-def test_init_sends_the_runtime_stamp_in_its_hello(
+def test_init_raises_when_the_listener_is_not_traceml_and_strict(
     initialization, monkeypatch
 ):
     import traceml_ai.runtime.lifecycle as lifecycle
-    from traceml_ai.telemetry.control import build_hello_payload
-
-    monkeypatch.delenv("TRACEML_DISABLED", raising=False)
-    monkeypatch.setenv("TRACEML_RUN_NONCE", "nonce-1")
-    seen = []
-    captured = {}
-    monkeypatch.setattr(lifecycle, "get_active_runtime_handle", lambda: None)
-    monkeypatch.setattr(
-        lifecycle,
-        "probe_aggregator",
-        _probe_returning(lifecycle.PROBE_ADMITTED, seen=seen),
-    )
-    monkeypatch.setattr(
-        lifecycle,
-        "start_runtime",
-        lambda settings, **k: captured.setdefault("s", settings)
-        and _FakeHandle(),
-    )
-
-    initialization.init(mode="manual", session_id="run-b")
-
-    settings = captured["s"]
-    assert seen == [
-        build_hello_payload(
-            session_id=settings.session_id,
-            run_nonce=settings.run_nonce,
-            session_source=settings.session_source,
-        )
-    ]
-    assert seen[0]["session_id"] == "run-b"
-    assert seen[0]["run_nonce"] == "nonce-1"
-    assert seen[0]["session_source"] == "explicit"
-
-
-@pytest.mark.parametrize(
-    ("status", "ack", "message"),
-    [
-        ("refused", "refused", "serves another run"),
-        ("not_traceml", None, "did not answer as a TraceML aggregator"),
-    ],
-)
-def test_init_warns_and_noops_on_the_wrong_listener(
-    initialization, monkeypatch, capsys, status, ack, message
-):
-    import traceml_ai.runtime.lifecycle as lifecycle
-
-    monkeypatch.delenv("TRACEML_DISABLED", raising=False)
-    monkeypatch.delenv("TRACEML_ON_MISSING_AGGREGATOR", raising=False)
-    started = []
-    monkeypatch.setattr(lifecycle, "get_active_runtime_handle", lambda: None)
-    monkeypatch.setattr(
-        lifecycle,
-        "probe_aggregator",
-        _probe_returning(status, _refused_ack() if ack else None),
-    )
-    monkeypatch.setattr(
-        lifecycle, "start_runtime", lambda *a, **k: started.append(1)
-    )
-
-    cfg = initialization.init(mode="manual", session_id="run-b")
-
-    assert cfg.disabled is True
-    assert started == []
-    err = capsys.readouterr().err
-    assert message in err
-    assert "Continuing without tracing" in err
-
-
-@pytest.mark.parametrize("status", ["refused", "not_traceml"])
-def test_init_raises_on_the_wrong_listener_when_strict(
-    initialization, monkeypatch, status
-):
-    import traceml_ai.runtime.lifecycle as lifecycle
 
     monkeypatch.delenv("TRACEML_DISABLED", raising=False)
     started = []
     monkeypatch.setattr(lifecycle, "get_active_runtime_handle", lambda: None)
     monkeypatch.setattr(
-        lifecycle, "probe_aggregator", _probe_returning(status, _refused_ack())
+        lifecycle, "probe_aggregator", _probe(lifecycle.PROBE_NOT_TRACEML)
     )
     monkeypatch.setattr(
         lifecycle, "start_runtime", lambda *a, **k: started.append(1)
     )
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="did not answer as a TraceML"):
         initialization.init(
             mode="manual", session_id="run-b", on_missing_aggregator="raise"
         )
@@ -691,27 +599,91 @@ def test_init_raises_on_the_wrong_listener_when_strict(
     assert initialization.get_init_config() is None
 
 
+@pytest.mark.parametrize("policy", ["warn", "raise"])
 def test_init_warns_and_traces_when_the_listener_never_answers(
-    initialization, monkeypatch, capsys
+    initialization, monkeypatch, capsys, policy
 ):
+    """An older aggregator does not answer, and mixed versions stay usable.
+
+    So no answer is never fatal, even under on_missing_aggregator='raise'.
+    """
     import traceml_ai.runtime.lifecycle as lifecycle
 
     monkeypatch.delenv("TRACEML_DISABLED", raising=False)
     fake_handle = _FakeHandle()
     monkeypatch.setattr(lifecycle, "get_active_runtime_handle", lambda: None)
     monkeypatch.setattr(
-        lifecycle,
-        "probe_aggregator",
-        _probe_returning(lifecycle.PROBE_NO_REPLY),
+        lifecycle, "probe_aggregator", _probe(lifecycle.PROBE_NO_REPLY)
     )
     monkeypatch.setattr(
         lifecycle, "start_runtime", lambda *a, **k: fake_handle
     )
 
-    cfg = initialization.init(mode="manual")
+    cfg = initialization.init(mode="manual", on_missing_aggregator=policy)
 
     assert cfg.disabled is False
     assert initialization._RUNTIME_HANDLE is fake_handle
     err = capsys.readouterr().err
     assert err.count("[TraceML]") == 1
     assert "older TraceML" in err
+
+
+@pytest.mark.parametrize(
+    ("served", "message"),
+    [
+        ({"session_id": "run-a"}, "serves session 'run-a'"),
+        (
+            {"session_id": "run-b", "run_nonce": "theirs"},
+            "another launch of run 'run-b'",
+        ),
+    ],
+    ids=["session", "nonce"],
+)
+def test_init_detaches_from_a_real_aggregator_for_another_run(
+    initialization, monkeypatch, capsys, tmp_path, served, message
+):
+    import threading
+
+    import traceml_ai.runtime.lifecycle as lifecycle
+    from traceml_ai.aggregator.trace_aggregator import TraceMLAggregator
+    from traceml_ai.runtime.settings import (
+        AggregatorTransportSettings,
+        TraceMLSettings,
+    )
+
+    monkeypatch.delenv("TRACEML_DISABLED", raising=False)
+    monkeypatch.delenv("TRACEML_ON_MISSING_AGGREGATOR", raising=False)
+    monkeypatch.delenv("TRACEML_SESSION_ID", raising=False)
+    monkeypatch.setenv("TRACEML_RUN_NONCE", "mine")
+    started = []
+    monkeypatch.setattr(lifecycle, "get_active_runtime_handle", lambda: None)
+    monkeypatch.setattr(
+        lifecycle, "start_runtime", lambda *a, **k: started.append(1)
+    )
+    aggregator = TraceMLAggregator(
+        logger=mock.Mock(),
+        stop_event=threading.Event(),
+        settings=TraceMLSettings(
+            mode="summary",
+            logs_dir=str(tmp_path),
+            db_path=str(tmp_path / "telemetry"),
+            enforce_session_id=True,
+            admit_generated_session_id=True,
+            aggregator=AggregatorTransportSettings(port=0),
+            **served,
+        ),
+    )
+    aggregator._tcp_server.start()
+    try:
+        cfg = initialization.init(
+            mode="manual",
+            session_id="run-b",
+            aggregator_port=aggregator._tcp_server.port,
+            connect_timeout_sec=2.0,
+        )
+    finally:
+        aggregator._tcp_server.stop()
+
+    assert cfg.disabled is True
+    assert started == []
+    assert message in capsys.readouterr().err

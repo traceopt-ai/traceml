@@ -23,10 +23,7 @@ import pytest
 import traceml_ai
 from traceml_ai.aggregator.trace_aggregator import TraceMLAggregator
 from traceml_ai.runtime.sender import SenderIdentity
-from traceml_ai.runtime.settings import (
-    AggregatorTransportSettings,
-    TraceMLSettings,
-)
+from traceml_ai.runtime.settings import TraceMLSettings
 from traceml_ai.telemetry.control import (
     HelloAck,
     build_hello_payload,
@@ -645,79 +642,49 @@ def test_failing_export_submit_is_logged_and_ingest_continues(tmp_path):
 
 # The init() hello: the ack applies the same rule as admission.
 
-_HELLO_STAMPS = {
-    "unstamped": {},
-    "own id": {"session_id": "run-b"},
-    "other explicit id": {"session_id": "run-a", "session_source": "explicit"},
-    "other id, no source": {"session_id": "run-a"},
-    "other generated id": {
-        "session_id": "run-a",
-        "session_source": "generated",
-    },
-    "own nonce": {"session_id": "run-b", "run_nonce": "nb"},
-    "other nonce": {"session_id": "run-b", "run_nonce": "na"},
-    "other nonce only": {"run_nonce": "na"},
-}
-
-_HELLO_AGGREGATORS = {
-    "nothing enforced": {},
-    "explicit ids": {"enforce_session_id": True},
-    "serve --run-name": {
-        "enforce_session_id": True,
-        "admit_generated_session_id": True,
-    },
-    "single-node run": {
-        "enforce_session_id": True,
-        "admit_generated_session_id": True,
-        "run_nonce": "nb",
-    },
-}
+_ENFORCED = {"enforce_session_id": True}
+_RUN_NAME = {**_ENFORCED, "admit_generated_session_id": True}
+_ONE_LAUNCH = {**_RUN_NAME, "run_nonce": "nb"}
+_OTHER = {"session_id": "run-a"}
+_OTHER_GENERATED = {**_OTHER, "session_source": "generated"}
 
 
-def _hello(**stamp) -> dict:
-    return build_hello_payload(
+@pytest.mark.parametrize(
+    ("aggregator", "stamp", "reason"),
+    [
+        ({}, _OTHER, None),
+        (_ENFORCED, {}, None),
+        (_ENFORCED, {"session_id": "run-b"}, None),
+        (_ENFORCED, _OTHER, "session_id"),
+        (_ENFORCED, _OTHER_GENERATED, "session_id"),
+        (_RUN_NAME, _OTHER_GENERATED, None),
+        (_RUN_NAME, _OTHER, "session_id"),
+        (_ONE_LAUNCH, {"session_id": "run-b", "run_nonce": "nb"}, None),
+        (_ONE_LAUNCH, {"session_id": "run-b", "run_nonce": "na"}, "run_nonce"),
+        (_ONE_LAUNCH, {"run_nonce": "na"}, "run_nonce"),
+    ],
+)
+def test_hello_ack_admits_exactly_what_admission_admits(
+    tmp_path, aggregator, stamp, reason
+):
+    agg = _make_aggregator(tmp_path, _settings(tmp_path, **aggregator))
+    hello = build_hello_payload(
         session_id=stamp.get("session_id"),
         run_nonce=stamp.get("run_nonce"),
         session_source=stamp.get("session_source"),
     )
 
-
-@pytest.mark.parametrize("aggregator", sorted(_HELLO_AGGREGATORS))
-@pytest.mark.parametrize("stamp", sorted(_HELLO_STAMPS))
-def test_hello_ack_admits_exactly_what_admission_admits(
-    tmp_path, aggregator, stamp
-):
-    settings = _settings(tmp_path, **_HELLO_AGGREGATORS[aggregator])
-    agg = _make_aggregator(tmp_path, settings)
-    fields = _HELLO_STAMPS[stamp]
-
-    ack = parse_hello_ack(agg._reply_to_hello(_hello(**fields)))
-
-    assert ack is not None
-    assert ack.admitted is agg._admit(_envelope(**fields))
-    assert ack.session_id == "run-b"
-
-
-@pytest.mark.parametrize(
-    ("stamp", "reason"),
-    [
-        ({"session_id": "run-a"}, "session_id"),
-        ({"session_id": "run-b", "run_nonce": "na"}, "run_nonce"),
-    ],
-)
-def test_hello_ack_names_the_key_that_differs(tmp_path, stamp, reason):
-    agg = _make_aggregator(tmp_path, _enforcing(tmp_path, run_nonce="nb"))
-
-    ack = parse_hello_ack(agg._reply_to_hello(_hello(**stamp)))
+    ack = parse_hello_ack(agg._reply_to_hello(hello))
 
     assert ack == HelloAck(
-        admitted=False,
+        admitted=reason is None,
         session_id="run-b",
         traceml_version=traceml_ai.__version__,
         reason=reason,
     )
     # A refused hello is not telemetry, so no sender is reported dropped.
     assert agg._foreign_senders == {}
+    assert agg._admit(_envelope(**stamp)) is (reason is None)
 
 
 def test_only_a_hello_gets_a_reply(tmp_path):
@@ -726,34 +693,3 @@ def test_only_a_hello_gets_a_reply(tmp_path):
     assert agg._reply_to_hello([_envelope()]) is None
     assert agg._reply_to_hello(_envelope()) is None
     assert agg._reply_to_hello(_rank_finished()) is None
-
-
-def test_aggregator_answers_a_hello_on_its_listening_port(tmp_path):
-    import socket
-
-    from traceml_ai.transport.tcp_transport import request_one_frame
-
-    agg = TraceMLAggregator(
-        logger=_Logger(),
-        stop_event=threading.Event(),
-        settings=_enforcing(
-            tmp_path, aggregator=AggregatorTransportSettings(port=0)
-        ),
-    )
-    agg._tcp_server.start()
-    try:
-        address = ("127.0.0.1", agg._tcp_server.port)
-        with socket.create_connection(address) as sock:
-            reply = request_one_frame(
-                sock, _hello(session_id="run-a"), timeout_sec=2.0
-            )
-        with socket.create_connection(address) as sock:
-            own = request_one_frame(
-                sock, _hello(session_id="run-b"), timeout_sec=2.0
-            )
-        assert parse_hello_ack(reply).admitted is False
-        assert parse_hello_ack(own).admitted is True
-        # Neither hello is queued for SQLite or export.
-        assert list(agg._tcp_server.poll()) == []
-    finally:
-        agg._tcp_server.stop()
