@@ -20,33 +20,11 @@ comparison fields into your existing run with one call,
 
 ## MLflow
 
-Add this snippet after training finishes, inside your active MLflow run.
-`traceml.summary()` returns a flat dictionary of diagnosis fields and average
-metrics. By default, it returns `None` on non-primary ranks, so the export
-runs only on the primary rank.
+The [MLflow integration](mlflow.md) publishes the diagnosis card and three
+comparison values into your existing run with one call,
+`log_training_report()`.
 
-MLflow stores numeric values as metrics and diagnosis strings as tags:
-
-```python
-import traceml_ai as traceml
-import mlflow
-
-# After training, inside your active MLflow run:
-summary = traceml.summary()
-if summary is not None:
-    metrics = {
-        key: value for key, value in summary.items()
-        if isinstance(value, (int, float)) and not isinstance(value, bool)
-    }
-    tags = {
-        key.replace("/", "."): value for key, value in summary.items()
-        if isinstance(value, str)
-    }
-    mlflow.log_metrics(metrics)
-    mlflow.set_tags(tags)
-```
-
-### Save the full report
+## Save the full report
 
 Keep `logs/<run_name>/final_summary.json` for local comparison or CI. You can
 also attach it using your tracker's artifact API. For an active MLflow run:
@@ -62,7 +40,8 @@ its compact projection. During training, each call requests a fresh snapshot.
 After shutdown, calls reuse the saved report.
 
 A [runnable MLflow example](https://github.com/traceopt-ai/traceml/blob/main/examples/mlflow_summary_minimal.py)
-logs the summary at the end of a small loop.
+logs the whole compact summary as metrics and tags at the end of a small
+loop.
 
 ## TensorBoard
 
@@ -73,8 +52,8 @@ does not provide a TensorBoard export adapter.
 
 - W&B, MLflow, and TensorBoard do not define TraceML's training boundaries.
   Use automatic trainer instrumentation or the explicit setup for your loop.
-- The W&B helper writes the end-of-run diagnosis only, not live per-step
-  metrics. The MLflow snippet above logs results through MLflow's own API.
+- The W&B and MLflow helpers write the end-of-run diagnosis only, not live
+  per-step metrics.
 - A summary requested during training is a best-effort snapshot. An uploaded
   report can cover fewer steps than the run reached when you requested it.
   See [End-of-run summaries](../public-api.md#end-of-run-summaries).
@@ -85,6 +64,7 @@ does not provide a TensorBoard export adapter.
 ## Next Steps
 
 - [W&B integration](wandb.md)
+- [MLflow integration](mlflow.md)
 - [How to Read Output](../reading-output.md)
 - [Compare Runs](../compare.md)
 - [Catch Regressions in CI](../regression-guard.md)

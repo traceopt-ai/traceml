@@ -265,3 +265,30 @@ def test_wandb_is_an_optional_extra() -> None:
         for requirement in _optional_dependencies("wandb")
     }
     assert "wandb" in extra_names, "wandb not found in the wandb extra"
+
+
+def test_mlflow_extra_requires_skinny_with_the_full_package_pin() -> None:
+    """The mlflow extra must accept both the skinny and the full package."""
+    runtime_names = {
+        _requirement_name(requirement)
+        for requirement in _runtime_dependencies()
+    }
+    assert not runtime_names & {
+        "mlflow",
+        "mlflow-skinny",
+    }, "mlflow belongs in the mlflow extra, not the base install"
+
+    for requirement in _optional_dependencies("mlflow"):
+        if _requirement_name(requirement) != "mlflow-skinny":
+            continue
+
+        specifier = _version_specifier(requirement).replace(" ", "")
+        assert ">=2.15" in specifier, (
+            f"the mlflow extra declares {requirement!r} without the 2.15 "
+            "floor from which the full mlflow package pins mlflow-skinny"
+        )
+        return
+
+    pytest.fail(
+        "mlflow-skinny not found in the mlflow optional dependency group"
+    )

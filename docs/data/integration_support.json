@@ -293,6 +293,29 @@
         "guide": "user_guide/integrations/wandb.md",
         "issues": []
       }
+    },
+    {
+      "id": "mlflow",
+      "stack": "MLflow",
+      "setup": "Diagnosis report",
+      "recommended_api": "traceml_ai.integrations.mlflow.log_training_report()",
+      "guide": "user_guide/integrations/mlflow.md",
+      "tested_dependency_range": "The mlflow extra requires mlflow-skinny>=2.15; no MLflow client is installed or run in CI.",
+      "coverage": {
+        "cpu": { "status": "Documented recipe", "detail": "unit-tested against a stand-in client and a real SQLite-backed client locally; no server in CI" },
+        "gpu": { "status": "Not applicable", "detail": "tracker export is device-independent" },
+        "single_process": { "status": "Documented recipe", "detail": "unit-tested against a stand-in client; real SQLite-backed client run locally only" },
+        "multi_process": { "status": "Not claimed", "detail": "primary-rank skip is unit-tested; no matrix evidence" },
+        "multi_node": { "status": "Not claimed", "detail": "no matrix evidence" }
+      },
+      "emitted_signals": "No tracker telemetry is emitted during training; at the end of the run the helper logs the compact diagnosis card as an HTML artifact, two step-time metrics and the primary status tag from the final summary.",
+      "example": "examples/mlflow_report_minimal.py",
+      "validation_level": "documented recipe",
+      "limitations": {
+        "guide_label": "MLflow guide",
+        "guide": "user_guide/integrations/mlflow.md",
+        "issues": []
+      }
     }
   ]
 }
