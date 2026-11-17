@@ -1,5 +1,6 @@
 import errno
 import socket
+import struct
 import time
 
 import pytest
@@ -9,7 +10,11 @@ from traceml_ai.transport.tcp_transport import (
     TCPConfig,
     TCPServer,
     bind_exclusive_listener,
+    NoReplyError,
+    request_one_frame,
 )
+from traceml_ai.utils.msgpack_codec import Decoder as MsgpackDecoder
+from traceml_ai.utils.msgpack_codec import encode as encode_msgpack
 
 
 class _FakeSocket:
@@ -238,3 +243,143 @@ def test_open_connections_tracks_peers_until_they_close() -> None:
             if sock is not None:
                 sock.close()
         server.stop()
+
+
+def _frame(payload) -> bytes:
+    data = encode_msgpack(payload)
+    return struct.pack("!I", len(data)) + data
+
+
+def _read_frame(sock: socket.socket):
+    sock.settimeout(2.0)
+    header = b""
+    while len(header) < 4:
+        header += sock.recv(4 - len(header))
+    (length,) = struct.unpack("!I", header)
+    body = b""
+    while len(body) < length:
+        body += sock.recv(length - len(body))
+    return MsgpackDecoder().decode(body)
+
+
+def _reply_to_ping(message):
+    return {"pong": 1} if message == {"ping": 1} else None
+
+
+def test_first_frame_reply_is_sent_and_never_queued() -> None:
+    server = TCPServer(
+        TCPConfig(host="127.0.0.1", port=0), first_frame_reply=_reply_to_ping
+    )
+    server.start()
+    try:
+        with socket.create_connection(("127.0.0.1", server.port)) as sock:
+            sock.sendall(_frame({"ping": 1}))
+            assert _read_frame(sock) == {"pong": 1}
+
+            # Only the first frame of a connection is offered for a reply.
+            sock.sendall(_frame({"ping": 1}))
+            assert server.wait_for_data(timeout=2.0)
+            assert list(server.poll()) == [{"ping": 1}]
+    finally:
+        server.stop()
+
+
+def test_first_frame_without_a_reply_is_queued_and_nothing_is_sent() -> None:
+    server = TCPServer(
+        TCPConfig(host="127.0.0.1", port=0), first_frame_reply=_reply_to_ping
+    )
+    server.start()
+    try:
+        with socket.create_connection(("127.0.0.1", server.port)) as sock:
+            sock.sendall(_frame([{"row": 1}]))
+            assert server.wait_for_data(timeout=2.0)
+            assert list(server.poll()) == [[{"row": 1}]]
+
+            sock.settimeout(0.3)
+            with pytest.raises(socket.timeout):
+                sock.recv(1)
+    finally:
+        server.stop()
+
+
+def test_request_one_frame_returns_the_decoded_reply() -> None:
+    server = TCPServer(
+        TCPConfig(host="127.0.0.1", port=0), first_frame_reply=_reply_to_ping
+    )
+    server.start()
+    try:
+        with socket.create_connection(("127.0.0.1", server.port)) as sock:
+            reply = request_one_frame(sock, {"ping": 1}, timeout_sec=2.0)
+        assert reply == {"pong": 1}
+    finally:
+        server.stop()
+
+
+def _listener(handle) -> tuple[socket.socket, int]:
+    """Accept one connection on a thread and pass it to ``handle``."""
+    import threading
+
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+
+    def run():
+        conn, _ = server.accept()
+        with conn:
+            handle(conn)
+
+    threading.Thread(target=run, daemon=True).start()
+    return server, server.getsockname()[1]
+
+
+def _read_to_eof(conn: socket.socket) -> None:
+    """Read until the client half-closes, as a request/response server does."""
+    conn.settimeout(2.0)
+    while conn.recv(1024):
+        pass
+
+
+@pytest.mark.parametrize(
+    "handle",
+    [
+        lambda conn: time.sleep(1.0),  # stays silent
+        _read_to_eof,  # hangs up without a word, as an older aggregator does
+    ],
+    ids=["silent", "hangs-up"],
+)
+def test_request_one_frame_reports_no_reply(handle) -> None:
+    server, port = _listener(handle)
+    try:
+        with socket.create_connection(("127.0.0.1", port)) as sock:
+            started = time.monotonic()
+            with pytest.raises(NoReplyError):
+                request_one_frame(sock, {"ping": 1}, timeout_sec=0.3)
+            assert time.monotonic() - started < 1.0
+    finally:
+        server.close()
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        b"HTTP/1.1 400 Bad Request\r\n\r\n",  # a huge declared length
+        struct.pack("!I", 3) + b"\xc1\xc1\xc1",  # not msgpack
+        struct.pack("!I", 10) + b"abc",  # closes mid-frame
+    ],
+    ids=["http", "not-msgpack", "cut-short"],
+)
+def test_request_one_frame_rejects_a_non_traceml_answer(
+    answer: bytes,
+) -> None:
+    def handle(conn):
+        # Answering only after EOF proves the request half-closes.
+        _read_to_eof(conn)
+        conn.sendall(answer)
+
+    server, port = _listener(handle)
+    try:
+        with socket.create_connection(("127.0.0.1", port)) as sock:
+            with pytest.raises(ValueError):
+                request_one_frame(sock, {"ping": 1}, timeout_sec=2.0)
+    finally:
+        server.close()

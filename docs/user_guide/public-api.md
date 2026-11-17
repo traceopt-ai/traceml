@@ -303,6 +303,12 @@ Launcher startup and in-script initialization have different defaults:
 | `traceml run` / `traceml watch` | Stop before launching training. |
 | Explicit `traceml.init()` | Retry within a bounded timeout, warn, and continue with tracing disabled. |
 
+`traceml.init()` also asks the listener on the port whether it is a TraceML
+aggregator that accepts this run. A program that is not TraceML, or an
+aggregator serving another explicit session ID, is handled like a missing
+aggregator. An aggregator from a release before this check does not answer,
+so `init()` prints one warning and keeps tracing.
+
 To let the launcher continue without telemetry:
 
 ```bash

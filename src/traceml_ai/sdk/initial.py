@@ -377,14 +377,18 @@ def _start_runtime_for_init(
 
     No-op when a runtime is already active in this process (for example one
     started by the ``traceml run`` executor), which keeps the CLI path working
-    even if user code also calls ``traceml.init()``. Otherwise this verifies the
-    aggregator is reachable within a bounded window and raises a clear error if
-    it is not.
+    even if user code also calls ``traceml.init()``. Otherwise this sends the
+    aggregator a hello within a bounded window. It raises a clear error when
+    nothing listens, when the listener is not a TraceML aggregator, or when
+    the aggregator serves another run. A listener that does not answer is
+    most likely an older aggregator, so that case warns and starts the
+    runtime.
     """
     global _RUNTIME_HANDLE, _ATEXIT_REGISTERED
     import atexit
 
     from traceml_ai.runtime import lifecycle
+    from traceml_ai.telemetry.control import build_hello_payload
 
     if lifecycle.get_active_runtime_handle() is not None:
         return  # executor/ray already started the runtime in this process
@@ -401,17 +405,50 @@ def _start_runtime_for_init(
     host = settings.aggregator.connect_host
     port = settings.aggregator.port
 
-    if not lifecycle.wait_for_aggregator(
+    probe = lifecycle.probe_aggregator(
         host,
         port,
+        build_hello_payload(
+            session_id=settings.session_id,
+            run_nonce=settings.run_nonce,
+            session_source=settings.session_source,
+        ),
         timeout_sec=connect_timeout_sec,
         poll_interval_sec=connect_retry_interval_sec,
-    ):
+    )
+    if probe.status == lifecycle.PROBE_UNREACHABLE:
         raise RuntimeError(
             f"TraceML could not reach the aggregator at {host}:{port} "
             f"after {connect_timeout_sec:.0f}s. Start it with "
             "`traceml serve` (matching --aggregator-host/--aggregator-port), "
             "or call traceml.init(disabled=True) to run without tracing."
+        )
+    if probe.status == lifecycle.PROBE_REFUSED and probe.ack is not None:
+        differs = {"session_id": "session id", "run_nonce": "launch"}.get(
+            str(probe.ack.reason), str(probe.ack.reason)
+        )
+        raise RuntimeError(
+            f"The TraceML aggregator at {host}:{port} serves another run "
+            f"(its session is '{probe.ack.session_id}', this process uses "
+            f"'{settings.session_id}'; the {differs} differs), so it would "
+            "drop this run's telemetry. Point init() at this run's "
+            "aggregator, or start this script with that session id."
+        )
+    if probe.status != lifecycle.PROBE_ADMITTED:
+        if probe.status != lifecycle.PROBE_NO_REPLY:
+            raise RuntimeError(
+                f"Something is listening on {host}:{port}, but it did not "
+                "answer as a TraceML aggregator. Check what holds the port, "
+                "or start `traceml serve` on a free one."
+            )
+        import sys
+
+        print(
+            f"[TraceML] The listener on {host}:{port} did not answer "
+            "TraceML's hello. An older TraceML aggregator does not answer "
+            "it, so tracing continues. If no telemetry arrives, check what "
+            "holds that port.",
+            file=sys.stderr,
         )
 
     _RUNTIME_HANDLE = lifecycle.start_runtime(settings, fail_open=False)
@@ -457,8 +494,9 @@ def init(
     Initialize TraceML for the current Python process and start its runtime.
 
     This installs the requested instrumentation patches, starts the TraceML
-    runtime (background samplers + telemetry) in-process, and verifies that the
-    aggregator is reachable over TCP. When TraceML is already running in this
+    runtime (background samplers + telemetry) in-process, and checks that the
+    listener on the aggregator port is a TraceML aggregator that would admit
+    this run's telemetry. When TraceML is already running in this
     process (for example under ``traceml run``), runtime startup is skipped and
     only the instrumentation policy is applied.
 
@@ -510,9 +548,10 @@ def init(
     connect_retry_interval_sec:
         Delay between aggregator connection attempts.
     on_missing_aggregator:
-        Policy when the aggregator is unreachable (or the runtime fails to
-        start): 'warn' (default) emits one stderr warning and continues as a
-        no-op so instrumentation never crashes training; 'raise' fails hard.
+        Policy when the aggregator is unreachable, is not a TraceML
+        aggregator, or serves another run (or the runtime fails to start):
+        'warn' (default) emits one stderr warning and continues as a no-op so
+        instrumentation never crashes training; 'raise' fails hard.
         Defaults to ``TRACEML_ON_MISSING_AGGREGATOR`` then 'warn'.
 
     Returns
@@ -525,9 +564,10 @@ def init(
     ValueError
         If the init request is invalid.
     RuntimeError
-        If init conflicts with an existing config. Missing aggregators,
-        runtime startup failures, and patch installation failures raise only
-        when ``on_missing_aggregator='raise'``; by default they warn and no-op.
+        If init conflicts with an existing config. Missing or mismatched
+        aggregators, runtime startup failures, and patch installation
+        failures raise only when ``on_missing_aggregator='raise'``; by
+        default they warn and no-op.
 
     Notes
     -----

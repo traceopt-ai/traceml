@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import socket
 import sys
+import time
 from dataclasses import dataclass
 from typing import Any
 from unittest.mock import Mock
@@ -11,6 +12,12 @@ import pytest
 from traceml_ai.runtime import lifecycle
 from traceml_ai.runtime.runtime import TraceMLRuntime
 from traceml_ai.runtime.settings import AggregatorEndpoint, TraceMLSettings
+from traceml_ai.telemetry.control import (
+    build_hello_ack_payload,
+    build_hello_payload,
+    is_hello,
+)
+from traceml_ai.transport.tcp_transport import TCPConfig, TCPServer
 
 
 @dataclass
@@ -298,3 +305,114 @@ def test_runtime_handle_flushes_only_a_live_runtime() -> None:
     noop = lifecycle.RuntimeHandle(lifecycle.NoOpRuntime())
     assert not noop.is_live
     assert noop.flush_pending_telemetry(1.5) is False
+
+
+# probe_aggregator: the init() preflight with the TraceML hello.
+
+_HELLO = build_hello_payload(
+    session_id="run-b", run_nonce=None, session_source="explicit"
+)
+
+
+def _answering_server(admitted: bool) -> TCPServer:
+    def reply(message):
+        if not is_hello(message):
+            return None
+        return build_hello_ack_payload(
+            session_id="run-b",
+            traceml_version="test",
+            mismatch=None if admitted else "session_id",
+        )
+
+    server = TCPServer(
+        TCPConfig(host="127.0.0.1", port=0), first_frame_reply=reply
+    )
+    server.start()
+    return server
+
+
+@pytest.mark.parametrize(
+    ("admitted", "status"),
+    [
+        (True, lifecycle.PROBE_ADMITTED),
+        (False, lifecycle.PROBE_REFUSED),
+    ],
+)
+def test_probe_reports_the_aggregator_ack(admitted, status) -> None:
+    server = _answering_server(admitted)
+    try:
+        probe = lifecycle.probe_aggregator(
+            "127.0.0.1", server.port, _HELLO, timeout_sec=2.0
+        )
+    finally:
+        server.stop()
+
+    assert probe.status == status
+    assert probe.ack is not None
+    assert probe.ack.session_id == "run-b"
+
+
+def _one_shot_listener(handle) -> socket.socket:
+    import threading
+
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+
+    def run():
+        conn, _ = server.accept()
+        with conn:
+            handle(conn)
+
+    threading.Thread(target=run, daemon=True).start()
+    return server
+
+
+def _hang_up(conn: socket.socket) -> None:
+    # What an older aggregator does: read to EOF, then close silently.
+    conn.settimeout(2.0)
+    while conn.recv(1024):
+        pass
+
+
+def _http_error(conn: socket.socket) -> None:
+    _hang_up(conn)
+    conn.sendall(b"HTTP/1.1 400 Bad Request\r\n\r\n")
+
+
+@pytest.mark.parametrize(
+    ("handle", "status"),
+    [
+        (lambda conn: time.sleep(1.0), lifecycle.PROBE_NO_REPLY),
+        (_hang_up, lifecycle.PROBE_NO_REPLY),
+        (_http_error, lifecycle.PROBE_NOT_TRACEML),
+    ],
+    ids=["silent", "hangs-up", "http"],
+)
+def test_probe_reports_a_listener_without_an_ack(handle, status) -> None:
+    server = _one_shot_listener(handle)
+    try:
+        probe = lifecycle.probe_aggregator(
+            "127.0.0.1",
+            server.getsockname()[1],
+            _HELLO,
+            timeout_sec=2.0,
+            reply_timeout_sec=0.3,
+        )
+    finally:
+        server.close()
+
+    assert probe == lifecycle.AggregatorProbe(status)
+
+
+def test_probe_reports_an_unreachable_port() -> None:
+    probe_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    probe_sock.bind(("127.0.0.1", 0))
+    port = probe_sock.getsockname()[1]
+    probe_sock.close()
+
+    probe = lifecycle.probe_aggregator(
+        "127.0.0.1", port, _HELLO, timeout_sec=0.3, poll_interval_sec=0.05
+    )
+
+    assert probe == lifecycle.AggregatorProbe(lifecycle.PROBE_UNREACHABLE)

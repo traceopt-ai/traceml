@@ -20,11 +20,18 @@ from pathlib import Path
 
 import pytest
 
+import traceml_ai
 from traceml_ai.aggregator.trace_aggregator import TraceMLAggregator
 from traceml_ai.runtime.sender import SenderIdentity
-from traceml_ai.runtime.settings import TraceMLSettings
+from traceml_ai.runtime.settings import (
+    AggregatorTransportSettings,
+    TraceMLSettings,
+)
 from traceml_ai.telemetry.control import (
+    HelloAck,
+    build_hello_payload,
     build_rank_finished_payload,
+    parse_hello_ack,
     parse_rank_finished,
 )
 from traceml_ai.telemetry.envelope import (
@@ -634,3 +641,119 @@ def test_failing_export_submit_is_logged_and_ingest_continues(tmp_path):
         "[TraceML] ExportWorker.submit failed",
         "[TraceML] ExportWorker.submit failed",
     ]
+
+
+# The init() hello: the ack applies the same rule as admission.
+
+_HELLO_STAMPS = {
+    "unstamped": {},
+    "own id": {"session_id": "run-b"},
+    "other explicit id": {"session_id": "run-a", "session_source": "explicit"},
+    "other id, no source": {"session_id": "run-a"},
+    "other generated id": {
+        "session_id": "run-a",
+        "session_source": "generated",
+    },
+    "own nonce": {"session_id": "run-b", "run_nonce": "nb"},
+    "other nonce": {"session_id": "run-b", "run_nonce": "na"},
+    "other nonce only": {"run_nonce": "na"},
+}
+
+_HELLO_AGGREGATORS = {
+    "nothing enforced": {},
+    "explicit ids": {"enforce_session_id": True},
+    "serve --run-name": {
+        "enforce_session_id": True,
+        "admit_generated_session_id": True,
+    },
+    "single-node run": {
+        "enforce_session_id": True,
+        "admit_generated_session_id": True,
+        "run_nonce": "nb",
+    },
+}
+
+
+def _hello(**stamp) -> dict:
+    return build_hello_payload(
+        session_id=stamp.get("session_id"),
+        run_nonce=stamp.get("run_nonce"),
+        session_source=stamp.get("session_source"),
+    )
+
+
+@pytest.mark.parametrize("aggregator", sorted(_HELLO_AGGREGATORS))
+@pytest.mark.parametrize("stamp", sorted(_HELLO_STAMPS))
+def test_hello_ack_admits_exactly_what_admission_admits(
+    tmp_path, aggregator, stamp
+):
+    settings = _settings(tmp_path, **_HELLO_AGGREGATORS[aggregator])
+    agg = _make_aggregator(tmp_path, settings)
+    fields = _HELLO_STAMPS[stamp]
+
+    ack = parse_hello_ack(agg._reply_to_hello(_hello(**fields)))
+
+    assert ack is not None
+    assert ack.admitted is agg._admit(_envelope(**fields))
+    assert ack.session_id == "run-b"
+
+
+@pytest.mark.parametrize(
+    ("stamp", "reason"),
+    [
+        ({"session_id": "run-a"}, "session_id"),
+        ({"session_id": "run-b", "run_nonce": "na"}, "run_nonce"),
+    ],
+)
+def test_hello_ack_names_the_key_that_differs(tmp_path, stamp, reason):
+    agg = _make_aggregator(tmp_path, _enforcing(tmp_path, run_nonce="nb"))
+
+    ack = parse_hello_ack(agg._reply_to_hello(_hello(**stamp)))
+
+    assert ack == HelloAck(
+        admitted=False,
+        session_id="run-b",
+        traceml_version=traceml_ai.__version__,
+        reason=reason,
+    )
+    # A refused hello is not telemetry, so no sender is reported dropped.
+    assert agg._foreign_senders == {}
+
+
+def test_only_a_hello_gets_a_reply(tmp_path):
+    agg = _make_aggregator(tmp_path, _settings(tmp_path))
+
+    assert agg._reply_to_hello([_envelope()]) is None
+    assert agg._reply_to_hello(_envelope()) is None
+    assert agg._reply_to_hello(_rank_finished()) is None
+
+
+def test_aggregator_answers_a_hello_on_its_listening_port(tmp_path):
+    import socket
+
+    from traceml_ai.transport.tcp_transport import request_one_frame
+
+    agg = TraceMLAggregator(
+        logger=_Logger(),
+        stop_event=threading.Event(),
+        settings=_enforcing(
+            tmp_path, aggregator=AggregatorTransportSettings(port=0)
+        ),
+    )
+    agg._tcp_server.start()
+    try:
+        address = ("127.0.0.1", agg._tcp_server.port)
+        with socket.create_connection(address) as sock:
+            reply = request_one_frame(
+                sock, _hello(session_id="run-a"), timeout_sec=2.0
+            )
+        with socket.create_connection(address) as sock:
+            own = request_one_frame(
+                sock, _hello(session_id="run-b"), timeout_sec=2.0
+            )
+        assert parse_hello_ack(reply).admitted is False
+        assert parse_hello_ack(own).admitted is True
+        # Neither hello is queued for SQLite or export.
+        assert list(agg._tcp_server.poll()) == []
+    finally:
+        agg._tcp_server.stop()
