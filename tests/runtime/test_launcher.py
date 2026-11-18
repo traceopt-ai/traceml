@@ -3985,89 +3985,107 @@ def test_launcher_prints_the_foreign_run_warning_in_cli_mode(
     assert err.count(_FOREIGN_WARNING) == 1
 
 
-@pytest.mark.parametrize("marker", [True, False])
-def test_strict_exporter_startup_failure_is_reported_as_such(
-    monkeypatch, tmp_path, capsys, marker
-) -> None:
+# The aggregator wait: telemetry mode adds the exporter startup budget.
+_AGGREGATOR_WAIT_CASES = [
+    (["--mode", "telemetry", "--exporter", "jsonl"], 25.0),
+    (["--mode", "summary"], 15.0),
+]
+
+
+def _strict_run_args(tmp_path: Path, *cli_args: str):
+    """Write a training script and parse ``traceml run`` for strict-run."""
     script = tmp_path / "train.py"
     script.write_text("print('train')\n", encoding="utf-8")
     args = build_parser().parse_args(
         [
             "run",
             str(script),
-            "--mode",
-            "telemetry",
-            "--exporter",
-            "wandb",
+            *cli_args,
             "--logs-dir",
             str(tmp_path / "logs"),
             "--run-name",
             "strict-run",
-            "--aggregator-port",
-            "43170",
         ]
     )
-    aggregator_dir = tmp_path / "logs" / "strict-run" / "aggregator"
-    aggregator = Mock(pid=10, returncode=1)
-    aggregator.poll.return_value = 1
+    return script, args
 
-    def start_aggregator(**kwargs):
-        if marker:
-            aggregator_dir.mkdir(parents=True, exist_ok=True)
-            (aggregator_dir / "exporter_startup_failed.json").write_text(
-                json.dumps(
-                    {
-                        "status": "error",
-                        "failed_at": launcher_commands.utc_now_iso(),
-                        "reason": "exporter_startup_failed",
-                        "exporter": "wandb",
-                        "error": "[TraceML] WandbExporter.open failed: "
-                        "ValueError('[TraceML] No API key configured')",
-                    }
-                ),
-                encoding="utf-8",
-            )
+
+def _patch_never_listening_owner_launch(
+    monkeypatch, tmp_path: Path, *, on_start=None, stderr_path=None
+) -> dict[str, Mock]:
+    """Patch an owner launch whose aggregator exits and never listens.
+
+    ``on_start`` runs when the aggregator is started. The returned mocks
+    include the started process under ``"aggregator"``.
+    """
+    aggregator = Mock(pid=10, returncode=1, **{"poll.return_value": 1})
+
+    def start_aggregator(**_kwargs):
+        if on_start is not None:
+            on_start()
         return aggregator
 
     aggregator_output = Mock()
     aggregator_output.finish.return_value = ProcessOutputResult(
         stdout_path=None,
-        stderr_path=aggregator_dir / "process.stderr.log",
+        stderr_path=stderr_path,
         stderr_tail=b"",
         warning=None,
     )
-    start_training = Mock()
-    update_manifest = Mock()
+    replacements = {
+        "install_shutdown_handlers": Mock(),
+        "ensure_aggregator_port_free": Mock(),
+        "start_aggregator_process": Mock(side_effect=start_aggregator),
+        "_start_aggregator_output": Mock(return_value=aggregator_output),
+        "wait_for_tcp_listen": Mock(return_value=False),
+        "terminate_process_group": Mock(),
+        "start_training_process": Mock(),
+        "write_code_manifest": Mock(return_value=None),
+        "write_run_manifest": Mock(return_value=tmp_path / "manifest.json"),
+        "update_run_manifest": Mock(),
+    }
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(launcher_commands, "install_shutdown_handlers", Mock())
-    monkeypatch.setattr(
-        launcher_commands, "ensure_aggregator_port_free", Mock()
+    for name, value in replacements.items():
+        monkeypatch.setattr(launcher_commands, name, value)
+    return {**replacements, "aggregator": aggregator}
+
+
+@pytest.mark.parametrize("marker", [True, False])
+def test_strict_exporter_startup_failure_is_reported_as_such(
+    monkeypatch, tmp_path, capsys, marker
+) -> None:
+    script, args = _strict_run_args(
+        tmp_path,
+        "--mode",
+        "telemetry",
+        "--exporter",
+        "wandb",
+        "--aggregator-port",
+        "43170",
     )
-    monkeypatch.setattr(
-        launcher_commands, "start_aggregator_process", start_aggregator
-    )
-    monkeypatch.setattr(
-        launcher_commands,
-        "_start_aggregator_output",
-        Mock(return_value=aggregator_output),
-    )
-    monkeypatch.setattr(
-        launcher_commands, "wait_for_tcp_listen", Mock(return_value=False)
-    )
-    monkeypatch.setattr(launcher_commands, "terminate_process_group", Mock())
-    monkeypatch.setattr(
-        launcher_commands, "start_training_process", start_training
-    )
-    monkeypatch.setattr(
-        launcher_commands, "write_code_manifest", Mock(return_value=None)
-    )
-    monkeypatch.setattr(
-        launcher_commands,
-        "write_run_manifest",
-        Mock(return_value=tmp_path / "manifest.json"),
-    )
-    monkeypatch.setattr(
-        launcher_commands, "update_run_manifest", update_manifest
+    aggregator_dir = tmp_path / "logs" / "strict-run" / "aggregator"
+
+    def write_marker():
+        aggregator_dir.mkdir(parents=True, exist_ok=True)
+        (aggregator_dir / "exporter_startup_failed.json").write_text(
+            json.dumps(
+                {
+                    "status": "error",
+                    "failed_at": launcher_commands.utc_now_iso(),
+                    "reason": "exporter_startup_failed",
+                    "exporter": "wandb",
+                    "error": "[TraceML] WandbExporter.open failed: "
+                    "ValueError('[TraceML] No API key configured')",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    mocks = _patch_never_listening_owner_launch(
+        monkeypatch,
+        tmp_path,
+        on_start=write_marker if marker else None,
+        stderr_path=aggregator_dir / "process.stderr.log",
     )
 
     with pytest.raises(SystemExit) as exc:
@@ -4075,6 +4093,7 @@ def test_strict_exporter_startup_failure_is_reported_as_such(
 
     assert exc.value.code == 1
     stderr = capsys.readouterr().err
+    update_manifest = mocks["update_run_manifest"]
     reason = update_manifest.call_args.kwargs["telemetry_reason"]
     if marker:
         assert reason == "exporter_startup_failed"
@@ -4094,37 +4113,22 @@ def test_strict_exporter_startup_failure_is_reported_as_such(
             "aggregator was not reachable at 127.0.0.1:43170 (exit=1); "
             "training was not started." in stderr
         )
-    start_training.assert_not_called()
+    mocks["start_training_process"].assert_not_called()
 
 
-@pytest.mark.parametrize(
-    ("mode_args", "timeout"),
-    [
-        (["--mode", "telemetry", "--exporter", "jsonl"], 25.0),
-        (["--mode", "summary"], 15.0),
-    ],
-)
+@pytest.mark.parametrize(("mode_args", "timeout"), _AGGREGATOR_WAIT_CASES)
 def test_non_owner_wait_covers_the_exporter_startup_in_telemetry_mode(
     monkeypatch, tmp_path, mode_args, timeout
 ) -> None:
-    script = tmp_path / "train.py"
-    script.write_text("print('train')\n", encoding="utf-8")
-    args = build_parser().parse_args(
-        [
-            "run",
-            str(script),
-            *mode_args,
-            "--logs-dir",
-            str(tmp_path / "logs"),
-            "--aggregator-host",
-            "telemetry.internal",
-            "--nnodes",
-            "2",
-            "--node-rank",
-            "1",
-            "--run-name",
-            "strict-run",
-        ]
+    script, args = _strict_run_args(
+        tmp_path,
+        *mode_args,
+        "--aggregator-host",
+        "telemetry.internal",
+        "--nnodes",
+        "2",
+        "--node-rank",
+        "1",
     )
     wait = Mock(return_value=False)
     monkeypatch.chdir(tmp_path)
@@ -4138,73 +4142,20 @@ def test_non_owner_wait_covers_the_exporter_startup_in_telemetry_mode(
     assert wait.call_args.kwargs["timeout_sec"] == timeout
 
 
-@pytest.mark.parametrize(
-    ("mode_args", "timeout"),
-    [
-        (["--mode", "telemetry", "--exporter", "jsonl"], 25.0),
-        (["--mode", "summary"], 15.0),
-    ],
-)
+@pytest.mark.parametrize(("mode_args", "timeout"), _AGGREGATOR_WAIT_CASES)
 def test_owner_wait_covers_the_exporter_startup_in_telemetry_mode(
     monkeypatch, tmp_path, mode_args, timeout
 ) -> None:
-    script = tmp_path / "train.py"
-    script.write_text("print('train')\n", encoding="utf-8")
-    args = build_parser().parse_args(
-        [
-            "run",
-            str(script),
-            *mode_args,
-            "--logs-dir",
-            str(tmp_path / "logs"),
-            "--run-name",
-            "strict-run",
-            "--aggregator-port",
-            "43171",
-        ]
+    script, args = _strict_run_args(
+        tmp_path, *mode_args, "--aggregator-port", "43171"
     )
-    aggregator = Mock(pid=10, returncode=1)
-    aggregator.poll.return_value = 1
-    aggregator_output = Mock()
-    aggregator_output.finish.return_value = ProcessOutputResult(
-        stdout_path=None,
-        stderr_path=None,
-        stderr_tail=b"",
-        warning=None,
-    )
-    wait = Mock(return_value=False)
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(launcher_commands, "install_shutdown_handlers", Mock())
-    monkeypatch.setattr(
-        launcher_commands, "ensure_aggregator_port_free", Mock()
-    )
-    monkeypatch.setattr(
-        launcher_commands,
-        "start_aggregator_process",
-        Mock(return_value=aggregator),
-    )
-    monkeypatch.setattr(
-        launcher_commands,
-        "_start_aggregator_output",
-        Mock(return_value=aggregator_output),
-    )
-    monkeypatch.setattr(launcher_commands, "wait_for_tcp_listen", wait)
-    monkeypatch.setattr(launcher_commands, "terminate_process_group", Mock())
-    monkeypatch.setattr(launcher_commands, "start_training_process", Mock())
-    monkeypatch.setattr(
-        launcher_commands, "write_code_manifest", Mock(return_value=None)
-    )
-    monkeypatch.setattr(
-        launcher_commands,
-        "write_run_manifest",
-        Mock(return_value=tmp_path / "manifest.json"),
-    )
-    monkeypatch.setattr(launcher_commands, "update_run_manifest", Mock())
+    mocks = _patch_never_listening_owner_launch(monkeypatch, tmp_path)
 
     with pytest.raises(SystemExit):
         launch_process(str(script), args)
 
-    assert wait.call_args.kwargs["proc"] is aggregator
+    wait = mocks["wait_for_tcp_listen"]
+    assert wait.call_args.kwargs["proc"] is mocks["aggregator"]
     assert wait.call_args.kwargs["timeout_sec"] == timeout
 
 
