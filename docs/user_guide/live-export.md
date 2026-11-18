@@ -76,6 +76,39 @@ training. After training starts, export failures and losses remain warnings and
 do not replace the training exit code. In summary mode, export remains optional
 and its initialization failures are warnings because local analysis continues.
 
+When the exporter fails to open in telemetry mode, `traceml run` names it.
+The launcher prints `exporter '<name>' failed to start: <reason>` and that
+training was not started. The run manifest records
+`telemetry_reason: exporter_startup_failed`. The aggregator also leaves the
+reason in `aggregator/exporter_startup_failed.json`. A run that never started
+writes no `finalization_warning.json`. An exporter the aggregator cannot
+build at all, such as `wandb` with any stream selection other than
+`step_time`, is named the same way, in every mode.
+In telemetry mode the launcher waits 10 seconds longer for the aggregator to
+listen, the exporter's startup budget, and so do the other nodes of a
+multi-node run.
+
+At shutdown in telemetry mode, the `wandb` exporter gets up to 30 seconds to
+finish its runs. The `jsonl` exporter and custom exporters keep the ordinary
+export slice of at most 2 seconds, as in the other modes. The close outcome,
+a timeout included, is recorded in `finalization_warning.json`. A close still
+running when the aggregator stops waiting shows there as
+`"close_finished": false`, with a `close_error` that says how long it had.
+The end-of-run deadline still bounds the close: `--finalize-timeout-sec`, and
+the launcher's own limit of that timeout plus 5 seconds. With `wandb` in
+telemetry mode, 2 seconds of that deadline stay reserved for late telemetry
+from the ranks before export takes its share. On Ctrl+C, the launcher gives
+the aggregator 5 seconds before it is killed, so a close can be cut off
+there.
+
+With Ray, `TraceMLRayConfig(stop_timeout_sec=...)` is the whole end-of-run
+deadline, and it must cover the exporter's close. The default of 5 seconds
+gives export half a second, except for `wandb` in telemetry mode, which gets
+3 seconds of them, because 2 seconds stay reserved for late telemetry from
+the ranks. TraceML kills the aggregator actor right after `stop` returns, so a
+close still in flight ends there. Set `stop_timeout_sec` to at least 33 seconds
+to give the `wandb` exporter its full close budget.
+
 For separately launched workers, select telemetry mode on the worker when its
 code may call `traceml.summary()` or `traceml.final_summary()`:
 

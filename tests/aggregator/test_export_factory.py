@@ -438,3 +438,65 @@ def test_failed_factory_is_in_the_error_artifact(tmp_path, value):
     assert error["export"]["exporter_failed"] is True
     assert error["export"]["failed_records"] == 1
     assert error["export"]["written_records"] == 0
+
+
+def test_telemetry_startup_failure_writes_a_marker_and_no_warning(
+    monkeypatch, tmp_path
+):
+    from traceml_ai.runtime import lifecycle
+
+    # Keep the process environment untouched by the in-process start.
+    monkeypatch.setattr(lifecycle, "_apply_settings_env", lambda *a, **k: None)
+    settings = _settings(tmp_path, "no_such_module_xyz:make", mode="telemetry")
+
+    with pytest.raises(ExporterStartupError, match="no_such_module_xyz"):
+        lifecycle.start_aggregator(settings, logger=_Logger())
+
+    aggregator_dir = tmp_path / "logs" / "run" / "aggregator"
+    marker = json.loads(
+        (aggregator_dir / "exporter_startup_failed.json").read_text()
+    )
+    assert marker["status"] == "error"
+    assert marker["reason"] == "exporter_startup_failed"
+    assert marker["exporter"] == "no_such_module_xyz:make"
+    assert "no_such_module_xyz" in marker["error"]
+    assert isinstance(marker["failed_at"], str)
+    assert not list(aggregator_dir.glob("finalization_*.json"))
+
+
+def test_an_exporter_that_cannot_be_built_writes_the_marker(
+    monkeypatch, tmp_path
+):
+    from traceml_ai.runtime import lifecycle
+
+    monkeypatch.setattr(lifecycle, "_apply_settings_env", lambda *a, **k: None)
+    # The launcher accepts this selection; only the wandb exporter rejects
+    # it, when the aggregator builds it.
+    settings = _settings(
+        tmp_path,
+        "wandb",
+        mode="telemetry",
+        export_streams="step_time,system",
+    )
+
+    with pytest.raises(ValueError, match="step_time stream only"):
+        lifecycle.start_aggregator(settings, logger=_Logger())
+
+    aggregator_dir = tmp_path / "logs" / "run" / "aggregator"
+    marker = json.loads(
+        (aggregator_dir / "exporter_startup_failed.json").read_text()
+    )
+    assert marker["reason"] == "exporter_startup_failed"
+    assert marker["exporter"] == "wandb"
+    assert "step_time stream only" in marker["error"]
+    assert not list(aggregator_dir.glob("finalization_*.json"))
+
+
+def test_startup_marker_name_matches_its_launcher_twin():
+    from traceml_ai.aggregator import trace_aggregator
+    from traceml_ai.launcher import manifest
+
+    assert (
+        trace_aggregator._EXPORTER_STARTUP_FAILED_NAME
+        == manifest.EXPORTER_STARTUP_FAILED_NAME
+    )

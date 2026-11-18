@@ -127,18 +127,41 @@ def read_traceml_env() -> dict[str, Any]:
     }
 
 
-def _install_signal_handlers(stop_event: threading.Event) -> None:
+def _install_signal_handlers(stop_event: threading.Event) -> dict[int, Any]:
     """
     Install SIGINT/SIGTERM handlers that request aggregator shutdown.
 
     The handler is intentionally minimal and only signals the main loop to stop.
+    Returns the handlers it replaced, for ``_restore_signal_handlers``.
     """
+    previous = {
+        sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)
+    }
 
     def _handler(signum: int, _frame: Any) -> None:
         stop_event.set()
 
     signal.signal(signal.SIGINT, _handler)
     signal.signal(signal.SIGTERM, _handler)
+    return previous
+
+
+def _restore_signal_handlers(previous: Optional[dict[int, Any]]) -> None:
+    """
+    Put back the Python handlers ``_install_signal_handlers`` replaced.
+
+    A handler installed outside Python (``signal.getsignal`` gave None)
+    cannot be restored from Python, so TraceML's handler stays in place for
+    that signal; it only sets the stop event.
+    """
+    for sig, handler in (previous or {}).items():
+        # None: installed outside Python; signal.signal cannot reinstall it.
+        if handler is None:
+            continue
+        try:
+            signal.signal(sig, handler)
+        except (ValueError, OSError, TypeError):
+            pass
 
 
 def run_aggregator(
@@ -180,7 +203,7 @@ def run_aggregator(
         logger = get_error_logger("TraceMLAggregatorMain")
 
     stop_event = threading.Event()
-    _install_signal_handlers(stop_event)
+    previous_handlers = _install_signal_handlers(stop_event)
 
     handle = None
     err: Optional[BaseException] = None
@@ -217,6 +240,11 @@ def run_aggregator(
             except Exception as stop_exc:
                 if err is None:
                     err = stop_exc
+
+        # The installed handlers only set the stop event, so after a failed
+        # start a hung exporter teardown (wandb's atexit) could not be
+        # interrupted.
+        _restore_signal_handlers(previous_handlers)
 
         print(
             f"[TraceML] Logs saved under: {session_root}",

@@ -25,6 +25,7 @@ from traceml_ai.aggregator.export import (
 )
 from traceml_ai.aggregator.export.wandb_exporter import WandbExporter
 from traceml_ai.aggregator.trace_aggregator import (
+    _EXPORT_FINISH_TIMEOUT_TELEMETRY_SEC,
     _EXPORT_STARTUP_TIMEOUT_SEC,
     TraceMLAggregator,
     _resolve_exporter,
@@ -385,11 +386,18 @@ def test_wandb_is_a_built_in_exporter_name_without_a_re_export():
 
 
 @pytest.mark.parametrize(
-    ("mode", "startup"),
-    [("telemetry", _EXPORT_STARTUP_TIMEOUT_SEC), ("summary", None)],
+    ("mode", "startup", "finish"),
+    [
+        (
+            "telemetry",
+            _EXPORT_STARTUP_TIMEOUT_SEC,
+            _EXPORT_FINISH_TIMEOUT_TELEMETRY_SEC,
+        ),
+        ("summary", None, 1.25),
+    ],
 )
 def test_resolve_exporter_builds_wandb_with_the_run_and_budgets(
-    tmp_path, mode, startup
+    tmp_path, mode, startup, finish
 ):
     settings = _settings(tmp_path, "wandb", mode=mode)
 
@@ -403,7 +411,7 @@ def test_resolve_exporter_builds_wandb_with_the_run_and_budgets(
     assert sink._run_name == "my-run"
     assert sink._expected_world_size == 4
     assert sink._startup_timeout_sec == startup
-    assert sink._finish_timeout_sec == 1.25
+    assert sink._finish_timeout_sec == finish
 
 
 def test_aggregator_passes_the_expected_world_size_to_wandb(tmp_path):
@@ -481,3 +489,26 @@ def test_telemetry_wandb_startup_failure_fails_before_tcp_start(
 
     assert tcp.started is False
     assert agg._started is False
+
+
+@pytest.mark.parametrize(
+    ("exporter", "mode", "finish"),
+    [
+        ("jsonl", "telemetry", None),
+        ("wandb", "telemetry", _EXPORT_FINISH_TIMEOUT_TELEMETRY_SEC),
+        ("wandb", "summary", 1.25),
+        (f"{__name__}:_no_such_factory", "telemetry", None),
+    ],
+)
+def test_aggregator_records_the_finish_timeout_it_gave_the_exporter(
+    tmp_path, exporter, mode, finish
+):
+    agg = TraceMLAggregator(
+        logger=_Logger(),
+        stop_event=threading.Event(),
+        settings=_settings(tmp_path, exporter, mode=mode),
+    )
+
+    assert agg._export_finish_timeout_sec == finish
+    if finish is not None:
+        assert agg._export_worker._exporter._finish_timeout_sec == finish
