@@ -61,7 +61,9 @@ class DatabaseWriter:
         self.flush_every = max(1, int(flush_every))
         self._flush_counter = 0
 
-        session_id = get_session_id()
+        # The runtime sets the run's session id before it builds samplers,
+        # so every writer of a run shares one session folder.
+        session_id = config.session_id or get_session_id()
         rank_dir = _rank_suffix()
 
         # Pathlib-based log root
@@ -88,9 +90,15 @@ class DatabaseWriter:
         """
         return encode_msgpack(row)
 
-    def flush(self):
+    def flush(self, force: bool = False):
         """
         Flush new records from all tables to disk.
+
+        Parameters
+        ----------
+        force : bool, optional
+            Write now, skipping the throttle. The runtime forces the final
+            flush at stop so the last records reach disk.
 
         Notes
         -----
@@ -102,7 +110,7 @@ class DatabaseWriter:
             return
 
         self._flush_counter += 1
-        if self._flush_counter % self.flush_every != 0:
+        if not force and self._flush_counter % self.flush_every != 0:
             return
 
         self.logs_dir.mkdir(parents=True, exist_ok=True)

@@ -95,14 +95,23 @@ class TelemetryPublisher:
                     exc,
                 )
 
-    def publish(self, samplers: Iterable[Any]) -> None:
-        """Flush sampler writers, collect payloads, and send one batch."""
+    def publish(
+        self, samplers: Iterable[Any], *, force_flush: bool = False
+    ) -> None:
+        """
+        Flush sampler writers, collect payloads, and send one batch.
+
+        ``force_flush`` makes the writers skip their write throttle; the
+        runtime sets it on the final publish at stop.
+        """
         sampler_list = list(samplers)
-        self.flush_writers(sampler_list)
+        self.flush_writers(sampler_list, force=force_flush)
         batch = self.collect_payloads(sampler_list)
         self.send_batch(batch)
 
-    def flush_writers(self, samplers: Iterable[Any]) -> None:
+    def flush_writers(
+        self, samplers: Iterable[Any], *, force: bool = False
+    ) -> None:
         """Flush local sampler DB writers, if present."""
         for sampler in samplers:
             db = getattr(sampler, "db", None)
@@ -111,7 +120,7 @@ class TelemetryPublisher:
             if flush is None:
                 continue
             try:
-                flush()
+                flush(force=force)
             except Exception as exc:
                 self._log_exception(
                     f"{self._sampler_name(sampler)}.writer.flush failed",
