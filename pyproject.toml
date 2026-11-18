@@ -104,7 +104,11 @@ deepspeed = [
 ]
 
 wandb = [
-    "wandb",
+    # The diagnosis helper needs only run.log, run.summary and wandb.Html.
+    # The floor is for the live wandb exporter: from 0.28.2 init_timeout
+    # also bounds the backend's retries during run initialization, while
+    # on 0.27.0 wandb.init never returns against an unreachable server.
+    "wandb>=0.28.2",
 ]
 
 mlflow = [

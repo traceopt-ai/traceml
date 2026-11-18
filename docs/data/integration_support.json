@@ -274,18 +274,18 @@
     {
       "id": "wandb",
       "stack": "Weights & Biases",
-      "setup": "Diagnosis report",
-      "recommended_api": "traceml_ai.integrations.wandb.log_training_report()",
+      "setup": "Diagnosis report and live step-time exporter",
+      "recommended_api": "traceml_ai.integrations.wandb.log_training_report(); --exporter wandb",
       "guide": "user_guide/integrations/wandb.md",
-      "tested_dependency_range": "The wandb extra declares wandb without a version floor; no W&B client is installed or run in CI.",
+      "tested_dependency_range": "The wandb extra requires wandb>=0.28.2 for the live exporter; no W&B client is installed or run in CI.",
       "coverage": {
         "cpu": { "status": "Documented recipe", "detail": "unit-tested against a stand-in wandb; real client not run" },
         "gpu": { "status": "Not applicable", "detail": "tracker export is device-independent" },
         "single_process": { "status": "Documented recipe", "detail": "unit-tested against a stand-in wandb; no real client in CI" },
-        "multi_process": { "status": "Not claimed", "detail": "primary-rank skip is unit-tested; no matrix evidence" },
+        "multi_process": { "status": "Not claimed", "detail": "primary-rank skip is unit-tested; the exporter's two-rank launch runs against a stand-in wandb only" },
         "multi_node": { "status": "Not claimed", "detail": "no matrix evidence" }
       },
-      "emitted_signals": "No tracker telemetry is emitted during training; at the end of the run the helper logs the compact diagnosis card and three run-summary fields from the final summary.",
+      "emitted_signals": "With --exporter wandb, the aggregator logs each rank's per-step phase timings into one W&B run per rank, grouped under the TraceML run name; at the end of the run the helper logs the compact diagnosis card and three run-summary fields from the final summary into the user's run.",
       "example": "examples/wandb_report_minimal.py",
       "validation_level": "documented recipe",
       "limitations": {
