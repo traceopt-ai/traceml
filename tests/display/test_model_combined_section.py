@@ -263,9 +263,7 @@ def test_step_time_dashboard_hero_measured_zero_is_not_partial() -> None:
     update_model_combined_section(panel, payload)
 
     # A measured-zero H2D is complete coverage, not partial signals.
-    assert panel["win"].text == (
-        "5 aligned steps · CPU selected"
-    )
+    assert panel["win"].text == "5 aligned steps · CPU selected"
     assert "n/a" not in panel["kpis"]["residual"].content
 
 
@@ -281,9 +279,7 @@ def test_step_time_dashboard_hero_absent_h2d_is_not_partial() -> None:
 
     update_model_combined_section(panel, payload)
 
-    assert panel["win"].text == (
-        "5 aligned steps · CPU selected"
-    )
+    assert panel["win"].text == "5 aligned steps · CPU selected"
     keys = [key for _, key, _ in theme.PHASES]
     by_key = dict(zip(keys, panel["seg_divs"]))
     assert by_key["h2d"].width == "0.000%"
@@ -394,10 +390,7 @@ def test_step_time_dashboard_hero_dark_input_wait_is_not_measured_zero() -> (
     keys = [key for _, key, _ in theme.PHASES]
     control_by_key = dict(zip(keys, control_panel["seg_divs"]))
     assert control_by_key["input_wait"].width == "0.000%"
-    assert (
-        control_panel["win"].text
-        == "5 aligned steps · CPU selected"
-    )
+    assert control_panel["win"].text == "5 aligned steps · CPU selected"
 
 
 def test_step_time_dashboard_hero_dead_run_shows_expired() -> None:
@@ -407,9 +400,7 @@ def test_step_time_dashboard_hero_dead_run_shows_expired() -> None:
     good = _payload(_metrics())
     panel = _panel()
     update_model_combined_section(panel, good)
-    assert panel["win"].text == (
-        "5 aligned steps · CPU selected"
-    )
+    assert panel["win"].text == "5 aligned steps · CPU selected"
     assert panel["kpis"]["median"].content.startswith("110")
 
     # A never-had-data payload (cold start) must NOT clear the panel --
@@ -488,10 +479,7 @@ def test_step_time_dashboard_hero_recovered_phase_restores_its_segment() -> (
     forward_color = dict((k, c) for _, k, c in theme.PHASES)["forward"]
     assert by_key["forward"].background == forward_color
     assert by_key["forward"].width != "0%"
-    assert (
-        panel["win"].text
-        == "5 aligned steps · CPU selected"
-    )
+    assert panel["win"].text == "5 aligned steps · CPU selected"
 
 
 def test_step_time_dashboard_hero_flags_partial_rank_coverage() -> None:
@@ -537,9 +525,7 @@ def test_step_time_dashboard_hero_clears_when_step_time_missing() -> None:
     complete = _payload(_metrics())
     panel = _panel()
     update_model_combined_section(panel, complete)
-    assert panel["win"].text == (
-        "5 aligned steps · CPU selected"
-    )
+    assert panel["win"].text == "5 aligned steps · CPU selected"
     assert panel["kpis"]["median"].content.startswith("110")
 
     no_envelope = _payload(
@@ -576,9 +562,7 @@ def test_step_time_dashboard_hero_uses_diagnosis_metrics() -> None:
     assert panel["seg_labs"][0].text == "IW"
     # input_wait 10 of the 110 ms iteration envelope.
     assert panel["seg_divs"][0].width == "9.091%"
-    assert panel["win"].text == (
-        "5 aligned steps · GPU selected"
-    )
+    assert panel["win"].text == "5 aligned steps · GPU selected"
     assert panel["kpis"]["median"].content.startswith("110")
     assert panel["kpis"]["worst"].content.startswith("210")
     assert not panel["kpis"]["median"].content.startswith("20")
