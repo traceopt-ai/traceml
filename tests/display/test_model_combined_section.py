@@ -657,6 +657,33 @@ def test_multi_process_card_keeps_rank_comparison_tiles() -> None:
     assert "representative r0" in panel["win"].text
 
 
+def test_single_to_multi_rank_transition_updates_label_and_tiles() -> None:
+    panel = _panel()
+    update_model_combined_section(panel, _payload(_metrics()))
+    assert "representative" not in panel["win"].text
+
+    # Same timings, so only the rank count differs from the first window.
+    update_model_combined_section(
+        panel,
+        _payload(_metrics(), per_rank_timing={0: _timing(), 1: _timing()}),
+    )
+
+    assert "representative r0" in panel["win"].text
+    assert "median" in _shown_tiles(panel)
+    assert "step" not in _shown_tiles(panel)
+
+
+def test_missing_step_time_still_applies_rank_layout() -> None:
+    panel = _panel()
+
+    update_model_combined_section(
+        panel, _payload(_metrics(omit=("input_wait", "step_time")))
+    )
+
+    assert panel["win"].text == "CPU selected · Step Time unavailable"
+    assert _shown_tiles(panel) == {"step", "residual"}
+
+
 def test_disjoint_rank_populations_clear_only_the_ribbon() -> None:
     payload = _payload(
         _metrics(

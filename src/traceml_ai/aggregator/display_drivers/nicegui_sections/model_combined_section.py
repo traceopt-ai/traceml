@@ -184,7 +184,10 @@ def _update_kpis(
             else "—"
         )
     )
-    # One process has no rank comparison: show a single Step Time value.
+
+
+def _apply_tile_layout(panel: Dict[str, Any], window: StepTimeWindow) -> None:
+    """Show one Step Time tile for one process, rank tiles for several."""
     tiles = panel["tiles"]
     multi_rank = _is_multi_rank(window)
     single_style = "display:none;" if multi_rank else "display:block;"
@@ -203,6 +206,8 @@ def update_model_combined_section(
     if payload.freshness == "expired" or not window.metrics:
         _clear_view(panel, _EXPIRED_SIG, "window expired")
         return
+    # Rank metadata decides the layout even when Step Time is missing.
+    _apply_tile_layout(panel, window)
     m = _index(window.metrics)
     if "step_time" not in m:
         _clear_view(
@@ -266,6 +271,7 @@ def update_model_combined_section(
         + tuple(sorted(partial_metrics))
         + (
             representative,
+            _is_multi_rank(window),
             round(float(step_time_metric.median_total), 3),
             round(float(step_time_metric.worst_total), 3),
             int(steps_used),
