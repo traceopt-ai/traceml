@@ -230,8 +230,7 @@ def test_step_time_dashboard_hero_renders_sparse_metrics() -> None:
     # The panel updated (no freeze): window label reflects the sparse
     # window and names the missing signal.
     assert (
-        panel["win"].text
-        == "5 aligned steps · CPU selected · partial: "
+        panel["win"].text == "5 aligned steps · CPU selected · partial: "
         "RESIDUAL"
     )
     # H2D is occurrence-driven and absent, so it's plain measured-zero.
@@ -315,9 +314,7 @@ def test_absent_optimizer_step_is_not_a_measured_zero() -> None:
     assert by_key["optimizer_step"].width == "0%"
     assert by_key["optimizer_step"].background == "transparent"
     assert (
-        panel["win"].text
-        == "5 aligned steps · CPU selected · partial: "
-        "OPT"
+        panel["win"].text == "5 aligned steps · CPU selected · partial: " "OPT"
     )
 
 
@@ -467,9 +464,7 @@ def test_step_time_dashboard_hero_recovered_phase_restores_its_segment() -> (
     assert by_key["forward"].width == "0%"
     assert by_key["forward"].background == "transparent"
     assert (
-        panel["win"].text
-        == "5 aligned steps · CPU selected · partial: "
-        "FWD"
+        panel["win"].text == "5 aligned steps · CPU selected · partial: " "FWD"
     )
 
     # Forward starts reporting again.

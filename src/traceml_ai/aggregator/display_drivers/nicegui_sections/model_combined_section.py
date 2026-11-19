@@ -93,9 +93,11 @@ def build_model_combined_section() -> Dict[str, Any]:
                 ("residual", "RESIDUAL SHARE", theme.C_CPU),
                 ("rank", "WORST RANK", "#2e7d32"),
             ]:
-                with ui.element("div").classes("kpi").style(
-                    f"--acc:{acc};"
-                ) as tile:
+                with (
+                    ui.element("div")
+                    .classes("kpi")
+                    .style(f"--acc:{acc};") as tile
+                ):
                     ui.label(lab).classes("klab")
                     kpis[key] = ui.html("—", sanitize=False).classes("kval")
                 tiles[key] = tile
