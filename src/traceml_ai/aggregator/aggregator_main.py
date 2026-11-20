@@ -207,6 +207,7 @@ def run_aggregator(
 
     handle = None
     err: Optional[BaseException] = None
+    exit_code = 0
 
     try:
         logger.info("[TraceML] Starting aggregator")
@@ -280,7 +281,12 @@ def run_aggregator(
                 file=sys.stderr,
             )
             sys.stderr.flush()
-            return 1
+            exit_code = 1
+
+    # Returning from ``finally`` is deprecated (PEP 765) and warns when the
+    # file is compiled on Python 3.14+, so the exit code is returned here.
+    if exit_code:
+        return exit_code
 
     print("\n[TraceML] Aggregator stopped.", file=sys.stderr, flush=True)
     return 0
