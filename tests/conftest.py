@@ -62,9 +62,11 @@ def _contain_traceml_logger_state():
     propagate = logger.propagate
     handlers = list(logger.handlers)
     yield
-    for handler in list(logger.handlers):
-        if handler not in handlers:
-            logger.removeHandler(handler)
-            handler.close()
-    logger.setLevel(level)
-    logger.propagate = propagate
+    try:
+        for handler in list(logger.handlers):
+            if handler not in handlers:
+                logger.removeHandler(handler)
+                handler.close()
+    finally:
+        logger.setLevel(level)
+        logger.propagate = propagate
