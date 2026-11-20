@@ -13,6 +13,7 @@ import signal
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import pytest
 
@@ -24,6 +25,18 @@ import subprocess, sys, time
 gc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
 print(gc.pid, flush=True)
 time.sleep(120)
+"""
+
+
+# Stands in for `traceml run`: starts the aggregator the same way, prints
+# its pid once it listens, then drains its stderr until killed.
+_LAUNCHER_SOURCE = """
+import os
+from traceml_ai.launcher.process import start_aggregator_process
+proc = start_aggregator_process(dict(os.environ), os.getcwd())
+for line in proc.stderr:
+    if b"Aggregator ready" in line:
+        print("PID", proc.pid, flush=True)
 """
 
 
@@ -232,3 +245,39 @@ def test_terminate_process_group_reaps_a_grandchild() -> None:
                 os.kill(pid, 9)
             except Exception:
                 pass
+
+
+def test_aggregator_exits_when_its_launcher_is_killed(tmp_path) -> None:
+    """End to end: a killed launcher must not leave the aggregator behind."""
+    src = str(Path(process_mod.__file__).resolve().parents[2])
+    path = os.pathsep.join(filter(None, (src, os.environ.get("PYTHONPATH"))))
+    env = {
+        **os.environ,
+        "PYTHONPATH": path,
+        "TRACEML_AGGREGATOR_PORT": "0",
+        "TRACEML_LOGS_DIR": str(tmp_path),
+        "TRACEML_FINALIZE_TIMEOUT_SEC": "1",
+    }
+    # The launcher's own stdin stays open, so only a pipe of its own that
+    # dies with it can tell the aggregator it is gone.
+    launcher = subprocess.Popen(
+        [sys.executable, "-c", _LAUNCHER_SOURCE],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        **process_mod.process_group_kwargs(),
+    )
+    aggregator_pid = None
+    try:
+        line = next(s for s in launcher.stdout if s.startswith("PID "))
+        aggregator_pid = int(line.split()[1])
+        launcher.kill()
+        launcher.wait(timeout=10.0)
+
+        assert _wait_gone(aggregator_pid, timeout_sec=20.0)
+    finally:
+        launcher.kill()
+        if aggregator_pid is not None and _pid_alive(aggregator_pid):
+            os.kill(aggregator_pid, 9)
