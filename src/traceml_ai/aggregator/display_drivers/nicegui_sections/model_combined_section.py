@@ -33,6 +33,7 @@ def build_model_combined_section() -> Dict[str, Any]:
     seg_divs: List[Any] = []
     seg_labs: List[Any] = []
     kpis: Dict[str, Any] = {}
+    tiles: Dict[str, Any] = {}
 
     card = ui.element("div").classes("glass reveal")
     card.style(
@@ -85,15 +86,24 @@ def build_model_combined_section() -> Dict[str, Any]:
             .style("gap:11px; margin-top:16px; flex-wrap:wrap;")
         ):
             for key, lab, acc in [
+                ("step", "STEP TIME", theme.C_GPU),
                 ("median", "MEDIAN STEP TIME", theme.C_GPU),
                 ("worst", "WORST STEP TIME", "#512da8"),
                 ("gap", "GAP", "#f9a825"),
                 ("residual", "RESIDUAL SHARE", theme.C_CPU),
                 ("rank", "WORST RANK", "#2e7d32"),
             ]:
-                with ui.element("div").classes("kpi").style(f"--acc:{acc};"):
+                with (
+                    ui.element("div")
+                    .classes("kpi")
+                    .style(f"--acc:{acc};") as tile
+                ):
                     ui.label(lab).classes("klab")
                     kpis[key] = ui.html("—", sanitize=False).classes("kval")
+                tiles[key] = tile
+            # Until the first window says how many ranks there are, keep the
+            # card as it was before this tile existed.
+            tiles["step"].style("display:none;")
 
     return {
         "seg_divs": seg_divs,
@@ -101,6 +111,7 @@ def build_model_combined_section() -> Dict[str, Any]:
         "win": win,
         "verdict": verdict,
         "kpis": kpis,
+        "tiles": tiles,
         "_last_sig": None,
     }
 
@@ -145,6 +156,10 @@ def _clear_ribbon(panel: Dict[str, Any], sig: str, label: str) -> None:
     panel["win"].text = label
 
 
+def _is_multi_rank(window: StepTimeWindow) -> bool:
+    return len(window.rank_universe) > 1
+
+
 def _update_kpis(
     panel: Dict[str, Any],
     window: StepTimeWindow,
@@ -152,9 +167,9 @@ def _update_kpis(
 ) -> None:
     """Update independently valid Step Time KPI values."""
     kpis = panel["kpis"]
-    kpis["median"].content = theme.kval(
-        f"{step_metric.median_total:.0f}", "ms"
-    )
+    step_ms = theme.kval(f"{step_metric.median_total:.0f}", "ms")
+    kpis["step"].content = step_ms
+    kpis["median"].content = step_ms
     kpis["worst"].content = theme.kval(f"{step_metric.worst_total:.0f}", "ms")
     kpis["gap"].content = (
         theme.kval("n/a")
@@ -176,6 +191,17 @@ def _update_kpis(
     )
 
 
+def _apply_tile_layout(panel: Dict[str, Any], window: StepTimeWindow) -> None:
+    """Show one Step Time tile for one process, rank tiles for several."""
+    tiles = panel["tiles"]
+    multi_rank = _is_multi_rank(window)
+    single_style = "display:none;" if multi_rank else "display:block;"
+    multi_style = "display:block;" if multi_rank else "display:none;"
+    tiles["step"].style(single_style)
+    for key in ("median", "worst", "gap", "rank"):
+        tiles[key].style(multi_style)
+
+
 def update_model_combined_section(
     panel: Dict[str, Any], payload: Optional[LiveStepTimeResult]
 ) -> None:
@@ -185,6 +211,8 @@ def update_model_combined_section(
     if payload.freshness == "expired" or not window.metrics:
         _clear_view(panel, _EXPIRED_SIG, "window expired")
         return
+    # Rank metadata decides the layout even when Step Time is missing.
+    _apply_tile_layout(panel, window)
     m = _index(window.metrics)
     if "step_time" not in m:
         _clear_view(
@@ -248,6 +276,7 @@ def update_model_combined_section(
         + tuple(sorted(partial_metrics))
         + (
             representative,
+            _is_multi_rank(window),
             round(float(step_time_metric.median_total), 3),
             round(float(step_time_metric.worst_total), 3),
             int(steps_used),
@@ -284,7 +313,8 @@ def update_model_combined_section(
     steps_text = (
         f"{int(steps_used)} aligned steps · {window.clock.upper()} selected"
     )
-    steps_text += f" · representative r{representative}"
+    if _is_multi_rank(window):
+        steps_text += f" · representative r{representative}"
     if unmeasured or partial_metrics:
         incomplete = set(unmeasured) | set(partial_metrics)
         names = [lab for lab, key, _c in theme.PHASES if key in incomplete]

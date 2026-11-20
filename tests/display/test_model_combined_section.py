@@ -16,6 +16,7 @@ pytest.importorskip("nicegui")
 
 from traceml_ai.aggregator.display_drivers.nicegui_sections import theme
 from traceml_ai.aggregator.display_drivers.nicegui_sections.model_combined_section import (
+    build_model_combined_section,
     update_model_combined_section,
     update_step_verdict,
 )
@@ -193,13 +194,27 @@ def _panel() -> dict:
         "win": _FakeText(),
         "verdict": _FakeText(),
         "kpis": {
+            "step": _FakeHtml(),
             "median": _FakeHtml(),
             "worst": _FakeHtml(),
             "gap": _FakeHtml(),
             "residual": _FakeHtml(),
             "rank": _FakeHtml(),
         },
+        "tiles": {key: _FakeText() for key in _TILE_KEYS},
         "_last_sig": None,
+    }
+
+
+_TILE_KEYS = ("step", "median", "worst", "gap", "residual", "rank")
+
+
+def _shown_tiles(panel: dict) -> set[str]:
+    """Tiles whose last display style does not hide them."""
+    return {
+        key
+        for key, tile in panel["tiles"].items()
+        if not tile.styles or "display:none;" not in tile.styles[-1]
     }
 
 
@@ -216,8 +231,7 @@ def test_step_time_dashboard_hero_renders_sparse_metrics() -> None:
     # The panel updated (no freeze): window label reflects the sparse
     # window and names the missing signal.
     assert (
-        panel["win"].text
-        == "5 aligned steps · CPU selected · representative r0 · partial: "
+        panel["win"].text == "5 aligned steps · CPU selected · partial: "
         "RESIDUAL"
     )
     # H2D is occurrence-driven and absent, so it's plain measured-zero.
@@ -249,9 +263,7 @@ def test_step_time_dashboard_hero_measured_zero_is_not_partial() -> None:
     update_model_combined_section(panel, payload)
 
     # A measured-zero H2D is complete coverage, not partial signals.
-    assert panel["win"].text == (
-        "5 aligned steps · CPU selected · representative r0"
-    )
+    assert panel["win"].text == "5 aligned steps · CPU selected"
     assert "n/a" not in panel["kpis"]["residual"].content
 
 
@@ -267,9 +279,7 @@ def test_step_time_dashboard_hero_absent_h2d_is_not_partial() -> None:
 
     update_model_combined_section(panel, payload)
 
-    assert panel["win"].text == (
-        "5 aligned steps · CPU selected · representative r0"
-    )
+    assert panel["win"].text == "5 aligned steps · CPU selected"
     keys = [key for _, key, _ in theme.PHASES]
     by_key = dict(zip(keys, panel["seg_divs"]))
     assert by_key["h2d"].width == "0.000%"
@@ -304,11 +314,7 @@ def test_absent_optimizer_step_is_not_a_measured_zero() -> None:
     by_key = dict(zip(keys, panel["seg_divs"]))
     assert by_key["optimizer_step"].width == "0%"
     assert by_key["optimizer_step"].background == "transparent"
-    assert (
-        panel["win"].text
-        == "5 aligned steps · CPU selected · representative r0 · partial: "
-        "OPT"
-    )
+    assert panel["win"].text == "5 aligned steps · CPU selected · partial: OPT"
 
 
 def test_dashboard_clears_when_input_wait_makes_step_time_unavailable() -> (
@@ -380,10 +386,7 @@ def test_step_time_dashboard_hero_dark_input_wait_is_not_measured_zero() -> (
     keys = [key for _, key, _ in theme.PHASES]
     control_by_key = dict(zip(keys, control_panel["seg_divs"]))
     assert control_by_key["input_wait"].width == "0.000%"
-    assert (
-        control_panel["win"].text
-        == "5 aligned steps · CPU selected · representative r0"
-    )
+    assert control_panel["win"].text == "5 aligned steps · CPU selected"
 
 
 def test_step_time_dashboard_hero_dead_run_shows_expired() -> None:
@@ -393,9 +396,7 @@ def test_step_time_dashboard_hero_dead_run_shows_expired() -> None:
     good = _payload(_metrics())
     panel = _panel()
     update_model_combined_section(panel, good)
-    assert panel["win"].text == (
-        "5 aligned steps · CPU selected · representative r0"
-    )
+    assert panel["win"].text == "5 aligned steps · CPU selected"
     assert panel["kpis"]["median"].content.startswith("110")
 
     # A never-had-data payload (cold start) must NOT clear the panel --
@@ -461,11 +462,7 @@ def test_step_time_dashboard_hero_recovered_phase_restores_its_segment() -> (
     by_key = dict(zip(keys, panel["seg_divs"]))
     assert by_key["forward"].width == "0%"
     assert by_key["forward"].background == "transparent"
-    assert (
-        panel["win"].text
-        == "5 aligned steps · CPU selected · representative r0 · partial: "
-        "FWD"
-    )
+    assert panel["win"].text == "5 aligned steps · CPU selected · partial: FWD"
 
     # Forward starts reporting again.
     complete = _payload(_metrics())
@@ -474,10 +471,7 @@ def test_step_time_dashboard_hero_recovered_phase_restores_its_segment() -> (
     forward_color = dict((k, c) for _, k, c in theme.PHASES)["forward"]
     assert by_key["forward"].background == forward_color
     assert by_key["forward"].width != "0%"
-    assert (
-        panel["win"].text
-        == "5 aligned steps · CPU selected · representative r0"
-    )
+    assert panel["win"].text == "5 aligned steps · CPU selected"
 
 
 def test_step_time_dashboard_hero_flags_partial_rank_coverage() -> None:
@@ -523,9 +517,7 @@ def test_step_time_dashboard_hero_clears_when_step_time_missing() -> None:
     complete = _payload(_metrics())
     panel = _panel()
     update_model_combined_section(panel, complete)
-    assert panel["win"].text == (
-        "5 aligned steps · CPU selected · representative r0"
-    )
+    assert panel["win"].text == "5 aligned steps · CPU selected"
     assert panel["kpis"]["median"].content.startswith("110")
 
     no_envelope = _payload(
@@ -562,9 +554,7 @@ def test_step_time_dashboard_hero_uses_diagnosis_metrics() -> None:
     assert panel["seg_labs"][0].text == "IW"
     # input_wait 10 of the 110 ms iteration envelope.
     assert panel["seg_divs"][0].width == "9.091%"
-    assert panel["win"].text == (
-        "5 aligned steps · GPU selected · representative r0"
-    )
+    assert panel["win"].text == "5 aligned steps · GPU selected"
     assert panel["kpis"]["median"].content.startswith("110")
     assert panel["kpis"]["worst"].content.startswith("210")
     assert not panel["kpis"]["median"].content.startswith("20")
@@ -611,6 +601,79 @@ def test_ribbon_selects_one_real_representative_rank() -> None:
     assert "representative r0" in panel["win"].text
     assert segments["forward"].width == "10.000%"
     assert segments["residual_proxy"].width == "60.000%"
+
+
+def test_single_process_card_shows_one_step_time_value() -> None:
+    payload = _payload(_metrics())
+    panel = _panel()
+
+    update_model_combined_section(panel, payload)
+
+    assert panel["kpis"]["step"].content.startswith("110")
+    assert _shown_tiles(panel) == {"step", "residual"}
+    assert "representative" not in panel["win"].text
+
+
+def test_multi_process_card_keeps_rank_comparison_tiles() -> None:
+    payload = _payload(
+        _metrics(),
+        per_rank_timing={0: _timing(), 1: _timing()},
+    )
+    panel = _panel()
+
+    update_model_combined_section(panel, payload)
+
+    assert _shown_tiles(panel) == {
+        "median",
+        "worst",
+        "gap",
+        "residual",
+        "rank",
+    }
+    assert "representative r0" in panel["win"].text
+
+
+def test_single_to_multi_rank_transition_updates_label_and_tiles() -> None:
+    panel = _panel()
+    update_model_combined_section(panel, _payload(_metrics()))
+    assert "representative" not in panel["win"].text
+
+    # Same timings, so only the rank count differs from the first window.
+    update_model_combined_section(
+        panel,
+        _payload(_metrics(), per_rank_timing={0: _timing(), 1: _timing()}),
+    )
+
+    assert "representative r0" in panel["win"].text
+    assert "median" in _shown_tiles(panel)
+    assert "step" not in _shown_tiles(panel)
+
+    update_model_combined_section(panel, _payload(_metrics()))
+
+    assert "representative" not in panel["win"].text
+    assert _shown_tiles(panel) == {"step", "residual"}
+
+
+def test_card_starts_with_the_rank_tiles_before_any_window() -> None:
+    panel = build_model_combined_section()
+
+    hidden = {
+        key
+        for key, tile in panel["tiles"].items()
+        if tile._style.get("display") == "none"
+    }
+    assert hidden == {"step"}
+
+
+def test_missing_step_time_still_applies_rank_layout() -> None:
+    panel = _panel()
+
+    update_model_combined_section(
+        panel, _payload(_metrics(omit=("input_wait", "step_time")))
+    )
+
+    assert panel["win"].text == "CPU selected · Step Time unavailable"
+    assert _shown_tiles(panel) == {"step", "residual"}
 
 
 def test_disjoint_rank_populations_clear_only_the_ribbon() -> None:
