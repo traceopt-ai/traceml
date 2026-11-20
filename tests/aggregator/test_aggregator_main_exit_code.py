@@ -14,6 +14,10 @@ from traceml_ai.runtime.settings import AggregatorEndpoint, TraceMLSettings
 def test_run_aggregator_exits_zero_after_a_clean_shutdown(
     tmp_path, monkeypatch, capsys
 ):
+    # run_aggregator writes both to os.environ; pin them so pytest restores
+    # them after this test.
+    monkeypatch.setenv("TRACEML_LOGS_DIR", str(tmp_path))
+    monkeypatch.setenv("TRACEML_SESSION_ID", "run")
     monkeypatch.setattr(
         aggregator_main, "_install_signal_handlers", lambda _event: None
     )
