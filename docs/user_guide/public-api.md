@@ -183,13 +183,16 @@ behavior.
 
 `--enable-logging` enables best-effort raw logs from the sampler writers in
 each training rank. Each sampler appends length-prefixed MessagePack records
-to `rank_<N>/data/<Sampler>/<Table>.msgpack` inside a generated session folder
-under the logs directory. Writers flush periodically, so short runs may
-produce no file, final records may be absent, and the generated folder may
-differ from the run's session folder. These limitations are tracked in
-[#580](https://github.com/traceopt-ai/traceml/issues/580). The same setting
-comes from `enable_logging: true` in `traceml.yaml` or
-`TRACEML_ENABLE_LOGGING=1`; when it is off, no `.msgpack` files are written.
+to `rank_<N>/data/<Sampler>/<Table>.msgpack` inside the run's session folder
+under the logs directory, beside `final_summary.json`. Writers append every
+100 sampler ticks and once more when TraceML stops, so a short run that
+stops normally still writes its files. A killed process loses the records
+since the last periodic write. Between writes each table holds its most
+recent 3,000 rows, so a table that gains more rows than that between two
+writes, such as step time on a fast loop, keeps only the most recent ones.
+The same setting comes from
+`enable_logging: true` in `traceml.yaml` or `TRACEML_ENABLE_LOGGING=1`; when
+it is off, no `.msgpack` files are written.
 
 The training processes write these files, so with `traceml serve` the flag
 does not reach them. Set `TRACEML_ENABLE_LOGGING=1` in the training

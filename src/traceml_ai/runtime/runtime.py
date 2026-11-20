@@ -402,7 +402,9 @@ class TraceMLRuntime:
                 "[TraceML] WARNING: sampler thread did not terminate"
             )
 
-        self._publisher.publish(self._samplers)
+        # Final publish: the writers skip their throttle so raw logs keep
+        # the records since their last periodic write.
+        self._publisher.publish(self._samplers, force_flush=True)
         self._publisher.send_control(
             build_rank_finished_payload(
                 global_rank=self.identity.global_rank,

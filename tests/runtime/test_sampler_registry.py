@@ -59,7 +59,7 @@ class _FakePublisher:
     def __init__(self) -> None:
         self.published: list[tuple[str, ...]] = []
 
-    def publish(self, samplers) -> None:
+    def publish(self, samplers, *, force_flush=False) -> None:
         self.published.append(
             tuple(getattr(s, "sampler_name", "") for s in samplers)
         )
@@ -595,7 +595,7 @@ class _SignallingPublisher(_FakePublisher):
     def send_control(self, payload) -> None:
         return None
 
-    def publish(self, samplers) -> None:
+    def publish(self, samplers, *, force_flush=False) -> None:
         if (
             self.hold_from is not None
             and len(self.published) >= self.hold_from
@@ -604,7 +604,7 @@ class _SignallingPublisher(_FakePublisher):
         if self.raise_next:
             self.raise_next = False
             raise RuntimeError("publish boom")
-        super().publish(samplers)
+        super().publish(samplers, force_flush=force_flush)
         self.published_event.set()
 
 
