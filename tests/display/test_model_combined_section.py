@@ -16,6 +16,7 @@ pytest.importorskip("nicegui")
 
 from traceml_ai.aggregator.display_drivers.nicegui_sections import theme
 from traceml_ai.aggregator.display_drivers.nicegui_sections.model_combined_section import (
+    build_model_combined_section,
     update_model_combined_section,
     update_step_verdict,
 )
@@ -313,9 +314,7 @@ def test_absent_optimizer_step_is_not_a_measured_zero() -> None:
     by_key = dict(zip(keys, panel["seg_divs"]))
     assert by_key["optimizer_step"].width == "0%"
     assert by_key["optimizer_step"].background == "transparent"
-    assert (
-        panel["win"].text == "5 aligned steps · CPU selected · partial: " "OPT"
-    )
+    assert panel["win"].text == "5 aligned steps · CPU selected · partial: OPT"
 
 
 def test_dashboard_clears_when_input_wait_makes_step_time_unavailable() -> (
@@ -463,9 +462,7 @@ def test_step_time_dashboard_hero_recovered_phase_restores_its_segment() -> (
     by_key = dict(zip(keys, panel["seg_divs"]))
     assert by_key["forward"].width == "0%"
     assert by_key["forward"].background == "transparent"
-    assert (
-        panel["win"].text == "5 aligned steps · CPU selected · partial: " "FWD"
-    )
+    assert panel["win"].text == "5 aligned steps · CPU selected · partial: FWD"
 
     # Forward starts reporting again.
     complete = _payload(_metrics())
@@ -650,6 +647,22 @@ def test_single_to_multi_rank_transition_updates_label_and_tiles() -> None:
     assert "representative r0" in panel["win"].text
     assert "median" in _shown_tiles(panel)
     assert "step" not in _shown_tiles(panel)
+
+    update_model_combined_section(panel, _payload(_metrics()))
+
+    assert "representative" not in panel["win"].text
+    assert _shown_tiles(panel) == {"step", "residual"}
+
+
+def test_card_starts_with_the_rank_tiles_before_any_window() -> None:
+    panel = build_model_combined_section()
+
+    hidden = {
+        key
+        for key, tile in panel["tiles"].items()
+        if tile._style.get("display") == "none"
+    }
+    assert hidden == {"step"}
 
 
 def test_missing_step_time_still_applies_rank_layout() -> None:

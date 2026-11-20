@@ -101,6 +101,9 @@ def build_model_combined_section() -> Dict[str, Any]:
                     ui.label(lab).classes("klab")
                     kpis[key] = ui.html("—", sanitize=False).classes("kval")
                 tiles[key] = tile
+            # Until the first window says how many ranks there are, keep the
+            # card as it was before this tile existed.
+            tiles["step"].style("display:none;")
 
     return {
         "seg_divs": seg_divs,

@@ -535,15 +535,14 @@ def test_canonical_surface_values_share_one_step_time_contract(
         def style(self, _value: str) -> "_Element":
             return self
 
+    tile_keys = ("step", "median", "worst", "gap", "residual", "rank")
     dashboard = {
         "seg_divs": [_Element() for _ in theme.PHASES],
         "seg_labs": [_Element() for _ in theme.PHASES],
         "win": _Element(),
         "verdict": _Element(),
-        "kpis": {
-            key: _Element()
-            for key in ("median", "worst", "gap", "residual", "rank")
-        },
+        "kpis": {key: _Element() for key in tile_keys},
+        "tiles": {key: _Element() for key in tile_keys},
         "_last_sig": None,
     }
     model_combined_section.update_model_combined_section(dashboard, live)
