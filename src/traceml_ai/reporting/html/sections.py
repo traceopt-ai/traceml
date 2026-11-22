@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+from ..terminal_card.common import plural
 from .banner import severity_tier
 from .sections_helpers import sorted_rows
 from .svg import memory_bars, phase_bar
@@ -23,6 +24,7 @@ _TITLES = {
     "process": "Process",
 }
 _BY_LABEL = {"global_rank": "rank", "node_rank": "node"}
+_IDX_PREFIX = {"global_rank": "r", "node_rank": "n"}
 _BADGE = {"crit": "CRIT", "warn": "WARN"}
 _OPEN_ROW_LIMIT = 8
 
@@ -55,12 +57,14 @@ def _diag_cards(section: Dict[str, Any]) -> str:
     return "".join(_diag_card(i) for i in issues if isinstance(i, dict))
 
 
-def _metric_cell(entry: Any, name: str) -> str:
+def _metric_cell(entry: Any, name: str, prefix: str = "r") -> str:
     """A median/worst cell is a {value, idx} object; average is a scalar."""
     if isinstance(entry, dict):
         idx = entry.get("idx")
         suffix = (
-            f' <span class="idx">r{esc(idx)}</span>' if idx is not None else ""
+            f' <span class="idx">{prefix}{esc(idx)}</span>'
+            if idx is not None
+            else ""
         )
         return f'{fmt_value(name, entry.get("value"))}{suffix}'
     return fmt_value(name, entry)
@@ -74,13 +78,16 @@ def _global_table(section: Dict[str, Any]) -> str:
     avg = glob.get("average") or {}
     median = glob.get("median") or {}
     worst = glob.get("worst") or {}
+    prefix = _IDX_PREFIX.get(str(glob.get("index_by") or ""), "r")
     rows: List[str] = []
     for name in metric_names:
         rows.append(
             f'<tr><td class="metric">{esc(metric_label(name))}</td>'
             f'<td class="num">{_metric_cell(avg.get(name), name)}</td>'
-            f'<td class="num">{_metric_cell(median.get(name), name)}</td>'
-            f'<td class="num">{_metric_cell(worst.get(name), name)}</td></tr>'
+            f'<td class="num">'
+            f"{_metric_cell(median.get(name), name, prefix)}</td>"
+            f'<td class="num">'
+            f"{_metric_cell(worst.get(name), name, prefix)}</td></tr>"
         )
     if not rows:
         return ""
@@ -147,7 +154,7 @@ def _section_card(
     by = _BY_LABEL.get(
         str((section.get("groups") or {}).get("by") or ""), "rank"
     )
-    sub = f"{n_rows} {by}s" if n_rows else "no data"
+    sub = plural(n_rows, by) if n_rows else "no data"
     return (
         f'<section class="card"><h3>{esc(_TITLES.get(name, name))}</h3>'
         f'<div class="sub">{esc(sub)}</div>'

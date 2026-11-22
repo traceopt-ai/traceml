@@ -84,3 +84,38 @@ def test_missing_section_does_not_crash(make_payload) -> None:
 
 def test_render_html_report_includes_sections(make_payload) -> None:
     assert "Step time" in render_html_report(make_payload())
+
+
+def test_node_section_marks_median_and_worst_as_nodes(
+    make_payload, make_section
+) -> None:
+    system = make_section(
+        metric_names=["cpu_percent"],
+        average={"cpu_percent": 93.6},
+        by="node_rank",
+    )
+    out = render_sections(make_payload(system=system))
+    system_card = out[out.index("<h3>System</h3>") :]
+    system_card = system_card[: system_card.index("</section>")]
+    assert '<span class="idx">n0</span>' in system_card
+    assert '<span class="idx">r0</span>' not in system_card
+
+
+def test_section_subtitle_uses_singular_for_one_row(
+    make_payload, make_section
+) -> None:
+    system = make_section(
+        metric_names=["cpu_percent"],
+        average={"cpu_percent": 93.6},
+        by="node_rank",
+        rows={
+            "0": {
+                "identity": {"node_rank": 0, "hostname": "h0"},
+                "metrics": {"cpu_percent": 93.6},
+            },
+        },
+    )
+    out = render_sections(make_payload(system=system))
+    assert '<div class="sub">1 node</div>' in out
+    assert '<div class="sub">1 rank</div>' in out
+    assert '<div class="sub">2 ranks</div>' in out
