@@ -1175,12 +1175,15 @@ def test_settle_is_skipped_without_history_or_export(monkeypatch, tmp_path):
 _OLD_EXPORT_STOP_CAP_SEC = 2.0
 
 
-class _SlowCloseExporter:
-    """``close`` sleeps, then raises ``error`` when one is given."""
+class _CloseExporter:
+    """``close`` blocks until ``release`` when ``block``, sleeps ``delay``,
+    then raises ``error`` when one is given."""
 
-    def __init__(self, delay, error=None):
+    def __init__(self, *, delay=0.0, error=None, block=False):
         self._delay = delay
         self._error = error
+        self._block = block
+        self.release = threading.Event()
         self.closed = False
 
     def open(self):
@@ -1193,10 +1196,25 @@ class _SlowCloseExporter:
         return None
 
     def close(self, *, dropped_batches=0):
+        if self._block:
+            self.release.wait(60)
         time.sleep(self._delay)
         self.closed = True
         if self._error is not None:
             raise self._error
+
+
+def _telemetry_mode(agg, *, finish_timeout_sec=30.0, **settings):
+    """Put ``agg`` in telemetry mode with history off.
+
+    The default ``finish_timeout_sec`` is the wandb exporter's telemetry
+    close bound.
+    """
+    agg._settings = replace(
+        agg._settings, mode="telemetry", history_enabled=False, **settings
+    )
+    agg._export_finish_timeout_sec = finish_timeout_sec
+    return agg
 
 
 def _telemetry_aggregator(monkeypatch, tmp_path, exporter):
@@ -1204,45 +1222,39 @@ def _telemetry_aggregator(monkeypatch, tmp_path, exporter):
     from traceml_ai.aggregator.export import ExportWorker
 
     agg, _, _ = _export_aggregator(monkeypatch, tmp_path, worker=False)
-    agg._settings = replace(
-        agg._settings, mode="telemetry", history_enabled=False
-    )
+    _telemetry_mode(agg)
     agg._export_worker = ExportWorker(
         exporter, interval_sec=60.0, logger=_Logger()
     )
-    # Built like the wandb exporter, with its telemetry close bound.
-    agg._export_finish_timeout_sec = 30.0
     agg._export_worker.start()
     return agg
 
 
+@pytest.mark.parametrize(
+    "error",
+    [None, TimeoutError("W&B finish did not return")],
+    ids=["close-returns", "close-raises"],
+)
 def test_telemetry_waits_for_a_close_longer_than_the_old_cap(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, error
 ):
-    exporter = _SlowCloseExporter(_OLD_EXPORT_STOP_CAP_SEC + 0.5)
+    exporter = _CloseExporter(
+        delay=_OLD_EXPORT_STOP_CAP_SEC + 0.5, error=error
+    )
     agg = _telemetry_aggregator(monkeypatch, tmp_path, exporter)
 
     agg.stop(timeout_sec=30.0)
 
     assert exporter.closed is True
-    assert agg._export_worker.stats().exporter_failed is False
-    assert not _warning_path(tmp_path).exists()
-
-
-def test_telemetry_records_a_close_that_fails_after_the_old_cap(
-    monkeypatch, tmp_path
-):
-    exporter = _SlowCloseExporter(
-        _OLD_EXPORT_STOP_CAP_SEC + 0.5,
-        error=TimeoutError("W&B finish did not return"),
-    )
-    agg = _telemetry_aggregator(monkeypatch, tmp_path, exporter)
-
-    agg.stop(timeout_sec=30.0)
-
-    warning = json.loads(_warning_path(tmp_path).read_text(encoding="utf-8"))
-    assert warning["reason"] == "export_incomplete"
-    assert warning["export"]["exporter_failed"] is True
+    if error is None:
+        assert agg._export_worker.stats().exporter_failed is False
+        assert not _warning_path(tmp_path).exists()
+    else:
+        warning = json.loads(
+            _warning_path(tmp_path).read_text(encoding="utf-8")
+        )
+        assert warning["reason"] == "export_incomplete"
+        assert warning["export"]["exporter_failed"] is True
 
 
 @pytest.mark.parametrize(
@@ -1253,11 +1265,7 @@ def test_telemetry_gives_export_the_finish_budget(
     monkeypatch, tmp_path, timeout, expected
 ):
     agg, _, _ = _export_aggregator(monkeypatch, tmp_path)
-    agg._settings = replace(
-        agg._settings, mode="telemetry", history_enabled=False
-    )
-    # The wandb exporter's telemetry close bound.
-    agg._export_finish_timeout_sec = 30.0
+    _telemetry_mode(agg)
 
     agg.stop(timeout_sec=timeout)
 
@@ -1286,11 +1294,10 @@ def test_second_export_stats_read_waits_for_close_in_telemetry_only(
 def test_telemetry_export_budget_never_exceeds_a_tiny_deadline(
     monkeypatch, tmp_path
 ):
+    # Kept apart from the finish budget cases: only here is the settle
+    # exactly 0.0; elsewhere it depends on the time stop() has used.
     agg, _, settle = _export_aggregator(monkeypatch, tmp_path)
-    agg._settings = replace(
-        agg._settings, mode="telemetry", history_enabled=False
-    )
-    agg._export_finish_timeout_sec = 30.0
+    _telemetry_mode(agg)
 
     agg.stop(timeout_sec=0.1)
 
@@ -1305,12 +1312,7 @@ def test_telemetry_jsonl_keeps_the_export_slice_and_the_settle(
     # jsonl is built without a finish timeout, so nothing is reserved for
     # a remote close: settle keeps most of a 10 s finalize timeout.
     agg, _, settle = _export_aggregator(monkeypatch, tmp_path)
-    agg._settings = replace(
-        agg._settings,
-        mode="telemetry",
-        history_enabled=False,
-        exporter="jsonl",
-    )
+    _telemetry_mode(agg, finish_timeout_sec=None, exporter="jsonl")
     assert trace_aggregator._exporter_finish_timeout(agg._settings) is None
 
     agg.stop(timeout_sec=10.0)
@@ -1321,27 +1323,8 @@ def test_telemetry_jsonl_keeps_the_export_slice_and_the_settle(
     assert settle_budget >= 8.0
 
 
-class _BlockingCloseExporter:
-    """``close`` blocks until ``release`` is set."""
-
-    def __init__(self):
-        self.release = threading.Event()
-
-    def open(self):
-        return None
-
-    def write(self, records):
-        return None
-
-    def flush(self):
-        return None
-
-    def close(self, *, dropped_batches=0):
-        self.release.wait(60)
-
-
 def test_telemetry_records_a_close_that_never_returns(monkeypatch, tmp_path):
-    exporter = _BlockingCloseExporter()
+    exporter = _CloseExporter(block=True)
     agg = _telemetry_aggregator(monkeypatch, tmp_path, exporter)
     try:
         started = time.monotonic()
