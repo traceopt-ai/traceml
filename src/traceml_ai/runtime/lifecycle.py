@@ -23,6 +23,11 @@ from traceml_ai.runtime.settings import (
     AggregatorEndpoint,
     TraceMLSettings,
 )
+from traceml_ai.telemetry.control import HelloAck, parse_hello_ack
+from traceml_ai.transport.tcp_transport import (
+    NoReplyError,
+    request_one_frame,
+)
 
 if TYPE_CHECKING:
     from traceml_ai.aggregator.trace_aggregator import TraceMLAggregator
@@ -67,23 +72,86 @@ def wait_for_aggregator(
 ) -> bool:
     """Return True once ``(host, port)`` accepts a TCP connection.
 
-    Retries for a bounded period. Used by ``traceml.init()`` as a best-effort
-    reachability probe before starting the runtime.
+    Retries for a bounded period. This is a bare TCP accept, so any listener
+    on the port passes. ``traceml.init()`` uses ``probe_aggregator``, which
+    also asks the listener whether it is a TraceML aggregator for this run.
+    """
+    sock = _connect_within(host, port, timeout_sec, poll_interval_sec)
+    if sock is None:
+        return False
+    sock.close()
+    return True
 
-    Limitation: this is a bare TCP accept, not a TraceML protocol/session
-    handshake, so any listener on the port (a foreign process, a stale
-    aggregator, or one serving a different session) passes the check. A real
-    handshake is a wire-format change tracked as a follow-up; on a genuine
-    mismatch the runtime simply produces no telemetry for this session.
+
+PROBE_ADMITTED = "admitted"
+PROBE_REFUSED = "refused"
+PROBE_NOT_TRACEML = "not_traceml"
+PROBE_NO_REPLY = "no_reply"
+PROBE_UNREACHABLE = "unreachable"
+
+
+@dataclass(frozen=True)
+class AggregatorProbe:
+    """What the ``traceml.init()`` preflight learned about the port.
+
+    ``status`` is one of the ``PROBE_*`` values. ``ack`` is the aggregator's
+    answer when ``status`` is ``PROBE_ADMITTED`` or ``PROBE_REFUSED``.
+    """
+
+    status: str
+    ack: Optional[HelloAck] = None
+
+
+def probe_aggregator(
+    host: str,
+    port: int,
+    hello: dict[str, Any],
+    *,
+    timeout_sec: float = 10.0,
+    poll_interval_sec: float = 0.25,
+    reply_timeout_sec: float = 1.0,
+) -> AggregatorProbe:
+    """Connect to ``(host, port)``, send ``hello`` and read the answer.
+
+    Connecting retries for up to ``timeout_sec``. The answer is awaited
+    for ``reply_timeout_sec`` once. An aggregator from a release before the
+    hello reads it and hangs up without a word, which shows as
+    ``PROBE_NO_REPLY``, the same as a listener that hangs up or stays
+    silent. Anything sent back that is not an ack is ``PROBE_NOT_TRACEML``.
+    """
+    sock = _connect_within(host, port, timeout_sec, poll_interval_sec)
+    if sock is None:
+        return AggregatorProbe(PROBE_UNREACHABLE)
+    with sock:
+        try:
+            reply = request_one_frame(
+                sock, hello, timeout_sec=reply_timeout_sec
+            )
+        except NoReplyError:
+            return AggregatorProbe(PROBE_NO_REPLY)
+        except (ValueError, OSError):
+            return AggregatorProbe(PROBE_NOT_TRACEML)
+    ack = parse_hello_ack(reply)
+    if ack is None:
+        return AggregatorProbe(PROBE_NOT_TRACEML)
+    status = PROBE_ADMITTED if ack.admitted else PROBE_REFUSED
+    return AggregatorProbe(status, ack)
+
+
+def _connect_within(
+    host: str, port: int, timeout_sec: float, poll_interval_sec: float
+) -> Optional[socket.socket]:
+    """Connect to ``(host, port)``, retrying for up to ``timeout_sec``.
+
+    Returns the connected socket, or None when the time runs out.
     """
     deadline = time.monotonic() + float(timeout_sec)
     while True:
         try:
-            with socket.create_connection((host, int(port)), timeout=0.5):
-                return True
+            return socket.create_connection((host, int(port)), timeout=0.5)
         except OSError:
             if time.monotonic() >= deadline:
-                return False
+                return None
             time.sleep(float(poll_interval_sec))
 
 
@@ -332,9 +400,16 @@ def start_runtime(
 
 __all__ = [
     "AggregatorHandle",
+    "AggregatorProbe",
     "NoOpRuntime",
+    "PROBE_ADMITTED",
+    "PROBE_NOT_TRACEML",
+    "PROBE_NO_REPLY",
+    "PROBE_REFUSED",
+    "PROBE_UNREACHABLE",
     "RuntimeHandle",
     "get_active_runtime_handle",
+    "probe_aggregator",
     "start_aggregator",
     "start_runtime",
     "wait_for_aggregator",

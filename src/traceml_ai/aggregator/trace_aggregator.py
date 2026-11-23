@@ -15,6 +15,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Type
 
+from traceml_ai import __version__
 from traceml_ai.aggregator.display_drivers.base import BaseDisplayDriver
 from traceml_ai.aggregator.display_drivers.cli import CLIDisplayDriver
 from traceml_ai.aggregator.display_drivers.summary import SummaryDisplayDriver
@@ -48,6 +49,8 @@ from traceml_ai.sdk.protocol import (
 )
 from traceml_ai.telemetry.control import (
     RankFinishedControl,
+    build_hello_ack_payload,
+    is_hello,
     parse_rank_finished,
 )
 from traceml_ai.transport.tcp_transport import TCPConfig, TCPServer
@@ -310,7 +313,8 @@ class TraceMLAggregator:
             TCPConfig(
                 host=str(settings.aggregator.bind_host),
                 port=int(settings.aggregator.port),
-            )
+            ),
+            first_frame_reply=self._reply_to_hello,
         )
 
         db_path = getattr(settings, "db_path", None)
@@ -926,6 +930,25 @@ class TraceMLAggregator:
         meta = payload.get("meta")
         stamp = meta if isinstance(meta, Mapping) else payload
 
+        if self._stamp_mismatch(stamp) is None:
+            return True
+        sender: _ForeignSender = tuple(  # type: ignore[assignment]
+            None if stamp.get(field) is None else str(stamp[field])
+            for field in ("hostname", "pid", "session_id")
+        )
+        self._foreign_senders[sender] = (
+            self._foreign_senders.get(sender, 0) + 1
+        )
+        return False
+
+    def _stamp_mismatch(self, stamp: Mapping) -> Optional[str]:
+        """
+        Return the first stamp key that names another run, or None.
+
+        The admission rule shared by ``_admit`` and the ``init()`` hello, so
+        a hello is refused exactly when that sender's telemetry would be
+        dropped. Reads only settings, so any thread may call it.
+        """
         settings = self._settings
         enforce_session = settings.enforce_session_id and not (
             settings.admit_generated_session_id
@@ -941,15 +964,25 @@ class TraceMLAggregator:
         for key, want in expected:
             got = stamp.get(key)
             if want and got not in (None, "") and str(got) != want:
-                sender: _ForeignSender = tuple(  # type: ignore[assignment]
-                    None if stamp.get(field) is None else str(stamp[field])
-                    for field in ("hostname", "pid", "session_id")
-                )
-                self._foreign_senders[sender] = (
-                    self._foreign_senders.get(sender, 0) + 1
-                )
-                return False
-        return True
+                return key
+        return None
+
+    def _reply_to_hello(self, message: Any) -> Optional[Dict[str, Any]]:
+        """
+        Answer a ``traceml.init()`` hello, or return None for anything else.
+
+        Called by the TCP server for the first message of each connection.
+        The ack says whether this aggregator would admit the sender's
+        telemetry. A hello is never queued, so it reaches neither SQLite
+        nor export, and a refused one is not counted as a foreign sender.
+        """
+        if not is_hello(message):
+            return None
+        return build_hello_ack_payload(
+            session_id=str(self._settings.session_id or ""),
+            traceml_version=__version__,
+            mismatch=self._stamp_mismatch(message),
+        )
 
     def _warn_foreign_senders(self) -> None:
         """Print one stderr warning naming every sender that was dropped."""

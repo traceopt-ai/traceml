@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import socket
+import struct
 import sys
+import threading
+import time
 from dataclasses import dataclass
 from typing import Any
 from unittest.mock import Mock
@@ -11,6 +14,11 @@ import pytest
 from traceml_ai.runtime import lifecycle
 from traceml_ai.runtime.runtime import TraceMLRuntime
 from traceml_ai.runtime.settings import AggregatorEndpoint, TraceMLSettings
+from traceml_ai.telemetry.control import (
+    build_hello_ack_payload,
+    build_hello_payload,
+)
+from traceml_ai.utils.msgpack_codec import encode as encode_msgpack
 
 
 @dataclass
@@ -298,3 +306,90 @@ def test_runtime_handle_flushes_only_a_live_runtime() -> None:
     noop = lifecycle.RuntimeHandle(lifecycle.NoOpRuntime())
     assert not noop.is_live
     assert noop.flush_pending_telemetry(1.5) is False
+
+
+# probe_aggregator: the init() preflight with the TraceML hello.
+
+_HELLO = build_hello_payload(
+    session_id="run-b", run_nonce=None, session_source="explicit"
+)
+
+
+def _ack(admitted: bool) -> bytes:
+    data = encode_msgpack(
+        build_hello_ack_payload(
+            session_id="run-b",
+            traceml_version="test",
+            mismatch=None if admitted else "session_id",
+        )
+    )
+    return struct.pack("!I", len(data)) + data
+
+
+_ACK = _ack(True)
+
+
+@pytest.mark.parametrize(
+    ("chunks", "status"),
+    [
+        ([_ACK], lifecycle.PROBE_ADMITTED),
+        ([_ack(False)], lifecycle.PROBE_REFUSED),
+        ([_ACK[:2], _ACK[2:6], _ACK[6:]], lifecycle.PROBE_ADMITTED),  # split
+        ([], lifecycle.PROBE_NO_REPLY),  # hangs up
+        (None, lifecycle.PROBE_NO_REPLY),  # stays silent
+        ([b"HTTP/1.1 400 Bad Request\r\n\r\n"], lifecycle.PROBE_NOT_TRACEML),
+        ([b"\0\0\0\3\xc1\xc1\xc1"], lifecycle.PROBE_NOT_TRACEML),  # bad body
+        ([_ACK[:-1]], lifecycle.PROBE_NOT_TRACEML),  # cut short
+    ],
+)
+def test_probe_classifies_what_the_listener_sends(chunks, status) -> None:
+    def handle(conn: socket.socket) -> None:
+        if chunks is None:
+            time.sleep(1.0)
+            return
+        # Answering only after EOF proves the probe half-closes. Sending
+        # nothing is what an older aggregator does: it hangs up.
+        conn.settimeout(2.0)
+        while conn.recv(1024):
+            pass
+        for chunk in chunks:
+            conn.sendall(chunk)
+            time.sleep(0.05)
+
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+
+    def serve() -> None:
+        conn, _ = server.accept()
+        with conn:
+            handle(conn)
+
+    threading.Thread(target=serve, daemon=True).start()
+    try:
+        probe = lifecycle.probe_aggregator(
+            "127.0.0.1",
+            server.getsockname()[1],
+            _HELLO,
+            timeout_sec=2.0,
+            reply_timeout_sec=0.5,
+        )
+    finally:
+        server.close()
+
+    assert probe.status == status
+    answered = (lifecycle.PROBE_ADMITTED, lifecycle.PROBE_REFUSED)
+    assert (probe.ack is not None) == (status in answered)
+
+
+def test_probe_reports_an_unreachable_port() -> None:
+    probe_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    probe_sock.bind(("127.0.0.1", 0))
+    port = probe_sock.getsockname()[1]
+    probe_sock.close()
+
+    probe = lifecycle.probe_aggregator(
+        "127.0.0.1", port, _HELLO, timeout_sec=0.3, poll_interval_sec=0.05
+    )
+
+    assert probe == lifecycle.AggregatorProbe(lifecycle.PROBE_UNREACHABLE)
