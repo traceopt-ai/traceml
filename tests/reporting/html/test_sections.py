@@ -119,3 +119,37 @@ def test_section_subtitle_uses_singular_for_one_row(
     assert '<div class="sub">1 node</div>' in out
     assert '<div class="sub">1 rank</div>' in out
     assert '<div class="sub">2 ranks</div>' in out
+
+
+def test_unknown_node_row_is_not_given_a_node_prefix(
+    make_payload, make_section
+) -> None:
+    system = make_section(
+        metric_names=["cpu_percent"],
+        average={"cpu_percent": 93.6},
+        by="node_rank",
+    )
+    for point in ("median", "worst"):
+        system["global"][point]["cpu_percent"]["idx"] = "unknown"
+    out = render_sections(make_payload(system=system))
+    assert '<span class="idx">unknown</span>' in out
+    assert "nunknown" not in out
+
+
+def test_section_subtitle_uses_plural_for_two_nodes(
+    make_payload, make_section
+) -> None:
+    system = make_section(
+        metric_names=["cpu_percent"],
+        average={"cpu_percent": 93.6},
+        by="node_rank",
+        rows={
+            str(node): {
+                "identity": {"node_rank": node, "hostname": f"h{node}"},
+                "metrics": {"cpu_percent": 93.6},
+            }
+            for node in (0, 1)
+        },
+    )
+    out = render_sections(make_payload(system=system))
+    assert '<div class="sub">2 nodes</div>' in out

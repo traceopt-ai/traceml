@@ -58,13 +58,16 @@ def _diag_cards(section: Dict[str, Any]) -> str:
 
 
 def _metric_cell(entry: Any, name: str, prefix: str = "r") -> str:
-    """A median/worst cell is a {value, idx} object; average is a scalar."""
+    """A median/worst cell is a {value, idx} object; average is a scalar.
+
+    Only a numeric idx gets the rank/node prefix; a non-numeric row key
+    such as the System ``unknown`` row is shown as it is.
+    """
     if isinstance(entry, dict):
         idx = entry.get("idx")
+        tag = f"{prefix}{idx}" if str(idx).isdigit() else idx
         suffix = (
-            f' <span class="idx">{prefix}{esc(idx)}</span>'
-            if idx is not None
-            else ""
+            f' <span class="idx">{esc(tag)}</span>' if idx is not None else ""
         )
         return f'{fmt_value(name, entry.get("value"))}{suffix}'
     return fmt_value(name, entry)
