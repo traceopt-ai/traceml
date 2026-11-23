@@ -526,6 +526,24 @@ def test_serve_checks_resolved_dashboard_mode_before_start(
     assert not (tmp_path / "configured-logs").exists()
 
 
+def test_serve_does_not_watch_for_a_launcher(monkeypatch, tmp_path) -> None:
+    # `traceml serve` outlives training scripts: stdin EOF must not stop it.
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TRACEML_UI_MODE", raising=False)
+    monkeypatch.delenv("TRACEML_MODE", raising=False)
+    run_aggregator = Mock(return_value=0)
+    monkeypatch.setattr(
+        "traceml_ai.aggregator.aggregator_main.run_aggregator",
+        run_aggregator,
+    )
+    from traceml_ai.launcher.commands import run_serve
+
+    with pytest.raises(SystemExit):
+        run_serve(build_parser().parse_args(["serve"]))
+
+    assert run_aggregator.call_args.kwargs.get("launcher_fd") is None
+
+
 def test_dashboard_dep_check_passes_without_plotly(monkeypatch) -> None:
     # Acceptance for the plotly removal: plotly is not imported anywhere,
     # so its absence must not block dashboard mode (previously the guard

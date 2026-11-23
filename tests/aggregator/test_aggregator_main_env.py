@@ -36,7 +36,7 @@ def test_launcher_aggregator_enforces_session_and_run_nonce(
     monkeypatch.setenv("TRACEML_RUN_NONCE", "abc123")
     captured = {}
 
-    def _run(settings, *, logger=None):
+    def _run(settings, *, logger=None, launcher_fd=None):
         captured["settings"] = settings
         return 0
 
@@ -89,7 +89,7 @@ def test_aggregator_main_passes_exporter_settings(monkeypatch) -> None:
     monkeypatch.setenv("TRACEML_EXPORTER_HOSTNAME", "1")
     captured = {}
 
-    def _run(settings, *, logger=None):
+    def _run(settings, *, logger=None, launcher_fd=None):
         captured["settings"] = settings
         return 0
 

@@ -481,7 +481,7 @@ def _aggregator_main_settings(monkeypatch, **env) -> TraceMLSettings:
         monkeypatch.setenv(var, value)
     captured = {}
 
-    def _run(settings, *, logger=None):
+    def _run(settings, *, logger=None, launcher_fd=None):
         captured["settings"] = settings
         return 0
 

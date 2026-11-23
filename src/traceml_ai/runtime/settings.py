@@ -30,6 +30,9 @@ DEFAULT_INTERVAL_SEC = 2.0
 # dashboard rendering remain explicit opt-ins.
 DEFAULT_UI_MODE = "summary"
 MISSING_AGGREGATOR_POLICIES = ("raise", "warn")
+# Set by the `traceml run` launcher on the aggregator it spawns, so that
+# aggregator treats EOF on stdin as "launcher gone" and shuts down.
+LAUNCHER_STDIN_WATCH_ENV = "TRACEML_LAUNCHER_STDIN_WATCH"
 
 
 def resolve_on_missing_aggregator(
