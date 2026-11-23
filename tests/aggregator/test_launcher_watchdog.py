@@ -3,6 +3,7 @@
 import os
 import sys
 import threading
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -59,6 +60,34 @@ def test_watchdog_stops_when_read_fails(monkeypatch) -> None:
     # -1 is never a valid fd, so the read raises EBADF.
     aggregator_main._install_launcher_watchdog(-1, stop_event, Mock())
     assert stop_event.wait(5.0)
+
+
+def test_windows_watch_polls_instead_of_reading(monkeypatch) -> None:
+    # A read left pending on the pipe blocks extension imports on Windows.
+    results = [(0, 0), (0, 0), BrokenPipeError(109, "The pipe has ended")]
+
+    def peek(handle):
+        assert handle == 42
+        result = results.pop(0)
+        if isinstance(result, BaseException):
+            raise result
+        return result
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setitem(
+        sys.modules, "_winapi", SimpleNamespace(PeekNamedPipe=peek)
+    )
+    monkeypatch.setitem(
+        sys.modules, "msvcrt", SimpleNamespace(get_osfhandle=lambda _: 42)
+    )
+    monkeypatch.setattr(aggregator_main.time, "sleep", lambda _: None)
+    monkeypatch.setattr(
+        aggregator_main.os, "read", Mock(side_effect=AssertionError)
+    )
+
+    with pytest.raises(BrokenPipeError):
+        aggregator_main._wait_for_launcher_eof(7)
+    assert results == []
 
 
 @pytest.mark.parametrize(

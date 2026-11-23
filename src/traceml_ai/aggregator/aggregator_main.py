@@ -27,6 +27,7 @@ import os
 import signal
 import sys
 import threading
+import time
 import traceback
 from dataclasses import replace
 from pathlib import Path
@@ -165,6 +166,25 @@ def _restore_signal_handlers(previous: Optional[dict[int, Any]]) -> None:
             pass
 
 
+def _wait_for_launcher_eof(fd: int) -> None:
+    """Return once the launcher's end of the pipe behind ``fd`` is closed."""
+    if sys.platform != "win32":
+        while os.read(fd, 4096):
+            pass
+        return
+    # On Windows a read left pending on this pipe blocks the main thread
+    # while it loads an extension module, so the aggregator never starts.
+    # Poll without reading: PeekNamedPipe raises BrokenPipeError once the
+    # launcher's end is closed.
+    import _winapi
+    import msvcrt
+
+    handle = msvcrt.get_osfhandle(fd)
+    while True:
+        _winapi.PeekNamedPipe(handle)
+        time.sleep(0.5)
+
+
 def _install_launcher_watchdog(
     fd: int,
     stop_event: threading.Event,
@@ -187,8 +207,7 @@ def _install_launcher_watchdog(
 
     def _watch() -> None:
         try:
-            while os.read(fd, 4096):
-                pass
+            _wait_for_launcher_eof(fd)
         except Exception:
             pass
         if stop_event.is_set():
