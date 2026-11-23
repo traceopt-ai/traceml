@@ -82,7 +82,7 @@ markdown_extensions:
 
 nav:
   - Home: index.md
-  - Guides:
+  - Diagnose Training:
       - Slow PyTorch Training: guides/slow-pytorch-training.md
       - Find Input Pipeline Bottlenecks: guides/pytorch-input-pipeline-bottleneck.md
       - Low GPU Utilization: guides/low-gpu-utilization-pytorch.md
@@ -91,7 +91,7 @@ nav:
       - Case Studies: case-studies.md
   - User Guide:
       - Quickstart: user_guide/quickstart.md
-      - Integrations:
+      - Training Integrations:
           - Overview: user_guide/integrations.md
           - Hugging Face: user_guide/integrations/huggingface.md
           - PyTorch Lightning: user_guide/integrations/lightning.md
@@ -100,19 +100,22 @@ nav:
           - MONAI: user_guide/integrations/monai.md
           - Ray Train: user_guide/integrations/ray.md
           - DeepSpeed: user_guide/integrations/deepspeed.md
+      - Reports and Comparisons:
+          - Read a Report: user_guide/reading-output.md
+          - Compare Runs: user_guide/compare.md
+          - Regression Guard: user_guide/regression-guard.md
+      - Distributed Training:
+          - Overview: user_guide/distributed-training.md
+          - Slurm: user_guide/slurm.md
+      - Tracking and Export:
+          - Overview: user_guide/integrations/wandb-mlflow.md
           - Weights & Biases: user_guide/integrations/wandb.md
           - MLflow: user_guide/integrations/mlflow.md
-          - W&B / MLflow: user_guide/integrations/wandb-mlflow.md
-      - Reading Output: user_guide/reading-output.md
-      - Live Export: user_guide/live-export.md
-      - Compare Runs: user_guide/compare.md
-      - Regression Guard: user_guide/regression-guard.md
-      - Distributed Training: user_guide/distributed-training.md
-      - Slurm (multi-node): user_guide/slurm.md
+          - Live Export: user_guide/live-export.md
       - Troubleshooting:
           - FAQ: user_guide/faq.md
-          - When Training Crashes: user_guide/training-crashes.md
-      - Public API: user_guide/public-api.md
+          - Training Crashes: user_guide/training-crashes.md
+      - Python API and CLI: user_guide/public-api.md
   - Developer Guide:
       - Architecture: developer_guide/architecture.md
       - Step Time Pipeline Contract: developer_guide/step-time-pipeline-contract.md
