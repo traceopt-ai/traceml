@@ -32,6 +32,7 @@ from __future__ import annotations
 import html
 import re
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 
@@ -100,9 +101,29 @@ class _Text(_El):
 
 
 class _Expansion(_El):
+    """Runs its change handlers when the value changes, as NiceGUI does
+    for a click and for a value set from code alike."""
+
     def __init__(self) -> None:
         super().__init__()
-        self.value = False
+        self._value = False
+        self._handlers: list = []
+
+    def on_value_change(self, handler) -> "_Expansion":
+        self._handlers.append(handler)
+        return self
+
+    @property
+    def value(self) -> bool:
+        return self._value
+
+    @value.setter
+    def value(self, value: bool) -> None:
+        changed = value != self._value
+        self._value = value
+        if changed:
+            for handler in self._handlers:
+                handler(SimpleNamespace(value=value))
 
 
 class _Chart:
@@ -136,8 +157,10 @@ def _panel() -> dict:
         "rss_label": _Text(),
         "cpu_sub": _Text(),
         "rss_sub": _Text(),
-        "cpu_sep": _Text(),
-        "rss_sep": _Text(),
+        "cpu_section": _Expansion(),
+        "rss_section": _Expansion(),
+        "cpu_hint": _Text(),
+        "rss_hint": _Text(),
         "cpu_tip": _Text(),
         "rss_tip": _Text(),
         "rows": _Expansion(),
@@ -147,8 +170,14 @@ def _panel() -> dict:
         "_was_open": False,
         "_signature": None,
     }
-    # Set once when the card is built, as the real header is.
-    panel["rows_hint"].text = process_section.ROWS_DESCRIPTION
+    # Set and wired once when the card is built, as the real header is.
+    for section, hint in (
+        ("cpu_section", "cpu_hint"),
+        ("rss_section", "rss_hint"),
+        ("rows", "rows_hint"),
+    ):
+        panel[hint].text = process_section.disclosure_hint(False)
+        process_section.follow_open_state(panel[section], panel[hint])
     return panel
 
 
@@ -766,15 +795,6 @@ def test_every_line_states_its_own_stacking_and_opacity():
             assert line["lineStyle"]["opacity"] == (1.0 if lead else 0.55)
 
 
-def test_a_graph_title_and_its_line_are_separated_only_when_both_show():
-    many, empty = _panel(), _panel()
-    process_section.update_process_section(many, _payload(ranks=(0, 1)))
-    process_section.update_process_section(empty, ProcessDashboardPayload())
-    for key in ("cpu", "rss"):
-        assert not many[f"{key}_sep"].hidden
-        assert empty[f"{key}_sep"].hidden, "a mark beside nothing"
-
-
 def test_one_rank_draws_in_the_accent_and_says_what_it_shows():
     panel = _panel()
     process_section.update_process_section(panel, _payload(ranks=(0,)))
@@ -929,14 +949,12 @@ def test_no_rank_yet_hides_the_rank_details():
     assert panel["rows"].hidden
 
 
-def test_many_ranks_name_the_rank_details_and_what_they_hold():
+def test_many_ranks_name_the_rank_details():
     panel = _panel()
     process_section.update_process_section(panel, _payload(ranks=(0, 1)))
     assert not panel["rows"].hidden
     assert panel["rows_title"].text == "Rank details (2)"
-    assert panel["rows_hint"].text == (
-        "CPU, process memory, node and sample age"
-    )
+    assert panel["rows_hint"].text == "click to open"
 
 
 def test_the_rows_use_the_cards_own_words():
@@ -1032,7 +1050,7 @@ def test_the_facts_state_coverage_without_classifying_it():
         assert verdict not in facts.lower()
 
 
-def test_the_rank_details_header_holds_only_its_title_and_description():
+def test_the_rank_details_header_holds_only_its_title_and_hint():
     """Facts appended to it wrapped the header onto a second line.
 
     The chevron then sat between the two lines, so they are a caption
@@ -1042,7 +1060,7 @@ def test_the_rank_details_header_holds_only_its_title_and_description():
     process_section.update_process_section(
         panel, _payload(ranks=(0, 1, 2, 3), stale=1, unknown=1, imbalance=16)
     )
-    assert panel["rows_hint"].text == process_section.ROWS_DESCRIPTION
+    assert panel["rows_hint"].text == "click to open"
     assert _facts(panel) == (
         "1 stale, excluded · 1 without a clock · reserved imbalance 16%"
     )
@@ -1054,10 +1072,11 @@ def test_nothing_to_report_leaves_no_empty_caption():
     assert panel["rows_html"].content.startswith("<table")
 
 
-def test_the_built_rank_details_header_is_one_line():
+@pytest.mark.parametrize("hint", ["cpu_hint", "rss_hint", "rows_hint"])
+def test_the_built_section_headers_are_one_line(hint):
     panel = process_section.build_process_section()
-    assert panel["rows_hint"].text == process_section.ROWS_DESCRIPTION
-    style = panel["rows_hint"]._style
+    assert panel[hint].text == "click to open"
+    style = panel[hint]._style
     assert style.get("white-space") == "nowrap"
     assert style.get("text-overflow") == "ellipsis"
 
@@ -1112,6 +1131,110 @@ def test_the_rows_stay_shut_when_the_engine_is_silent():
     panel = _panel()
     process_section.update_process_section(panel, _payload(rows_open=False))
     assert panel["rows"].value is False
+
+
+# --- the three sections ---------------------------------------------------
+_SECTIONS = ("cpu_section", "rss_section", "rows")
+_HINTS = ("cpu_hint", "rss_hint", "rows_hint")
+
+
+def _states(panel: dict) -> list:
+    return [(panel[s].value, panel[h].text) for s, h in zip(_SECTIONS, _HINTS)]
+
+
+def test_the_built_graphs_start_shut():
+    panel = process_section.build_process_section()
+    assert panel["cpu_section"].value is False
+    assert panel["rss_section"].value is False
+
+
+@pytest.mark.parametrize("section", _SECTIONS)
+def test_the_whole_header_opens_a_section(section):
+    """With Quasar's expand-icon-toggle only the chevron would open it, and
+    a click on the words "click to open" would do nothing."""
+    panel = process_section.build_process_section()
+    assert "expand-icon-toggle" not in panel[section]._props
+
+
+@pytest.mark.parametrize(
+    "section,title",
+    [
+        ("cpu_section", "cpu_label"),
+        ("rss_section", "rss_label"),
+        ("rows", "rows_title"),
+    ],
+)
+def test_a_screen_reader_names_each_section_by_its_title(section, title):
+    """Quasar names the toggle 'Expand "<label>"'; with no label all three
+    headers were announced as a bare "Expand"."""
+    panel = process_section.build_process_section()
+    assert panel[section]._props["label"] == panel[title].text
+    panel[title].text = "Renamed (4)"
+    assert panel[section]._props["label"] == "Renamed (4)"
+
+
+def test_a_graph_with_nothing_to_say_shows_no_empty_line():
+    empty, many = _panel(), _panel()
+    process_section.update_process_section(empty, ProcessDashboardPayload())
+    process_section.update_process_section(many, _payload(ranks=(0, 1)))
+    for key in ("cpu", "rss"):
+        assert empty[f"{key}_sub"].hidden
+        assert not many[f"{key}_sub"].hidden
+
+
+def test_each_section_opens_on_its_own_and_says_so():
+    panel = _panel()
+    process_section.update_process_section(panel, _payload(ranks=(0, 1)))
+    panel["cpu_section"].value = True
+    panel["rows"].value = True
+    process_section.update_process_section(panel, _payload(ranks=(0, 1)))
+    assert _states(panel) == [
+        (True, "click to close"),
+        (False, "click to open"),
+        (True, "click to close"),
+    ]
+
+
+def test_a_refresh_keeps_what_the_reader_opened_and_closed():
+    """Every tick redraws the card; none of them may undo a reader's click."""
+    panel = _panel()
+    payload = _payload(ranks=(0, 1), rows_open=True)
+    process_section.update_process_section(panel, payload)
+    panel["rss_section"].value = True
+    panel["rows"].value = False
+    for tick in range(1, 4):
+        newer = replace(payload, window_len=payload.window_len + tick)
+        process_section.update_process_section(panel, newer)
+    assert _states(panel) == [
+        (False, "click to open"),
+        (True, "click to close"),
+        (False, "click to open"),
+    ]
+
+
+def test_the_rank_details_say_click_to_close_once_the_engine_opens_them():
+    panel = _panel()
+    process_section.update_process_section(panel, _payload(rows_open=True))
+    assert panel["rows_hint"].text == "click to close"
+
+
+@pytest.mark.parametrize("section,hint", list(zip(_SECTIONS, _HINTS)))
+def test_a_built_section_changes_its_hint_on_the_click(section, hint):
+    """Not on the next tick: the reader sees the words change as it opens."""
+    panel = process_section.build_process_section()
+    panel[section].value = True
+    assert panel[hint].text == "click to close"
+    panel[section].value = False
+    assert panel[hint].text == "click to open"
+
+
+def test_the_graphs_sit_inside_their_sections():
+    """Opening a section shows its graph; a shut one shows neither line."""
+    panel = process_section.build_process_section()
+    for key in ("cpu", "rss"):
+        content = panel[f"{key}_section"].default_slot.children
+        assert panel[f"{key}_sub"] in content
+        assert panel[f"{key}_chart"] in content
 
 
 def test_the_card_never_decides_the_threshold_itself():
