@@ -413,7 +413,7 @@ scaler overflow. These CPU checks do not establish CUDA timing accuracy.
 | Surface | Loads | Diagnoses | Presents |
 |---|---|---|---|
 | Live CLI | One `LiveStepTimeSession` refresh | Diagnosis is precomputed once by the live pipeline | Pure Rich diagnosis and metric table |
-| Dashboard hero | Shared result | Precomputed verdict | Ribbon and KPIs |
+| Dashboard hero | Shared result | None; the verdict is in the diagnostics rail | Step Time summary and one rank's phase tree |
 | Dashboard diagnostics rail | Same result | Precomputed diagnosis | Finding and evidence |
 | Final summary | One repository snapshot with identity and progress | Summary policy | Stable JSON projection and text card |
 

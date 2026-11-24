@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 
 import pytest
@@ -18,7 +19,6 @@ from traceml_ai.aggregator.display_drivers.nicegui_sections import theme
 from traceml_ai.aggregator.display_drivers.nicegui_sections.model_combined_section import (
     build_model_combined_section,
     update_model_combined_section,
-    update_step_verdict,
 )
 from traceml_ai.diagnostics.model_diagnostics import (
     build_model_diagnostics_payload,
@@ -38,43 +38,6 @@ from traceml_ai.step_time.pipeline import (
     LiveStepTimeResult,
     LiveStepTimeSession,
 )
-
-
-class _FakeSegment:
-    """Style double that MERGES like NiceGUI's ``Element.style()``.
-
-    An append-only list of style strings would let a stale declaration
-    (e.g. an unmeasured phase's hatch) survive a later width-only update
-    while every assertion still passed, because assertions read the last
-    call instead of the resulting style. Merging into a dict is what
-    makes that class of bug visible to a test at all. Pinned against the
-    real widget by ``test_fake_segment_matches_nicegui_style_merge``.
-    """
-
-    def __init__(self) -> None:
-        self.styles: list[str] = []
-        self.declarations: dict[str, str] = {}
-
-    def style(self, value: str) -> "_FakeSegment":
-        self.styles.append(value)
-        for part in value.split(";"):
-            if ":" not in part:
-                continue
-            name, _, val = part.partition(":")
-            self.declarations[name.strip()] = val.strip()
-        return self
-
-    @property
-    def background(self) -> str:
-        return self.declarations.get("background", "")
-
-    @property
-    def width(self) -> str:
-        return self.declarations.get("width", "")
-
-    @property
-    def hatched(self) -> bool:
-        return "repeating-linear-gradient" in self.background
 
 
 class _FakeText:
@@ -189,32 +152,24 @@ def _payload(
 
 def _panel() -> dict:
     return {
-        "seg_divs": [_FakeSegment() for _ in theme.PHASES],
-        "seg_labs": [_FakeText() for _ in theme.PHASES],
         "win": _FakeText(),
-        "verdict": _FakeText(),
-        "kpis": {
-            "step": _FakeHtml(),
-            "median": _FakeHtml(),
-            "worst": _FakeHtml(),
-            "gap": _FakeHtml(),
-            "residual": _FakeHtml(),
-            "rank": _FakeHtml(),
-        },
-        "tiles": {key: _FakeText() for key in _TILE_KEYS},
+        "summary": _FakeHtml(),
+        "tree": _FakeHtml(),
         "_last_sig": None,
     }
 
 
-_TILE_KEYS = ("step", "median", "worst", "gap", "residual", "rank")
+_ROW_RE = re.compile(
+    r"<td class='tml-tree-name'>(.*?)</td>"
+    r"<td class='tml-num'>(.*?)</td><td class='tml-num'>(.*?)</td>"
+)
 
 
-def _shown_tiles(panel: dict) -> set[str]:
-    """Tiles whose last display style does not hide them."""
+def _rows(html: str) -> dict[str, tuple[str, str]]:
+    """Map each row's label (tree glyphs stripped) to (value, share/scope)."""
     return {
-        key
-        for key, tile in panel["tiles"].items()
-        if not tile.styles or "display:none;" not in tile.styles[-1]
+        name.lstrip("├│└─ "): (value, extra)
+        for name, value, extra in _ROW_RE.findall(html)
     }
 
 
@@ -222,67 +177,48 @@ def test_step_time_dashboard_hero_renders_sparse_metrics() -> None:
     # h2d and residual_proxy were never measured: the hero must still
     # update from the fresh sparse window instead of freezing on the last
     # complete view (issue #259).
-    diagnosis_metrics = _metrics(omit=("h2d", "residual_proxy"))
-    payload = _payload(diagnosis_metrics)
+    payload = _payload(_metrics(omit=("h2d", "residual_proxy")))
     panel = _panel()
 
     update_model_combined_section(panel, payload)
 
-    # The panel updated (no freeze): window label reflects the sparse
-    # window and names the missing signal.
-    assert (
-        panel["win"].text == "5 aligned steps · CPU selected · partial: "
-        "RESIDUAL"
-    )
+    assert panel["win"].text == "5 steps · CPU clock · partial: Residual"
+    tree = _rows(panel["tree"].content)
     # H2D is occurrence-driven and absent, so it's plain measured-zero.
-    # residual_proxy is genuinely unmeasured, so it has no visual share.
+    assert tree["H2D"] == ("0.0 ms", "0%")
+    # residual_proxy is genuinely unmeasured: n/a, never a fake 0%.
+    assert tree["Residual"] == ("n/a", "—")
     # Measured phases use the canonical 110 ms Step Time denominator directly.
-    keys = [key for _, key, _ in theme.PHASES]
-    by_key = dict(zip(keys, panel["seg_divs"]))
-    by_lab = dict(zip(keys, panel["seg_labs"]))
-    assert by_key["h2d"].width == "0.000%"
-    residual_seg = by_key["residual_proxy"]
-    assert residual_seg.width == "0%"
-    assert residual_seg.background == "transparent"
-    # Missing signals are named in the existing window metadata instead of
-    # receiving a fabricated proportional ribbon segment.
-    assert by_lab["residual_proxy"].text == ""
-    assert by_key["input_wait"].width == "9.091%"
-    # An underivable residual shows n/a, never a fake 0%.
-    assert "n/a" in panel["kpis"]["residual"].content
-    assert panel["kpis"]["median"].content.startswith("110")
+    assert tree["Input wait"] == ("10.0 ms", "9%")
+    assert _rows(panel["summary"].content)["Step Time"][0] == "110 ms"
 
 
 def test_step_time_dashboard_hero_measured_zero_is_not_partial() -> None:
-    diagnosis_metrics = _metrics(
-        overrides={"h2d": 0.0, "residual_proxy": 30.0}
+    payload = _payload(
+        _metrics(overrides={"h2d": 0.0, "residual_proxy": 30.0})
     )
-    payload = _payload(diagnosis_metrics)
     panel = _panel()
 
     update_model_combined_section(panel, payload)
 
     # A measured-zero H2D is complete coverage, not partial signals.
-    assert panel["win"].text == "5 aligned steps · CPU selected"
-    assert "n/a" not in panel["kpis"]["residual"].content
+    assert panel["win"].text == "5 steps · CPU clock"
+    assert _rows(panel["tree"].content)["H2D"] == ("0.0 ms", "0%")
+    assert "n/a" not in panel["tree"].content
 
 
 def test_step_time_dashboard_hero_absent_h2d_is_not_partial() -> None:
     # H2D events are occurrence-driven: a run with no host-to-device
     # copies emits none, which is complete coverage, not partial.
-    diagnosis_metrics = _metrics(
-        omit=("h2d",),
-        overrides={"residual_proxy": 30.0},
+    payload = _payload(
+        _metrics(omit=("h2d",), overrides={"residual_proxy": 30.0})
     )
-    payload = _payload(diagnosis_metrics)
     panel = _panel()
 
     update_model_combined_section(panel, payload)
 
-    assert panel["win"].text == "5 aligned steps · CPU selected"
-    keys = [key for _, key, _ in theme.PHASES]
-    by_key = dict(zip(keys, panel["seg_divs"]))
-    assert by_key["h2d"].width == "0.000%"
+    assert panel["win"].text == "5 steps · CPU clock"
+    assert _rows(panel["tree"].content)["H2D"] == ("0.0 ms", "0%")
 
 
 def test_step_time_dashboard_hero_step_time_only_extreme() -> None:
@@ -293,28 +229,27 @@ def test_step_time_dashboard_hero_step_time_only_extreme() -> None:
 
     # The inner envelope alone is not a canonical Step Time denominator.
     # Clear the existing card state rather than substituting it for Step Time.
-    assert panel["win"].text == "CPU selected · Step Time unavailable"
-    assert all(seg.width == "0%" for seg in panel["seg_divs"])
-    assert all(
-        kpi.content == theme.kval("—") for kpi in panel["kpis"].values()
-    )
+    assert panel["win"].text == "CPU clock · Step Time unavailable"
+    assert panel["summary"].content == ""
+    assert panel["tree"].content == ""
 
 
 def test_absent_optimizer_step_is_not_a_measured_zero() -> None:
-    # Narrow guard for the predicate itself. optimizer_step is
-    # occurrence-driven, but "never observed in the whole window" is
-    # absence, not an occurrence of zero: the canonical availability rule
-    # drops a never-seen optimizer entirely, so the card must not render
-    # it as a confident 0%.
+    # optimizer_step is occurrence-driven, but "never observed in the whole
+    # window" is absence, not an occurrence of zero: the canonical
+    # availability rule drops a never-seen optimizer entirely, so the card
+    # must not render it as a confident 0%.
     payload = _payload(_metrics(omit=("optimizer_step",)))
     panel = _panel()
     update_model_combined_section(panel, payload)
 
-    keys = [key for _, key, _ in theme.PHASES]
-    by_key = dict(zip(keys, panel["seg_divs"]))
-    assert by_key["optimizer_step"].width == "0%"
-    assert by_key["optimizer_step"].background == "transparent"
-    assert panel["win"].text == "5 aligned steps · CPU selected · partial: OPT"
+    tree = _rows(panel["tree"].content)
+    assert tree["Optimizer"] == ("n/a", "—")
+    # Compute includes its children, so it is unavailable too.
+    assert tree["Compute"] == ("n/a", "—")
+    # The available phases keep their own shares rather than rescaling.
+    assert tree["Forward"] == ("20.0 ms", "18%")
+    assert panel["win"].text == "5 steps · CPU clock · partial: Optimizer"
 
 
 def test_dashboard_clears_when_input_wait_makes_step_time_unavailable() -> (
@@ -331,22 +266,20 @@ def test_dashboard_clears_when_input_wait_makes_step_time_unavailable() -> (
     panel = _panel()
     update_model_combined_section(panel, payload)
 
-    assert panel["win"].text == "CPU selected · Step Time unavailable"
-    assert all(
-        kpi.content == theme.kval("—") for kpi in panel["kpis"].values()
-    )
+    assert panel["win"].text == "CPU clock · Step Time unavailable"
+    assert panel["summary"].content == ""
 
     # Control twin: canonical Step Time restores the existing card.
     with_wait = _payload(_metrics(overrides={"residual_proxy": 10.0}))
     control = _panel()
     update_model_combined_section(control, with_wait)
-    assert "n/a" not in control["kpis"]["residual"].content
+    assert _rows(control["tree"].content)["Residual"] == ("10.0 ms", "9%")
 
 
 def test_partial_rank_coverage_includes_step_time() -> None:
-    # step_time is not a ribbon phase, but it is the envelope every share
-    # is computed against, so a rank missing it makes the window
-    # incomplete exactly as the engine reports it.
+    # step_time is not a phase, but it is the denominator every share is
+    # computed against, so a rank missing it makes the window incomplete
+    # exactly as the engine reports it.
     payload = _payload(
         _metrics(),
         per_rank_timing={
@@ -357,10 +290,8 @@ def test_partial_rank_coverage_includes_step_time() -> None:
     panel = _panel()
     update_model_combined_section(panel, payload)
 
-    assert (
-        panel["win"].text
-        == "5 aligned steps · CPU selected · representative r0 · partial: "
-        "RESIDUAL,STEP TIME"
+    assert panel["win"].text == (
+        "5 steps · CPU clock · partial: Residual, Step Time"
     )
 
 
@@ -373,105 +304,62 @@ def test_step_time_dashboard_hero_dark_input_wait_is_not_measured_zero() -> (
     panel = _panel()
     update_model_combined_section(panel, dark_input_wait)
 
-    assert panel["win"].text == "CPU selected · Step Time unavailable"
-    assert all(seg.width == "0%" for seg in panel["seg_divs"])
+    assert panel["win"].text == "CPU clock · Step Time unavailable"
+    assert panel["tree"].content == ""
 
-    # Control twin: input_wait genuinely measured as 0ms must render as
-    # a real 0%-width segment, distinct from the unmeasured case above.
+    # Control twin: input_wait genuinely measured as 0ms is a real 0%,
+    # distinct from the unmeasured case above.
     measured_zero_input_wait = _payload(
         _metrics(overrides={"input_wait": 0.0})
     )
     control_panel = _panel()
     update_model_combined_section(control_panel, measured_zero_input_wait)
-    keys = [key for _, key, _ in theme.PHASES]
-    control_by_key = dict(zip(keys, control_panel["seg_divs"]))
-    assert control_by_key["input_wait"].width == "0.000%"
-    assert control_panel["win"].text == "5 aligned steps · CPU selected"
+    assert _rows(control_panel["tree"].content)["Input wait"] == (
+        "0.0 ms",
+        "0%",
+    )
+    assert control_panel["win"].text == "5 steps · CPU clock"
 
 
 def test_step_time_dashboard_hero_dead_run_shows_expired() -> None:
     # The CLI sibling distinguishes "no data yet" from "had data, now
-    # expired" via live-session freshness; the compatibility projection must
-    # do the same instead of freezing on the last complete view forever.
+    # expired" via live-session freshness; the card must do the same
+    # instead of freezing on the last complete view forever.
     good = _payload(_metrics())
     panel = _panel()
     update_model_combined_section(panel, good)
-    assert panel["win"].text == "5 aligned steps · CPU selected"
-    assert panel["kpis"]["median"].content.startswith("110")
+    assert panel["win"].text == "5 steps · CPU clock"
+    assert "110 ms" in panel["summary"].content
 
     # A never-had-data payload (cold start) must NOT clear the panel --
     # there is nothing to clear yet.
-    cold_start = live_result_from_window(
-        StepTimeWindow(),
-        freshness="cold",
-    )
+    cold_start = live_result_from_window(StepTimeWindow(), freshness="cold")
     cold_panel = _panel()
     update_model_combined_section(cold_panel, cold_start)
     assert cold_panel["win"].text == ""
 
     # TTL expiry must visibly clear rather than keep showing "good".
-    expired = live_result_from_window(
-        StepTimeWindow(),
-        freshness="expired",
-    )
+    expired = live_result_from_window(StepTimeWindow(), freshness="expired")
     update_model_combined_section(panel, expired)
 
     assert panel["win"].text == "window expired"
-    assert all(seg.width == "0%" for seg in panel["seg_divs"])
-    assert all(sl.text == "" for sl in panel["seg_labs"])
-    assert all(
-        kpi.content == theme.kval("—") for kpi in panel["kpis"].values()
-    )
+    assert panel["summary"].content == ""
+    assert panel["tree"].content == ""
 
 
-def test_fake_segment_matches_nicegui_style_merge() -> None:
-    """Pin the double against the real widget.
-
-    ``Element.style()`` MERGES declarations, so a background set while a
-    phase is unmeasured must be explicitly cleared. A double
-    that only appended style strings could never express that, which is
-    how a stale segment could reach review: the test could not fail.
-    """
-    from nicegui import ui
-
-    real = ui.element("div")
-    fake = _FakeSegment()
-    for call in (
-        "background:#1976d2; width:0%;",
-        "width:0%; background:transparent;",
-        "width:33.000%; background:#1976d2;",
-    ):
-        real.style(call)
-        fake.style(call)
-
-    assert dict(real._style) == fake.declarations
-    # The production path must restate the background when a signal changes.
-    assert fake.background == "#1976d2"
-
-
-def test_step_time_dashboard_hero_recovered_phase_restores_its_segment() -> (
-    None
-):
-    # Stateful sparse -> complete. NiceGUI merges styles, so a cleared phase
-    # must restore its solid background and real width when it recovers.
+def test_step_time_dashboard_hero_recovered_phase_restores_its_row() -> None:
     sparse = _payload(_metrics(omit=("forward",)))
     panel = _panel()
     update_model_combined_section(panel, sparse)
 
-    keys = [key for _, key, _ in theme.PHASES]
-    by_key = dict(zip(keys, panel["seg_divs"]))
-    assert by_key["forward"].width == "0%"
-    assert by_key["forward"].background == "transparent"
-    assert panel["win"].text == "5 aligned steps · CPU selected · partial: FWD"
+    assert _rows(panel["tree"].content)["Forward"] == ("n/a", "—")
+    assert panel["win"].text == "5 steps · CPU clock · partial: Forward"
 
     # Forward starts reporting again.
-    complete = _payload(_metrics())
-    update_model_combined_section(panel, complete)
+    update_model_combined_section(panel, _payload(_metrics()))
 
-    forward_color = dict((k, c) for _, k, c in theme.PHASES)["forward"]
-    assert by_key["forward"].background == forward_color
-    assert by_key["forward"].width != "0%"
-    assert panel["win"].text == "5 aligned steps · CPU selected"
+    assert _rows(panel["tree"].content)["Forward"] == ("20.0 ms", "18%")
+    assert panel["win"].text == "5 steps · CPU clock"
 
 
 def test_step_time_dashboard_hero_flags_partial_rank_coverage() -> None:
@@ -489,36 +377,27 @@ def test_step_time_dashboard_hero_flags_partial_rank_coverage() -> None:
     panel = _panel()
     update_model_combined_section(panel, payload)
 
-    assert (
-        panel["win"].text
-        == "5 aligned steps · CPU selected · representative r0 · partial: "
-        "BWD,RESIDUAL"
+    assert panel["win"].text == (
+        "5 steps · CPU clock · partial: Backward, Residual"
     )
 
     # Control twin: every rank measured everything -> not partial.
-    window = payload.analysis.window
     symmetric = _payload(
-        window.metrics,
+        payload.analysis.window.metrics,
         per_rank_timing={rank: _timing() for rank in (0, 1)},
     )
     control = _panel()
     update_model_combined_section(control, symmetric)
-    assert (
-        control["win"].text
-        == "5 aligned steps · CPU selected · representative r0"
-    )
+    assert control["win"].text == "5 steps · CPU clock"
 
 
 def test_step_time_dashboard_hero_clears_when_step_time_missing() -> None:
-    # Stateful: a COMPLETE window is drawn first, then a window arrives
-    # with no canonical Step Time. Without that denominator, so
-    # every share would be invented -- the card must clear rather than
-    # leave the previous ribbon and KPIs standing as if they were current.
-    complete = _payload(_metrics())
+    # Stateful: a complete window is drawn first, then a window arrives with
+    # no canonical Step Time. The card must clear rather than leave the
+    # previous values standing as if they were current.
     panel = _panel()
-    update_model_combined_section(panel, complete)
-    assert panel["win"].text == "5 aligned steps · CPU selected"
-    assert panel["kpis"]["median"].content.startswith("110")
+    update_model_combined_section(panel, _payload(_metrics()))
+    assert "110 ms" in panel["summary"].content
 
     no_envelope = _payload(
         _metrics(
@@ -534,33 +413,39 @@ def test_step_time_dashboard_hero_clears_when_step_time_missing() -> None:
     )
     update_model_combined_section(panel, no_envelope)
 
-    assert panel["win"].text == "CPU selected · Step Time unavailable"
-    assert all(seg.width == "0%" for seg in panel["seg_divs"])
-    assert all(
-        kpi.content == theme.kval("—") for kpi in panel["kpis"].values()
+    assert panel["win"].text == "CPU clock · Step Time unavailable"
+    assert panel["summary"].content == ""
+    assert panel["tree"].content == ""
+
+
+def test_multi_rank_summary_shows_median_and_worst_rank() -> None:
+    payload = _payload(
+        _metrics(worst={"step_time": 210.0}),
+        per_rank_timing={0: _timing(), 1: _timing()},
+        clock="gpu",
     )
-
-
-def test_step_time_dashboard_hero_uses_diagnosis_metrics() -> None:
-    assert theme.PHASES[0][:2] == ("IW", "input_wait")
-
-    # Self-consistent window shape: phases sum to canonical Step Time.
-    diagnosis_metrics = _metrics(worst={"step_time": 210.0})
-    payload = _payload(diagnosis_metrics, clock="gpu")
     panel = _panel()
 
     update_model_combined_section(panel, payload)
 
-    assert panel["seg_labs"][0].text == "IW"
-    # input_wait 10 of the 110 ms iteration envelope.
-    assert panel["seg_divs"][0].width == "9.091%"
-    assert panel["win"].text == "5 aligned steps · GPU selected"
-    assert panel["kpis"]["median"].content.startswith("110")
-    assert panel["kpis"]["worst"].content.startswith("210")
-    assert not panel["kpis"]["median"].content.startswith("20")
+    summary = _rows(panel["summary"].content)
+    assert summary["Median"] == ("110 ms", "Across ranks")
+    assert summary["Worst"] == ("210 ms", "Rank 0")
+    assert panel["win"].text == "5 steps · GPU clock"
+    assert "Phase breakdown · Rank 0" in panel["tree"].content
 
 
-def test_ribbon_selects_one_real_representative_rank() -> None:
+def test_single_rank_summary_shows_one_step_time() -> None:
+    panel = _panel()
+
+    update_model_combined_section(panel, _payload(_metrics()))
+
+    assert _rows(panel["summary"].content) == {"Step Time": ("110 ms", "")}
+    assert "Phase breakdown<" in panel["tree"].content
+    assert "Rank" not in panel["tree"].content
+
+
+def test_tree_reads_one_rank_and_uses_its_step_time_for_shares() -> None:
     metrics = _metrics(
         omit=("h2d",),
         overrides={
@@ -596,87 +481,38 @@ def test_ribbon_selects_one_real_representative_rank() -> None:
 
     update_model_combined_section(panel, payload)
 
-    keys = [key for _, key, _ in theme.PHASES]
-    segments = dict(zip(keys, panel["seg_divs"]))
-    assert "representative r0" in panel["win"].text
-    assert segments["forward"].width == "10.000%"
-    assert segments["residual_proxy"].width == "60.000%"
+    # Rank 0's own 100 ms Step Time, not the across-rank 110 ms median.
+    assert "Phase breakdown · Rank 0" in panel["tree"].content
+    assert _rows(panel["tree"].content) == {
+        "Step Time": ("100.0 ms", "100%"),
+        "Input wait": ("0.0 ms", "0%"),
+        "Compute": ("40.0 ms", "40%"),
+        "Forward": ("10.0 ms", "10%"),
+        "Backward": ("20.0 ms", "20%"),
+        "Optimizer": ("10.0 ms", "10%"),
+        "H2D": ("0.0 ms", "0%"),
+        "Residual": ("60.0 ms", "60%"),
+    }
 
 
-def test_single_process_card_shows_one_step_time_value() -> None:
-    payload = _payload(_metrics())
-    panel = _panel()
-
-    update_model_combined_section(panel, payload)
-
-    assert panel["kpis"]["step"].content.startswith("110")
-    assert _shown_tiles(panel) == {"step", "residual"}
-    assert "representative" not in panel["win"].text
-
-
-def test_multi_process_card_keeps_rank_comparison_tiles() -> None:
+@pytest.mark.parametrize("step_ms", (0.0, -1.0))
+def test_non_positive_step_time_shows_no_shares(step_ms: float) -> None:
     payload = _payload(
         _metrics(),
-        per_rank_timing={0: _timing(), 1: _timing()},
+        per_rank_timing={0: _timing(input_wait=step_ms, traced_step_time=0.0)},
     )
     panel = _panel()
 
     update_model_combined_section(panel, payload)
 
-    assert _shown_tiles(panel) == {
-        "median",
-        "worst",
-        "gap",
-        "residual",
-        "rank",
-    }
-    assert "representative r0" in panel["win"].text
+    tree = panel["tree"].content
+    assert _rows(tree)["Step Time"] == (f"{step_ms:.1f} ms", "")
+    assert "%" not in tree
+    assert "No phase shares without a positive Step Time" in tree
+    assert "110 ms" in panel["summary"].content
 
 
-def test_single_to_multi_rank_transition_updates_label_and_tiles() -> None:
-    panel = _panel()
-    update_model_combined_section(panel, _payload(_metrics()))
-    assert "representative" not in panel["win"].text
-
-    # Same timings, so only the rank count differs from the first window.
-    update_model_combined_section(
-        panel,
-        _payload(_metrics(), per_rank_timing={0: _timing(), 1: _timing()}),
-    )
-
-    assert "representative r0" in panel["win"].text
-    assert "median" in _shown_tiles(panel)
-    assert "step" not in _shown_tiles(panel)
-
-    update_model_combined_section(panel, _payload(_metrics()))
-
-    assert "representative" not in panel["win"].text
-    assert _shown_tiles(panel) == {"step", "residual"}
-
-
-def test_card_starts_with_the_rank_tiles_before_any_window() -> None:
-    panel = build_model_combined_section()
-
-    hidden = {
-        key
-        for key, tile in panel["tiles"].items()
-        if tile._style.get("display") == "none"
-    }
-    assert hidden == {"step"}
-
-
-def test_missing_step_time_still_applies_rank_layout() -> None:
-    panel = _panel()
-
-    update_model_combined_section(
-        panel, _payload(_metrics(omit=("input_wait", "step_time")))
-    )
-
-    assert panel["win"].text == "CPU selected · Step Time unavailable"
-    assert _shown_tiles(panel) == {"step", "residual"}
-
-
-def test_disjoint_rank_populations_clear_only_the_ribbon() -> None:
+def test_disjoint_rank_populations_keep_the_summary() -> None:
     payload = _payload(
         _metrics(
             omit=("h2d", "residual_proxy"),
@@ -709,10 +545,16 @@ def test_disjoint_rank_populations_clear_only_the_ribbon() -> None:
 
     update_model_combined_section(panel, payload)
 
-    assert "no coherent phase cohort" in panel["win"].text
-    assert all(segment.width == "0%" for segment in panel["seg_divs"])
-    assert panel["kpis"]["median"].content.startswith("110")
-    assert panel["kpis"]["gap"].content != theme.kval("—")
+    assert "no coherent phase cohort" in panel["tree"].content
+    assert _rows(panel["tree"].content) == {}
+    assert _rows(panel["summary"].content)["Median"][0] == "110 ms"
+
+
+def test_card_builds_without_ribbon_or_verdict() -> None:
+    panel = build_model_combined_section()
+
+    assert set(panel) == {"win", "summary", "tree", "_last_sig"}
+    assert panel["win"].text == "waiting for steps"
 
 
 def test_sqlite_window_has_one_share_across_live_and_summary_consumers(
@@ -824,7 +666,7 @@ def test_sqlite_window_has_one_share_across_live_and_summary_consumers(
 
     panel = _panel()
     update_model_combined_section(panel, result)
-    assert panel["kpis"]["residual"].content == theme.kval("5", "%")
+    assert _rows(panel["tree"].content)["Residual"] == ("10.0 ms", "5%")
 
 
 def test_diagnostics_rail_incomplete_data_is_neutral() -> None:
@@ -1073,12 +915,3 @@ def test_diagnostics_pill_follows_overall_not_the_first_item() -> None:
 
     assert panel["overall"].text == "WARN"
     assert theme.SEV["warn"] in panel["overall"].styles[-1]
-
-
-def test_empty_diagnostics_payload_clears_stale_hero_verdict() -> None:
-    panel = _panel()
-    panel["verdict"].text = "COMPUTE-BOUND"
-
-    update_step_verdict(panel, {"items": []})
-
-    assert panel["verdict"].text == "NO DATA"
