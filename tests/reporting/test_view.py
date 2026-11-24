@@ -195,6 +195,38 @@ def test_view_summary_re_render_ignores_watch_title_in_run_name(
     assert "Verdict: INPUT-BOUND" in text
 
 
+@pytest.mark.parametrize(
+    ("html_written", "footer"),
+    [
+        (
+            True,
+            "Full evidence: logs/old_run/final_summary.json · "
+            "logs/old_run/final_summary.html",
+        ),
+        (
+            False,
+            "Full evidence: logs/old_run/final_summary.json  (--html-report)",
+        ),
+    ],
+    ids=["html", "no_html"],
+)
+def test_view_summary_re_render_points_at_the_run_artifacts(
+    tmp_path, html_written, footer
+) -> None:
+    run_dir = tmp_path / "logs" / "old_run"
+    run_dir.mkdir(parents=True)
+    summary_path = run_dir / "final_summary.json"
+    _write_json(summary_path, _payload_with_stored_card(_OLD_CARD))
+    if html_written:
+        (run_dir / "final_summary.html").write_text(
+            "<html></html>", encoding="utf-8"
+        )
+
+    text = view_summary(summary_path, print_to_stdout=False, re_render=True)
+
+    assert footer in text
+
+
 def test_view_summary_re_render_survives_a_bare_payload(tmp_path) -> None:
     """An unversioned payload keeps its stored card rather than raising."""
     summary_path = tmp_path / "summary.json"

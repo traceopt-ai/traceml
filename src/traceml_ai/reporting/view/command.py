@@ -13,6 +13,7 @@ from pathlib import Path
 from traceml_ai.reporting.summary_artifact import (
     extract_summary_text,
     load_summary_artifact,
+    resolve_summary_artifact_path,
 )
 
 
@@ -44,7 +45,9 @@ def view_summary(
     text = extract_summary_text(payload, path=summary_path)
 
     if re_render:
-        text = _re_rendered_card(payload, stored_text=text)
+        text = _re_rendered_card(
+            payload, stored_text=text, summary_path=summary_path
+        )
 
     if print_to_stdout:
         print(text)
@@ -52,7 +55,9 @@ def view_summary(
     return text
 
 
-def _re_rendered_card(payload: dict, *, stored_text: str) -> str:
+def _re_rendered_card(
+    payload: dict, *, stored_text: str, summary_path: str | Path
+) -> str:
     """Rebuild the card from the payload, falling back to the stored text.
 
     Pre-1.7 payloads use different Step Time field meanings, so rendering them
@@ -67,15 +72,24 @@ def _re_rendered_card(payload: dict, *, stored_text: str) -> str:
 
     try:
         from traceml_ai.reporting.terminal_card.card import (
+            FINAL_SUMMARY_HTML_NAME,
+            FINAL_SUMMARY_JSON_NAME,
             build_card_from_payload,
             card_profile_from_text,
             card_to_plain,
         )
 
+        path = resolve_summary_artifact_path(summary_path)
+        in_run_dir = path.name == FINAL_SUMMARY_JSON_NAME
         return card_to_plain(
             build_card_from_payload(
                 payload,
                 profile=card_profile_from_text(stored_text),
+                session_root=str(path.parent) if in_run_dir else None,
+                write_html=(
+                    in_run_dir
+                    and (path.parent / FINAL_SUMMARY_HTML_NAME).is_file()
+                ),
             )
         )
     except Exception:
