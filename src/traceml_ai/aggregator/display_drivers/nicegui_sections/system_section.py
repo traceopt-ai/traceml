@@ -4,16 +4,18 @@
 # you may not use this file except in compliance with the License.
 # SPDX-License-Identifier: Apache-2.0
 
-"""System dashboard block: four resource tiles, two charts and GPU rows.
+"""System dashboard block: four resource tiles and three collapsible sections.
 
 The tiles summarize GPU utilisation, memory and temperature plus RAM.
-The CPU and GPU-power charts initially show recent raw samples. After the run
+Below them, CPU utilization, GPU power and GPU details are independent
+collapsible sections sharing one header style. CPU utilization and GPU power
+start closed. The two charts initially show recent raw samples. After the run
 outgrows that window, they use bounded whole-run series: rolling CPU values
 and fixed-duration GPU-power buckets. Both charts share a wall-clock axis.
 
-Per-GPU rows open when the computer says the spread has earned it.
-On a host that reports no GPU, the GPU tiles, the power chart and the rows
-leave the card, which keeps the RAM tile and the CPU chart.
+GPU details opens on its own when the computer says the spread has earned it.
+On a host that reports no GPU, the GPU tiles, the GPU power section and GPU
+details leave the card, which keeps the RAM tile and the CPU section.
 This section presents measurements and leaves verdicts to diagnostics.
 """
 
@@ -37,7 +39,7 @@ from . import charting, theme
 from .formatting import format_elapsed, format_gb_pair, format_window, gb
 
 # Window-p95 GPU utilisation spread (max - min, percentage points) that
-# automatically opens the per-GPU rows.
+# automatically opens GPU details.
 
 _GPU_COLORS = (
     "#f97316",
@@ -81,7 +83,7 @@ def disclosure_text(
     *,
     is_open: bool,
 ) -> str:
-    """Header of the per-GPU rows: the utilisation range, and nothing else.
+    """Header of GPU details: the utilisation range, and nothing else.
 
     The range is read from the payload rather than recomputed. Computing
     it here made a SECOND definition of "the spread across GPUs" living
@@ -600,8 +602,8 @@ def _set_gpu_layout(panel: Dict[str, Any], layout: str) -> None:
     """Show the GPU slots that the layout from ``gpu_layout`` calls for.
 
     A CPU-only host has no GPU slots at all. The three GPU tiles, the
-    power heading, chart and placeholder, and the per-GPU rows all leave
-    the layout, so the card shrinks to what was measured instead of
+    GPU power section (heading, chart and placeholder) and GPU details
+    all leave the layout, so the card shrinks to what was measured instead of
     repeating the same absence in every slot. In the waiting layout,
     every slot keeps its place and the placeholders stand in for the
     chart and the rows. A card waits before its first sample. A GPU

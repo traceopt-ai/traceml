@@ -4,11 +4,11 @@
 # you may not use this file except in compliance with the License.
 # SPDX-License-Identifier: Apache-2.0
 
-"""System block: four tiles, two charts, spread-triggered per-GPU rows.
+"""System block: four tiles, two charts, spread-triggered GPU details.
 
 Pure helpers carry the display rules so they can be checked without a
 browser: levels read "used / total", rates read one window median, the
-per-GPU rows open on their own when the across-GPU spread crosses the bar,
+GPU details open on their own when the across-GPU spread crosses the bar,
 and nothing on the block carries a verdict word.
 """
 
