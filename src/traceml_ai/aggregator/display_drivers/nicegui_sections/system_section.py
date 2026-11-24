@@ -423,7 +423,7 @@ def _collapsible(
             hint.text = hint_text(bool(event.value))
 
     exp = (
-        ui.expansion(on_value_change=on_change)
+        ui.expansion(title, on_value_change=on_change)
         .classes("w-full tml-exp" + (" tml-exp-flush" if flush else ""))
         .props("dense expand-icon-class=text-grey-6")
         .style(f"margin-top:{margin_top};")
