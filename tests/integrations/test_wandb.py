@@ -55,7 +55,11 @@ class _FakeRun:
     def __init__(self, *, summary_error=None, log_error=None):
         self.summary = _FakeSummary(summary_error)
         self.logged = []
+        self.defined = []
         self._log_error = log_error
+
+    def define_metric(self, name, **kwargs):
+        self.defined.append((name, kwargs))
 
     def log(self, data, **kwargs):
         if self._log_error is not None:
@@ -329,6 +333,38 @@ def test_written_fields_are_the_shared_comparison_fields(session, run):
 
     assert run.summary.updates == [tracker_comparison_fields(session.payload)]
     assert helper.tracker_comparison_fields is tracker_comparison_fields
+
+
+def test_numeric_fields_get_no_chart(session, run):
+    assert helper.log_training_report() is True
+
+    # The two timings exist only in the summary, so a chart would be
+    # empty; the verdict is text and W&B never charts it.
+    assert run.defined == [
+        ("traceml/step_time/step_time_ms", {"hidden": True}),
+        ("traceml/step_time/input_wait_ms", {"hidden": True}),
+    ]
+
+
+def test_hiding_failure_still_writes_the_report(session, monkeypatch, capsys):
+    class _NoDefine(_FakeRun):
+        def define_metric(self, name, **kwargs):
+            raise ValueError("define_metric unavailable")
+
+    target = _NoDefine()
+    monkeypatch.setitem(sys.modules, "wandb", _fake_wandb(target))
+
+    assert helper.log_training_report() is True
+
+    assert target.summary.updates == [
+        tracker_comparison_fields(session.payload)
+    ]
+    assert isinstance(_card(target), _FakeHtml)
+    err = capsys.readouterr().err.strip().splitlines()
+    assert err == [
+        "[TraceML] W&B: could not hide the summary fields from charts: "
+        "ValueError: define_metric unavailable"
+    ]
 
 
 def test_nan_average_is_omitted_and_zero_is_kept(session, run):

@@ -255,7 +255,14 @@ def test_two_rank_telemetry_run_logs_into_two_grouped_runs(
             for call in calls
             if call["call"] == "define_metric" and call["id"] == run_id
         ]
-        assert defined == ["traceml/step", "traceml/*"]
+        assert defined == [
+            "traceml/step",
+            "traceml/*",
+            "traceml/timestamp_unix_ns",
+            "traceml/export_written_records",
+            "traceml/export_dropped_batches",
+            "traceml/export_skipped_records",
+        ]
 
     steps = {0: [], 1: []}
     for call in calls:

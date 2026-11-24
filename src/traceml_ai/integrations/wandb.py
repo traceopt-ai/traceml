@@ -120,6 +120,25 @@ def _resolve_run(run: Any) -> Any:
     return active
 
 
+def _hide_from_charts(run: Any, fields: Dict[str, Any]) -> None:
+    """Keep W&B from drawing a chart for each numeric summary field.
+
+    The fields live in the run summary only, with no history, so a chart
+    for them would be empty. Hidden metrics stay in the summary and the
+    runs table. Failing to hide them leaves the fields themselves intact.
+    """
+    for key, value in fields.items():
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        try:
+            run.define_metric(key, hidden=True)
+        except Exception as exc:
+            _log_wandb_error(
+                "could not hide the summary fields from charts", exc
+            )
+            return
+
+
 def _write_summary(run: Any, fields: Dict[str, Any]) -> bool:
     if not fields:
         return True
@@ -227,6 +246,7 @@ def log_training_report(
         _log_wandb_error("could not build the diagnosis report", exc)
         return False
 
+    _hide_from_charts(target, fields)
     summary_ok = _write_summary(target, fields)
     card_ok = _write_card(target, html)
     return summary_ok and card_ok
