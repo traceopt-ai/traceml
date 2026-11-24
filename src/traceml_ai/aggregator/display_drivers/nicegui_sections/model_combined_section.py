@@ -37,7 +37,6 @@ _TREE: Tuple[Tuple[str, str, str], ...] = (
 # Signals checked for partial coverage, named as the tree names them.
 _COVERAGE: Tuple[Tuple[str, str], ...] = (
     ("input_wait", "Input wait"),
-    ("h2d", "H2D"),
     ("forward", "Forward"),
     ("backward", "Backward"),
     ("optimizer_step", "Optimizer"),
@@ -164,8 +163,8 @@ def _partial_names(
     return [
         label
         for key, label in _COVERAGE
-        if (key not in ("h2d", "step_time") and values.value(key) is None)
-        or (key != "h2d" and 0 < len(window.ranks_for(key)) < universe_size)
+        if (key != "step_time" and values.value(key) is None)
+        or 0 < len(window.ranks_for(key)) < universe_size
     ]
 
 
@@ -205,7 +204,7 @@ def update_model_combined_section(
         title += f" · Rank {representative}"
     tree = _tree_html(title, values)
     if values.step_time_ms is None or values.step_time_ms <= 0.0:
-        tree += _note("Step Time unavailable for phase shares.")
+        tree += _note("No phase shares without a positive Step Time.")
     partial = _partial_names(window, values)
     if partial:
         win += f" · partial: {', '.join(partial)}"

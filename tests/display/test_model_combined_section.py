@@ -508,7 +508,7 @@ def test_non_positive_step_time_shows_no_shares(step_ms: float) -> None:
     tree = panel["tree"].content
     assert _rows(tree)["Step Time"] == (f"{step_ms:.1f} ms", "")
     assert "%" not in tree
-    assert "Step Time unavailable for phase shares" in tree
+    assert "No phase shares without a positive Step Time" in tree
     assert "110 ms" in panel["summary"].content
 
 

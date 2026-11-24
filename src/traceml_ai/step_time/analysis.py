@@ -628,7 +628,7 @@ def _build_cohorts(
         for metric in _COMPOSITION_KEYS
         if any(facts.average.value(metric) is not None for facts in rank_facts)
     )
-    # The dashboard ribbon visualizes the traced envelope and can still show
+    # The dashboard phase tree shows the traced envelope and can still show
     # its measured phases when input wait is unavailable. Diagnosis shares
     # remain anchored to outer Step Time above; this presentation cohort must
     # not manufacture that unavailable denominator.
