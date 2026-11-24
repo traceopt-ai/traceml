@@ -44,7 +44,9 @@ def view_summary(
     text = extract_summary_text(payload, path=summary_path)
 
     if re_render:
-        text = _re_rendered_card(payload, stored_text=text)
+        text = _re_rendered_card(
+            payload, stored_text=text, summary_path=summary_path
+        )
 
     if print_to_stdout:
         print(text)
@@ -52,12 +54,18 @@ def view_summary(
     return text
 
 
-def _re_rendered_card(payload: dict, *, stored_text: str) -> str:
+def _re_rendered_card(
+    payload: dict, *, stored_text: str, summary_path: str | Path
+) -> str:
     """Rebuild the card from the payload, falling back to the stored text.
 
     Pre-1.7 payloads use different Step Time field meanings, so rendering them
     with the current card could mislabel historical timing. Keep their stored
     card instead. Any other rendering failure also degrades to stored text.
+
+    The evidence footer is rebuilt from the artifact's own folder, so a
+    re-render names the same paths as the stored card and points at the HTML
+    report only when it exists next to the JSON.
     """
     try:
         if float(payload.get("schema_version")) < 1.7:
@@ -67,15 +75,20 @@ def _re_rendered_card(payload: dict, *, stored_text: str) -> str:
 
     try:
         from traceml_ai.reporting.terminal_card.card import (
+            FINAL_SUMMARY_HTML_NAME,
             build_card_from_payload,
             card_profile_from_text,
             card_to_plain,
         )
 
+        session_root = Path(summary_path).expanduser().resolve().parent
+        write_html = (session_root / FINAL_SUMMARY_HTML_NAME).is_file()
         return card_to_plain(
             build_card_from_payload(
                 payload,
                 profile=card_profile_from_text(stored_text),
+                session_root=str(session_root),
+                write_html=write_html,
             )
         )
     except Exception:

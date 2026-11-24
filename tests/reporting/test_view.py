@@ -145,6 +145,35 @@ def test_view_summary_re_render_keeps_pre_1_7_card(
     assert text == _OLD_CARD
 
 
+def test_view_summary_re_render_keeps_the_run_folder_in_full_evidence(
+    tmp_path,
+) -> None:
+    session_root = tmp_path / "logs" / "a"
+    session_root.mkdir(parents=True)
+    summary_path = session_root / "final_summary.json"
+    _write_json(summary_path, _payload_with_stored_card(_OLD_CARD))
+
+    text = view_summary(summary_path, print_to_stdout=False, re_render=True)
+
+    assert "Full evidence: logs/a/final_summary.json" in text
+    assert "(--html-report)" in text
+
+
+def test_view_summary_re_render_names_an_existing_html_report(
+    tmp_path,
+) -> None:
+    session_root = tmp_path / "logs" / "a"
+    session_root.mkdir(parents=True)
+    summary_path = session_root / "final_summary.json"
+    _write_json(summary_path, _payload_with_stored_card(_OLD_CARD))
+    (session_root / "final_summary.html").write_text("<html></html>", encoding="utf-8")
+
+    text = view_summary(summary_path, print_to_stdout=False, re_render=True)
+
+    assert "Full evidence: logs/a/final_summary.json · logs/a/final_summary.html" in text
+    assert "(--html-report)" not in text
+
+
 def test_view_summary_default_still_prints_the_stored_card(tmp_path) -> None:
     summary_path = tmp_path / "summary.json"
     _write_json(summary_path, _payload_with_stored_card(_OLD_CARD))
