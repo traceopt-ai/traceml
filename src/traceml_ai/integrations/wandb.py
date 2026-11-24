@@ -127,16 +127,18 @@ def _hide_from_charts(run: Any, fields: Dict[str, Any]) -> None:
     for them would be empty. Hidden metrics stay in the summary and the
     runs table. Failing to hide them leaves the fields themselves intact.
     """
+    error: Optional[Exception] = None
     for key, value in fields.items():
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             continue
         try:
             run.define_metric(key, hidden=True)
         except Exception as exc:
-            _log_wandb_error(
-                "could not hide the summary fields from charts", exc
-            )
-            return
+            error = error or exc
+    if error is not None:
+        _log_wandb_error(
+            "could not hide the summary fields from charts", error
+        )
 
 
 def _write_summary(run: Any, fields: Dict[str, Any]) -> bool:

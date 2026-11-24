@@ -210,8 +210,9 @@ the run's world size, or at or above the 1024-run limit).
 The full loss report stays local in `finalization_warning.json`.
 A written record means one handed to the W&B SDK.
 
-The timestamp and the three counts get no chart in the workspace. They are
-in each run's Overview and can be added as runs-table columns.
+The timestamp and the three counts get no chart in the workspace. The
+timestamp stays in every history row, for example in `run.history()`. The
+counts are in each run's Overview and can be added as runs-table columns.
 
 ### When it cannot start
 

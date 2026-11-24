@@ -349,6 +349,7 @@ def test_numeric_fields_get_no_chart(session, run):
 def test_hiding_failure_still_writes_the_report(session, monkeypatch, capsys):
     class _NoDefine(_FakeRun):
         def define_metric(self, name, **kwargs):
+            self.defined.append((name, kwargs))
             raise ValueError("define_metric unavailable")
 
     target = _NoDefine()
@@ -360,6 +361,11 @@ def test_hiding_failure_still_writes_the_report(session, monkeypatch, capsys):
         tracker_comparison_fields(session.payload)
     ]
     assert isinstance(_card(target), _FakeHtml)
+    # Every field is tried even after the first one fails; one line in all.
+    assert [name for name, _ in target.defined] == [
+        "traceml/step_time/step_time_ms",
+        "traceml/step_time/input_wait_ms",
+    ]
     err = capsys.readouterr().err.strip().splitlines()
     assert err == [
         "[TraceML] W&B: could not hide the summary fields from charts: "
@@ -377,6 +383,11 @@ def test_nan_average_is_omitted_and_zero_is_kept(session, run):
     (written,) = run.summary.updates
     assert "traceml/step_time/step_time_ms" not in written
     assert written["traceml/step_time/input_wait_ms"] == 0.0
+    # The measured zero is hidden from charts like any value; the omitted
+    # field is not touched.
+    assert run.defined == [
+        ("traceml/step_time/input_wait_ms", {"hidden": True})
+    ]
 
 
 def test_summary_failure_still_logs_the_card(session, monkeypatch, capsys):
