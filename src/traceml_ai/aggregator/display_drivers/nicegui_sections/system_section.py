@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import math
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from nicegui import ui
 
@@ -103,6 +103,11 @@ def disclosure_text(
         return f"{n} GPUs" + tail
     low, high = span
     return f"{n} GPUs · util {low:.0f} to {high:.0f}%" + tail
+
+
+def section_hint(is_open: bool) -> str:
+    """Header tail of the CPU and power sections, worded like the GPU rows."""
+    return "click to close" if is_open else "click to open"
 
 
 def node_scope_text(ctx: Optional[RunContext]) -> str:
@@ -394,6 +399,65 @@ def _apply_span_axis(
 
 
 # --- build / update --------------------------------------------------------
+def _collapsible(
+    title: str,
+    *,
+    margin_top: str,
+    hint_text: Callable[[bool], str],
+    flush: bool = False,
+) -> Tuple[Any, Any]:
+    """One section of the card: a header that opens and closes its content.
+
+    The CPU, power and GPU sections share this header so they read alike:
+    the title, then a muted hint from ``hint_text(is_open)``, rewritten as
+    soon as the section opens or closes. ``flush`` drops the content's
+    side padding so a chart keeps the full card width it had before it
+    was put in a section. Returns the expansion and the hint label.
+    """
+    hint: Any = None
+
+    def on_change(event: Any) -> None:
+        if hint is not None:
+            hint.text = hint_text(bool(event.value))
+
+    exp = (
+        ui.expansion(on_value_change=on_change)
+        .classes("w-full tml-exp" + (" tml-exp-flush" if flush else ""))
+        .props("dense expand-icon-class=text-grey-6")
+        .style(f"margin-top:{margin_top};")
+    )
+    with exp.add_slot("header"):
+        with (
+            ui.row()
+            .classes("w-full items-center")
+            .style("gap:10px; min-width:0;")
+        ):
+            ui.label(title).style(
+                f"{_MONO} font-size:11px; font-weight:600; "
+                "color:var(--ink);"
+            )
+            hint = ui.label(hint_text(False)).classes("cmeta")
+    return exp, hint
+
+
+def _rows_hint(panel: Dict[str, Any], is_open: bool) -> str:
+    """GPU details header for the GPUs the last update described."""
+    described = panel.get("_rows_described")
+    if described is None:
+        return ""
+    gpus, roll = described
+    return disclosure_text(gpus, roll, is_open=is_open)
+
+
+def _resize_on_open(exp: Any, chart: Any) -> None:
+    """Redraw the chart at its real width once its section has opened.
+
+    A chart built inside a closed section has no width yet. Quasar fires
+    ``after-show`` in the browser when the section finishes opening.
+    """
+    exp.on("after-show", lambda: chart.run_chart_method("resize"))
+
+
 def build_system_section() -> Dict[str, Any]:
     panel: Dict[str, Any] = {
         "tiles": {},
@@ -440,85 +504,92 @@ def build_system_section() -> Dict[str, Any]:
                     panel["subs"][key] = ui.label("").classes("ksub")
                 panel["tile_els"][key] = tile
 
-        with (
-            ui.row()
-            .classes("w-full items-baseline")
-            .style("gap:8px; margin:2px 0 2px;")
-        ):
-            panel["cpu_label"] = ui.label(CPU_LABEL).classes("estlabel")
-            # One tooltip element per label, retitled on update: calling
-            # .tooltip() on every tick would add a new element each time.
-            with panel["cpu_label"]:
-                panel["cpu_label_tip"] = ui.tooltip(CPU_DEFINITION).props(
-                    _TIP_FROM_LEFT
-                )
-            ui.element("div").style("flex:1;")
-            # The value says which statistic it is: a window median sits
-            # beside a line whose last point is the newest sample. On a
-            # narrow card the row wraps; margin-left:auto keeps the value
-            # at the right edge on its own line.
-            with ui.element("div").style(
-                "display:flex; align-items:baseline; gap:6px; "
-                "margin-left:auto;"
+        cpu, panel["cpu_hint"] = _collapsible(
+            "CPU utilization",
+            margin_top="2px",
+            hint_text=section_hint,
+            flush=True,
+        )
+        panel["cpu"] = cpu
+        with cpu:
+            with (
+                ui.row()
+                .classes("w-full items-baseline")
+                .style("gap:8px; margin:2px 0 2px;")
             ):
-                panel["cpu_value_name"] = ui.label("").classes("estlabel")
-                panel["cpu_value"] = ui.label("").style(
+                panel["cpu_label"] = ui.label(CPU_LABEL).classes("estlabel")
+                # One tooltip element per label, retitled on update: calling
+                # .tooltip() on every tick would add a new element each time.
+                with panel["cpu_label"]:
+                    panel["cpu_label_tip"] = ui.tooltip(CPU_DEFINITION).props(
+                        _TIP_FROM_LEFT
+                    )
+                ui.element("div").style("flex:1;")
+                # The value says which statistic it is: a window median sits
+                # beside a line whose last point is the newest sample. On a
+                # narrow card the row wraps; margin-left:auto keeps the value
+                # at the right edge on its own line.
+                with ui.element("div").style(
+                    "display:flex; align-items:baseline; gap:6px; "
+                    "margin-left:auto;"
+                ):
+                    panel["cpu_value_name"] = ui.label("").classes("estlabel")
+                    panel["cpu_value"] = ui.label("").style(
+                        f"{_MONO} font-size:13px; font-weight:600; "
+                        "color:var(--ink);"
+                    )
+                    panel["cpu_value_tip"] = ui.tooltip("").props(
+                        _TIP_FROM_RIGHT
+                    )
+            panel["cpu_chart"] = ui.echart(
+                charting.span_line_options(theme.C_CPU, "%")
+            ).style("height:92px; width:100%;")
+        _resize_on_open(cpu, panel["cpu_chart"])
+
+        power, panel["power_hint"] = _collapsible(
+            "GPU power",
+            margin_top="2px",
+            hint_text=section_hint,
+            flush=True,
+        )
+        panel["power"] = power
+        with power:
+            panel["power_head"] = (
+                ui.row()
+                .classes("w-full items-baseline")
+                .style("gap:8px; margin:8px 0 2px;")
+            )
+            with panel["power_head"]:
+                panel["power_label"] = ui.label("gpu power · per GPU").classes(
+                    "estlabel"
+                )
+                # On a one-GPU run the current reading sits here, at the right
+                # edge like the CPU value, in place of GPU details.
+                ui.element("div").style("flex:1;")
+                panel["power_value"] = ui.label("").style(
                     f"{_MONO} font-size:13px; font-weight:600; "
                     "color:var(--ink);"
                 )
-                panel["cpu_value_tip"] = ui.tooltip("").props(_TIP_FROM_RIGHT)
-        panel["cpu_chart"] = ui.echart(
-            charting.span_line_options(theme.C_CPU, "%")
-        ).style("height:92px; width:100%;")
-
-        panel["power_head"] = (
-            ui.row()
-            .classes("w-full items-baseline")
-            .style("gap:8px; margin:8px 0 2px;")
-        )
-        with panel["power_head"]:
-            panel["power_label"] = ui.label("gpu power · per GPU").classes(
-                "estlabel"
+            panel["power_chart"] = ui.echart(
+                charting.multi_line_options(" W")
+            ).style("height:150px; width:100%;")
+            # Shown only in the waiting layout, at the chart's height, so a GPU
+            # host's chart replaces it without moving anything below.
+            panel["power_placeholder"] = ui.label("waiting for data").style(
+                f"{_MONO} font-size:11px; color:var(--muted); height:150px; "
+                "width:100%; display:none; align-items:center; "
+                "justify-content:center;"
             )
-            # On a one-GPU run the current reading sits here, at the right
-            # edge like the CPU value, in place of the per-GPU row.
-            ui.element("div").style("flex:1;")
-            panel["power_value"] = ui.label("").style(
-                f"{_MONO} font-size:13px; font-weight:600; "
-                "color:var(--ink);"
-            )
-        panel["power_chart"] = ui.echart(
-            charting.multi_line_options(" W")
-        ).style("height:150px; width:100%;")
-        # Shown only in the waiting layout, at the chart's height, so a GPU
-        # host's chart replaces it without moving anything below.
-        panel["power_placeholder"] = ui.label("waiting for data").style(
-            f"{_MONO} font-size:11px; color:var(--muted); height:150px; "
-            "width:100%; display:none; align-items:center; "
-            "justify-content:center;"
-        )
 
-        exp = (
-            ui.expansion()
-            .classes("w-full tml-exp")
-            .props("dense expand-icon-class=text-grey-6")
-            .style("margin-top:6px;")
+        exp, panel["rows_hint"] = _collapsible(
+            "GPU details",
+            margin_top="2px",
+            hint_text=lambda is_open: _rows_hint(panel, is_open),
         )
-        with exp.add_slot("header"):
-            with (
-                ui.row()
-                .classes("w-full items-center")
-                .style("gap:10px; min-width:0;")
-            ):
-                ui.label("per-GPU rows").style(
-                    f"{_MONO} font-size:11px; font-weight:600; "
-                    "color:var(--ink);"
-                )
-                panel["rows_hint"] = ui.label("").classes("cmeta")
         with exp:
             panel["rows_html"] = ui.html("", sanitize=False).classes("w-full")
         panel["rows"] = exp
-        panel["rows_placeholder"] = ui.label("per-GPU rows").style(
+        panel["rows_placeholder"] = ui.label("GPU details").style(
             f"{_MONO} font-size:11px; color:var(--muted); margin-top:6px; "
             "padding:4px 2px; display:none;"
         )
@@ -544,6 +615,7 @@ def _set_gpu_layout(panel: Dict[str, Any], layout: str) -> None:
     kept = layout != "cpu_only"
     for key in ("util", "mem", "temp"):
         panel["tile_els"][key].style(f"display:{'block' if kept else 'none'};")
+    panel["power"].style(f"display:{'block' if kept else 'none'};")
     panel["power_head"].style(f"display:{'flex' if kept else 'none'};")
     panel["power_chart"].style(f"display:{'block' if gpu else 'none'};")
     panel["power_placeholder"].style(
@@ -924,7 +996,7 @@ def _update_gpu_rows(
     if layout != "gpu":
         # Only a waiting card shows this slot; a CPU-only card hides it.
         panel["rows_placeholder"].text = (
-            "per-GPU rows" if layout == "waiting" else ""
+            "GPU details" if layout == "waiting" else ""
         )
         return
 
@@ -941,6 +1013,7 @@ def _update_gpu_rows(
     if should_auto_open(prev_over=panel["_over"], over=over):
         panel["rows"].value = True
     panel["_over"] = over
+    panel["_rows_described"] = (gpus, roll)
     panel["rows_hint"].text = disclosure_text(
         gpus, roll, is_open=bool(panel["rows"].value)
     )

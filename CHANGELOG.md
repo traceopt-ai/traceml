@@ -7,6 +7,12 @@ which carry the full historical notes for versions predating this file.
 
 ## [Unreleased]
 
+- The dashboard's System card now shows CPU utilization, GPU power and GPU
+  details as three independent collapsible sections. CPU utilization and GPU
+  power start collapsed; GPU details keeps its default and still opens on its
+  own when the spread across GPUs crosses the bar. Each header says
+  "click to open" or "click to close" as soon as it is toggled.
+
 - Added opt-in live telemetry export to JSON Lines files or a custom
   `module:factory` exporter. One bounded background worker prepares and
   delivers records; export failures and dropped data are reported without

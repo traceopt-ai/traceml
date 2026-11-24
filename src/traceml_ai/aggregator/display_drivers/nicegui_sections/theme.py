@@ -170,6 +170,7 @@ body{{
 .tml-gpus tr.tml-stale td{{color:var(--muted); opacity:.72;}}
 .tml-exp .q-item{{padding:4px 2px; min-height:0;}}
 .tml-exp .q-expansion-item__content{{padding:0 0 4px;}}
+.tml-exp-flush .nicegui-expansion-content{{padding-left:0; padding-right:0;}}
 </style>
 """
 
