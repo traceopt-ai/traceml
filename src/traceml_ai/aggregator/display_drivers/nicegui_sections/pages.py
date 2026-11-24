@@ -21,7 +21,6 @@ from .context_section import (
 from .model_combined_section import (
     build_model_combined_section,
     update_model_combined_section,
-    update_step_verdict,
 )
 from .model_diagnostics_section import (
     build_model_diagnostics_section,
@@ -69,9 +68,8 @@ def define_pages(cls):
             )
             cls.subscribe_layout(CONTEXT_LAYOUT, strip, update_context_section)
 
-            hero_cards = None
             if "model_combined" in shown:
-                # Row 1: hero (step-time ribbon + verdict). A watch session
+                # Row 1: hero (Step Time summary + phase tree). A watch session
                 # has no step loop, so no hero: the resource panes lead.
                 with (
                     ui.row()
@@ -134,22 +132,10 @@ def define_pages(cls):
                         with _cell("1"):
                             diag_cards = build_model_diagnostics_section()
 
-                            # One MODEL_DIAGNOSTICS_LAYOUT subscriber drives
-                            # BOTH the rail and the hero verdict, so the hero
-                            # shows the engine's step-time status verbatim
-                            # (single source of truth). Two subscribers on
-                            # one layout/client would evict each other.
-                            def _update_diag(
-                                _c, d, _dc=diag_cards, _hc=hero_cards
-                            ):
-                                update_model_diagnostics_section(_dc, d)
-                                if _hc is not None:
-                                    update_step_verdict(_hc, d)
-
                             cls.subscribe_layout(
                                 MODEL_DIAGNOSTICS_LAYOUT,
                                 diag_cards,
-                                _update_diag,
+                                update_model_diagnostics_section,
                             )
 
         cls.ensure_ui_timer(0.75)

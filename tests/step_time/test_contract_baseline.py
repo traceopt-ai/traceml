@@ -14,22 +14,22 @@ and dictionary ordering intentionally remain outside the golden surface.
 
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-import subprocess
 from typing import Any, Mapping
 
 import pytest
 from rich.console import Console
 
+from tests.step_time.factories import rank_average
 from tests.step_time.scenarios import (
     SCENARIOS,
     StepTimeScenario,
     create_step_time_database,
 )
-from tests.step_time.factories import rank_average
-from traceml_ai.diagnostics.step_time.policy import LIVE_STEP_TIME_POLICY
 from traceml_ai.diagnostics.step_time.api import diagnose_step_time_window
+from traceml_ai.diagnostics.step_time.policy import LIVE_STEP_TIME_POLICY
 from traceml_ai.renderers.model_diagnostics.renderer import (
     ModelDiagnosticsRenderer,
 )
@@ -522,7 +522,6 @@ def test_canonical_surface_values_share_one_step_time_contract(
     assert "STEP=traced" not in cli_text
 
     pytest.importorskip("nicegui")
-    from traceml_ai.aggregator.display_drivers.nicegui_sections import theme
     from traceml_ai.aggregator.display_drivers.nicegui_sections import (
         model_combined_section,
     )
@@ -535,25 +534,18 @@ def test_canonical_surface_values_share_one_step_time_contract(
         def style(self, _value: str) -> "_Element":
             return self
 
-    tile_keys = ("step", "median", "worst", "gap", "residual", "rank")
     dashboard = {
-        "seg_divs": [_Element() for _ in theme.PHASES],
-        "seg_labs": [_Element() for _ in theme.PHASES],
         "win": _Element(),
-        "verdict": _Element(),
-        "kpis": {key: _Element() for key in tile_keys},
-        "tiles": {key: _Element() for key in tile_keys},
+        "summary": _Element(),
+        "tree": _Element(),
         "_last_sig": None,
     }
     model_combined_section.update_model_combined_section(dashboard, live)
     step_metric = next(
         metric for metric in window.metrics if metric.metric == "step_time"
     )
-    assert (
-        f"{step_metric.median_total:.0f}"
-        in dashboard["kpis"]["median"].content
-    )
-    assert f"{window.clock.upper()} selected" in dashboard["win"].text
+    assert f"{step_metric.median_total:.0f} ms" in dashboard["summary"].content
+    assert f"{window.clock.upper()} clock" in dashboard["win"].text
 
     html = phase_bar({"global": {"average": average}}, schema_version=1.7)
     if average["step_time_ms"] in (None, 0.0):
