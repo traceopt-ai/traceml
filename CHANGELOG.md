@@ -21,6 +21,11 @@ which carry the full historical notes for versions predating this file.
   own when the spread across GPUs crosses the bar. Each header says
   "click to open" or "click to close" as soon as it is toggled.
 
+- With `--enable-logging`, the raw logs no longer drop rows from fast loops.
+  A table that fills half of its 3,000-row bound before the next throttled
+  write is now written at once, so step-time rows above about 15 steps per
+  second reach disk before they are evicted.
+
 ## [0.5.1] - 2026-11-09
 
 - Added opt-in live telemetry export to JSON Lines files or a custom
