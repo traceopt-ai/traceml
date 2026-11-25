@@ -7,6 +7,8 @@ which carry the full historical notes for versions predating this file.
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-11-25
+
 - The dashboard's Diagnostics card now sits beside run information at the
   top, so findings and next steps show without scrolling. The two cards share
   the row equally and stack, run information first, on narrow screens. Step
@@ -18,6 +20,8 @@ which carry the full historical notes for versions predating this file.
   power start collapsed; GPU details keeps its default and still opens on its
   own when the spread across GPUs crosses the bar. Each header says
   "click to open" or "click to close" as soon as it is toggled.
+
+## [0.5.1] - 2026-11-09
 
 - Added opt-in live telemetry export to JSON Lines files or a custom
   `module:factory` exporter. One bounded background worker prepares and
