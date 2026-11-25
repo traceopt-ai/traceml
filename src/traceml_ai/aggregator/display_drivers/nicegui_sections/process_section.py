@@ -58,7 +58,6 @@ _MONO = "font-family:var(--mono);"
 _MEMORY_MIN_SPAN_GB = 0.01
 
 WAITING = "waiting for data"
-ROWS_DESCRIPTION = "CPU, process memory, node and sample age"
 
 # The period a tile's median covers. While the graphs draw the recent
 # window it is the period they show. Once the run outgrows that window the
@@ -113,8 +112,8 @@ def build_process_section() -> Dict[str, Any]:
         "_gpu_tiles": True,
         # What ``_show`` last set; every one of these starts hidden.
         "_rows_shown": False,
-        "_cpu_sep_shown": False,
-        "_rss_sep_shown": False,
+        "_cpu_sub_shown": False,
+        "_rss_sub_shown": False,
     }
     card = ui.element("div").classes("glass reveal")
     card.style(
@@ -166,84 +165,99 @@ def build_process_section() -> Dict[str, Any]:
                         )
                 panel["tile_els"][key] = tile
 
-        # Each graph in its own bordered block, so the pair never reads as
-        # one chart with two halves.
-        for key, head, unit, margin in (
-            ("cpu", "CPU usage", "%", "0"),
-            ("rss", "Process memory", " GiB", "8px"),
+        # The two graphs start shut: the tiles above already carry their
+        # numbers, and a reader opens a graph to see its shape.
+        for key, head, unit in (
+            ("cpu", "CPU usage", "%"),
+            ("rss", "Process memory", " GiB"),
         ):
-            block = ui.element("div").style(
-                f"margin-top:{margin}; padding:8px 10px 4px; "
-                f"border:1px solid {theme.BORDER}; border-radius:12px;"
-            )
-            with block:
-                with (
-                    ui.row()
-                    .classes("w-full items-baseline")
-                    .style("gap:6px; margin:0 0 2px;")
-                ):
-                    # The title leads: ink and weight, at the size of the
-                    # line beside it rather than smaller than it.
-                    panel[f"{key}_label"] = (
-                        ui.label(head)
-                        .classes("estlabel")
-                        .style(
-                            "font-size:10px; color:var(--ink); "
-                            "font-weight:600;"
-                        )
-                    )
-                    with panel[f"{key}_label"]:
-                        panel[f"{key}_tip"] = ui.tooltip("")
-                    # "BY RANK" then "Rank 2" needs a mark between them.
-                    panel[f"{key}_sep"] = (
-                        ui.label("·")
-                        .classes("cmeta")
-                        .style("font-size:10px; display:none;")
-                    )
-                    panel[f"{key}_sub"] = (
-                        ui.label("").classes("cmeta").style("font-size:10px;")
-                    )
+            section, title, hint = _section(head)
+            panel[f"{key}_section"] = section
+            panel[f"{key}_label"] = title
+            panel[f"{key}_hint"] = hint
+            with title:
+                panel[f"{key}_tip"] = ui.tooltip("")
+            with section:
+                panel[f"{key}_sub"] = (
+                    ui.label("")
+                    .classes("cmeta")
+                    .style("font-size:10px; display:none;")
+                )
                 panel[f"{key}_chart"] = ui.echart(
                     charting.multi_line_options(unit)
                 ).style("height:92px; width:100%;")
 
         # Hidden until more than one rank reports: one rank's details are
         # the tiles above.
-        expansion = (
-            ui.expansion()
-            .classes("w-full tml-exp")
-            .props("dense dense-toggle expand-icon-toggle")
-            .style("margin-top:6px; display:none;")
+        expansion, panel["rows_title"], panel["rows_hint"] = _section(
+            "Rank details", hidden=True
         )
-        # The header is one line: the title and what the rows hold. What
-        # the rows found (stale ranks, the reserved spread) is a caption
-        # above the table, so a long run of facts cannot wrap the header
-        # onto two lines and strand the chevron between them.
-        with expansion.add_slot("header"):
-            with (
-                ui.row()
-                .classes("w-full items-center no-wrap")
-                .style("gap:10px; min-width:0;")
-            ):
-                panel["rows_title"] = ui.label("Rank details").style(
-                    f"{_MONO} font-size:12px; font-weight:700; "
-                    "white-space:nowrap;"
-                )
-                panel["rows_hint"] = (
-                    ui.label(ROWS_DESCRIPTION)
-                    .classes("cmeta")
-                    .style(
-                        "flex:1; min-width:0; white-space:nowrap; "
-                        "overflow:hidden; text-overflow:ellipsis;"
-                    )
-                )
+        panel["rows"] = expansion
         with expansion:
             panel["rows_html"] = ui.html("", sanitize=False).classes("w-full")
-        panel["rows"] = expansion
         panel["_was_open"] = False
         panel["_signature"] = None
     panel["card"] = card
     return panel
+
+
+def disclosure_hint(is_open: bool) -> str:
+    """What a click on a section's header does next."""
+    return "click to close" if is_open else "click to open"
+
+
+def follow_open_state(section: Any, hint: Any) -> None:
+    """Keep ``hint`` saying what the next click on ``section`` does.
+
+    NiceGUI runs this on every change of the value, whether the reader
+    clicked or the card opened the section itself, so the words change as
+    the section does rather than on the next refresh.
+    """
+    section.on_value_change(
+        lambda event: setattr(hint, "text", disclosure_hint(bool(event.value)))
+    )
+
+
+def _section(heading: str, *, hidden: bool = False) -> Tuple[Any, Any, Any]:
+    """One collapsible section of the card: the element, its title, its hint.
+
+    The whole header toggles it, so "click to open" holds wherever on the
+    line the reader clicks, and Quasar makes that header an item Enter and
+    Space also toggle. The header is one line: what a section found goes in
+    its content, so a long run of facts cannot wrap the header onto two
+    lines and strand the chevron between them.
+    """
+    element = (
+        ui.expansion()
+        .classes("w-full tml-exp")
+        .props("dense dense-toggle")
+        .style("margin-top:6px;" + (" display:none;" if hidden else ""))
+    )
+    with element.add_slot("header"):
+        with (
+            ui.row()
+            .classes("w-full items-center no-wrap")
+            .style("gap:6px; min-width:0;")
+        ):
+            title = ui.label(heading).style(
+                f"{_MONO} font-size:12px; font-weight:700; "
+                "white-space:nowrap;"
+            )
+            ui.label("·").classes("cmeta")
+            hint = (
+                ui.label(disclosure_hint(False))
+                .classes("cmeta")
+                .style(
+                    "flex:1; min-width:0; white-space:nowrap; "
+                    "overflow:hidden; text-overflow:ellipsis;"
+                )
+            )
+    # The header slot replaces Quasar's label, which still names the toggle
+    # for a screen reader ("Expand", "Collapse"); without it all three
+    # headers would read as a bare "Expand".
+    element.bind_text_from(title, "text")
+    follow_open_state(element, hint)
+    return element, title, hint
 
 
 def should_auto_open(*, prev_over: bool, over: bool) -> bool:
@@ -861,7 +875,7 @@ def update_process_section(panel: Dict[str, Any], data: Any) -> None:
             note = rolling_words(chart)
         text = " · ".join(part for part in (sub, note) if part)
         panel[f"{key}_sub"].text = text
-        _show(panel, f"{key}_sep", bool(text))
+        _show(panel, f"{key}_sub", bool(text))
 
     _show(panel, "rows", many)
     panel["rows_title"].text = (

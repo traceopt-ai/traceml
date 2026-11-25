@@ -2,6 +2,7 @@
 :root {
   --traceopt-orange: #FF8C00;
   --traceopt-dark-orange: #D2691E;
+  --traceopt-link: #a8550d;
   --traceopt-warm-bg: #fffdfa;
   --traceopt-text: #1f2937;
   --traceopt-muted: #6b7280;
@@ -15,8 +16,8 @@
   --md-primary-bg-color: #ffffff;
   --md-primary-bg-color--light: rgba(255, 255, 255, 0.7);
 
-  --md-accent-fg-color: var(--traceopt-dark-orange);
-  --md-accent-fg-color--transparent: rgba(210, 105, 30, 0.1);
+  --md-accent-fg-color: var(--traceopt-link);
+  --md-accent-fg-color--transparent: rgba(168, 85, 13, 0.1);
   --md-accent-bg-color: #ffffff;
   --md-accent-bg-color--light: rgba(255, 255, 255, 0.7);
 
@@ -24,7 +25,7 @@
   --md-default-fg-color: var(--traceopt-text);
   --md-default-fg-color--light: var(--traceopt-muted);
 
-  --md-typeset-a-color: var(--traceopt-dark-orange);
+  --md-typeset-a-color: var(--traceopt-link);
 }
 
 /* Warm radial gradient background matching traceopt.ai hero */
@@ -52,31 +53,80 @@
   color: var(--traceopt-text);
 }
 [data-md-color-scheme="default"] .md-tabs__link:hover,
-[data-md-color-scheme="default"] .md-tabs__link--active {
-  color: var(--traceopt-dark-orange);
+[data-md-color-scheme="default"] .md-tabs__item--active .md-tabs__link {
+  color: var(--traceopt-link);
   opacity: 1;
 }
 
-/* Gradient primary button — mirrors traceopt.ai CTA */
-.md-typeset .md-button--primary {
-  background: linear-gradient(135deg, var(--traceopt-orange), var(--traceopt-dark-orange));
-  border-color: transparent;
-  color: #ffffff !important;
-  box-shadow: 0 4px 14px rgba(255, 140, 0, 0.25);
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
-}
-.md-typeset .md-button--primary:hover,
-.md-typeset .md-button--primary:focus {
-  transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(255, 140, 0, 0.35);
-  background: linear-gradient(135deg, var(--traceopt-orange), var(--traceopt-dark-orange));
-  color: #ffffff !important;
+/* Match the closed desktop search to the neutral headers. */
+@media screen and (min-width: 60em) {
+  [data-md-toggle="search"]:not(:checked) ~ .md-header .md-search__form {
+    --md-primary-bg-color: var(--md-default-fg-color);
+    --md-primary-bg-color--light: var(--md-default-fg-color);
+    background-color: color-mix(in srgb, var(--md-default-fg-color) 8%, transparent);
+  }
+  [data-md-toggle="search"]:not(:checked) ~ .md-header .md-search__form:hover {
+    background-color: color-mix(in srgb, var(--md-default-fg-color) 12%, transparent);
+  }
 }
 
-/* Native system font stack (matches traceopt.ai) */
-body,
-.md-typeset {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+/* Keep page titles, section headings, and the active page easy to scan. */
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3 {
+  color: var(--md-default-fg-color);
+  line-height: 1.25;
+}
+.md-typeset h1 {
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  margin-bottom: 0.8em;
+}
+.md-typeset h2 {
+  font-weight: 650;
+  letter-spacing: -0.025em;
+}
+.md-typeset h3 {
+  font-weight: 600;
+}
+.md-sidebar--primary .md-nav__title,
+.md-sidebar--primary .md-nav__item--section > .md-nav__link {
+  color: var(--md-default-fg-color);
+  font-weight: 700;
+}
+.md-sidebar--primary .md-nav__link--active {
+  color: var(--md-typeset-a-color);
+  font-weight: 700;
+  background-color: var(--md-accent-fg-color--transparent);
+  border-radius: 0.2rem;
+}
+
+.traceml-lead {
+  max-width: 68ch;
+  font-size: 1.05em;
+  line-height: 1.6;
+}
+.md-typeset :is(p, li) a:not(.md-button) {
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+.md-typeset .traceml-secondary-link {
+  color: var(--md-default-fg-color);
+  font-weight: 600;
+  margin-inline-start: 0.65rem;
+}
+
+/* A high-contrast action in both color schemes. */
+.md-typeset .md-button--primary {
+  background: var(--md-default-fg-color);
+  border-color: var(--md-default-fg-color);
+  color: var(--md-default-bg-color);
+}
+.md-typeset .md-button--primary:hover,
+.md-typeset .md-button--primary:focus-visible {
+  background: var(--md-typeset-a-color);
+  border-color: var(--md-typeset-a-color);
+  color: var(--md-default-bg-color);
 }
 
 /* ─── Dark scheme ──────────────────────────────────────────────── */
@@ -87,17 +137,18 @@ body,
   --md-primary-fg-color--dark: var(--traceopt-dark-orange);
 
   --md-accent-fg-color: #ffa94d;
+  --md-accent-fg-color--transparent: rgba(255, 169, 77, 0.12);
   --md-typeset-a-color: #ffa94d;
 }
+[data-md-color-scheme="slate"] .md-header,
+[data-md-color-scheme="slate"] .md-tabs {
+  background: var(--md-default-bg-color);
+  color: var(--md-default-fg-color);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: none;
+}
 [data-md-color-scheme="slate"] .md-tabs__link:hover,
-[data-md-color-scheme="slate"] .md-tabs__link--active {
+[data-md-color-scheme="slate"] .md-tabs__item--active .md-tabs__link {
   color: #ffa94d;
   opacity: 1;
-}
-
-/* Material's default h1 color (--md-default-fg-color--light) reads as
-   muted, low-contrast gray on the slate background. Reuse the full-contrast
-   foreground color already defined for this scheme instead. */
-[data-md-color-scheme="slate"] .md-typeset h1 {
-  color: var(--md-default-fg-color);
 }

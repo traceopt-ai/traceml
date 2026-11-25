@@ -63,7 +63,7 @@ class _FakeWriter:
         self.fail_flush = fail_flush
         self.flush_count = 0
 
-    def flush(self) -> None:
+    def flush(self, force: bool = False) -> None:
         self.flush_count += 1
         if self.fail_flush:
             raise RuntimeError("flush failed")

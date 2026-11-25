@@ -11,7 +11,9 @@ At shutdown, TraceML waits briefly for pending records to be written.
 ## Switching it on
 
 Export is off by default.
-The built-in exporter is `jsonl`.
+There are two built-in exporters.
+`jsonl` writes the local files this page describes.
+`wandb` streams step time into Weights & Biases, one run per rank; [Send step time to Weights & Biases](integrations/wandb.md#send-step-time-to-weights-biases) covers its setup and behavior.
 A custom exporter is selected by setting `exporter` to a `module:factory` value, described in [Custom exporters](../developer_guide/export-records.md#custom-exporters).
 Pick whichever layer fits your setup:
 
@@ -36,6 +38,100 @@ The launcher resolves the setting like every other one.
 A CLI flag beats the `TRACEML_*` environment variable, which beats `traceml.yaml`.
 With Ray, the fields on `TraceMLRayConfig` set it.
 Ray reads no environment variable and no `traceml.yaml` for it, so `exporter=""` means off.
+
+### Export without local analysis
+
+Choose `telemetry` mode to export measurements without a local SQLite database,
+diagnostics, live UI, or summary generation:
+
+```bash
+traceml run train.py --mode telemetry --exporter jsonl
+```
+
+Telemetry mode always disables local history, including when inherited
+configuration sets `history_enabled: true`. It requires an exporter and rejects
+HTML reports and regression guards. `traceml.summary()` and
+`traceml.final_summary()` are unavailable in this mode. `watch` does not support
+telemetry mode.
+
+Operational logs, run metadata, and launcher-captured training output may still
+be written locally. Raw sampler logging is controlled separately by
+`--enable-logging`, `TRACEML_ENABLE_LOGGING`, or `enable_logging` in
+`traceml.yaml`. It is off by default; enabling it also writes local `.msgpack`
+files, including in telemetry mode.
+
+To export measurements and retain local analysis and the final summary:
+
+```bash
+traceml run train.py --mode summary --exporter jsonl
+```
+
+The aggregator remains active in both cases. It admits measurements, consumes
+rank-completion markers, and drains pending telemetry and exports within the
+existing shutdown bounds. Completion markers do not guarantee delivery or
+indicate that training succeeded. In telemetry mode, the required exporter
+must open before the aggregator accepts workers; an initialization failure is
+an aggregator startup failure, so the default launcher policy does not start
+training. After training starts, export failures and losses remain warnings and
+do not replace the training exit code. In summary mode, export remains optional
+and its initialization failures are warnings because local analysis continues.
+
+When the exporter fails to open in telemetry mode, `traceml run` names it.
+The launcher prints `exporter '<name>' failed to start: <reason>` and that
+training was not started. The run manifest records
+`telemetry_reason: exporter_startup_failed`. The aggregator also leaves the
+reason in `aggregator/exporter_startup_failed.json`. A run that never started
+writes no `finalization_warning.json`. An exporter the aggregator cannot
+build at all, such as `wandb` with any stream selection other than
+`step_time`, is named the same way, in every mode.
+In telemetry mode the launcher waits 10 seconds longer for the aggregator to
+listen, the exporter's startup budget, and so do the other nodes of a
+multi-node run.
+
+At shutdown in telemetry mode, the `wandb` exporter gets up to 30 seconds to
+finish its runs. The `jsonl` exporter and custom exporters keep the ordinary
+export slice of at most 2 seconds, as in the other modes. The close outcome,
+a timeout included, is recorded in `finalization_warning.json`. A close still
+running when the aggregator stops waiting shows there as
+`"close_finished": false`, with a `close_error` that says how long it had.
+The end-of-run deadline still bounds the close: `--finalize-timeout-sec`, and
+the launcher's own limit of that timeout plus 5 seconds. With `wandb` in
+telemetry mode, 2 seconds of that deadline stay reserved for late telemetry
+from the ranks before export takes its share. On Ctrl+C, the launcher gives
+the aggregator 5 seconds before it is killed, so a close can be cut off
+there.
+
+With Ray, `TraceMLRayConfig(stop_timeout_sec=...)` is the whole end-of-run
+deadline, and it must cover the exporter's close. The default of 5 seconds
+gives export half a second, except for `wandb` in telemetry mode, which gets
+3 seconds of them, because 2 seconds stay reserved for late telemetry from
+the ranks. TraceML kills the aggregator actor right after `stop` returns, so a
+close still in flight ends there. Set `stop_timeout_sec` to at least 33 seconds
+to give the `wandb` exporter its full close budget.
+
+For separately launched workers, select telemetry mode on the worker when its
+code may call `traceml.summary()` or `traceml.final_summary()`:
+
+```bash
+# Terminal 1
+traceml serve --mode telemetry --exporter jsonl --run-name my-run
+
+# Terminal 2: train.py calls traceml.init() and instruments its steps
+TRACEML_UI_MODE=telemetry TRACEML_SESSION_ID=my-run python train.py
+```
+
+Alternatively, select `ui_mode="telemetry"` in the worker's `traceml.init()`.
+Workers send measurements independently of this setting; the telemetry-mode
+server still exports them without SQLite history. Setting the worker mode makes
+summary API calls fail immediately instead of waiting for a service that the
+telemetry server intentionally does not run. The standalone server does not
+negotiate execution mode with its workers. Stop `serve` with Ctrl+C or SIGTERM
+after training ends. CLI-launched runs and Ray stop their aggregator through
+their existing lifecycle.
+
+JSONL remains a local-file exporter. For delivery to a platform, use the
+built-in `wandb` exporter or a custom exporter; telemetry mode works with
+either.
 
 Lines carry no hostname by default, because the file may be uploaded elsewhere.
 To include `hostname` on records that have this field, use `--exporter-hostname`, `exporter_hostname: true` in YAML, `TRACEML_EXPORTER_HOSTNAME=1`, or `TraceMLRayConfig(exporter_hostname=True)`.
@@ -174,8 +270,10 @@ So every closing line of a run shows the same `dropped_batches`.
 
 ## When something was lost
 
-Export never fails the run.
-When the export did not write every record of the selected streams, `finalization_warning.json` in the run folder gets an `export` block.
+After training starts, export never changes the training outcome. Telemetry
+mode first requires its exporter to open successfully, as described above.
+When the export did not write every record of the selected streams,
+`finalization_warning.json` in the run folder gets an `export` block.
 The block holds `written_records`, `dropped_batches`, `failed_records`, `skipped_items` and `exporter_failed`.
 If export is the only problem, the file also says `"reason": "export_incomplete"`.
 If another warning already started the file, the `export` block is added to it.

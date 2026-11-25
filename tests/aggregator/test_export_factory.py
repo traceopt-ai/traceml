@@ -17,6 +17,7 @@ import pytest
 
 from traceml_ai.aggregator.export import (
     ExporterContext,
+    ExporterStartupError,
     ExportWorker,
     StepTimeRecord,
 )
@@ -54,9 +55,10 @@ class _Logger:
 class _TCP:
     def __init__(self, messages):
         self._messages = list(messages)
+        self.started = False
 
     def start(self):
-        return None
+        self.started = True
 
     def poll(self):
         while self._messages:
@@ -377,6 +379,30 @@ def test_failed_factory_run_records_the_loss(tmp_path, value, logged):
     }
 
 
+def test_telemetry_failed_factory_fails_before_tcp_start(tmp_path):
+    logger = _Logger()
+    agg = TraceMLAggregator(
+        logger=logger,
+        stop_event=threading.Event(),
+        settings=_settings(
+            tmp_path,
+            "no_such_module_xyz:make",
+            mode="telemetry",
+        ),
+    )
+    tcp = _TCP([])
+    agg._tcp_server = tcp
+
+    try:
+        with pytest.raises(ExporterStartupError, match="no_such_module_xyz"):
+            agg.start()
+    finally:
+        agg._export_worker.stop(timeout_sec=1.0)
+
+    assert tcp.started is False
+    assert agg._started is False
+
+
 @pytest.mark.parametrize(
     "value",
     ["no_such_module_xyz:make", f"{__name__}:raising_factory"],
@@ -412,3 +438,60 @@ def test_failed_factory_is_in_the_error_artifact(tmp_path, value):
     assert error["export"]["exporter_failed"] is True
     assert error["export"]["failed_records"] == 1
     assert error["export"]["written_records"] == 0
+
+
+@pytest.mark.parametrize(
+    ("exporter", "export_streams", "error_type", "message"),
+    [
+        pytest.param(
+            "no_such_module_xyz:make",
+            "step_time",
+            ExporterStartupError,
+            "no_such_module_xyz",
+            id="factory-not-importable",
+        ),
+        # The launcher accepts this selection; only the wandb exporter
+        # rejects it, when the aggregator builds it.
+        pytest.param(
+            "wandb",
+            "step_time,system",
+            ValueError,
+            "step_time stream only",
+            id="exporter-cannot-be-built",
+        ),
+    ],
+)
+def test_telemetry_startup_failure_writes_a_marker_and_no_warning(
+    monkeypatch, tmp_path, exporter, export_streams, error_type, message
+):
+    from traceml_ai.runtime import lifecycle
+
+    # Keep the process environment untouched by the in-process start.
+    monkeypatch.setattr(lifecycle, "_apply_settings_env", lambda *a, **k: None)
+    settings = _settings(
+        tmp_path, exporter, mode="telemetry", export_streams=export_streams
+    )
+
+    with pytest.raises(error_type, match=message):
+        lifecycle.start_aggregator(settings, logger=_Logger())
+
+    aggregator_dir = tmp_path / "logs" / "run" / "aggregator"
+    marker = json.loads(
+        (aggregator_dir / "exporter_startup_failed.json").read_text()
+    )
+    assert marker["status"] == "error"
+    assert marker["reason"] == "exporter_startup_failed"
+    assert marker["exporter"] == exporter
+    assert message in marker["error"]
+    assert isinstance(marker["failed_at"], str)
+    assert not list(aggregator_dir.glob("finalization_*.json"))
+
+
+def test_startup_marker_name_matches_its_launcher_twin():
+    from traceml_ai.aggregator import trace_aggregator
+    from traceml_ai.launcher import manifest
+
+    assert (
+        trace_aggregator._EXPORTER_STARTUP_FAILED_NAME
+        == manifest.EXPORTER_STARTUP_FAILED_NAME
+    )

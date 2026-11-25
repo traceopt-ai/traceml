@@ -26,6 +26,8 @@ REQUIRED_IDS = {
     "ray-train",
     "deepspeed",
     "wandb-mlflow",
+    "wandb",
+    "mlflow",
 }
 REQUIRED_FIELDS = {
     "id",

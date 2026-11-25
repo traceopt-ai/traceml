@@ -14,6 +14,20 @@ which carry the full historical notes for versions predating this file.
   at version 1; internal records and other exporters are unchanged. See the
   [migration guide](docs/user_guide/live-export.md#migrating-from-schema-version-1).
 
+## [0.5.2] - 2026-11-25
+
+- The dashboard's Diagnostics card now sits beside run information at the
+  top, so findings and next steps show without scrolling. The two cards share
+  the row equally and stack, run information first, on narrow screens. Step
+  Memory takes its row alone, and a `watch` session keeps run information at
+  full width.
+
+- The dashboard's System card now shows CPU utilization, GPU power and GPU
+  details as three independent collapsible sections. CPU utilization and GPU
+  power start collapsed; GPU details keeps its default and still opens on its
+  own when the spread across GPUs crosses the bar. Each header says
+  "click to open" or "click to close" as soon as it is toggled.
+
 ## [0.5.1] - 2026-11-09
 
 - Added opt-in live telemetry export to JSON Lines files or a custom

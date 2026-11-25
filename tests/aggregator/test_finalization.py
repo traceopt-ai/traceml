@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 import threading
 import time
 from pathlib import Path
@@ -116,11 +117,13 @@ def _make_aggregator(tmp_path: Path, *, writer: _Writer, tcp: _TCP):
     agg._foreign_senders = {}
     agg._drain_lock = threading.Lock()
     agg._summary_lock = threading.Lock()
+    agg._final_summary_written = False
     agg._thread = _StoppedThread()
     agg._display_driver = _Display()
     agg._tcp_server = tcp
     agg._sqlite_writer = writer
     agg._export_worker = None
+    agg._export_finish_timeout_sec = None
     return agg
 
 
@@ -578,7 +581,42 @@ def test_split_telemetry_payloads_duplicate_rank_is_idempotent(tmp_path):
     assert agg._finished_ranks_snapshot() == [0]
 
 
-def test_stop_writes_no_warning_when_all_ranks_finished(monkeypatch, tmp_path):
+@pytest.mark.parametrize("mode", ["summary", "telemetry"])
+def test_stop_writes_no_warning_when_all_ranks_finished(
+    monkeypatch, tmp_path, mode
+):
+    control_messages = [
+        build_rank_finished_payload(
+            global_rank=rank, world_size=2, node_rank=0, hostname="worker"
+        )
+        for rank in (0, 1)
+    ]
+    agg = _make_aggregator(
+        tmp_path,
+        writer=_Writer(_ok_result()),
+        tcp=_TCP(messages=control_messages),
+    )
+    agg._settings = replace(agg._settings, mode=mode)
+    monkeypatch.setattr(
+        trace_aggregator,
+        "generate_summary",
+        lambda *args, **kwargs: _write_fake_summary(tmp_path),
+    )
+
+    agg.stop(timeout_sec=0.5)
+
+    agg_dir = tmp_path / "run" / "aggregator"
+    assert not (agg_dir / "finalization_warning.json").exists()
+    assert not (agg_dir / "finalization_error.json").exists()
+    assert get_final_summary_json_path(tmp_path / "run").is_file() is (
+        mode == "summary"
+    )
+
+
+def test_summary_is_final_only_after_stop_rewrites_it(
+    monkeypatch,
+    tmp_path,
+):
     control_messages = [
         build_rank_finished_payload(
             global_rank=rank, world_size=2, node_rank=0, hostname="worker"
@@ -595,13 +633,16 @@ def test_stop_writes_no_warning_when_all_ranks_finished(monkeypatch, tmp_path):
         "generate_summary",
         lambda *args, **kwargs: _write_fake_summary(tmp_path),
     )
+    # An in-training report exists and every rank has finished, but the
+    # end-of-run report has not been written yet.
+    _write_fake_summary(tmp_path)
+    agg._drain_tcp()
+    assert sorted(agg._finished_ranks) == [0, 1]
+    assert agg._summary_finalized() is False
 
     agg.stop(timeout_sec=0.5)
 
-    agg_dir = tmp_path / "run" / "aggregator"
-    assert not (agg_dir / "finalization_warning.json").exists()
-    assert not (agg_dir / "finalization_error.json").exists()
-    assert get_final_summary_json_path(tmp_path / "run").is_file()
+    assert agg._summary_finalized() is True
 
 
 def test_stop_downgrades_post_write_summary_error_to_warning(
@@ -807,6 +848,7 @@ class _FakeExportWorker:
         self._calls = calls
         self._stats = stats
         self.stop_timeouts = []
+        self.wait_closed_timeouts = []
 
     def submit(self, payload):
         return None
@@ -815,6 +857,10 @@ class _FakeExportWorker:
         self._calls.append("export_stop")
         self.stop_timeouts.append(timeout_sec)
         return self._stats
+
+    def wait_closed(self, timeout_sec):
+        self.wait_closed_timeouts.append(timeout_sec)
+        return True
 
     def stats(self):
         return self._stats
@@ -931,12 +977,13 @@ def test_export_budget_leaves_the_sqlite_budget_unchanged(
     assert runs[True][0] == [28.0]
 
 
-def test_export_losses_write_a_warning_without_failing_summary_mode(
-    monkeypatch, tmp_path
+@pytest.mark.parametrize("mode", ["summary", "telemetry"])
+def test_export_losses_write_a_warning_without_failing_headless_mode(
+    monkeypatch, tmp_path, mode
 ):
     stats = _export_stats(failed_records=3, exporter_failed=True)
     agg, _, _ = _export_aggregator(monkeypatch, tmp_path, stats=stats)
-    assert agg._settings.mode == "summary"
+    agg._settings = replace(agg._settings, mode=mode)
 
     agg.stop(timeout_sec=10.0)
 
@@ -1064,8 +1111,12 @@ def test_export_stats_reach_the_error_artifact(monkeypatch, tmp_path):
     assert error["export"]["written_records"] == 4
 
 
-def test_export_worker_stops_even_when_settle_raises(monkeypatch, tmp_path):
+@pytest.mark.parametrize("mode", ["summary", "telemetry"])
+def test_export_worker_stops_even_when_settle_raises(
+    monkeypatch, tmp_path, mode
+):
     agg, calls, _ = _export_aggregator(monkeypatch, tmp_path)
+    agg._settings = replace(agg._settings, mode=mode)
 
     def _settle(timeout_sec):
         raise RuntimeError("settle failed")
@@ -1076,19 +1127,35 @@ def test_export_worker_stops_even_when_settle_raises(monkeypatch, tmp_path):
         agg.stop(timeout_sec=10.0)
 
     assert calls == ["export_stop"]
+    error = json.loads(
+        (
+            tmp_path / "run" / "aggregator" / "finalization_error.json"
+        ).read_text()
+    )
+    assert error["error"] == "settle failed"
 
 
+@pytest.mark.parametrize(
+    ("mode", "finish", "settle"),
+    [
+        ("cli", None, 98.0),
+        ("telemetry", 30.0, 69.0),
+        ("telemetry", None, 98.0),
+    ],
+)
 def test_settle_runs_for_export_when_history_is_disabled(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, mode, finish, settle
 ):
     from dataclasses import replace
 
-    agg, calls, _ = _export_aggregator(monkeypatch, tmp_path)
-    agg._settings = replace(agg._settings, mode="cli", history_enabled=False)
+    agg, calls, budgets = _export_aggregator(monkeypatch, tmp_path)
+    agg._settings = replace(agg._settings, mode=mode, history_enabled=False)
+    agg._export_finish_timeout_sec = finish
 
-    agg.stop(timeout_sec=10.0)
+    agg.stop(timeout_sec=100.0)
 
     assert calls == ["settle", "tcp_stop", "export_stop", "sqlite_finalize"]
+    assert budgets[0] == pytest.approx(settle, abs=0.1)
 
 
 def test_settle_is_skipped_without_history_or_export(monkeypatch, tmp_path):
@@ -1100,3 +1167,243 @@ def test_settle_is_skipped_without_history_or_export(monkeypatch, tmp_path):
     agg.stop(timeout_sec=10.0)
 
     assert calls == ["tcp_stop", "sqlite_finalize"]
+
+
+# A remote exporter's shutdown in telemetry mode.
+
+# Export's share of the stop budget before telemetry mode had its own.
+_OLD_EXPORT_STOP_CAP_SEC = 2.0
+
+
+class _CloseExporter:
+    """``close`` blocks until ``release`` when ``block``, sleeps ``delay``,
+    then raises ``error`` when one is given."""
+
+    def __init__(self, *, delay=0.0, error=None, block=False):
+        self._delay = delay
+        self._error = error
+        self._block = block
+        self.release = threading.Event()
+        self.closed = False
+
+    def open(self):
+        return None
+
+    def write(self, records):
+        return None
+
+    def flush(self):
+        return None
+
+    def close(self, *, dropped_batches=0):
+        if self._block:
+            self.release.wait(60)
+        time.sleep(self._delay)
+        self.closed = True
+        if self._error is not None:
+            raise self._error
+
+
+def _telemetry_mode(agg, *, finish_timeout_sec=30.0, **settings):
+    """Put ``agg`` in telemetry mode with history off.
+
+    The default ``finish_timeout_sec`` is the wandb exporter's telemetry
+    close bound.
+    """
+    agg._settings = replace(
+        agg._settings, mode="telemetry", history_enabled=False, **settings
+    )
+    agg._export_finish_timeout_sec = finish_timeout_sec
+    return agg
+
+
+def _telemetry_aggregator(monkeypatch, tmp_path, exporter):
+    """A telemetry-mode aggregator with a real export worker."""
+    from traceml_ai.aggregator.export import ExportWorker
+
+    agg, _, _ = _export_aggregator(monkeypatch, tmp_path, worker=False)
+    _telemetry_mode(agg)
+    agg._export_worker = ExportWorker(
+        exporter, interval_sec=60.0, logger=_Logger()
+    )
+    agg._export_worker.start()
+    return agg
+
+
+@pytest.mark.parametrize(
+    "error",
+    [None, TimeoutError("W&B finish did not return")],
+    ids=["close-returns", "close-raises"],
+)
+def test_telemetry_waits_for_a_close_longer_than_the_old_cap(
+    monkeypatch, tmp_path, error
+):
+    exporter = _CloseExporter(
+        delay=_OLD_EXPORT_STOP_CAP_SEC + 0.5, error=error
+    )
+    agg = _telemetry_aggregator(monkeypatch, tmp_path, exporter)
+
+    agg.stop(timeout_sec=30.0)
+
+    assert exporter.closed is True
+    if error is None:
+        assert agg._export_worker.stats().exporter_failed is False
+        assert not _warning_path(tmp_path).exists()
+    else:
+        warning = json.loads(
+            _warning_path(tmp_path).read_text(encoding="utf-8")
+        )
+        assert warning["reason"] == "export_incomplete"
+        assert warning["export"]["exporter_failed"] is True
+
+
+@pytest.mark.parametrize(
+    ("timeout", "expected"),
+    [(100.0, 31.0), (10.0, 8.0), (2.0, 0.5), (0.1, 0.1)],
+)
+def test_telemetry_gives_export_the_finish_budget(
+    monkeypatch, tmp_path, timeout, expected
+):
+    agg, _, _ = _export_aggregator(monkeypatch, tmp_path)
+    _telemetry_mode(agg)
+
+    agg.stop(timeout_sec=timeout)
+
+    (budget,) = agg._export_worker.stop_timeouts
+    assert budget == pytest.approx(expected, abs=0.1)
+
+
+@pytest.mark.parametrize(
+    ("mode", "waits"), [("telemetry", True), ("cli", False)]
+)
+def test_second_export_stats_read_waits_for_close_in_telemetry_only(
+    monkeypatch, tmp_path, mode, waits
+):
+    agg, _, _ = _export_aggregator(monkeypatch, tmp_path)
+    agg._settings = replace(agg._settings, mode=mode, history_enabled=False)
+
+    agg.stop(timeout_sec=100.0)
+
+    (bound,) = agg._export_worker.wait_closed_timeouts
+    if waits:
+        assert bound == pytest.approx(100.0, abs=0.5)
+    else:
+        assert bound == 0.0
+
+
+def test_telemetry_export_budget_never_exceeds_a_tiny_deadline(
+    monkeypatch, tmp_path
+):
+    # Kept apart from the finish budget cases: only here is the settle
+    # exactly 0.0; elsewhere it depends on the time stop() has used.
+    agg, _, settle = _export_aggregator(monkeypatch, tmp_path)
+    _telemetry_mode(agg)
+
+    agg.stop(timeout_sec=0.1)
+
+    (budget,) = agg._export_worker.stop_timeouts
+    assert 0.0 <= budget <= 0.1
+    assert settle == [0.0]
+
+
+def test_telemetry_jsonl_keeps_the_export_slice_and_the_settle(
+    monkeypatch, tmp_path
+):
+    # jsonl is built without a finish timeout, so nothing is reserved for
+    # a remote close: settle keeps most of a 10 s finalize timeout.
+    agg, _, settle = _export_aggregator(monkeypatch, tmp_path)
+    _telemetry_mode(agg, finish_timeout_sec=None, exporter="jsonl")
+    assert trace_aggregator._exporter_finish_timeout(agg._settings) is None
+
+    agg.stop(timeout_sec=10.0)
+
+    (budget,) = agg._export_worker.stop_timeouts
+    assert budget == pytest.approx(1.0, abs=0.05)
+    (settle_budget,) = settle
+    assert settle_budget >= 8.0
+
+
+def test_telemetry_records_a_close_that_never_returns(monkeypatch, tmp_path):
+    exporter = _CloseExporter(block=True)
+    agg = _telemetry_aggregator(monkeypatch, tmp_path, exporter)
+    try:
+        started = time.monotonic()
+        agg.stop(timeout_sec=3.0)
+        elapsed = time.monotonic() - started
+        stats = agg._export_worker.stats()
+    finally:
+        exporter.release.set()
+
+    assert elapsed < 3.5
+    assert stats.exporter_failed is False
+    warning = json.loads(_warning_path(tmp_path).read_text(encoding="utf-8"))
+    assert warning["reason"] == "export_incomplete"
+    assert warning["message"] == "Telemetry export did not finish closing."
+    assert warning["export"]["close_finished"] is False
+    assert warning["export"]["close_error"].startswith(
+        "exporter close did not finish within "
+    )
+
+
+@pytest.mark.parametrize("start_fails", [True, False])
+def test_run_aggregator_restores_the_signal_handlers(
+    monkeypatch, tmp_path, start_fails
+):
+    import signal
+
+    class _Handle:
+        endpoint = AggregatorEndpoint(host="127.0.0.1", port=1, session_id="r")
+
+        def stop(self, timeout_sec):
+            return None
+
+    def fake_start_aggregator(settings, logger, stop_event):
+        if start_fails:
+            raise RuntimeError("exporter did not open")
+        stop_event.set()
+        return _Handle()
+
+    def previous(signum, frame):
+        return None
+
+    monkeypatch.setenv("TRACEML_LOGS_DIR", str(tmp_path))
+    monkeypatch.setenv("TRACEML_SESSION_ID", "run")
+    monkeypatch.setattr(
+        aggregator_main, "start_aggregator", fake_start_aggregator
+    )
+    originals = {
+        sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)
+    }
+    try:
+        for sig in originals:
+            signal.signal(sig, previous)
+
+        code = aggregator_main.run_aggregator(
+            TraceMLSettings(logs_dir=str(tmp_path), session_id="run"),
+            logger=Mock(),
+        )
+
+        assert code == (1 if start_fails else 0)
+        assert signal.getsignal(signal.SIGINT) is previous
+        assert signal.getsignal(signal.SIGTERM) is previous
+    finally:
+        for sig, handler in originals.items():
+            signal.signal(sig, handler)
+
+
+def test_a_handler_installed_outside_python_is_left_alone():
+    import signal
+
+    original = signal.getsignal(signal.SIGTERM)
+    try:
+        installed = aggregator_main._install_signal_handlers(threading.Event())
+        traceml_handler = signal.getsignal(signal.SIGTERM)
+
+        # signal.getsignal reports a C-level handler as None.
+        aggregator_main._restore_signal_handlers({signal.SIGTERM: None})
+
+        assert signal.getsignal(signal.SIGTERM) is traceml_handler
+        assert callable(traceml_handler)
+    finally:
+        aggregator_main._restore_signal_handlers(installed)
+        signal.signal(signal.SIGTERM, original)

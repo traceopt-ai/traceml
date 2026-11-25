@@ -188,6 +188,29 @@ def test_training_process_only_pipes_output_when_requested(
     assert popen.call_args.kwargs["stderr"] is subprocess.PIPE
 
 
+def test_training_process_does_not_inherit_export_destination(monkeypatch):
+    popen = Mock()
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    env = {
+        "TRACEML_UI_MODE": "telemetry",
+        "TRACEML_HISTORY_ENABLED": "0",
+        "TRACEML_EXPORTER": "private_adapter:make",
+        "TRACEML_EXPORT_STREAMS": "all",
+        "TRACEML_EXPORTER_HOSTNAME": "1",
+        "USER_SETTING": "preserved",
+    }
+    original = env.copy()
+
+    start_training_process(["python", "train.py"], env, ".")
+
+    assert popen.call_args.kwargs["env"] == {
+        "TRACEML_UI_MODE": "telemetry",
+        "TRACEML_HISTORY_ENABLED": "0",
+        "USER_SETTING": "preserved",
+    }
+    assert env == original
+
+
 def test_aggregator_process_pipes_only_stderr(monkeypatch) -> None:
     popen = Mock()
     monkeypatch.setattr(subprocess, "Popen", popen)

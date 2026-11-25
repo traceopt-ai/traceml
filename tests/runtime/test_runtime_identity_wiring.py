@@ -46,7 +46,7 @@ class _FakePublisher:
     def attach_senders(self, samplers) -> None:
         self.attached_samplers = list(samplers)
 
-    def publish(self, samplers) -> None:
+    def publish(self, samplers, *, force_flush=False) -> None:
         return None
 
     def close(self) -> None:

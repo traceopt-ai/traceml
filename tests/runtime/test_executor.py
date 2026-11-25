@@ -160,6 +160,22 @@ def test_read_traceml_env_defaults_to_two_second_interval(monkeypatch):
     assert read_traceml_env()["interval"] == 2.0
 
 
+@pytest.mark.parametrize(
+    ("mode", "history", "expected"),
+    [("cli", "0", False), ("summary", "1", True), ("telemetry", "1", False)],
+)
+def test_executor_preserves_effective_history(
+    monkeypatch, mode, history, expected
+):
+    monkeypatch.setenv("TRACEML_SCRIPT_PATH", "train.py")
+    monkeypatch.setenv("TRACEML_UI_MODE", mode)
+    monkeypatch.setenv("TRACEML_HISTORY_ENABLED", history)
+
+    assert (
+        build_runtime_settings(read_traceml_env()).history_enabled is expected
+    )
+
+
 def test_read_traceml_env_defaults_to_summary(monkeypatch):
     monkeypatch.setenv("TRACEML_SCRIPT_PATH", "train.py")
     monkeypatch.delenv("TRACEML_UI_MODE", raising=False)

@@ -248,3 +248,68 @@ def test_hf_extra_requires_supported_transformers() -> None:
         return
 
     pytest.fail("transformers not found in the hf optional dependency group")
+
+
+def test_wandb_is_an_optional_extra() -> None:
+    """wandb installs through the wandb extra, never the base install."""
+    runtime_names = {
+        _requirement_name(requirement)
+        for requirement in _runtime_dependencies()
+    }
+    assert (
+        "wandb" not in runtime_names
+    ), "wandb belongs in the wandb extra, not the base install"
+
+    extra_names = {
+        _requirement_name(requirement)
+        for requirement in _optional_dependencies("wandb")
+    }
+    assert "wandb" in extra_names, "wandb not found in the wandb extra"
+
+
+def test_wandb_extra_requires_init_timeout_to_bound_the_backend() -> None:
+    """The wandb extra must carry the floor the live exporter needs.
+
+    From 0.28.2 init_timeout also bounds the backend's retries during run
+    initialization, so wandb.init returns against an unreachable server.
+    """
+    for requirement in _optional_dependencies("wandb"):
+        if _requirement_name(requirement) != "wandb":
+            continue
+
+        specifier = _version_specifier(requirement).replace(" ", "")
+        assert ">=0.28.2" in specifier, (
+            f"the wandb extra declares {requirement!r} without the 0.28.2 "
+            "floor from which init_timeout bounds the backend's retries "
+            "during run initialization"
+        )
+        return
+
+    pytest.fail("wandb not found in the wandb optional dependency group")
+
+
+def test_mlflow_extra_requires_skinny_with_the_full_package_pin() -> None:
+    """The mlflow extra must accept both the skinny and the full package."""
+    runtime_names = {
+        _requirement_name(requirement)
+        for requirement in _runtime_dependencies()
+    }
+    assert not runtime_names & {
+        "mlflow",
+        "mlflow-skinny",
+    }, "mlflow belongs in the mlflow extra, not the base install"
+
+    for requirement in _optional_dependencies("mlflow"):
+        if _requirement_name(requirement) != "mlflow-skinny":
+            continue
+
+        specifier = _version_specifier(requirement).replace(" ", "")
+        assert ">=2.15" in specifier, (
+            f"the mlflow extra declares {requirement!r} without the 2.15 "
+            "floor from which the full mlflow package pins mlflow-skinny"
+        )
+        return
+
+    pytest.fail(
+        "mlflow-skinny not found in the mlflow optional dependency group"
+    )

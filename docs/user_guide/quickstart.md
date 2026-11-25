@@ -1,64 +1,89 @@
 # TraceML Quickstart
 
-Diagnose slow training with Hugging Face Trainer, PyTorch Lightning, RF-DETR, or a custom PyTorch loop.
+Get a first saved report from [your training script](#use-your-training-script)
+or [the included example](#try-the-included-example). TraceML requires Python
+3.10 or later.
 
-This guide assumes Python 3.10+ and a working training environment with your
-framework already installed.
+## Use your training script
 
-## 1. Install TraceML
-
-Add TraceML to the environment where you run training:
+Install TraceML in the Python environment where you run training. It should
+already contain PyTorch and any trainer your script uses:
 
 ```bash
 pip install traceml-ai
 ```
 
-## 2. Run Your Training
-
 ### Hugging Face Trainer, PyTorch Lightning, and RF-DETR
 
-Launch your existing script through TraceML:
+Standard [Hugging Face Trainer](integrations/huggingface.md),
+[PyTorch Lightning](integrations/lightning.md), and
+[RF-DETR object detection](integrations/rfdetr.md) scripts need no TraceML code
+changes. Launch your existing script through TraceML:
 
 ```diff
 - python train.py
 + traceml run train.py
 ```
 
-TraceML detects the framework and attaches instrumentation automatically.
-No code changes are required for these standard training paths.
-
-
 ### Custom PyTorch Loop
 
-Initialize TraceML once and mark the optimizer-step boundary:
+For a plain PyTorch loop, initialize TraceML once and wrap each training step,
+including its optimizer update:
 
 ```diff
-+   import traceml_ai as traceml
++ import traceml_ai as traceml
 
-+   traceml.init(mode="auto")
++ traceml.init(mode="auto")
 
-    for batch in dataloader:
-+       with traceml.trace_step(model):
-            optimizer.zero_grad(set_to_none=True)
-            outputs = model(batch["x"])
-            loss = criterion(outputs, batch["y"])
-            loss.backward()
-            optimizer.step()
+  for batch in dataloader:
++     with traceml.trace_step(model):
+          optimizer.zero_grad(set_to_none=True)
+          outputs = model(batch["x"])
+          loss = criterion(outputs, batch["y"])
+          loss.backward()
+          optimizer.step()
 ```
 
-Then run:
+Then launch the instrumented script:
 
 ```bash
 traceml run train.py
 ```
 
 See the [core API](public-api.md) for custom input sources and more explicit
-control.
+control, or the [integration guides](integrations.md) for other training setups.
 
-## 3. Read the Diagnosis
+## Try the included example
 
-When training finishes, TraceML identifies the likely bottleneck, explains the
-evidence, and suggests what to inspect next. For example:
+The repository's `examples/quickstart.py` trains on generated data, so it needs
+no dataset download. It runs on CPU when CUDA is unavailable and already has
+the custom-loop instrumentation shown above. Use a repository checkout of this
+documentation version; examples are not included in the PyPI package:
+
+```bash
+git clone --branch version_0.5.2 https://github.com/traceopt-ai/traceml.git
+cd traceml
+python -m pip install -e ".[torch]"
+traceml run examples/quickstart.py --args --steps 20
+```
+
+To try automatic instrumentation without your own script, follow the
+[Hugging Face Trainer example](https://github.com/traceopt-ai/traceml/blob/version_0.5.2/examples/README.md#start-here).
+
+## Read the diagnosis and saved report
+
+When training finishes, TraceML prints a verdict, the supporting measurements,
+and a suggested next investigation. The terminal shows the report path; the
+files are saved under the generated run name:
+
+```text
+logs/<run-name>/final_summary.json
+logs/<run-name>/final_summary.txt
+```
+
+The included example checks the first-run workflow, not a particular
+bottleneck. This excerpt illustrates how to read a diagnosis; your verdict and
+measurements may differ:
 
 ```text
 TraceML Run Summary
@@ -78,31 +103,8 @@ Step Time       200.4 ms  100%
 
 Your result depends on the workload and hardware. TraceML also reports system,
 process, memory, and distributed-rank evidence when those signals are
-available.
-
-Reports are saved under:
-
-```text
-logs/<run_name>/final_summary.json
-logs/<run_name>/final_summary.txt
-```
-
-Use [How to Read TraceML Output](reading-output.md) for the full report and
-verdict reference.
-
-## Try It Without Your Own Script
-
-In an environment with Hugging Face Trainer and TraceML installed, try this
-small example. It contains no TraceML code and downloads no model or dataset.
-The examples are not included in the PyPI wheel, so run it from a repository
-checkout:
-
-```bash
-git clone https://github.com/traceopt-ai/traceml.git
-cd traceml
-traceml run examples/integrations/huggingface_trainer_minimal.py \
-  --args --steps 20
-```
+available. See [How to Read TraceML Output](reading-output.md#start-with-the-diagnosis)
+for the full report and verdict reference.
 
 ## Next Steps
 

@@ -4,11 +4,11 @@
 # you may not use this file except in compliance with the License.
 # SPDX-License-Identifier: Apache-2.0
 
-"""System block: four tiles, two charts, spread-triggered per-GPU rows.
+"""System block: four tiles, two charts, spread-triggered GPU details.
 
 Pure helpers carry the display rules so they can be checked without a
 browser: levels read "used / total", rates read one window median, the
-per-GPU rows open on their own when the across-GPU spread crosses the bar,
+GPU details open on their own when the across-GPU spread crosses the bar,
 and nothing on the block carries a verdict word.
 """
 
@@ -31,6 +31,7 @@ from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section impor
     gpu_layout,
     odd_ones_out,
     power_axis_bounds,
+    power_value_text,
     rows_html,
     should_auto_open,
     sparkline_svg,
@@ -394,9 +395,9 @@ def test_whole_run_charts_share_one_clock_axis() -> None:
         panel["cpu_label_tip"].text
     )
     assert panel["cpu_label_tip"].text.endswith(CPU_DEFINITION)
+    # One GPU: the value beside the chart carries the limit.
     assert panel["power_label"].text == (
-        "gpu power · per GPU vs 70 W limit · recent history · "
-        "average and lowest every 2 min"
+        "gpu power · recent history · average and lowest every 2 min"
     )
     assert "min," not in panel["cpu_label"].text
 
@@ -1052,7 +1053,7 @@ def test_the_first_tick_waits_and_the_gpu_slots_come_back() -> None:
         # Nothing was read, so nothing is known about the GPUs yet.
         assert panel["subs"][key].text == ""
     assert panel["power_placeholder"].text == "waiting for data"
-    assert panel["rows_placeholder"].text == "per-GPU rows"
+    assert panel["rows_placeholder"].text == "GPU details"
     assert _display(panel["power_placeholder"]) == "flex"
     assert _display(panel["rows"]) == "none"
     assert panel["gpu_layout"] == "waiting"
@@ -1513,3 +1514,264 @@ def test_the_cpu_value_is_the_median_of_the_samples_drawn(tmp_path) -> None:
     assert panel["cpu_value"].text == f"{statistics.median(window):.0f}%"
     assert panel["cpu_value"].text != f"{window[-1]:.0f}%"
     assert panel["cpu_value_name"].text == "median · last 3 min"
+
+
+def test_power_value_reads_the_reading_and_its_limit() -> None:
+    """The one-GPU heading value: reading / limit, the reading alone, or nothing."""
+    assert power_value_text(66.4, 70.0) == "66 / 70 W"
+    assert power_value_text(66.0, None) == "66 W"
+    # No reading is left blank rather than printed as 0 W.
+    assert power_value_text(None, 70.0) == ""
+
+
+def _gpu_payload(gpus: list) -> dict:
+    """A GPU payload carrying exactly these rows, with one power series each."""
+    return {
+        "window_len": 2,
+        "gpu_available": True,
+        "rollups": {
+            "cpu": {"now": 9.0, "p50": 8.0},
+            "ram": {"now": 9.0 * GIB, "total": 200.0 * GIB},
+            "gpu_util": {"now": 99.0, "p50": 99.0},
+            "gpu_power": {"now": 66.0, "p50": 66.0, "limit": 70.0},
+            "gpus": gpus,
+        },
+        "series": {
+            "x_time": [
+                "2026-08-21T10:00:00+00:00",
+                "2026-08-21T10:03:20+00:00",
+            ],
+            "cpu": [8.0, 9.0],
+            "gpu_power": [
+                {"gpu_idx": g["gpu_idx"], "values": [66.0, 68.0]} for g in gpus
+            ],
+        },
+    }
+
+
+def test_one_gpu_shows_its_power_beside_the_chart_and_no_rows() -> None:
+    """With one GPU there is nothing to compare, so the rows leave the card.
+
+    The current reading moves beside the power chart, which stays.
+    """
+    from nicegui import ui
+
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section import (  # noqa: E501
+        build_system_section,
+        update_system_section,
+    )
+
+    with ui.element("div"):
+        panel = build_system_section()
+    update_system_section(panel, as_payload(_gpu_payload(_gpus()[:1])))
+
+    assert _display(panel["rows"]) == "none"
+    assert _display(panel["power_chart"]) == "block"
+    assert panel["power_value"].text == "66 / 70 W"
+
+
+def test_several_gpus_keep_their_rows_and_no_single_value() -> None:
+    """The rows return when a second GPU reports, and carry the readings."""
+    from nicegui import ui
+
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section import (  # noqa: E501
+        build_system_section,
+        update_system_section,
+    )
+
+    with ui.element("div"):
+        panel = build_system_section()
+    update_system_section(panel, as_payload(_gpu_payload(_gpus()[:1])))
+    update_system_section(panel, as_payload(_gpu_payload(_gpus())))
+
+    assert _display(panel["rows"]) == "block"
+    assert panel["power_value"].text == ""
+
+
+def test_a_one_gpu_card_that_goes_waiting_drops_its_power_value() -> None:
+    """A held-over reading must not sit beside 'waiting for data'."""
+    from nicegui import ui
+
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section import (  # noqa: E501
+        build_system_section,
+        update_system_section,
+    )
+
+    with ui.element("div"):
+        panel = build_system_section()
+    update_system_section(panel, as_payload(_gpu_payload(_gpus()[:1])))
+    empty = {"window_len": 0, "gpu_available": False, "rollups": {}}
+    update_system_section(panel, as_payload(empty))
+
+    assert panel["gpu_layout"] == "waiting"
+    assert panel["power_value"].text == ""
+
+
+def test_one_gpu_power_heading_leaves_the_limit_to_the_value() -> None:
+    """With one GPU there is no 'per GPU', and the value carries the limit.
+
+    The heading returns to its per-GPU form when a second GPU reports.
+    """
+    from nicegui import ui
+
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section import (  # noqa: E501
+        build_system_section,
+        update_system_section,
+    )
+
+    with ui.element("div"):
+        panel = build_system_section()
+    update_system_section(panel, as_payload(_gpu_payload(_gpus()[:1])))
+    assert panel["power_label"].text == "gpu power · last 3 min"
+    assert panel["power_value"].text == "66 / 70 W"
+
+    update_system_section(panel, as_payload(_gpu_payload(_gpus())))
+    assert panel["power_label"].text == (
+        "gpu power · per GPU vs 70 W limit · last 3 min"
+    )
+
+
+def _two_gpu_payload(*, rows_over: bool) -> dict:
+    return {
+        "window_len": 2,
+        "gpu_available": True,
+        "rollups": {
+            "cpu": {"now": 9.0, "p50": 8.0, "p95": 12.0},
+            "ram": {"now": 9.0 * GIB, "total": 200.0 * GIB},
+            "gpu_util": {"now": 25.0, "p50": 25.0, "p95": 25.0},
+            "gpu_delta": {"now": 0.0, "p95": 5.0},
+            "rows_over": rows_over,
+            "util_range": (20.0, 30.0),
+            "gpu_mem": {"now": 6.67 * GIB, "total": 16.1 * GIB},
+            "temp": {"now": 54.0, "status": "OK"},
+            "gpu_power": {"now": 68.0, "p50": 67.0, "limit": 70.0},
+            "gpus": _gpus(),
+            "ctx": {"gpu_count": 2},
+        },
+        "series": {
+            "x_time": [
+                "2026-08-21T10:00:00+00:00",
+                "2026-08-21T10:03:20+00:00",
+            ],
+            "cpu": [8.0, 9.0],
+            "gpu_avg": [25.0, 25.0],
+            "gpu_power": [
+                {"gpu_idx": 0, "values": [66.0, 68.0]},
+                {"gpu_idx": 1, "values": [33.0, 33.0]},
+            ],
+        },
+    }
+
+
+def test_section_hint_reads_like_the_gpu_details_header() -> None:
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section import (  # noqa: E501
+        section_hint,
+    )
+
+    assert section_hint(False) == "click to open"
+    assert section_hint(True) == "click to close"
+
+
+def test_cpu_and_power_start_closed_and_open_independently() -> None:
+    """Three sections at one level: each opens and closes on its own."""
+    from nicegui import ui
+
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section import (  # noqa: E501
+        build_system_section,
+        update_system_section,
+    )
+
+    with ui.element("div"):
+        panel = build_system_section()
+    update_system_section(panel, as_payload(_two_gpu_payload(rows_over=False)))
+
+    assert panel["cpu"].value is False
+    assert panel["power"].value is False
+    assert panel["rows"].value is False  # GPU details keeps its default
+    assert panel["cpu_hint"].text == "click to open"
+    assert panel["power_hint"].text == "click to open"
+
+    # Opening CPU leaves the other two as they were.
+    panel["cpu"].value = True
+    assert panel["cpu_hint"].text == "click to close"
+    assert panel["power"].value is False
+    assert panel["power_hint"].text == "click to open"
+    assert panel["rows"].value is False
+
+    # Several sections can be open at once, and a tick doesn't close them.
+    panel["power"].value = True
+    update_system_section(panel, as_payload(_two_gpu_payload(rows_over=False)))
+    assert panel["cpu"].value is True
+    assert panel["power"].value is True
+    assert panel["power_hint"].text == "click to close"
+
+    panel["cpu"].value = False
+    assert panel["cpu_hint"].text == "click to open"
+    assert panel["power"].value is True
+
+
+def test_gpu_details_header_follows_a_click_without_waiting_for_a_tick() -> (
+    None
+):
+    from nicegui import ui
+
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section import (  # noqa: E501
+        build_system_section,
+        update_system_section,
+    )
+
+    with ui.element("div"):
+        panel = build_system_section()
+    update_system_section(panel, as_payload(_two_gpu_payload(rows_over=False)))
+    assert panel["rows_hint"].text == "2 GPUs · util 20 to 30% · click to open"
+
+    panel["rows"].value = True
+    assert (
+        panel["rows_hint"].text == "2 GPUs · util 20 to 30% · click to close"
+    )
+
+    # The spread crossing the bar still opens it on its own.
+    with ui.element("div"):
+        spread = build_system_section()
+    update_system_section(spread, as_payload(_two_gpu_payload(rows_over=True)))
+    assert spread["rows"].value is True
+    assert spread["cpu"].value is False
+    assert spread["power"].value is False
+
+
+def test_a_cpu_only_card_keeps_cpu_and_drops_the_power_section() -> None:
+    from nicegui import ui
+
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section import (  # noqa: E501
+        build_system_section,
+        update_system_section,
+    )
+
+    with ui.element("div"):
+        panel = build_system_section()
+    update_system_section(
+        panel,
+        as_payload(
+            {
+                "window_len": 1,
+                "gpu_available": False,
+                "rollups": {
+                    "cpu": {"now": 3.0, "p50": 3.0},
+                    "ram": {"now": 1.0 * GIB, "total": 16.0 * GIB},
+                    "gpu_power": {"now": None, "p50": None, "limit": None},
+                    "gpus": [],
+                },
+                "series": {
+                    "x_time": ["2026-08-21T10:00:00+00:00"],
+                    "cpu": [3.0],
+                    "gpu_avg": [],
+                    "gpu_power": [],
+                },
+            }
+        ),
+    )
+    assert panel["gpu_layout"] == "cpu_only"
+    assert _display(panel["cpu"]) != "none"
+    assert _display(panel["power"]) == "none"
+    assert _display(panel["rows"]) == "none"
+    assert panel["cpu_hint"].text == "click to open"

@@ -9,10 +9,13 @@ grandchild, and asserts the grandchild is gone after teardown.
 from __future__ import annotations
 
 import os
+import queue
 import signal
 import subprocess
 import sys
+import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -24,6 +27,30 @@ import subprocess, sys, time
 gc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
 print(gc.pid, flush=True)
 time.sleep(120)
+"""
+
+
+# Stands in for `traceml run`: starts the aggregator the same way, prints
+# its pid, then echoes its stderr until killed.
+_LAUNCHER_SOURCE = """
+import os, sys
+from traceml_ai.launcher.process import start_aggregator_process
+proc = start_aggregator_process(dict(os.environ), os.getcwd())
+print("PID", proc.pid, flush=True)
+for line in proc.stderr:
+    sys.stdout.write(line.decode(errors="replace"))
+    sys.stdout.flush()
+"""
+
+# Loaded by every Python process the end-to-end test starts. A process
+# still alive after 15 s writes all its thread stacks, so a hang on a CI
+# runner shows where it is stuck instead of only timing out.
+_STACK_DUMP_SOURCE = """
+import faulthandler, os
+_dir = os.environ.get("TRACEML_TEST_STACK_DIR")
+if _dir:
+    _f = open(os.path.join(_dir, f"stacks-{os.getpid()}.txt"), "w")
+    faulthandler.dump_traceback_later(15, file=_f)
 """
 
 
@@ -232,3 +259,84 @@ def test_terminate_process_group_reaps_a_grandchild() -> None:
                 os.kill(pid, 9)
             except Exception:
                 pass
+
+
+def _pump(stream, sink: queue.Queue) -> None:
+    """Copy lines from ``stream`` to ``sink``, then a ``None`` at EOF."""
+    for line in stream:
+        sink.put(line)
+    sink.put(None)
+
+
+def _diagnostics(lines: list[str], stack_dir: Path) -> str:
+    """Return the launcher output and any stack dumps, for a failure."""
+    dumps = [
+        f"--- {p.name}\n{p.read_text()}"
+        for p in sorted(stack_dir.glob("stacks-*.txt"))
+        if p.stat().st_size
+    ]
+    return "".join(lines) + "\n".join(dumps)
+
+
+def test_aggregator_exits_when_its_launcher_is_killed(tmp_path) -> None:
+    """End to end: a killed launcher must not leave the aggregator behind."""
+    src = str(Path(process_mod.__file__).resolve().parents[2])
+    stack_dir = tmp_path / "stacks"
+    stack_dir.mkdir()
+    (stack_dir / "sitecustomize.py").write_text(_STACK_DUMP_SOURCE)
+    path = os.pathsep.join(
+        filter(None, (str(stack_dir), src, os.environ.get("PYTHONPATH")))
+    )
+    env = {
+        **os.environ,
+        "PYTHONPATH": path,
+        "TRACEML_TEST_STACK_DIR": str(stack_dir),
+        "TRACEML_AGGREGATOR_PORT": "0",
+        "TRACEML_LOGS_DIR": str(tmp_path),
+        "TRACEML_FINALIZE_TIMEOUT_SEC": "1",
+    }
+    # The launcher's own stdin stays open, so only a pipe of its own that
+    # dies with it can tell the aggregator it is gone.
+    launcher = subprocess.Popen(
+        [sys.executable, "-c", _LAUNCHER_SOURCE],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        **process_mod.process_group_kwargs(),
+    )
+    # Read on a thread so a launcher or aggregator that never gets ready
+    # fails the test after a bounded wait instead of blocking it.
+    out: queue.Queue = queue.Queue()
+    threading.Thread(
+        target=_pump, args=(launcher.stdout, out), daemon=True
+    ).start()
+    lines: list[str] = []
+    aggregator_pid = None
+    try:
+        deadline = time.monotonic() + 60.0
+        while not any("Aggregator ready" in s for s in lines):
+            try:
+                line = out.get(timeout=max(deadline - time.monotonic(), 0))
+            except queue.Empty:
+                line = None
+            if line is None:
+                pytest.fail(
+                    "aggregator never reported ready:\n"
+                    + _diagnostics(lines, stack_dir)
+                )
+            lines.append(line)
+            if line.startswith("PID "):
+                aggregator_pid = int(line.split()[1])
+
+        launcher.kill()
+        launcher.wait(timeout=10.0)
+
+        assert _wait_gone(aggregator_pid, timeout_sec=20.0), _diagnostics(
+            lines, stack_dir
+        )
+    finally:
+        launcher.kill()
+        if aggregator_pid is not None and _pid_alive(aggregator_pid):
+            os.kill(aggregator_pid, 9)

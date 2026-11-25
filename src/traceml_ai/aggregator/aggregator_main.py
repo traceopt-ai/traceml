@@ -27,6 +27,7 @@ import os
 import signal
 import sys
 import threading
+import time
 import traceback
 from dataclasses import replace
 from pathlib import Path
@@ -38,6 +39,7 @@ from traceml_ai.runtime.settings import (
     DEFAULT_FINALIZE_TIMEOUT_SEC,
     DEFAULT_INTERVAL_SEC,
     DEFAULT_UI_MODE,
+    LAUNCHER_STDIN_WATCH_ENV,
     AggregatorTransportSettings,
     TraceMLSettings,
 )
@@ -59,11 +61,12 @@ def read_traceml_env() -> dict[str, Any]:
     - ``TRACEML_UI_MODE`` is preferred
     - ``TRACEML_MODE`` is still accepted
 
-    Supported display modes
-    -----------------------
+    Supported execution modes
+    -------------------------
     - ``cli``: live terminal UI
     - ``dashboard``: NiceGUI browser UI
     - ``summary``: no live UI, final summary only
+    - ``telemetry``: export only, no local history or analysis
     """
 
     ui_mode = os.environ.get(
@@ -126,24 +129,119 @@ def read_traceml_env() -> dict[str, Any]:
     }
 
 
-def _install_signal_handlers(stop_event: threading.Event) -> None:
+def _install_signal_handlers(stop_event: threading.Event) -> dict[int, Any]:
     """
     Install SIGINT/SIGTERM handlers that request aggregator shutdown.
 
     The handler is intentionally minimal and only signals the main loop to stop.
+    Returns the handlers it replaced, for ``_restore_signal_handlers``.
     """
+    previous = {
+        sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)
+    }
 
     def _handler(signum: int, _frame: Any) -> None:
         stop_event.set()
 
     signal.signal(signal.SIGINT, _handler)
     signal.signal(signal.SIGTERM, _handler)
+    return previous
+
+
+def _restore_signal_handlers(previous: Optional[dict[int, Any]]) -> None:
+    """
+    Put back the Python handlers ``_install_signal_handlers`` replaced.
+
+    A handler installed outside Python (``signal.getsignal`` gave None)
+    cannot be restored from Python, so TraceML's handler stays in place for
+    that signal; it only sets the stop event.
+    """
+    for sig, handler in (previous or {}).items():
+        # None: installed outside Python; signal.signal cannot reinstall it.
+        if handler is None:
+            continue
+        try:
+            signal.signal(sig, handler)
+        except (ValueError, OSError, TypeError):
+            pass
+
+
+def _wait_for_launcher_eof(fd: int) -> None:
+    """Return once the launcher's end of the pipe behind ``fd`` is closed."""
+    if sys.platform != "win32":
+        while os.read(fd, 4096):
+            pass
+        return
+    # On Windows a read left pending on this pipe blocks the main thread
+    # while it loads an extension module, so the aggregator never starts.
+    # Poll without reading: PeekNamedPipe raises BrokenPipeError once the
+    # launcher's end is closed.
+    import _winapi
+    import msvcrt
+
+    handle = msvcrt.get_osfhandle(fd)
+    while True:
+        _winapi.PeekNamedPipe(handle)
+        time.sleep(0.5)
+
+
+def _install_launcher_watchdog(
+    fd: int,
+    stop_event: threading.Event,
+    logger: Any,
+) -> None:
+    """
+    Stop the aggregator once the launcher that started it is gone.
+
+    The ``traceml run`` launcher keeps the write end of the pipe behind
+    ``fd`` open for its whole life and never writes to it. The OS closes
+    that end however the launcher exits, including SIGKILL, so a read that
+    returns EOF or fails means nobody will ever send this process SIGTERM.
+    Without this, the aggregator outlives a killed launcher and waits
+    forever.
+
+    The thread reads the raw fd, not ``sys.stdin.buffer``: a daemon thread
+    parked inside a buffered read holds its lock, and interpreter shutdown
+    then aborts with "could not acquire lock for <stdin>".
+    """
+
+    def _watch() -> None:
+        try:
+            _wait_for_launcher_eof(fd)
+        except Exception:
+            pass
+        if stop_event.is_set():
+            return
+        try:
+            logger.info("[TraceML] Launcher exited; stopping aggregator")
+            print(
+                "[TraceML] Launcher exited; stopping aggregator.",
+                file=sys.stderr,
+                flush=True,
+            )
+        except Exception:
+            pass
+        # The launcher was the only reader of this process's stderr pipe,
+        # so every later write there would raise BrokenPipeError and end
+        # the shutdown with a traceback instead of exit code 0.
+        try:
+            sys.stderr = open(os.devnull, "w", encoding="utf-8")
+        except OSError:
+            pass
+        stop_event.set()
+
+    threading.Thread(
+        target=_watch,
+        name="TraceMLLauncherWatchdog",
+        daemon=True,
+    ).start()
 
 
 def run_aggregator(
     settings: TraceMLSettings,
     *,
     logger: Optional[Any] = None,
+    launcher_fd: Optional[int] = None,
 ) -> int:
     """
     Own one aggregator lifecycle until a shutdown signal, then exit cleanly.
@@ -154,9 +252,13 @@ def run_aggregator(
 
     - starts only the aggregator (never a user training script)
     - prints the reachable endpoint
-    - blocks until SIGINT/SIGTERM
-    - shuts down cleanly, preserving final-summary behavior
+    - blocks until SIGINT/SIGTERM, or until ``launcher_fd`` reaches EOF
+      when the launcher that started it passes one
+    - shuts down cleanly, finalizing the configured export and analysis
     - logs fatal errors to its structured process-owned log
+
+    ``traceml serve`` passes no ``launcher_fd``: it is meant to outlive
+    any training script.
 
     Returns a process exit code (0 on clean shutdown, 1 on fatal error).
     """
@@ -179,10 +281,13 @@ def run_aggregator(
         logger = get_error_logger("TraceMLAggregatorMain")
 
     stop_event = threading.Event()
-    _install_signal_handlers(stop_event)
+    previous_handlers = _install_signal_handlers(stop_event)
+    if launcher_fd is not None:
+        _install_launcher_watchdog(launcher_fd, stop_event, logger)
 
     handle = None
     err: Optional[BaseException] = None
+    exit_code = 0
 
     try:
         logger.info("[TraceML] Starting aggregator")
@@ -216,6 +321,11 @@ def run_aggregator(
             except Exception as stop_exc:
                 if err is None:
                     err = stop_exc
+
+        # The installed handlers only set the stop event, so after a failed
+        # start a hung exporter teardown (wandb's atexit) could not be
+        # interrupted.
+        _restore_signal_handlers(previous_handlers)
 
         print(
             f"[TraceML] Logs saved under: {session_root}",
@@ -251,7 +361,12 @@ def run_aggregator(
                 file=sys.stderr,
             )
             sys.stderr.flush()
-            return 1
+            exit_code = 1
+
+    # Returning from ``finally`` is deprecated (PEP 765) and warns when the
+    # file is compiled on Python 3.14+, so the exit code is returned here.
+    if exit_code:
+        return exit_code
 
     print("\n[TraceML] Aggregator stopped.", file=sys.stderr, flush=True)
     return 0
@@ -303,7 +418,33 @@ def main() -> None:
         ),
     )
 
-    raise SystemExit(run_aggregator(settings, logger=logger))
+    raise SystemExit(
+        run_aggregator(
+            settings,
+            logger=logger,
+            launcher_fd=_launcher_fd(),
+        )
+    )
+
+
+def _launcher_fd() -> Optional[int]:
+    """
+    Return the pipe the ``traceml run`` launcher holds open, if any.
+
+    Only an aggregator started with the marker watches stdin. The launcher
+    sets it in the aggregator's environment alone, never in its own or the
+    training processes', so a hand-started aggregator does not watch unless
+    the marker was set by hand.
+    """
+    if os.environ.get(LAUNCHER_STDIN_WATCH_ENV) != "1":
+        return None
+    stdin = sys.stdin
+    try:
+        if stdin is None or stdin.isatty():
+            return None
+        return stdin.fileno()
+    except (OSError, ValueError):
+        return None
 
 
 if __name__ == "__main__":

@@ -12,9 +12,15 @@ import json
 import threading
 import time
 
+import pytest
+
 from traceml_ai.aggregator.export import worker as worker_module
 from traceml_ai.aggregator.export.json_exporter import JsonExporter
-from traceml_ai.aggregator.export.worker import ExportStats, ExportWorker
+from traceml_ai.aggregator.export.worker import (
+    ExporterStartupError,
+    ExportStats,
+    ExportWorker,
+)
 from traceml_ai.runtime.sender import SenderIdentity
 from traceml_ai.telemetry.envelope import build_telemetry_envelope
 
@@ -146,6 +152,18 @@ class _FailingOpenExporter(_RecordingExporter):
         raise OSError("read-only file system")
 
 
+class _BlockingOpenExporter(_RecordingExporter):
+    def __init__(self) -> None:
+        super().__init__()
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def open(self) -> None:
+        super().open()
+        self.entered.set()
+        self.release.wait(timeout=1.0)
+
+
 class _FailingFlushExporter(_RecordingExporter):
     def flush(self) -> None:
         super().flush()
@@ -156,6 +174,16 @@ class _FailingCloseExporter(_RecordingExporter):
     def close(self, *, dropped_batches: int = 0) -> None:
         super().close(dropped_batches=dropped_batches)
         raise OSError("close failed")
+
+
+class _SlowCloseExporter(_RecordingExporter):
+    def __init__(self, delay: float) -> None:
+        super().__init__()
+        self._delay = delay
+
+    def close(self, *, dropped_batches: int = 0) -> None:
+        time.sleep(self._delay)
+        super().close(dropped_batches=dropped_batches)
 
 
 def _wait_until(pred, timeout: float = 2.0, interval: float = 0.01) -> bool:
@@ -382,6 +410,10 @@ def test_raising_open_is_logged_once_and_marks_failed() -> None:
     worker = ExportWorker(exporter, interval_sec=0.05, logger=logger)
     worker.start()
     try:
+        with pytest.raises(
+            ExporterStartupError, match="read-only file system"
+        ):
+            worker.wait_until_ready(timeout_sec=0.5)
         assert _wait_until(lambda: worker.stats().exporter_failed)
         worker.submit(_payload(1))
         assert _wait_until(lambda: worker.stats().failed_records == 1)
@@ -395,6 +427,21 @@ def test_raising_open_is_logged_once_and_marks_failed() -> None:
     assert len(logger.errors) == 1
     assert logger.errors[0].startswith("[TraceML]")
     assert "_FailingOpenExporter" in logger.errors[0]
+
+
+def test_wait_until_ready_is_bounded_while_open_is_blocked() -> None:
+    exporter = _BlockingOpenExporter()
+    worker = ExportWorker(exporter, logger=_FakeLogger())
+    worker.start()
+    try:
+        assert exporter.entered.wait(timeout=0.5)
+        with pytest.raises(ExporterStartupError, match="within 0.01 seconds"):
+            worker.wait_until_ready(timeout_sec=0.01)
+        exporter.release.set()
+        worker.wait_until_ready(timeout_sec=0.5)
+    finally:
+        exporter.release.set()
+        worker.stop(timeout_sec=0.5)
 
 
 def test_stop_without_start_drops_the_queue_and_calls_nothing() -> None:
@@ -516,3 +563,38 @@ def test_json_exporter_hostname_through_the_worker(tmp_path) -> None:
     assert lines[0]["hostname"] == "host-a"
     assert lines[-1]["closing"] is True
     assert lines[-1]["written_records"] == 1
+
+
+def test_wait_closed_waits_for_a_close_that_outlasts_stop() -> None:
+    exporter = _SlowCloseExporter(0.5)
+    worker = ExportWorker(exporter, interval_sec=60.0, logger=_FakeLogger())
+    worker.start()
+    worker.stop(timeout_sec=0.1)
+    assert exporter.close_calls == 0
+
+    assert worker.wait_closed(timeout_sec=2.0) is True
+    assert exporter.close_calls == 1
+
+
+def test_wait_closed_is_bounded() -> None:
+    exporter = _SlowCloseExporter(1.0)
+    worker = ExportWorker(exporter, interval_sec=60.0, logger=_FakeLogger())
+    worker.start()
+    worker.stop(timeout_sec=0.0)
+
+    start = time.monotonic()
+    assert worker.wait_closed(timeout_sec=0.2) is False
+    assert time.monotonic() - start < 0.35
+    assert worker.wait_closed(timeout_sec=2.0) is True
+    assert exporter.close_calls == 1
+
+
+def test_wait_closed_without_a_thread_returns_at_once() -> None:
+    exporter = _RecordingExporter()
+    worker = ExportWorker(exporter, logger=_FakeLogger())
+    worker.stop(timeout_sec=1.0)
+
+    start = time.monotonic()
+    assert worker.wait_closed(timeout_sec=5.0) is True
+    assert time.monotonic() - start < 0.1
+    assert exporter.open_calls == 0

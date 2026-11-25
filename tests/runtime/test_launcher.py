@@ -526,6 +526,24 @@ def test_serve_checks_resolved_dashboard_mode_before_start(
     assert not (tmp_path / "configured-logs").exists()
 
 
+def test_serve_does_not_watch_for_a_launcher(monkeypatch, tmp_path) -> None:
+    # `traceml serve` outlives training scripts: stdin EOF must not stop it.
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TRACEML_UI_MODE", raising=False)
+    monkeypatch.delenv("TRACEML_MODE", raising=False)
+    run_aggregator = Mock(return_value=0)
+    monkeypatch.setattr(
+        "traceml_ai.aggregator.aggregator_main.run_aggregator",
+        run_aggregator,
+    )
+    from traceml_ai.launcher.commands import run_serve
+
+    with pytest.raises(SystemExit):
+        run_serve(build_parser().parse_args(["serve"]))
+
+    assert run_aggregator.call_args.kwargs.get("launcher_fd") is None
+
+
 def test_dashboard_dep_check_passes_without_plotly(monkeypatch) -> None:
     # Acceptance for the plotly removal: plotly is not imported anywhere,
     # so its absence must not block dashboard mode (previously the guard
@@ -934,6 +952,79 @@ def test_run_passes_exporter_flags_to_the_aggregator_env(
     assert env["TRACEML_EXPORTER_HOSTNAME"] == "1"
 
 
+@pytest.mark.parametrize("source", ["env", "yaml"])
+def test_telemetry_overrides_inherited_history(monkeypatch, tmp_path, source):
+    if source == "env":
+        monkeypatch.setenv("TRACEML_UI_MODE", "telemetry")
+        monkeypatch.setenv("TRACEML_HISTORY_ENABLED", "1")
+        monkeypatch.setenv("TRACEML_EXPORTER", "jsonl")
+    else:
+        for key in (
+            "TRACEML_UI_MODE",
+            "TRACEML_HISTORY_ENABLED",
+            "TRACEML_EXPORTER",
+        ):
+            monkeypatch.delenv(key, raising=False)
+        (tmp_path / "traceml.yaml").write_text(
+            "mode: telemetry\nhistory_enabled: true\nexporter: jsonl\n"
+        )
+
+    env = _aggregator_env(monkeypatch, tmp_path, clear_exporter_env=False)
+    assert env["TRACEML_UI_MODE"] == "telemetry"
+    assert env["TRACEML_HISTORY_ENABLED"] == "0"
+    assert env["TRACEML_EXPORTER"] == "jsonl"
+
+
+@pytest.mark.parametrize(
+    ("command", "flags", "error"),
+    [
+        ("run", [], "requires a configured exporter"),
+        ("serve", [], "requires a configured exporter"),
+        ("run", ["--exporter", "jsonl", "--html-report"], "HTML reports"),
+    ],
+)
+def test_telemetry_rejects_conflicts_before_startup(
+    monkeypatch, tmp_path, command, flags, error
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TRACEML_EXPORTER", raising=False)
+    forbidden = _forbid_guard_launch_side_effects(monkeypatch)
+    script = tmp_path / "train.py"
+    script.write_text("pass\n")
+    argv = [command, "--mode", "telemetry", *flags]
+    if command == "run":
+        argv.append(str(script))
+    args = build_parser().parse_args(argv)
+    with pytest.raises(SystemExit, match=error):
+        if command == "run":
+            launch_process(str(script), args)
+        else:
+            _resolve_serve_settings(args)
+    for replacement in forbidden.values():
+        replacement.assert_not_called()
+    assert not (tmp_path / "logs").exists()
+
+
+def test_serve_telemetry_disables_history(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TRACEML_HISTORY_ENABLED", "1")
+    settings = _resolve_serve_settings(
+        build_parser().parse_args(
+            ["serve", "--mode", "telemetry", "--exporter", "jsonl"]
+        )
+    )
+    assert settings.history_enabled is False
+    assert settings.exporter == "jsonl"
+
+
+def test_serve_summary_rejects_disabled_history(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TRACEML_HISTORY_ENABLED", "0")
+
+    with pytest.raises(SystemExit, match="mode=summary requires history"):
+        _resolve_serve_settings(build_parser().parse_args(["serve"]))
+
+
 def test_run_exporter_env_defaults_off(monkeypatch, tmp_path) -> None:
     env = _aggregator_env(monkeypatch, tmp_path)
 
@@ -1002,7 +1093,7 @@ def test_run_rejects_an_unknown_exporter_before_launch(
 
     assert str(exc.value) == (
         "[TraceML] Unknown exporter: 'unsupported'. "
-        "Supported: ['jsonl'] or 'module:factory'"
+        "Supported: ['jsonl', 'wandb'] or 'module:factory'"
     )
     for replacement in forbidden.values():
         replacement.assert_not_called()
@@ -1080,7 +1171,7 @@ def test_run_rejects_a_malformed_factory_value(
 
     assert str(exc.value) == (
         f"[TraceML] Unknown exporter: {value.strip()!r}. "
-        "Supported: ['jsonl'] or 'module:factory'"
+        "Supported: ['jsonl', 'wandb'] or 'module:factory'"
     )
 
 
@@ -1093,6 +1184,20 @@ def test_run_passes_a_factory_value_without_importing_it(
 
     assert env["TRACEML_EXPORTER"] == "mod:make"
     assert "mod" not in sys.modules
+
+
+def test_run_accepts_the_wandb_exporter_without_importing_wandb(
+    monkeypatch, tmp_path
+) -> None:
+    # Any ``import wandb`` in the launcher would raise.
+    monkeypatch.setitem(sys.modules, "wandb", None)
+
+    env = _aggregator_env(
+        monkeypatch, tmp_path, "--mode", "telemetry", "--exporter", "wandb"
+    )
+
+    assert env["TRACEML_EXPORTER"] == "wandb"
+    assert env["TRACEML_EXPORT_STREAMS"] == "step_time"
 
 
 def test_run_passes_a_dotted_factory_module(monkeypatch, tmp_path) -> None:
@@ -1407,6 +1512,11 @@ def test_run_rejects_duplicate_guard_before_manifest_or_processes(
     ("config_prefix", "launch_args", "match"),
     [
         ("mode: summary\n", ["--mode", "cli"], "require mode=summary"),
+        (
+            "mode: summary\n",
+            ["--mode", "telemetry", "--exporter", "jsonl"],
+            "require mode=summary",
+        ),
         (
             "mode: summary\n",
             ["--mode", "summary", "--no-history"],
@@ -3676,6 +3786,37 @@ def test_run_identity_rejects_path_segments() -> None:
         RunIdentity.from_args(args)
 
 
+@pytest.mark.parametrize("name", [".", ".."])
+@pytest.mark.parametrize("flag", ["run_name", "session_id"])
+def test_run_identity_rejects_dot_segments(flag: str, name: str) -> None:
+    args = argparse.Namespace(run_name="", session_id="")
+    setattr(args, flag, name)
+
+    with pytest.raises(ValueError, match=r"cannot be '\.' or '\.\.'"):
+        RunIdentity.from_args(args)
+
+
+@pytest.mark.parametrize("name", [".", ".."])
+def test_serve_rejects_dot_run_name_before_writing(
+    tmp_path, monkeypatch, name: str
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    run_aggregator = Mock(return_value=0)
+    monkeypatch.setattr(
+        "traceml_ai.aggregator.aggregator_main.run_aggregator",
+        run_aggregator,
+    )
+    args = build_parser().parse_args(
+        ["serve", "--run-name", name, "--logs-dir", str(tmp_path / "logs")]
+    )
+
+    with pytest.raises(SystemExit, match=r"cannot be '\.' or '\.\.'"):
+        launcher_commands.run_serve(args)
+
+    run_aggregator.assert_not_called()
+    assert list(tmp_path.iterdir()) == []
+
+
 @pytest.mark.parametrize(
     ("extra", "enforced"),
     [
@@ -3860,3 +4001,186 @@ def test_launcher_prints_the_foreign_run_warning_in_cli_mode(
 
     err = capsys.readouterr().err.splitlines()
     assert err.count(_FOREIGN_WARNING) == 1
+
+
+# The aggregator wait: telemetry mode adds the exporter startup budget.
+_AGGREGATOR_WAIT_CASES = [
+    (["--mode", "telemetry", "--exporter", "jsonl"], 25.0),
+    (["--mode", "summary"], 15.0),
+]
+
+
+def _strict_run_args(tmp_path: Path, *cli_args: str):
+    """Write a training script and parse ``traceml run`` for strict-run."""
+    script = tmp_path / "train.py"
+    script.write_text("print('train')\n", encoding="utf-8")
+    args = build_parser().parse_args(
+        [
+            "run",
+            str(script),
+            *cli_args,
+            "--logs-dir",
+            str(tmp_path / "logs"),
+            "--run-name",
+            "strict-run",
+        ]
+    )
+    return script, args
+
+
+def _patch_never_listening_owner_launch(
+    monkeypatch, tmp_path: Path, *, on_start=None, stderr_path=None
+) -> dict[str, Mock]:
+    """Patch an owner launch whose aggregator exits and never listens.
+
+    ``on_start`` runs when the aggregator is started. The returned mocks
+    include the started process under ``"aggregator"``.
+    """
+    aggregator = Mock(pid=10, returncode=1, **{"poll.return_value": 1})
+
+    def start_aggregator(**_kwargs):
+        if on_start is not None:
+            on_start()
+        return aggregator
+
+    aggregator_output = Mock()
+    aggregator_output.finish.return_value = ProcessOutputResult(
+        stdout_path=None,
+        stderr_path=stderr_path,
+        stderr_tail=b"",
+        warning=None,
+    )
+    replacements = {
+        "install_shutdown_handlers": Mock(),
+        "ensure_aggregator_port_free": Mock(),
+        "start_aggregator_process": Mock(side_effect=start_aggregator),
+        "_start_aggregator_output": Mock(return_value=aggregator_output),
+        "wait_for_tcp_listen": Mock(return_value=False),
+        "terminate_process_group": Mock(),
+        "start_training_process": Mock(),
+        "write_code_manifest": Mock(return_value=None),
+        "write_run_manifest": Mock(return_value=tmp_path / "manifest.json"),
+        "update_run_manifest": Mock(),
+    }
+    monkeypatch.chdir(tmp_path)
+    for name, value in replacements.items():
+        monkeypatch.setattr(launcher_commands, name, value)
+    return {**replacements, "aggregator": aggregator}
+
+
+@pytest.mark.parametrize("marker", [True, False])
+def test_strict_exporter_startup_failure_is_reported_as_such(
+    monkeypatch, tmp_path, capsys, marker
+) -> None:
+    script, args = _strict_run_args(
+        tmp_path,
+        "--mode",
+        "telemetry",
+        "--exporter",
+        "wandb",
+        "--aggregator-port",
+        "43170",
+    )
+    aggregator_dir = tmp_path / "logs" / "strict-run" / "aggregator"
+
+    def write_marker():
+        aggregator_dir.mkdir(parents=True, exist_ok=True)
+        (aggregator_dir / "exporter_startup_failed.json").write_text(
+            json.dumps(
+                {
+                    "status": "error",
+                    "failed_at": launcher_commands.utc_now_iso(),
+                    "reason": "exporter_startup_failed",
+                    "exporter": "wandb",
+                    "error": "[TraceML] WandbExporter.open failed: "
+                    "ValueError('[TraceML] No API key configured')",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    mocks = _patch_never_listening_owner_launch(
+        monkeypatch,
+        tmp_path,
+        on_start=write_marker if marker else None,
+        stderr_path=aggregator_dir / "process.stderr.log",
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        launch_process(str(script), args)
+
+    assert exc.value.code == 1
+    stderr = capsys.readouterr().err
+    update_manifest = mocks["update_run_manifest"]
+    reason = update_manifest.call_args.kwargs["telemetry_reason"]
+    if marker:
+        assert reason == "exporter_startup_failed"
+        assert (
+            "[TraceML] ERROR: exporter 'wandb' failed to start: "
+            "WandbExporter.open failed: ValueError('No API key "
+            "configured') (exit=1); training was not started." in stderr
+        )
+        (error_line,) = [
+            line for line in stderr.splitlines() if "failed to start" in line
+        ]
+        assert error_line.count("[TraceML]") == 1
+        assert "not reachable" not in stderr
+    else:
+        assert reason == "aggregator_not_ready"
+        assert (
+            "aggregator was not reachable at 127.0.0.1:43170 (exit=1); "
+            "training was not started." in stderr
+        )
+    mocks["start_training_process"].assert_not_called()
+
+
+@pytest.mark.parametrize(("mode_args", "timeout"), _AGGREGATOR_WAIT_CASES)
+def test_non_owner_wait_covers_the_exporter_startup_in_telemetry_mode(
+    monkeypatch, tmp_path, mode_args, timeout
+) -> None:
+    script, args = _strict_run_args(
+        tmp_path,
+        *mode_args,
+        "--aggregator-host",
+        "telemetry.internal",
+        "--nnodes",
+        "2",
+        "--node-rank",
+        "1",
+    )
+    wait = Mock(return_value=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(launcher_commands, "install_shutdown_handlers", Mock())
+    monkeypatch.setattr(launcher_commands, "wait_for_tcp_listen", wait)
+    monkeypatch.setattr(launcher_commands, "start_training_process", Mock())
+
+    with pytest.raises(SystemExit):
+        launch_process(str(script), args)
+
+    assert wait.call_args.kwargs["timeout_sec"] == timeout
+
+
+@pytest.mark.parametrize(("mode_args", "timeout"), _AGGREGATOR_WAIT_CASES)
+def test_owner_wait_covers_the_exporter_startup_in_telemetry_mode(
+    monkeypatch, tmp_path, mode_args, timeout
+) -> None:
+    script, args = _strict_run_args(
+        tmp_path, *mode_args, "--aggregator-port", "43171"
+    )
+    mocks = _patch_never_listening_owner_launch(monkeypatch, tmp_path)
+
+    with pytest.raises(SystemExit):
+        launch_process(str(script), args)
+
+    wait = mocks["wait_for_tcp_listen"]
+    assert wait.call_args.kwargs["proc"] is mocks["aggregator"]
+    assert wait.call_args.kwargs["timeout_sec"] == timeout
+
+
+def test_launcher_export_startup_timeout_matches_its_aggregator_twin():
+    from traceml_ai.aggregator import trace_aggregator
+
+    assert (
+        launcher_commands._EXPORT_STARTUP_TIMEOUT_SEC
+        == trace_aggregator._EXPORT_STARTUP_TIMEOUT_SEC
+    )

@@ -9,6 +9,10 @@
 [PyTorch Lightning](https://traceopt-ai.github.io/traceml/user_guide/integrations/lightning/) ·
 [RF-DETR](https://traceopt-ai.github.io/traceml/user_guide/integrations/rfdetr/)
 
+**Reports into:**
+[Weights & Biases](https://traceopt-ai.github.io/traceml/user_guide/integrations/wandb/) ·
+[MLflow](https://traceopt-ai.github.io/traceml/user_guide/integrations/mlflow/)
+
 [![PyPI version](https://img.shields.io/pypi/v/traceml-ai.svg)](https://pypi.org/project/traceml-ai/)
 [![CI](https://github.com/traceopt-ai/traceml/actions/workflows/ci.yml/badge.svg)](https://github.com/traceopt-ai/traceml/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
@@ -168,6 +172,26 @@ Run it with `traceml run train.py`.
 See the [Public API](https://traceopt-ai.github.io/traceml/user_guide/public-api/)
 and [integration support matrix](https://traceopt-ai.github.io/traceml/user_guide/integrations/).
 
+### Experiment trackers
+
+TraceML writes its diagnosis into the W&B or MLflow run you already use, so
+you can sort and filter runs by bottleneck next to your own metrics.
+
+```python
+from traceml_ai.integrations.wandb import log_training_report  # or .mlflow
+
+trainer.train()
+log_training_report()
+```
+
+| Tracker | What lands in your run |
+|---|---|
+| [Weights & Biases](https://traceopt-ai.github.io/traceml/user_guide/integrations/wandb/) | The diagnosis card, plus the verdict, step time and input wait as summary fields. `--mode telemetry --exporter wandb` also streams each rank's step time while training runs. |
+| [MLflow](https://traceopt-ai.github.io/traceml/user_guide/integrations/mlflow/) | The diagnosis card as an HTML artifact, the verdict as a tag, and step time and input wait as metrics. |
+
+The helper never creates, finishes or logs in to a run. On a problem it
+prints one warning instead of raising.
+
 ## Distributed training and straggler detection
 
 For scripts already configured for distributed training, replace
@@ -192,8 +216,8 @@ traceml run train.py \
 ```
 
 Node 0 starts the TraceML aggregator; other nodes join the same run.
-All nodes require a shared logs directory. Multi-node DDP uses summary mode;
-multi-node GPU support is experimental.
+All nodes require a shared logs directory. Multi-node DDP defaults to summary
+mode and also accepts telemetry mode; multi-node GPU support is experimental.
 
 When training finishes, TraceML aligns common steps across all ranks and
 nodes and points to the rank most likely holding up the run:
@@ -328,10 +352,22 @@ pip install "traceml-ai[dashboard]"
 traceml run train.py --mode=dashboard
 ```
 
-TraceML can also export a self-contained HTML report and send its compact
-summary to an existing W&B or MLflow run. See
-[W&B and MLflow](https://traceopt-ai.github.io/traceml/user_guide/integrations/wandb-mlflow/)
-and the [complete quickstart](https://traceopt-ai.github.io/traceml/user_guide/quickstart/).
+To try the dashboard without installing anything, run the Docker demo in
+dashboard mode and open the published port in a browser:
+
+```bash
+docker build -t traceml-demo .
+docker run --rm -p 127.0.0.1:8765:8765 traceml-demo \
+  traceml run examples/diagnosis/dataloader_bottleneck_demo.py --mode=dashboard --args --scenario slow --epochs 20
+```
+
+Open <http://localhost:8765> while the run is still active. `--epochs` sets
+how long the demo runs; raise it for more time.
+
+TraceML can also export a self-contained HTML report. To send the diagnosis
+to W&B or MLflow, see [Experiment trackers](#experiment-trackers). For every
+option, see the
+[complete quickstart](https://traceopt-ai.github.io/traceml/user_guide/quickstart/).
 
 ## Learn more
 

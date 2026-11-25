@@ -20,6 +20,9 @@ from traceml_ai.utils.atomic_io import write_json_atomic
 
 FINALIZATION_ERROR_NAME = "finalization_error.json"
 FINALIZATION_WARNING_NAME = "finalization_warning.json"
+# Written by the aggregator when a telemetry exporter fails to open; twin of
+# _EXPORTER_STARTUP_FAILED_NAME in aggregator/trace_aggregator.py.
+EXPORTER_STARTUP_FAILED_NAME = "exporter_startup_failed.json"
 
 
 def utc_now_iso() -> str:
@@ -134,6 +137,37 @@ def read_current_finalization_reason(
     ):
         return "finalization_warning"
     return None
+
+
+def read_exporter_startup_failure(
+    aggregator_dir: Path,
+    *,
+    aggregator_started_at: str,
+) -> Optional[Dict[str, str]]:
+    """
+    Return this aggregator's exporter startup failure, if it recorded one.
+
+    The result has ``exporter`` and ``error`` text; None when the marker is
+    missing, unreadable or older than ``aggregator_started_at``.
+    """
+    path = Path(aggregator_dir).resolve() / EXPORTER_STARTUP_FAILED_NAME
+    if not _is_current_json_artifact(
+        path,
+        aggregator_started_at=aggregator_started_at,
+        timestamp_field="failed_at",
+    ):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return {
+        "exporter": str(payload.get("exporter") or "").strip(),
+        "error": str(payload.get("error") or "").strip(),
+    }
 
 
 def _set_telemetry_fields(

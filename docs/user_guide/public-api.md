@@ -45,6 +45,18 @@ the environment for a run or bug report.
 
 ### End-of-run summaries
 
+During training, `traceml.final_summary()` requests a best-effort snapshot of
+the data the aggregator has received. TraceML tries to send pending
+measurements from the calling rank first. For example, a call at step 400
+might report 395 steps analyzed if CUDA events for the last five steps are
+still pending or their measurements have yet to reach the aggregator.
+
+Each session shares one request and response file, so call it from one rank,
+as the default `rank0_only=True` does. Regenerating the report adds overhead,
+so request it outside the training loop.
+
+After shutdown, calls reuse the saved `final_summary.json` when available.
+
 ::: traceml_ai.api.summary
     options:
       show_root_heading: true
@@ -65,6 +77,35 @@ The exception is `wrap_dataloader_fetch(...)` for a custom non-PyTorch iterator
 that automatic DataLoader instrumentation cannot observe. When TraceML is
 disabled, each wrapper is an identity no-op. Otherwise, invalid targets raise
 their documented `TypeError` before initialization and ownership are checked.
+
+#### Validation loaders in a plain PyTorch loop
+
+With `mode="auto"`, TraceML times every PyTorch `DataLoader` in the process
+and charges a fetch to the next training step. A validation loader iterated
+between training steps therefore adds its whole pass to that step's Input
+Wait. The Hugging Face and Lightning integrations keep evaluation fetches out
+on their own; a plain loop can use selective mode instead. Turn the automatic
+DataLoader patch off, keep the other phases on, and wrap only the training
+loader and the optimizer, which selective mode does not time on its own. With
+the patch off, `wrap_dataloader_fetch` accepts a PyTorch `DataLoader`:
+
+```python
+traceml.init(
+    mode="selective",
+    patch_dataloader=False,
+    patch_forward=True,
+    patch_backward=True,
+    patch_h2d=True,
+)
+train_loader = traceml.wrap_dataloader_fetch(train_loader)
+optimizer = traceml.wrap_optimizer(optimizer)
+```
+
+The loop itself stays as it was, with each training step inside
+`traceml.trace_step(model)`. The validation loader is then not timed at all,
+and Input Wait covers only the training loader. The DataLoader patch is off
+for the whole process, so wrap every other loader a training step draws from
+as well.
 
 ::: traceml_ai.api.wrap_dataloader_fetch
     options:
@@ -104,6 +145,7 @@ TraceML installs the `traceml` command:
 traceml run train.py                  # training diagnosis and saved reports
 traceml run train.py --mode=cli       # live terminal view
 traceml run train.py --mode=dashboard # live browser view
+traceml run train.py --mode telemetry --exporter jsonl # export without local analysis
 traceml watch train.py                # system/process visibility
 traceml serve                         # standalone aggregator for direct launches
 ```
@@ -113,6 +155,12 @@ Dashboard mode requires `pip install "traceml-ai[dashboard]"`.
 Summary mode is the default for every topology. Live CLI and dashboard modes
 are intended for single-node runs. `watch` does not install automatic trainer
 instrumentation or provide step timing.
+
+`run` and `serve` also support `telemetry` mode. It requires an exporter and
+always disables SQLite history, local diagnostics, rendering, and summaries.
+It rejects HTML reports and regression guards. See
+[Live Export](live-export.md#export-without-local-analysis) for telemetry-only
+and export-plus-summary examples, including separately launched workers.
 
 Use `traceml run --help` for launch flags. See
 [Distributed Training](distributed-training.md) for multi-node commands,
@@ -135,13 +183,16 @@ behavior.
 
 `--enable-logging` enables best-effort raw logs from the sampler writers in
 each training rank. Each sampler appends length-prefixed MessagePack records
-to `rank_<N>/data/<Sampler>/<Table>.msgpack` inside a generated session folder
-under the logs directory. Writers flush periodically, so short runs may
-produce no file, final records may be absent, and the generated folder may
-differ from the run's session folder. These limitations are tracked in
-[#580](https://github.com/traceopt-ai/traceml/issues/580). The same setting
-comes from `enable_logging: true` in `traceml.yaml` or
-`TRACEML_ENABLE_LOGGING=1`; when it is off, no `.msgpack` files are written.
+to `rank_<N>/data/<Sampler>/<Table>.msgpack` inside the run's session folder
+under the logs directory, beside `final_summary.json`. Writers append every
+100 sampler ticks and once more when TraceML stops, so a short run that
+stops normally still writes its files. A killed process loses the records
+since the last periodic write. Between writes each table holds its most
+recent 3,000 rows, so a table that gains more rows than that between two
+writes, such as step time on a fast loop, keeps only the most recent ones.
+The same setting comes from
+`enable_logging: true` in `traceml.yaml` or `TRACEML_ENABLE_LOGGING=1`; when
+it is off, no `.msgpack` files are written.
 
 The training processes write these files, so with `traceml serve` the flag
 does not reach them. Set `TRACEML_ENABLE_LOGGING=1` in the training
@@ -158,7 +209,8 @@ a run killed between writes still exits 0.
 
 `run`, `watch`, and `serve` accept `--history-retention DURATION`. The default
 is `30m`; bare values are seconds, with `s`, `m`, `h`, and `d` suffixes accepted.
-Use `--no-history` on `run` or `watch` only with a live display mode.
+Use `--no-history` on `run` or `watch` with a live display mode; telemetry mode
+already forces history off.
 Summary mode, HTML reports, and summary APIs require history.
 
 The retention setting is also available as `history_retention` in
@@ -217,7 +269,7 @@ node-0 endpoint. Configure the expected world size to match your workers.
 | `--aggregator-bind-host` | Bind address; use `0.0.0.0` for multi-node. |
 | `--aggregator-port` | Telemetry port; default `29765`. |
 | `--nnodes` / `--nproc-per-node` | Expected world size for finalization. |
-| `--mode` | `summary` (default), `cli`, or `dashboard`. |
+| `--mode` | `summary` (default), `cli`, `dashboard`, or `telemetry` (requires an exporter). |
 | `--logs-dir` | Session log directory. |
 | `--run-name` / `--session-id` | Shared run identity; choose a fresh name. |
 | `--history-retention` | History duration; default `30m`. |
@@ -254,6 +306,13 @@ Launcher startup and in-script initialization have different defaults:
 | `traceml run` / `traceml watch` | Stop before launching training. |
 | Explicit `traceml.init()` | Retry within a bounded timeout, warn, and continue with tracing disabled. |
 
+`traceml.init()` also asks the listener on the port whether it is a TraceML
+aggregator that accepts this run. A program that is not TraceML, an
+aggregator serving another explicit session ID, or one serving another
+launch of the same run (a different `TRACEML_RUN_NONCE`) is handled like a
+missing aggregator. An aggregator from a release before this check does not
+answer, so `init()` prints one warning and keeps tracing.
+
 To let the launcher continue without telemetry:
 
 ```bash
@@ -282,8 +341,14 @@ final telemetry health; in multi-node runs this is node 0. See
 ### Direct-launch configuration
 
 Runtime settings resolve from explicit `init()` arguments, environment
-variables, `traceml.yaml`, then built-in defaults. For display mode, the Python
+variables, `traceml.yaml`, then built-in defaults. For execution mode, the Python
 argument is `ui_mode`; `init(mode=...)` selects instrumentation behavior.
+
+`ui_mode="telemetry"` disables local history even when inherited settings enable
+it. Configure an exporter on the aggregator process; workers do not
+need exporter configuration. Summary APIs fail immediately when local history
+is disabled, before writing a request or polling the aggregator. Their default
+`rank0_only=True` behavior still returns `None` on non-primary ranks.
 
 Aggregator host and port resolve from explicit arguments, environment
 variables, then defaults. Run identity and aggregator endpoints are not read
@@ -369,6 +434,22 @@ setup. See the [Ray Train guide](integrations/ray.md).
       show_source: false
 
 ::: traceml_ai.integrations.ray.TraceMLRayConfig
+    options:
+      show_root_heading: true
+      show_source: false
+
+## Experiment trackers
+
+Tracker helpers publish TraceML's end-of-run diagnosis into a run you
+already own. See the [Weights & Biases guide](integrations/wandb.md) and the
+[MLflow guide](integrations/mlflow.md).
+
+::: traceml_ai.integrations.wandb.log_training_report
+    options:
+      show_root_heading: true
+      show_source: false
+
+::: traceml_ai.integrations.mlflow.log_training_report
     options:
       show_root_heading: true
       show_source: false

@@ -2,8 +2,9 @@ import queue
 import socket
 import struct
 import threading
+import time
 from dataclasses import dataclass
-from typing import Dict, Iterator, Optional
+from typing import Any, Callable, Dict, Iterator, Optional
 
 from traceml_ai.loggers.error_log import get_error_logger
 from traceml_ai.utils.msgpack_codec import Decoder as MsgpackDecoder
@@ -56,10 +57,18 @@ class TCPServer:
       - One background thread handles accept + recv
       - Messages are length-prefixed MessagePack frames
       - poll() is non-blocking and safe to call from runtime thread
+      - ``first_frame_reply`` sees the first message of each connection. When
+        it returns a dict, that dict goes back to the peer as one frame and
+        the message is not queued. The server never sends otherwise.
     """
 
-    def __init__(self, cfg: TCPConfig):
+    def __init__(
+        self,
+        cfg: TCPConfig,
+        first_frame_reply: Optional[Callable[[Any], Optional[Dict]]] = None,
+    ):
         self.cfg = cfg
+        self._first_frame_reply = first_frame_reply
         self._port = int(cfg.port)
         self._sock: Optional[socket.socket] = None
         self._thread: Optional[threading.Thread] = None
@@ -210,6 +219,7 @@ class TCPServer:
         buffer = bytearray()  # mutable extend() is O(1) amortised, no copies
         expected: Optional[int] = None
         decoder = MsgpackDecoder()
+        first_frame = True
 
         self._track_connection(1)
         try:
@@ -228,6 +238,10 @@ class TCPServer:
                 for payload in frames:
                     try:
                         msg = decoder.decode(payload)
+                        if first_frame:
+                            first_frame = False
+                            if self._reply_to_first_frame(conn, msg):
+                                continue
                         self._queue.put_nowait(msg)
                         self._data_ready.set()  # wake the aggregator loop
                     except queue.Full:
@@ -242,6 +256,87 @@ class TCPServer:
             # Last, so every frame from this peer is queued before the count
             # can reach zero.
             self._track_connection(-1)
+
+    def _reply_to_first_frame(self, conn: socket.socket, msg: Any) -> bool:
+        """Send the reply for a connection's first message, if it has one.
+
+        Returns True when the message was answered, so it is not queued.
+        """
+        if self._first_frame_reply is None:
+            return False
+        try:
+            reply = self._first_frame_reply(msg)
+        except Exception as exc:
+            self.logger.error(
+                "[TraceML] TCP first-frame reply failed: %s: %s",
+                type(exc).__name__,
+                exc,
+            )
+            return False
+        if reply is None:
+            return False
+        try:
+            conn.sendall(_encode_frame(reply))
+        except OSError:
+            pass  # the peer left; nothing to queue either way
+        return True
+
+
+def _encode_frame(payload: Any) -> bytes:
+    data = encode_msgpack(payload)
+    return struct.pack("!I", len(data)) + data
+
+
+class NoReplyError(Exception):
+    """The peer sent nothing back: it hung up or stayed silent."""
+
+
+def request_one_frame(
+    sock: socket.socket,
+    payload: Any,
+    *,
+    timeout_sec: float,
+    max_frame_bytes: int = 65536,
+) -> Any:
+    """Send one frame on ``sock``, half-close it, and decode one reply frame.
+
+    The half-close tells the peer nothing more is coming, so a peer that
+    does not answer hangs up at once instead of letting ``timeout_sec``
+    run out.
+
+    Raises ``NoReplyError`` when the peer closes or stays silent for
+    ``timeout_sec`` without sending a byte. Raises ``ValueError`` when it
+    sends anything but one msgpack frame of at most ``max_frame_bytes``,
+    including a frame cut short.
+    """
+    deadline = time.monotonic() + float(timeout_sec)
+    sock.settimeout(float(timeout_sec))
+    sock.sendall(_encode_frame(payload))
+    sock.shutdown(socket.SHUT_WR)
+    buffer = bytearray()
+    length: Optional[int] = None
+    while length is None or len(buffer) < 4 + length:
+        remaining = deadline - time.monotonic()
+        data = b""
+        if remaining > 0:
+            sock.settimeout(remaining)
+            try:
+                data = sock.recv(4096)
+            except socket.timeout:
+                pass
+        if not data:
+            if not buffer:
+                raise NoReplyError()
+            raise ValueError("reply cut short")
+        buffer.extend(data)
+        if length is None and len(buffer) >= 4:
+            length = struct.unpack("!I", bytes(buffer[:4]))[0]
+            if length > max_frame_bytes:
+                raise ValueError("reply is not a TraceML frame")
+    try:
+        return MsgpackDecoder().decode(bytes(buffer[4 : 4 + length]))
+    except Exception as exc:
+        raise ValueError("reply is not msgpack") from exc
 
 
 # TCP Client (worker ranks)

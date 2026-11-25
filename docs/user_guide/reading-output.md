@@ -178,7 +178,8 @@ traceml run train.py --mode=dashboard
 
 The browser dashboard provides timing breakdowns, memory trends, resource
 cards, and a diagnostics rail. Start with the diagnosis, then inspect the
-corresponding chart or table. Multi-node runs use summary mode.
+corresponding chart or table. Multi-node runs default to summary mode; use
+telemetry mode to export measurements without local analysis.
 
 `traceml watch` provides system and process visibility without training-step
 measurements or a performance verdict. To diagnose step timing, use `run`
