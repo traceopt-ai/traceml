@@ -325,6 +325,28 @@ class TestDatabaseWriter:
             assert records[0]["i"] == 0
             assert records[-1]["i"] == 7
 
+    def test_fast_table_written_before_eviction(self, tmp_path):
+        """A table filling between throttled writes is written before rows drop."""
+        db = Database(sampler_name="test", max_rows=10)
+
+        with patch("traceml_ai.database.database_writer.config") as mock_cfg:
+            mock_cfg.enable_logging = True
+
+            writer = db.writer
+            writer.logs_dir = tmp_path / "data" / "test"
+
+            # 4 rows per tick, far fewer ticks than flush_every (100)
+            step = 0
+            for _ in range(10):
+                for _ in range(4):
+                    db.add_record("t1", {"step": step})
+                    step += 1
+                writer.flush()
+            writer.flush(force=True)
+
+            records = _read_framed_records(writer.logs_dir / "t1.msgpack")
+            assert [r["step"] for r in records] == list(range(step))
+
 
 def test_runtime_stop_writes_raw_logs_under_run_session(monkeypatch, tmp_path):
     """Stop forces the final write into the run's own session folder."""
