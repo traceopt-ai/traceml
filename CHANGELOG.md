@@ -7,7 +7,7 @@ which carry the full historical notes for versions predating this file.
 
 ## [Unreleased]
 
-## [0.5.2] - 2026-11-25
+## [0.5.2] - Unreleased
 
 - The dashboard's Diagnostics card now sits beside run information at the
   top, so findings and next steps show without scrolling. The two cards share
@@ -21,10 +21,10 @@ which carry the full historical notes for versions predating this file.
   own when the spread across GPUs crosses the bar. Each header says
   "click to open" or "click to close" as soon as it is toggled.
 
-- With `--enable-logging`, the raw logs no longer drop rows from fast loops.
-  A table that fills half of its 3,000-row bound before the next throttled
-  write is now written at once, so step-time rows above about 15 steps per
-  second reach disk before they are evicted.
+- With `--enable-logging`, raw logs also flush when unwritten rows reach half
+  the table capacity (1,500 rows by default), reducing losses between
+  scheduled writes. Bursts that overflow the table within one sampler tick
+  can still lose rows.
 
 ## [0.5.1] - 2026-11-09
 
