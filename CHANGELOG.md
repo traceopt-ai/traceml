@@ -9,6 +9,9 @@ which carry the full historical notes for versions predating this file.
 
 ## [0.5.2] - Unreleased
 
+- Fixed home-directory expansion in `logs_dir` values supplied through YAML,
+  environment variables, CLI flags, or `traceml.init()`.
+
 - **Breaking (JSONL export):** `step_time.jsonl` now uses schema version 2.
   Each event has an explicit `device`, built-in names use `traceml:` instead
   of `_traceml_internal:`, and `duration_ms` is omitted. Read `cpu_ms` for
