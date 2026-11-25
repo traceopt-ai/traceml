@@ -108,7 +108,8 @@ WANDB_MODE=offline traceml run examples/wandb_report_minimal.py --args --steps 2
   `traceml/step_time/step_time_ms` and `traceml/step_time/input_wait_ms` are
   written to the run summary. They appear as columns in the runs table, so
   you can sort and filter runs by the verdict and the two timings. A field
-  TraceML did not measure is left out rather than written as zero.
+  TraceML did not measure is left out rather than written as zero. The two
+  timings are single values, so they get no chart in the workspace.
 
 ## How the helper behaves
 
@@ -208,6 +209,10 @@ At the end of the run each run's summary gets three counts:
 the run's world size, or at or above the 1024-run limit).
 The full loss report stays local in `finalization_warning.json`.
 A written record means one handed to the W&B SDK.
+
+The timestamp and the three counts get no chart in the workspace. The
+timestamp stays in every history row, for example in `run.history()`. The
+counts are in each run's Overview and can be added as runs-table columns.
 
 ### When it cannot start
 
