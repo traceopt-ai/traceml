@@ -139,14 +139,33 @@ These two lines come from `step_time.jsonl` of a two-rank CPU run of four steps.
 The first is a data line and the second is the closing line:
 
 ```json
-{"stream":"step_time","schema_version":1,"observed_timestamp_unix_ns":1793808200784977000,"rank":1,"global_rank":1,"local_rank":1,"world_size":2,"local_world_size":2,"node_rank":0,"timestamp_unix_ns":1793808199881904896,"seq":2,"step":1,"events":{"_traceml_internal:backward_time":{"cpu":{"cpu_ms":15.316009521484375,"duration_ms":15.316009521484375,"gpu_ms":null,"is_gpu":false,"n_calls":1}},"_traceml_internal:dataloader_next":{"cpu":{"cpu_ms":3.7009716033935547,"duration_ms":3.7009716033935547,"gpu_ms":null,"is_gpu":false,"n_calls":1}},"_traceml_internal:forward_time":{"cpu":{"cpu_ms":8.20612907409668,"duration_ms":8.20612907409668,"gpu_ms":null,"is_gpu":false,"n_calls":1}},"_traceml_internal:optimizer_step":{"cpu":{"cpu_ms":0.5419254302978516,"duration_ms":0.5419254302978516,"gpu_ms":null,"is_gpu":false,"n_calls":1}},"_traceml_internal:step_time":{"cpu":{"cpu_ms":27.03070640563965,"duration_ms":27.03070640563965,"gpu_ms":null,"is_gpu":false,"n_calls":1}}}}
-{"stream":"step_time","closing":true,"schema_version":1,"written_records":8,"dropped_batches":0}
+{"stream":"step_time","schema_version":2,"observed_timestamp_unix_ns":1793808200784977000,"rank":1,"global_rank":1,"local_rank":1,"world_size":2,"local_world_size":2,"node_rank":0,"timestamp_unix_ns":1793808199881904896,"seq":2,"step":1,"events":{"traceml:backward_time":{"device":"cpu","cpu_ms":15.316009521484375,"gpu_ms":null,"is_gpu":false,"n_calls":1},"traceml:dataloader_next":{"device":"cpu","cpu_ms":3.7009716033935547,"gpu_ms":null,"is_gpu":false,"n_calls":1},"traceml:forward_time":{"device":"cpu","cpu_ms":8.20612907409668,"gpu_ms":null,"is_gpu":false,"n_calls":1},"traceml:optimizer_step":{"device":"cpu","cpu_ms":0.5419254302978516,"gpu_ms":null,"is_gpu":false,"n_calls":1},"traceml:step_time":{"device":"cpu","cpu_ms":27.03070640563965,"gpu_ms":null,"is_gpu":false,"n_calls":1}}}
+{"stream":"step_time","closing":true,"schema_version":2,"written_records":8,"dropped_batches":0}
 ```
 
-`events[name][device]` holds one phase of that step on one device.
-It gives the CPU time, the GPU time, the duration TraceML uses, and how many calls were summed.
+`step_time.jsonl` uses schema version 2 on its data and closing lines; the other streams use version 1.
+`events[name]` holds one phase of that step.
+`device` names the device its timing was recorded on.
+It is followed by the CPU time, the GPU time, `is_gpu`, and how many calls were summed, copied as TraceML recorded them.
+A device label describes the recorded timing context: an event on `cuda:0` can hold both host wall time (`cpu_ms`) and CUDA event time (`gpu_ms`).
 `gpu_ms` is `null` on a CPU run.
 It is also `null` when any call in the step lacked a GPU measurement.
+A missing measurement is `null`, and a measured zero is `0`.
+
+TraceML's built-in events are named `traceml:<phase>`, and the `traceml:` prefix is reserved for them.
+Custom event names are exported unchanged.
+If a custom event already uses a built-in's exported name, such as `traceml:forward_time`, that step cannot be written.
+The write fails with `Duplicate exported event name: traceml:forward_time`, export stops for the run, and the loss is reported as below.
+
+Version 2 assumes one device per event name, rank and step.
+If an event has entries for several devices in one step, only the first device in label order is exported.
+
+### Migrating from schema version 1
+
+- `events[name]` is one object instead of a map keyed by device: read `events[name]["device"]` and the measurements beside it.
+- Built-in event names start with `traceml:` instead of `_traceml_internal:`.
+- `duration_ms` is no longer exported. It held GPU time when that was recorded, otherwise CPU wall time; read `gpu_ms` and `cpu_ms` instead.
+- `schema_version` tells the two apart. Other streams are unchanged at version 1.
 
 A file that finished cleanly ends with one closing line.
 Its `written_records` counts the data lines of that file only.

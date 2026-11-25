@@ -32,7 +32,7 @@ EVENTS = {
 }
 
 
-NAN_EVENTS = {"x": {"cuda:0": {"duration_ms": float("nan")}}}
+NAN_EVENTS = {"x": {"cuda:0": {"cpu_ms": float("nan")}}}
 
 
 def _payload(step: int = 7, events: dict = EVENTS) -> dict:
