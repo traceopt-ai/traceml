@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import warnings
 from pathlib import Path
 from typing import Any, Mapping
@@ -371,4 +372,5 @@ def resolve_config(
             result[key] = yaml_config[key]
         else:
             result[key] = defaults[key]
+    result["logs_dir"] = os.path.expanduser(result["logs_dir"])
     return result
