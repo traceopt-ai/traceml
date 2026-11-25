@@ -55,7 +55,11 @@ class _FakeRun:
     def __init__(self, *, summary_error=None, log_error=None):
         self.summary = _FakeSummary(summary_error)
         self.logged = []
+        self.defined = []
         self._log_error = log_error
+
+    def define_metric(self, name, **kwargs):
+        self.defined.append((name, kwargs))
 
     def log(self, data, **kwargs):
         if self._log_error is not None:
@@ -331,6 +335,44 @@ def test_written_fields_are_the_shared_comparison_fields(session, run):
     assert helper.tracker_comparison_fields is tracker_comparison_fields
 
 
+def test_numeric_fields_get_no_chart(session, run):
+    assert helper.log_training_report() is True
+
+    # The two timings exist only in the summary, so a chart would be
+    # empty; the verdict is text and W&B never charts it.
+    assert run.defined == [
+        ("traceml/step_time/step_time_ms", {"hidden": True}),
+        ("traceml/step_time/input_wait_ms", {"hidden": True}),
+    ]
+
+
+def test_hiding_failure_still_writes_the_report(session, monkeypatch, capsys):
+    class _NoDefine(_FakeRun):
+        def define_metric(self, name, **kwargs):
+            self.defined.append((name, kwargs))
+            raise ValueError("define_metric unavailable")
+
+    target = _NoDefine()
+    monkeypatch.setitem(sys.modules, "wandb", _fake_wandb(target))
+
+    assert helper.log_training_report() is True
+
+    assert target.summary.updates == [
+        tracker_comparison_fields(session.payload)
+    ]
+    assert isinstance(_card(target), _FakeHtml)
+    # Every field is tried even after the first one fails; one line in all.
+    assert [name for name, _ in target.defined] == [
+        "traceml/step_time/step_time_ms",
+        "traceml/step_time/input_wait_ms",
+    ]
+    err = capsys.readouterr().err.strip().splitlines()
+    assert err == [
+        "[TraceML] W&B: could not hide the summary fields from charts: "
+        "ValueError: define_metric unavailable"
+    ]
+
+
 def test_nan_average_is_omitted_and_zero_is_kept(session, run):
     average = session.payload["step_time"]["global"]["average"]
     average["step_time_ms"] = math.nan
@@ -341,6 +383,11 @@ def test_nan_average_is_omitted_and_zero_is_kept(session, run):
     (written,) = run.summary.updates
     assert "traceml/step_time/step_time_ms" not in written
     assert written["traceml/step_time/input_wait_ms"] == 0.0
+    # The measured zero is hidden from charts like any value; the omitted
+    # field is not touched.
+    assert run.defined == [
+        ("traceml/step_time/input_wait_ms", {"hidden": True})
+    ]
 
 
 def test_summary_failure_still_logs_the_card(session, monkeypatch, capsys):

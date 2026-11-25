@@ -54,6 +54,10 @@ from traceml_ai.step_time.sqlite import normalize_step_time_events
 
 _PREFIX = "traceml"
 _STEP_KEY = f"{_PREFIX}/step"
+_TIMESTAMP_KEY = f"{_PREFIX}/timestamp_unix_ns"
+_WRITTEN_KEY = f"{_PREFIX}/export_written_records"
+_DROPPED_KEY = f"{_PREFIX}/export_dropped_batches"
+_SKIPPED_KEY = f"{_PREFIX}/export_skipped_records"
 _JOB_TYPE = "traceml"
 
 # ``WANDB_MODE`` values that leave the exporter online. An allowlist, so
@@ -166,7 +170,7 @@ def _step_metrics(record: StepTimeRecord) -> Optional[Tuple[int, Dict]]:
         return None
     metrics: Dict[str, Union[int, float]] = {_STEP_KEY: step}
     if record.timestamp_unix_ns is not None:
-        metrics[f"{_PREFIX}/timestamp_unix_ns"] = record.timestamp_unix_ns
+        metrics[_TIMESTAMP_KEY] = record.timestamp_unix_ns
     clocks = normalize_step_time_events(record.events) or {}
     for phase in STEP_TIME_EVENT_NAMES:
         values = clocks.get(phase)
@@ -177,6 +181,23 @@ def _step_metrics(record: StepTimeRecord) -> Optional[Tuple[int, Dict]]:
         if values.gpu_ms is not None:
             metrics[f"{_PREFIX}/{phase}_gpu_ms"] = values.gpu_ms
     return rank, metrics
+
+
+def _define_run_metrics(run: Any) -> None:
+    """
+    Plot every ``traceml/`` key against the hidden ``traceml/step`` axis.
+
+    W&B draws a chart for every metric it knows. The training-clock
+    timestamp is for aligning rows, not for reading, and the three export
+    counts exist only in the run summary, so their charts would show a
+    rising line and three empty panels. They are hidden from charts and
+    stay in the summary and the runs table.
+    """
+    run.define_metric(_STEP_KEY, hidden=True)
+    run.define_metric(f"{_PREFIX}/*", step_metric=_STEP_KEY)
+    run.define_metric(_TIMESTAMP_KEY, step_metric=_STEP_KEY, hidden=True)
+    for key in (_WRITTEN_KEY, _DROPPED_KEY, _SKIPPED_KEY):
+        run.define_metric(key, hidden=True)
 
 
 def _import_wandb() -> Any:
@@ -584,8 +605,7 @@ class WandbExporter:
                     pass
                 return
             try:
-                run.define_metric(_STEP_KEY, hidden=True)
-                run.define_metric(f"{_PREFIX}/*", step_metric=_STEP_KEY)
+                _define_run_metrics(run)
             except BaseException as exc:
                 fail(exc)
 
@@ -758,15 +778,9 @@ class WandbExporter:
         error: Optional[BaseException] = None
         for rank, run in self._runs.items():
             try:
-                run.summary[f"{_PREFIX}/export_written_records"] = int(
-                    self._rows.get(rank, 0)
-                )
-                run.summary[f"{_PREFIX}/export_dropped_batches"] = int(
-                    dropped_batches
-                )
-                run.summary[f"{_PREFIX}/export_skipped_records"] = int(
-                    self._skipped_records
-                )
+                run.summary[_WRITTEN_KEY] = int(self._rows.get(rank, 0))
+                run.summary[_DROPPED_KEY] = int(dropped_batches)
+                run.summary[_SKIPPED_KEY] = int(self._skipped_records)
             except Exception as exc:
                 error = error or exc
         if self._skipped_records:

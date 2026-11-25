@@ -9,6 +9,10 @@
 [PyTorch Lightning](https://traceopt-ai.github.io/traceml/user_guide/integrations/lightning/) ·
 [RF-DETR](https://traceopt-ai.github.io/traceml/user_guide/integrations/rfdetr/)
 
+**Reports into:**
+[Weights & Biases](https://traceopt-ai.github.io/traceml/user_guide/integrations/wandb/) ·
+[MLflow](https://traceopt-ai.github.io/traceml/user_guide/integrations/mlflow/)
+
 [![PyPI version](https://img.shields.io/pypi/v/traceml-ai.svg)](https://pypi.org/project/traceml-ai/)
 [![CI](https://github.com/traceopt-ai/traceml/actions/workflows/ci.yml/badge.svg)](https://github.com/traceopt-ai/traceml/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
@@ -18,7 +22,7 @@
 [**Quickstart**](#quickstart) ·
 [**Integrations**](#integrations) ·
 [**Distributed training**](#distributed-training-and-straggler-detection) ·
-[**Monitoring**](#continuous-monitoring) ·
+[**Live telemetry**](#live-telemetry-export) ·
 [**Compare runs**](#compare-runs) ·
 [**Documentation**](https://traceopt-ai.github.io/traceml/)
 
@@ -34,8 +38,8 @@ and saves reports for comparison or CI.
   explicit step instrumentation for custom PyTorch loops.
 - **Distributed diagnosis:** compare rank timings and identify stragglers
   across GPUs and nodes.
-- **Continuous monitoring:** collect timing and resource metrics
-  throughout training.
+- **Live telemetry export:** export per-step, per-rank timing and resource
+  records from the aggregator to JSONL or a custom backend.
 
 ## Quickstart
 
@@ -168,6 +172,26 @@ Run it with `traceml run train.py`.
 See the [Public API](https://traceopt-ai.github.io/traceml/user_guide/public-api/)
 and [integration support matrix](https://traceopt-ai.github.io/traceml/user_guide/integrations/).
 
+### Experiment trackers
+
+TraceML writes its diagnosis into the W&B or MLflow run you already use, so
+you can sort and filter runs by bottleneck next to your own metrics.
+
+```python
+from traceml_ai.integrations.wandb import log_training_report  # or .mlflow
+
+trainer.train()
+log_training_report()
+```
+
+| Tracker | What lands in your run |
+|---|---|
+| [Weights & Biases](https://traceopt-ai.github.io/traceml/user_guide/integrations/wandb/) | The diagnosis card, plus the verdict, step time and input wait as summary fields. `--mode telemetry --exporter wandb` also streams each rank's step time while training runs. |
+| [MLflow](https://traceopt-ai.github.io/traceml/user_guide/integrations/mlflow/) | The diagnosis card as an HTML artifact, the verdict as a tag, and step time and input wait as metrics. |
+
+The helper never creates, finishes or logs in to a run. On a problem it
+prints one warning instead of raising.
+
 ## Distributed training and straggler detection
 
 For scripts already configured for distributed training, replace
@@ -244,12 +268,21 @@ for ports and shared storage,
 [integration support matrix](https://traceopt-ai.github.io/traceml/user_guide/integrations/#integration-support-matrix)
 for framework-specific details, including FSDP.
 
-## Continuous monitoring
+## Live telemetry export
 
-TraceML records GPU phase timings with CUDA events and resolves them
-asynchronously. Telemetry is batched and processed by a separate aggregator.
+Export per-step, per-rank timing records from the aggregator while training:
 
-Use a kernel profiler when the diagnosis points inside GPU compute.
+```bash
+traceml run --exporter jsonl train.py
+```
+
+By default, TraceML writes live step timings to
+`logs/<run-name>/aggregator/export/step_time.jsonl`. You can also use a
+[custom exporter](https://traceopt-ai.github.io/traceml/developer_guide/export-records/#custom-exporters)
+to send selected telemetry directly to your platform.
+
+See [Live Export](https://traceopt-ai.github.io/traceml/user_guide/live-export/)
+for available streams, configuration options, and the record schema.
 
 ## Compare runs
 
@@ -331,14 +364,10 @@ docker run --rm -p 127.0.0.1:8765:8765 traceml-demo \
 Open <http://localhost:8765> while the run is still active. `--epochs` sets
 how long the demo runs; raise it for more time.
 
-TraceML can also export a self-contained HTML report and send its compact
-summary to an existing W&B or MLflow run. For W&B,
-`traceml_ai.integrations.wandb.log_training_report()` publishes the diagnosis
-card into your run, and `traceml_ai.integrations.mlflow.log_training_report()`
-does the same for MLflow. `--exporter wandb` also streams each rank's step
-time into W&B while training runs. See
-[W&B and MLflow](https://traceopt-ai.github.io/traceml/user_guide/integrations/wandb-mlflow/)
-and the [complete quickstart](https://traceopt-ai.github.io/traceml/user_guide/quickstart/).
+TraceML can also export a self-contained HTML report. To send the diagnosis
+to W&B or MLflow, see [Experiment trackers](#experiment-trackers). For every
+option, see the
+[complete quickstart](https://traceopt-ai.github.io/traceml/user_guide/quickstart/).
 
 ## Learn more
 

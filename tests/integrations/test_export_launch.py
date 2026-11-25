@@ -79,12 +79,12 @@ def test_two_rank_run_exports_step_time_jsonl(tmp_path, mode):
     assert data
     for line in data:
         assert line["stream"] == "step_time"
-        assert line["schema_version"] == 1
+        assert line["schema_version"] == 2
         assert "closing" not in line
     assert closing == {
         "stream": "step_time",
         "closing": True,
-        "schema_version": 1,
+        "schema_version": 2,
         "written_records": len(data),
         "dropped_batches": 0,
     }
@@ -108,14 +108,14 @@ def test_two_rank_run_exports_step_time_jsonl(tmp_path, mode):
         assert isinstance(line["observed_timestamp_unix_ns"], int)
         assert isinstance(line["timestamp_unix_ns"], int)
         events = line["events"]
-        for devices in events.values():
-            for value in devices.values():
-                assert value["gpu_ms"] is None
-                assert isinstance(value["cpu_ms"], float)
-                assert value["cpu_ms"] >= 0
+        for value in events.values():
+            assert value["device"] == "cpu"
+            assert value["gpu_ms"] is None
+            assert isinstance(value["cpu_ms"], float)
+            assert value["cpu_ms"] >= 0
+            assert "duration_ms" not in value
         for name in ("forward_time", "backward_time"):
-            devices = events[f"_traceml_internal:{name}"]
-            assert sum(value["cpu_ms"] for value in devices.values()) > 0
+            assert events[f"traceml:{name}"]["cpu_ms"] > 0
 
     if mode == "summary":
         summary = json.loads((session_root / "final_summary.json").read_text())

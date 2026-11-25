@@ -13,7 +13,10 @@ import json
 
 import pytest
 
-from traceml_ai.aggregator.export.json_exporter import JsonExporter
+from traceml_ai.aggregator.export.json_exporter import (
+    JsonExporter,
+    public_step_events,
+)
 from traceml_ai.aggregator.export.records import StepTimeRecord
 
 EVENTS = {
@@ -95,7 +98,7 @@ def test_zero_records_leaves_only_the_closing_line(tmp_path) -> None:
         {
             "stream": "step_time",
             "closing": True,
-            "schema_version": 1,
+            "schema_version": 2,
             "written_records": 0,
             "dropped_batches": 0,
         }
@@ -112,9 +115,11 @@ def test_data_lines_carry_the_record(tmp_path) -> None:
     for line, step in zip(lines[:2], (1, 2)):
         expected = _record(step).to_dict()
         del expected["hostname"]
+        expected["schema_version"] = 2
+        expected["events"] = public_step_events(EVENTS)
         assert line == expected
         assert line["stream"] == "step_time"
-        assert line["schema_version"] == 1
+        assert line["schema_version"] == 2
 
 
 def test_lines_are_compact_and_parse_alone(tmp_path) -> None:
@@ -153,7 +158,7 @@ def test_nan_raises_value_error(tmp_path) -> None:
     exporter.open()
     bad = dataclasses.replace(
         _record(),
-        events={"x": {"cuda:0": {"duration_ms": float("nan")}}},
+        events={"x": {"cuda:0": {"cpu_ms": float("nan")}}},
     )
 
     with pytest.raises(ValueError):
@@ -165,7 +170,7 @@ def test_nan_in_a_batch_writes_no_line_of_it(tmp_path) -> None:
     exporter.open()
     bad = dataclasses.replace(
         _record(2),
-        events={"x": {"cuda:0": {"duration_ms": float("nan")}}},
+        events={"x": {"cuda:0": {"cpu_ms": float("nan")}}},
     )
 
     with pytest.raises(ValueError):
@@ -236,7 +241,7 @@ def test_closing_line_is_last_and_carries_counts(tmp_path) -> None:
     assert lines[-1] == {
         "stream": "step_time",
         "closing": True,
-        "schema_version": 1,
+        "schema_version": 2,
         "written_records": 3,
         "dropped_batches": 4,
     }

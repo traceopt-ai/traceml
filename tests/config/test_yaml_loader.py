@@ -432,8 +432,9 @@ def test_resolve_config_expands_home_in_logs_dir(
     yaml: dict,
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     result = resolve_config({**_no_cli(), **cli}, env, yaml, _defaults())
-    assert result["logs_dir"] == str(tmp_path / "traceml-logs")
+    assert Path(result["logs_dir"]) == tmp_path / "traceml-logs"
 
 
 def test_load_yaml_config_exporter_keys(tmp_path: Path) -> None:

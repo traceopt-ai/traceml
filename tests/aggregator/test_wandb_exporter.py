@@ -99,6 +99,21 @@ class FakeSettings:
             raise AttributeError(name) from None
 
 
+# What ``open`` defines on every run: the hidden step axis, every key
+# plotted against it, and no chart for the timestamp or the export counts.
+_DEFINED_METRICS = [
+    ("traceml/step", {"hidden": True}),
+    ("traceml/*", {"step_metric": "traceml/step"}),
+    (
+        "traceml/timestamp_unix_ns",
+        {"step_metric": "traceml/step", "hidden": True},
+    ),
+    ("traceml/export_written_records", {"hidden": True}),
+    ("traceml/export_dropped_batches", {"hidden": True}),
+    ("traceml/export_skipped_records", {"hidden": True}),
+]
+
+
 class FakeRun:
     def __init__(self, fake, kwargs):
         self._fake = fake
@@ -550,10 +565,7 @@ def test_open_creates_one_grouped_run_per_rank(tmp_path, env, fake, capsys):
         assert re.fullmatch(r"[a-z0-9]{8}", kwargs["id"])
         for absent in ("tags", "config", "step", "notes"):
             assert absent not in kwargs
-        assert run.defined == [
-            ("traceml/step", {"hidden": True}),
-            ("traceml/*", {"step_metric": "traceml/step"}),
-        ]
+        assert run.defined == _DEFINED_METRICS
     assert len({run.id for run in runs.values()}) == 3
     captured = capsys.readouterr()
     assert captured.out == ""
@@ -837,7 +849,7 @@ def test_write_logs_one_committed_row_per_record_into_its_rank(
     assert [row["traceml/step"] for row, _ in runs[1].logged] == [1]
     for run in runs.values():
         assert all(kwargs == {"commit": True} for _, kwargs in run.logged)
-        assert len(run.defined) == 2
+        assert run.defined == _DEFINED_METRICS
 
 
 def test_write_skips_and_counts_records_without_rank_or_step(
@@ -880,7 +892,7 @@ def test_a_rank_beyond_the_world_size_gets_one_extra_run(
     runs = _runs_by_rank(fake)
     assert sorted(runs) == [0, 1, 2]
     assert len(runs[2].logged) == 2
-    assert len(runs[2].defined) == 2
+    assert runs[2].defined == _DEFINED_METRICS
     assert runs[2].kwargs["settings"].fields["init_timeout"] == 10.0
     warnings = [
         line
@@ -1100,6 +1112,28 @@ def test_close_fails_a_run_that_received_no_row(tmp_path, env, fake):
     assert runs[0].finished == [0]
     assert runs[1].finished == [1]
     assert runs[1].summary["traceml/export_written_records"] == 0
+
+
+def test_only_phase_clocks_get_a_chart(tmp_path, env, fake):
+    exporter = _exporter(tmp_path, world=1)
+    exporter.open()
+    exporter.write([_record(rank=0, step=1), _record(rank=0, step=2)])
+    exporter.close()
+
+    run = fake.runs[0]
+    hidden = {name for name, kwargs in run.defined if kwargs.get("hidden")}
+    history_keys = {key for row, _ in run.logged for key in row}
+    summary_only = set(run.summary) - history_keys
+    charted = history_keys - hidden
+
+    # W&B draws an empty chart for a summary-only key and a rising line
+    # for the timestamp; every key that gets a chart is a phase clock.
+    assert summary_only and summary_only <= hidden
+    assert "traceml/timestamp_unix_ns" in history_keys - charted
+    assert charted
+    assert all(
+        key.endswith(("_cpu_ms", "_gpu_ms")) for key in charted
+    ), charted
 
 
 def test_close_is_one_shot(tmp_path, env, fake):

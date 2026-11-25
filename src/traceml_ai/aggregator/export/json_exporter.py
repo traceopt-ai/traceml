@@ -13,6 +13,12 @@ record type, exclusively: an existing file raises, so a reused run folder
 cannot mix two runs. ``close`` appends one closing line per file with the
 records written and the batches the worker dropped, so a run with no
 records still ends with a closing line per selected stream.
+
+``step_time.jsonl`` uses schema version 2, a public shape of the step-time
+record: one entry per event with its ``device`` and measurements, and
+``traceml:`` in place of the internal ``_traceml_internal:`` prefix (#680).
+The record itself, SQLite and the other exporters are unchanged. The other
+streams keep ``SCHEMA_VERSION``.
 """
 
 from __future__ import annotations
@@ -36,13 +42,71 @@ from traceml_ai.aggregator.export.records import (
     RECORD_TYPES,
     SCHEMA_VERSION,
     Record,
+    StepEvents,
+    StepTimeRecord,
     selected_streams,
 )
+
+STEP_TIME_SCHEMA_VERSION = 2
+"""Schema version of ``step_time.jsonl`` lines, data and closing alike."""
+
+_INTERNAL_EVENT_PREFIX = "_traceml_internal:"
+PUBLIC_EVENT_PREFIX = "traceml:"
+"""Reserved prefix of TraceML's built-in events in ``step_time.jsonl``."""
+
+_EXPORTED_EVENT_FIELDS = ("cpu_ms", "gpu_ms", "is_gpu", "n_calls")
+
+_STREAM_SCHEMA_VERSIONS = {StepTimeRecord.STREAM: STEP_TIME_SCHEMA_VERSION}
 
 
 def _dumps(obj: Dict) -> str:
     """One compact JSON line; NaN and infinity raise ``ValueError``."""
     return json.dumps(obj, separators=(",", ":"), allow_nan=False) + "\n"
+
+
+def _public_event_name(name: str) -> str:
+    """``traceml:`` for a built-in event; a custom name is kept as is."""
+    if name.startswith(_INTERNAL_EVENT_PREFIX):
+        return PUBLIC_EVENT_PREFIX + name[len(_INTERNAL_EVENT_PREFIX) :]
+    return name
+
+
+def public_step_events(events: StepEvents) -> Dict[str, Dict[str, object]]:
+    """
+    The ``events`` map of a schema-2 ``step_time.jsonl`` line.
+
+    Each event becomes one object: ``device`` and the measurements of its
+    first device, copied without recalculation (``None`` stays ``None``,
+    ``0`` stays ``0``); ``duration_ms`` is not exported. Version 2 assumes
+    one device per event name, rank and step: further device entries are not
+    exported. The stored map is sorted by device, so "first" is the first
+    device label in that order. An event with no device entry exports
+    ``device`` and every measurement as ``None``.
+
+    Raises ``ValueError`` when two events map to the same exported name, for
+    example a custom ``traceml:forward_time`` next to the built-in one.
+    """
+    out: Dict[str, Dict[str, object]] = {}
+    for name, by_device in events.items():
+        public = _public_event_name(name)
+        if public in out:
+            raise ValueError(f"Duplicate exported event name: {public}")
+        device, stats = next(iter(by_device.items()), (None, {}))
+        entry: Dict[str, object] = {"device": device}
+        entry.update(
+            {field: stats.get(field) for field in _EXPORTED_EVENT_FIELDS}
+        )
+        out[public] = entry
+    return out
+
+
+def _line_object(record: Record) -> Dict:
+    """The JSON object written for ``record``, before the hostname rule."""
+    obj = record.to_dict()
+    if isinstance(record, StepTimeRecord):
+        obj["schema_version"] = STEP_TIME_SCHEMA_VERSION
+        obj["events"] = public_step_events(record.events)
+    return obj
 
 
 class JsonExporter:
@@ -113,8 +177,8 @@ class JsonExporter:
         Append one line per record to its stream's file.
 
         Every record is serialised before any line is written, so a record
-        that does not serialise raises ``ValueError`` and the batch leaves
-        no line. ``hostname`` is dropped unless ``include_hostname``. A
+        that does not serialise (NaN, infinity, or a duplicate exported
+        event name) raises ``ValueError`` and the batch leaves no line. ``hostname`` is dropped unless ``include_hostname``. A
         stream ``open`` did not create raises ``ValueError``; a call after
         ``close`` raises ``RuntimeError``.
         """
@@ -125,7 +189,7 @@ class JsonExporter:
             stream = record.STREAM
             if stream not in self._files:
                 raise ValueError(f"no export file for stream {stream!r}")
-            obj = record.to_dict()
+            obj = _line_object(record)
             if not self._include_hostname:
                 obj.pop("hostname", None)
             lines.append((stream, _dumps(obj)))
@@ -170,7 +234,9 @@ class JsonExporter:
                             {
                                 "stream": stream,
                                 "closing": True,
-                                "schema_version": SCHEMA_VERSION,
+                                "schema_version": _STREAM_SCHEMA_VERSIONS.get(
+                                    stream, SCHEMA_VERSION
+                                ),
                                 "written_records": self._written[stream],
                                 "dropped_batches": int(dropped_batches),
                             }
