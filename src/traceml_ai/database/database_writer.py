@@ -90,6 +90,23 @@ class DatabaseWriter:
         """
         return encode_msgpack(row)
 
+    def _backlog_near_bound(self) -> bool:
+        """
+        Return True when a table's unwritten rows fill half of its bound.
+
+        Tables keep only ``db.max_rows`` rows, so a fast loop (one step-time
+        row per step) can evict rows before the next throttled write. Writing
+        at half the bound keeps writes rare on slow loops and lossless as
+        long as a table gains fewer than half its bound per tick.
+        """
+        threshold = max(1, self.db.max_rows // 2)
+        return any(
+            self.db.get_append_count(name)
+            - self._last_written_seq.get(name, 0)
+            >= threshold
+            for name in self.db.all_tables()
+        )
+
     def flush(self, force: bool = False):
         """
         Flush new records from all tables to disk.
@@ -103,14 +120,19 @@ class DatabaseWriter:
         Notes
         -----
         - This method may be called very frequently (e.g., every training step).
-        - Actual disk I/O is throttled via `flush_every`.
+        - Actual disk I/O is throttled via `flush_every`, unless a table's
+          unwritten rows reach half of its bound and would soon be evicted.
         - Only records that were not written in previous flushes are appended.
         """
         if not config.enable_logging:
             return
 
         self._flush_counter += 1
-        if not force and self._flush_counter % self.flush_every != 0:
+        if (
+            not force
+            and self._flush_counter % self.flush_every != 0
+            and not self._backlog_near_bound()
+        ):
             return
 
         self.logs_dir.mkdir(parents=True, exist_ok=True)

@@ -31,6 +31,11 @@ which carry the full historical notes for versions predating this file.
   own when the spread across GPUs crosses the bar. Each header says
   "click to open" or "click to close" as soon as it is toggled.
 
+- With `--enable-logging`, raw logs also flush when unwritten rows reach half
+  the table capacity (1,500 rows by default), reducing losses between
+  scheduled writes. Bursts that overflow the table within one sampler tick
+  can still lose rows.
+
 ## [0.5.1] - 2026-11-09
 
 - Added opt-in live telemetry export to JSON Lines files or a custom

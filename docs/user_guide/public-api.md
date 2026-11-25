@@ -185,11 +185,11 @@ behavior.
 each training rank. Each sampler appends length-prefixed MessagePack records
 to `rank_<N>/data/<Sampler>/<Table>.msgpack` inside the run's session folder
 under the logs directory, beside `final_summary.json`. Writers append every
-100 sampler ticks and once more when TraceML stops, so a short run that
-stops normally still writes its files. A killed process loses the records
-since the last periodic write. Between writes each table holds its most
-recent 3,000 rows, so a table that gains more rows than that between two
-writes, such as step time on a fast loop, keeps only the most recent ones.
+100 sampler ticks, when any table's unwritten rows reach half its capacity
+(1,500 rows by default), and once more when TraceML stops normally.
+A killed process loses records since the last write. Each table holds its
+most recent 3,000 rows by default; a burst that overflows the table within
+one sampler tick can still evict unwritten rows before they reach disk.
 The same setting comes from
 `enable_logging: true` in `traceml.yaml` or `TRACEML_ENABLE_LOGGING=1`; when
 it is off, no `.msgpack` files are written.
