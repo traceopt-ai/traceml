@@ -23,6 +23,7 @@ The record uses the same projection code as the SQLite row, so their projected f
 
 Every record class carries `STREAM`, `SCHEMA_VERSION` (currently `1`) and `COLUMNS`, its field names in order.
 `to_dict()` returns `stream`, `schema_version` and then every field.
+The JSON Lines exporter writes `to_dict()` for every stream except `step_time`, which it writes in its own public shape (see below).
 The JSON Lines exporter omits `hostname` unless `exporter_hostname` is on.
 When enabled, records that have a `hostname` field keep it, with `null` when the rank sent no hostname.
 An unavailable value remains `None`; a measured zero remains `0`.
@@ -145,6 +146,27 @@ Each value is `None` when the rank did not send it.
 `cpu_ms` is CPU wall time and `gpu_ms` is CUDA event time, each summed over the step's calls.
 `gpu_ms` is `None` unless every call of that phase in the step measured the GPU clock; a measured zero stays `0.0`.
 `duration_ms` is the legacy effective duration, and `is_gpu` says whether GPU time backs it.
+This is the record's internal shape, which SQLite, the other exporters and `to_dict()` keep.
+
+#### `step_time.jsonl` (schema version 2)
+
+The JSON Lines exporter writes a public shape of `StepTimeRecord`, with `schema_version` `2` on its data and closing lines.
+`json_exporter.public_step_events` builds it; the record itself is not changed.
+The fields other than `events` are the record's, in the same order.
+
+`events[name]` is one object: `device` (str), then `cpu_ms`, `gpu_ms` (float, milliseconds), `is_gpu` (bool) and `n_calls` (int).
+They are copied from the record without recalculation, so `None` stays `null` and a measured zero stays `0`.
+`duration_ms` is not exported.
+An event with no device entry exports `device` and every measurement as `null`.
+
+Built-in names lose the internal `_traceml_internal:` prefix and get the reserved `traceml:` prefix instead; custom names are kept.
+Two events that map to the same exported name raise `ValueError("Duplicate exported event name: <name>")`, so the batch writes no line.
+
+Version 2 assumes one device per event name, rank and step.
+When the record holds several devices for one event, only the first is exported.
+The stored `events_json` is serialised with sorted keys, so the first device is the first in label order.
+
+Version 1 lines wrote `events[name][device]` as in the internal shape above, with `_traceml_internal:` names and `duration_ms`.
 
 ### StepMemoryRecord
 
