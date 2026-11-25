@@ -58,18 +58,37 @@ def define_pages(cls):
                 "gap:16px; padding:22px 26px; max-width:1380px; margin:0 auto;"
             )
         ):
-            strip = build_context_section(
-                identity,
-                cls.register_staleness_label,
-                show_layers=deep_enabled,
-                sampler_interval_s=getattr(
-                    cls._settings, "sampler_interval_sec", None
-                ),
-            )
+            # Row 1: run information | Diagnostics, equal columns that stack
+            # (in that order) once the page is too narrow for both. Whether
+            # Diagnostics shows follows the profile, not whether data has
+            # arrived: a watch session has no step loop, so run information
+            # keeps the whole row.
+            with (
+                ui.row()
+                .classes("w-full items-stretch")
+                .style("gap:16px; flex-wrap:wrap;")
+            ):
+                with _cell("1 1 0"):
+                    strip = build_context_section(
+                        identity,
+                        cls.register_staleness_label,
+                        show_layers=deep_enabled,
+                        sampler_interval_s=getattr(
+                            cls._settings, "sampler_interval_sec", None
+                        ),
+                    )
+                if "model_diagnostics" in shown:
+                    with _cell("1 1 0"):
+                        diag_cards = build_model_diagnostics_section()
+                        cls.subscribe_layout(
+                            MODEL_DIAGNOSTICS_LAYOUT,
+                            diag_cards,
+                            update_model_diagnostics_section,
+                        )
             cls.subscribe_layout(CONTEXT_LAYOUT, strip, update_context_section)
 
             if "model_combined" in shown:
-                # Row 1: hero (Step Time summary + phase tree). A watch session
+                # Row 2: hero (Step Time summary + phase tree). A watch session
                 # has no step loop, so no hero: the resource panes lead.
                 with (
                     ui.row()
@@ -111,32 +130,22 @@ def define_pages(cls):
                 SYSTEM_LAYOUT, system_cards, update_system_section
             )
 
-            # Row 3: Step Memory | Diagnostics (training runs only)
-            if "step_memory" in shown or "model_diagnostics" in shown:
+            # Row 4: Step Memory, now the whole row (training runs only)
+            if "step_memory" in shown:
                 with (
                     ui.row()
                     .classes("w-full items-stretch")
                     .style("gap:16px; flex-wrap:wrap;")
                 ):
-                    if "step_memory" in shown:
-                        with _cell("1.3") as cell:
-                            cards = build_step_memory_section()
-                            # The card hides this cell on a run with no GPU.
-                            cards["container"] = cell
-                            cls.subscribe_layout(
-                                MODEL_MEMORY_LAYOUT,
-                                cards,
-                                update_step_memory_section,
-                            )
-                    if "model_diagnostics" in shown:
-                        with _cell("1"):
-                            diag_cards = build_model_diagnostics_section()
-
-                            cls.subscribe_layout(
-                                MODEL_DIAGNOSTICS_LAYOUT,
-                                diag_cards,
-                                update_model_diagnostics_section,
-                            )
+                    with _cell("1") as cell:
+                        cards = build_step_memory_section()
+                        # The card hides this cell on a run with no GPU.
+                        cards["container"] = cell
+                        cls.subscribe_layout(
+                            MODEL_MEMORY_LAYOUT,
+                            cards,
+                            update_step_memory_section,
+                        )
 
         cls.ensure_ui_timer(0.75)
         if not cls._ui_ready:

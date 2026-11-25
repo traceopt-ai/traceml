@@ -278,6 +278,11 @@ class StaleProxy:
 _MONO = "font-family:var(--mono);"
 
 
+# The strip shares its row with Diagnostics, so a long run name, script name
+# or path breaks inside the card instead of widening it past the page.
+_WRAP = "overflow-wrap:anywhere; min-width:0;"
+
+
 def build_context_section(
     identity: Dict[str, str],
     register_staleness,
@@ -305,7 +310,7 @@ def build_context_section(
             ui.label(identity.get("profile") or "run").classes("eyebrow")
             name, muted = run_name_label(identity)
             cards["run_name"] = ui.label(name).style(
-                f"{_MONO} font-size:13px; "
+                f"{_MONO} font-size:13px; {_WRAP}"
                 + (
                     "font-style:italic; color:var(--muted);"
                     if muted
@@ -334,12 +339,12 @@ def build_context_section(
         )
         script = identity.get("script_name") or ""
         cards["script"] = ui.label(script).style(
-            f"{_MONO} font-size:11px; color:var(--ink); margin-top:2px; "
+            f"{_MONO} font-size:11px; color:var(--ink); margin-top:2px; {_WRAP}"
             f"display:{'block' if script else 'none'};"
         )
         artifact = identity.get("artifact_path") or ""
         cards["artifact"] = ui.label(abbreviate_path(artifact)).style(
-            f"{_MONO} font-size:10px; color:var(--muted); margin-top:2px; "
+            f"{_MONO} font-size:10px; color:var(--muted); margin-top:2px; {_WRAP}"
             f"cursor:{'copy' if artifact else 'default'}; "
             f"display:{'block' if artifact else 'none'};"
         )

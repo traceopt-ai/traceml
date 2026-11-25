@@ -7,6 +7,12 @@ which carry the full historical notes for versions predating this file.
 
 ## [Unreleased]
 
+- The dashboard's Diagnostics card now sits beside run information at the
+  top, so findings and next steps show without scrolling. The two cards share
+  the row equally and stack, run information first, on narrow screens. Step
+  Memory takes its row alone, and a `watch` session keeps run information at
+  full width.
+
 - The dashboard's System card now shows CPU utilization, GPU power and GPU
   details as three independent collapsible sections. CPU utilization and GPU
   power start collapsed; GPU details keeps its default and still opens on its
