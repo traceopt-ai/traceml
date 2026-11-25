@@ -164,7 +164,7 @@ If an event has entries for several devices in one step, only the first device i
 
 - `events[name]` is one object instead of a map keyed by device: read `events[name]["device"]` and the measurements beside it.
 - Built-in event names start with `traceml:` instead of `_traceml_internal:`.
-- `duration_ms` is no longer exported. It held GPU time when that was recorded, otherwise CPU wall time; read `gpu_ms` and `cpu_ms` instead.
+- `duration_ms` is no longer exported. Read `cpu_ms` for host wall time and `gpu_ms` for CUDA event time.
 - `schema_version` tells the two apart. Other streams are unchanged at version 1.
 
 A file that finished cleanly ends with one closing line.

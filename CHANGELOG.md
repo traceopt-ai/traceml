@@ -7,6 +7,13 @@ which carry the full historical notes for versions predating this file.
 
 ## [Unreleased]
 
+- **Breaking (JSONL export):** `step_time.jsonl` now uses schema version 2.
+  Each event has an explicit `device`, built-in names use `traceml:` instead
+  of `_traceml_internal:`, and `duration_ms` is omitted. Read `cpu_ms` for
+  host wall time and `gpu_ms` for CUDA event time. Other JSONL streams remain
+  at version 1; internal records and other exporters are unchanged. See the
+  [migration guide](docs/user_guide/live-export.md#migrating-from-schema-version-1).
+
 ## [0.5.1] - 2026-11-09
 
 - Added opt-in live telemetry export to JSON Lines files or a custom
