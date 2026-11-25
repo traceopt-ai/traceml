@@ -122,19 +122,28 @@ def test_driver_feeds_context_layout_in_both_profiles(
 
 def test_update_context_section_consumes_the_context_payload() -> None:
     class _Label:
-        def __init__(self) -> None:
-            self.text = ""
+        def __init__(self, text: str = "") -> None:
+            self.text = text
             self.styles: list[str] = []
 
         def style(self, value: str) -> "_Label":
             self.styles.append(value)
             return self
 
+    labels = (
+        "Script",
+        "Profile",
+        "GPUs detected",
+        "Observed duration",
+        "Telemetry coverage",
+        "Last sample",
+    )
     cards = {
-        "strategy": _Label(),
-        "coverage": _Label(),
-        "liveness": _Label(),
+        "execution": _Label(),
+        "status": _Label(),
         "dot": _Label(),
+        "detail_values": {label: _Label() for label in labels},
+        "identity": {"script_name": "train.py", "profile": "run"},
         "live_threshold_s": 6.0,
     }
     payload = {
@@ -148,12 +157,104 @@ def test_update_context_section_consumes_the_context_payload() -> None:
         "last_data_ts": 1146.0,
     }
     update_context_section(cards, payload, now=1147.0)
-    assert cards["strategy"].text == "DDP"
-    assert (
-        cards["coverage"].text
-        == "ranks 3/4 reporting · 4 GPUs observed · 1 node · 2m 26s"
-    )
-    assert cards["liveness"].text == "live"
+    assert cards["execution"].text == "DDP · 4 processes · 1 node"
+    assert cards["status"].text == "Updating"
+    details = {label: w.text for label, w in cards["detail_values"].items()}
+    assert details == {
+        "Script": "train.py",
+        "Profile": "run",
+        "GPUs detected": "4",
+        "Observed duration": "2m 26s",
+        "Telemetry coverage": "3 / 4 ranks",
+        "Last sample": "1s ago",
+    }
+    # Stale data says so, with its age, and is not dressed as a failure.
+    update_context_section(cards, payload, now=1146.0 + 47)
+    assert cards["status"].text == "Delayed · 47s since last data"
     # A payload shaped like the old System rollups is ignored, not misread.
     update_context_section(cards, {"rollups": {"ctx": payload}})
-    assert cards["coverage"].text.startswith("ranks 3/4")
+    assert cards["execution"].text == "DDP · 4 processes · 1 node"
+
+
+def _build(identity, **kwargs):
+    from nicegui import ui
+
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.context_section import (  # noqa: E501
+        build_context_section,
+    )
+
+    with ui.element("div"):
+        return build_context_section(identity, lambda _proxy: None, **kwargs)
+
+
+_LONG_PATH = (
+    "/very/long/path/to/the/training/logs/directory/for/this/team/"
+    "bert-baseline-with-a-long-run-name/final_summary.json"
+)
+
+
+def test_header_labels_run_execution_and_data_status() -> None:
+    cards = _build(
+        {
+            "profile": "run",
+            "run_name": "bert-baseline",
+            "run_name_source": "run_name",
+            "script_name": "train.py",
+            "artifact_path": _LONG_PATH,
+        }
+    )
+    assert cards["identity_label"].text == "Run:"
+    assert cards["run_name"].text == "bert-baseline"
+    assert cards["status"].text == "Waiting"
+    assert cards["execution"].text == "unknown"
+    # The field holds the complete path, not an abbreviation of it.
+    assert cards["artifact"].value == _LONG_PATH
+    assert "readonly" in cards["artifact"].props
+    assert cards["copy"].text == "Copy"
+
+
+def test_watch_profile_reads_session_and_unnamed_run_is_muted() -> None:
+    cards = _build(
+        {
+            "profile": "watch",
+            "run_name": "session_20260821_123224_1103e8",
+            "run_name_source": "generated",
+            "artifact_path": "",
+        }
+    )
+    assert cards["identity_label"].text == "Session:"
+    assert cards["run_name"].text == "Unnamed run"
+    # No path yet: the row is hidden rather than showing an empty field.
+    assert cards["artifact_row"]._style.get("display") == "none"
+
+
+def test_details_start_collapsed_and_toggle() -> None:
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.context_section import (  # noqa: E501
+        set_details_open,
+    )
+
+    cards = _build({"profile": "run", "run_name": "r", "artifact_path": ""})
+    assert cards["details_open"] is False
+    assert cards["details"]._style.get("display") == "none"
+    assert cards["details_toggle"].props.get("aria-expanded") == "false"
+
+    set_details_open(cards, True)
+    assert cards["details"]._style.get("display") == "grid"
+    assert cards["details_toggle"].text == "Details ▴"
+    assert cards["details_toggle"].props.get("aria-expanded") == "true"
+
+    set_details_open(cards, False)
+    assert cards["details"]._style.get("display") == "none"
+    assert cards["details_toggle"].text == "Details ▾"
+
+
+def test_long_run_name_is_clipped_and_kept_whole() -> None:
+    name = "x" * 300
+    cards = _build(
+        {"profile": "run", "run_name": name, "run_name_source": "run_name"}
+    )
+    style = cards["run_name"]._style
+    assert style.get("white-space") == "nowrap"
+    assert style.get("text-overflow") == "ellipsis"
+    assert style.get("overflow") == "hidden"
+    assert cards["run_name"].text == name
