@@ -82,11 +82,20 @@ def build_model_diagnostics_section(
     return {"overall": overall, "body": body, "hint": hint}
 
 
+def _is_visible_item(item: Dict[str, Any]) -> bool:
+    """Hide CPU-only Step memory rows without mutating payloads."""
+    return not (
+        isinstance(item, dict)
+        and item.get("source") == "step_memory"
+        and item.get("kind") == "NO_GPU"
+    )
+
+
 def update_model_diagnostics_section(
     panel: Dict[str, Any], payload: Any
 ) -> None:
     try:
-        items = _items(payload)
+        items = [it for it in _items(payload) if _is_visible_item(it)]
         if not items:
             panel["overall"].text = "NO DATA"
             panel["body"].content = ""

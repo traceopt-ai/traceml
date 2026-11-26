@@ -915,3 +915,210 @@ def test_diagnostics_pill_follows_overall_not_the_first_item() -> None:
 
     assert panel["overall"].text == "WARN"
     assert theme.SEV["warn"] in panel["overall"].styles[-1]
+
+
+def test_diagnostics_hides_step_memory_no_gpu_without_mutating_payload() -> (
+    None
+):
+    from traceml_ai.aggregator.display_drivers.nicegui_sections import (
+        model_diagnostics_section as mds,
+    )
+
+    panel = {
+        "overall": _FakeText(),
+        "body": _FakeHtml(),
+        "hint": _FakeText(),
+    }
+    step_time_item = {
+        "source": "step_time",
+        "kind": "INPUT_BOUND",
+        "severity": "warn",
+        "status": "INPUT-BOUND",
+        "reason": "Input wait dominates the step.",
+    }
+    step_memory_item = {
+        "source": "step_memory",
+        "kind": "NO_GPU",
+        "severity": "info",
+        "status": "NO GPU",
+        "reason": "No CUDA device detected.",
+    }
+    payload = {
+        "overall_severity": "warn",
+        "items": [step_time_item, step_memory_item],
+    }
+
+    mds.update_model_diagnostics_section(panel, payload)
+
+    assert len(payload["items"]) == 2
+    assert payload["items"][1] is step_memory_item
+    assert panel["overall"].text == "WARN"
+    assert panel["hint"].text == ""
+    assert "Step time" in panel["body"].content
+    assert "Step memory" not in panel["body"].content
+    assert "NO GPU" not in panel["body"].content
+    assert panel["body"].content.count("class='diagrow'") == 1
+
+
+@pytest.mark.parametrize(
+    ("source", "kind", "status", "reason"),
+    (
+        (
+            "step_memory",
+            "NO_DATA",
+            "NO GPU",
+            "No GPU-like waiting message in display text.",
+        ),
+        (
+            "step_memory",
+            "WARMUP",
+            "WARMUP",
+            "Collecting step memory baseline.",
+        ),
+        (
+            "step_memory",
+            "INCOMPLETE_DATA",
+            "INCOMPLETE DATA",
+            "Missing samples from some ranks.",
+        ),
+        (
+            "step_memory",
+            "BALANCED",
+            "BALANCED",
+            "GPU memory is steady.",
+        ),
+        (
+            "step_time",
+            "NO_GPU",
+            "NO GPU",
+            "Non-memory entry sharing NO_GPU kind stays visible.",
+        ),
+    ),
+)
+def test_diagnostics_keeps_non_matching_and_waiting_entries_visible(
+    source: str, kind: str, status: str, reason: str
+) -> None:
+    from traceml_ai.aggregator.display_drivers.nicegui_sections import (
+        model_diagnostics_section as mds,
+    )
+
+    panel = {
+        "overall": _FakeText(),
+        "body": _FakeHtml(),
+        "hint": _FakeText(),
+    }
+    mds.update_model_diagnostics_section(
+        panel,
+        {
+            "overall_severity": "info",
+            "items": [
+                {
+                    "source": source,
+                    "kind": kind,
+                    "severity": "info",
+                    "status": status,
+                    "reason": reason,
+                }
+            ],
+        },
+    )
+
+    assert panel["hint"].text == ""
+    assert reason in panel["body"].content
+    assert panel["body"].content.count("class='diagrow'") == 1
+
+
+def test_diagnostics_uses_empty_state_when_only_step_memory_no_gpu() -> None:
+    from traceml_ai.aggregator.display_drivers.nicegui_sections import (
+        model_diagnostics_section as mds,
+    )
+
+    panel = {
+        "overall": _FakeText(),
+        "body": _FakeHtml(),
+        "hint": _FakeText(),
+    }
+    panel["overall"].text = "WARN"
+    panel["body"].content = "stale row"
+
+    mds.update_model_diagnostics_section(
+        panel,
+        {
+            "overall_severity": "info",
+            "items": [
+                {
+                    "source": "step_memory",
+                    "kind": "NO_GPU",
+                    "severity": "info",
+                    "status": "NO GPU",
+                    "reason": "No CUDA device detected.",
+                }
+            ],
+        },
+    )
+
+    assert panel["overall"].text == "NO DATA"
+    assert panel["body"].content == ""
+    assert panel["hint"].text == "Waiting for diagnostics"
+    assert theme.SEV["neutral"] in panel["overall"].styles[-1]
+
+
+def test_diagnostics_updates_reflect_payload_changes_for_step_memory() -> None:
+    from traceml_ai.aggregator.display_drivers.nicegui_sections import (
+        model_diagnostics_section as mds,
+    )
+
+    panel = {
+        "overall": _FakeText(),
+        "body": _FakeHtml(),
+        "hint": _FakeText(),
+    }
+    mds.update_model_diagnostics_section(
+        panel,
+        {
+            "overall_severity": "info",
+            "items": [
+                {
+                    "source": "step_time",
+                    "kind": "BALANCED",
+                    "severity": "info",
+                    "status": "BALANCED",
+                    "reason": "Step time is steady.",
+                },
+                {
+                    "source": "step_memory",
+                    "kind": "NO_GPU",
+                    "severity": "info",
+                    "status": "NO GPU",
+                    "reason": "No CUDA device detected.",
+                },
+            ],
+        },
+    )
+    assert "Step memory" not in panel["body"].content
+
+    mds.update_model_diagnostics_section(
+        panel,
+        {
+            "overall_severity": "warn",
+            "items": [
+                {
+                    "source": "step_time",
+                    "kind": "BALANCED",
+                    "severity": "info",
+                    "status": "BALANCED",
+                    "reason": "Step time is steady.",
+                },
+                {
+                    "source": "step_memory",
+                    "kind": "MEMORY_CREEP",
+                    "severity": "warn",
+                    "status": "MEMORY-CREEP",
+                    "reason": "Allocated GPU memory grows across steps.",
+                },
+            ],
+        },
+    )
+    assert "Step memory" in panel["body"].content
+    assert "MEMORY-CREEP" in panel["body"].content
+    assert panel["body"].content.count("class='diagrow'") == 2
