@@ -87,6 +87,9 @@ class StepTimeAnalysisContext:
 
     largest_compute: Optional[str]
     rank_straggler: Optional[_RankStragglerEvidence]
+    # Upper-middle rank by Backward time (Forward + Backward for FSDP),
+    # or rank 0 when there is no usable comparison.
+    reference_rank: int
     missing_signals: tuple[str, ...] = ()
     signal_coverage: tuple[tuple[str, str], ...] = ()
 
@@ -198,15 +201,15 @@ def _build_rank_straggler_evidence(
     score_threshold: float,
     cause_coverage_threshold: float,
     training_strategy: str,
-) -> tuple[Optional[_RankStragglerEvidence], int]:
-    """Build diagnosis-specific evidence from the analyzer's rank cohort."""
+) -> tuple[Optional[_RankStragglerEvidence], int, int]:
+    """Return finding evidence, eligible rank count, and reference rank."""
     eligible = tuple(
         facts
         for rank in window.straggler_ranks
         if (facts := window.rank(rank)) is not None
     )
     if len(eligible) <= 1:
-        return None, len(eligible)
+        return None, len(eligible), 0
 
     fsdp = training_strategy == "fsdp"
     pair = _rank_straggler_pair(
@@ -224,17 +227,18 @@ def _build_rank_straggler_evidence(
         )
     )
     if pair is None:
-        return None, len(eligible)
+        return None, len(eligible), 0
 
     by_rank = {facts.global_rank: facts for facts in eligible}
     culprit = by_rank[pair.culprit_rank]
     victim = by_rank[pair.victim_rank]
     step_time = _rank_value(victim, "step_time")
     if step_time <= 0.0:
-        return None, len(eligible)
+        return None, len(eligible), 0
     score = pair.cost_ms / step_time
     if score < non_negative_finite(score_threshold):
-        return None, len(eligible)
+        # The same rank represents the window even when no finding is emitted.
+        return None, len(eligible), pair.victim_rank
 
     input_culprit = _rank_value(culprit, "input_wait")
     input_victim = _rank_value(victim, "input_wait")
@@ -313,7 +317,7 @@ def _build_rank_straggler_evidence(
         (pair.culprit_value_ms, pair.victim_value_ms),
     )
 
-    return _RankStragglerEvidence(
+    evidence = _RankStragglerEvidence(
         kind=kind,
         status=status,
         component=cause,
@@ -331,7 +335,8 @@ def _build_rank_straggler_evidence(
         component_coverage=coverage,
         component_culprit_ms=component_culprit,
         component_victim_ms=component_victim,
-    ), len(eligible)
+    )
+    return evidence, len(eligible), pair.victim_rank
 
 
 def largest_compute_phase(
@@ -463,7 +468,11 @@ def build_step_time_context(
         elif input_worst <= 0.0:
             input_skew = 0.0
 
-    rank_straggler, eligible_count = _build_rank_straggler_evidence(
+    (
+        rank_straggler,
+        eligible_count,
+        reference_rank,
+    ) = _build_rank_straggler_evidence(
         window,
         score_threshold=thresholds.straggler_score_warn,
         cause_coverage_threshold=thresholds.straggler_cause_coverage_min,
@@ -519,6 +528,7 @@ def build_step_time_context(
         step_time_total=step_total,
         largest_compute=largest_compute_phase(window),
         rank_straggler=rank_straggler,
+        reference_rank=reference_rank,
         missing_signals=missing,
         signal_coverage=signal_coverage,
     )

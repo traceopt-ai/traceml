@@ -82,6 +82,8 @@ class DiagnosticResult(Generic[PrimaryT]):
     primary: PrimaryT
     issues: Tuple[DiagnosticIssue, ...] = ()
     metric_attribution: Dict[str, Any] = field(default_factory=dict)
+    # Rank to use for a breakdown, when the domain provides one.
+    reference_rank: Optional[int] = None
 
     def __post_init__(self) -> None:
         issues = ensure_primary_issue(self.primary, self.issues)
