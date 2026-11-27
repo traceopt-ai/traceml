@@ -1,7 +1,4 @@
-"""Step Time analysis dashboard hero.
-
-A compact timing summary (median and worst rank Step Time, or one Step Time
-on a single-rank run) followed by a numeric phase tree for one rank.
+"""Step Time phase breakdown for the dashboard.
 
 The tree reads the diagnostic reference rank's averages from the analysis
 window. Each phase share uses that rank's Step Time as its denominator.
@@ -13,11 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from nicegui import ui
 
-from traceml_ai.step_time.model import (
-    StepTimeMetric,
-    StepTimeValues,
-    StepTimeWindow,
-)
+from traceml_ai.step_time.model import StepTimeValues, StepTimeWindow
 from traceml_ai.step_time.pipeline import LiveStepTimeResult
 
 # (tree prefix, label, canonical metric key). Compute is the sum of its three
@@ -62,55 +55,22 @@ def build_model_combined_section() -> Dict[str, Any]:
             ui.label("Step Time").classes("ctitle")
             ui.element("div").style("flex:1;")
             win = ui.label("waiting for steps").classes("cmeta")
-        summary = ui.html("", sanitize=False).classes("w-full")
         tree = ui.html("", sanitize=False).classes("w-full")
 
-    return {"win": win, "summary": summary, "tree": tree, "_last_sig": None}
+    return {"win": win, "tree": tree, "_last_sig": None}
 
 
-def _show(panel: Dict[str, Any], win: str, summary: str, tree: str) -> None:
-    sig = (win, summary, tree)
+def _show(panel: Dict[str, Any], win: str, tree: str) -> None:
+    sig = (win, tree)
     if panel.get("_last_sig") == sig:
         return
     panel["_last_sig"] = sig
     panel["win"].text = win
-    panel["summary"].content = summary
     panel["tree"].content = tree
 
 
-def _ms(value: Optional[float], fmt: str = "{:.1f}") -> str:
-    return "n/a" if value is None else f"{fmt.format(value)} ms"
-
-
-def _summary_html(window: StepTimeWindow, step: StepTimeMetric) -> str:
-    """Median and worst rank Step Time, or one value on a single rank."""
-    if len(window.rank_universe) <= 1:
-        rows = _ROW.format(
-            name="Step Time",
-            value=_ms(step.median_total, "{:.0f}"),
-            extra="",
-        )
-        return f"<table class='tml-tree'>{rows}</table>"
-    worst_scope = (
-        f"Rank {int(step.worst_rank)}" if step.worst_rank is not None else "—"
-    )
-    rows = "".join(
-        (
-            "<tr><th></th><th class='tml-num'>Step time</th>"
-            "<th class='tml-num'>Scope</th></tr>",
-            _ROW.format(
-                name="Median",
-                value=_ms(step.median_total, "{:.0f}"),
-                extra="Across ranks",
-            ),
-            _ROW.format(
-                name="Worst",
-                value=_ms(step.worst_total, "{:.0f}"),
-                extra=worst_scope,
-            ),
-        )
-    )
-    return f"<table class='tml-tree'>{rows}</table>"
+def _ms(value: Optional[float]) -> str:
+    return "n/a" if value is None else f"{value:.1f} ms"
 
 
 def _tree_html(title: str, values: StepTimeValues) -> str:
@@ -174,24 +134,20 @@ def update_model_combined_section(
     window = analysis.window
     if payload.freshness == "expired" or not window.metrics:
         # A stale complete view left on screen is read as current.
-        _show(panel, "window expired", "", "")
+        _show(panel, "window expired", "")
         return
     clock = f"{window.clock.upper()} clock"
-    step = next((m for m in window.metrics if m.metric == "step_time"), None)
-    if step is None:
-        _show(panel, f"{clock} · Step Time unavailable", "", "")
+    if not any(m.metric == "step_time" for m in window.metrics):
+        _show(panel, f"{clock} · Step Time unavailable", "")
         return
 
     win = f"{int(window.coverage.steps_used)} steps · {clock}"
-    summary = _summary_html(window, step)
     reference_rank = analysis.diagnosis.reference_rank
     facts = window.rank(reference_rank) if reference_rank is not None else None
     if facts is None:
-        # The summary stays valid without a rank to break down.
         _show(
             panel,
             win,
-            summary,
             _note("Phase breakdown unavailable for the reference rank."),
         )
         return
@@ -199,11 +155,11 @@ def update_model_combined_section(
     values = facts.average
     title = "Phase breakdown"
     if len(window.rank_universe) > 1:
-        title += f" · Rank {reference_rank}"
+        title += f" · Reference rank {reference_rank}"
     tree = _tree_html(title, values)
     if values.step_time_ms is None or values.step_time_ms <= 0.0:
         tree += _note("No phase shares without a positive Step Time.")
     partial = _partial_names(window, values)
     if partial:
         win += f" · partial: {', '.join(partial)}"
-    _show(panel, win, summary, tree)
+    _show(panel, win, tree)

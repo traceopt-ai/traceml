@@ -153,7 +153,6 @@ def _payload(
 def _panel() -> dict:
     return {
         "win": _FakeText(),
-        "summary": _FakeHtml(),
         "tree": _FakeHtml(),
         "_last_sig": None,
     }
@@ -166,7 +165,7 @@ _ROW_RE = re.compile(
 
 
 def _rows(html: str) -> dict[str, tuple[str, str]]:
-    """Map each row's label (tree glyphs stripped) to (value, share/scope)."""
+    """Map each row's label (tree glyphs stripped) to (value, share)."""
     return {
         name.lstrip("├│└─ "): (value, extra)
         for name, value, extra in _ROW_RE.findall(html)
@@ -190,7 +189,7 @@ def test_step_time_dashboard_hero_renders_sparse_metrics() -> None:
     assert tree["Residual"] == ("n/a", "—")
     # Measured phases use the canonical 110 ms Step Time denominator directly.
     assert tree["Input wait"] == ("10.0 ms", "9%")
-    assert _rows(panel["summary"].content)["Step Time"][0] == "110 ms"
+    assert tree["Step Time"] == ("110.0 ms", "100%")
 
 
 def test_step_time_dashboard_hero_measured_zero_is_not_partial() -> None:
@@ -230,7 +229,6 @@ def test_step_time_dashboard_hero_step_time_only_extreme() -> None:
     # The inner envelope alone is not a canonical Step Time denominator.
     # Clear the existing card state rather than substituting it for Step Time.
     assert panel["win"].text == "CPU clock · Step Time unavailable"
-    assert panel["summary"].content == ""
     assert panel["tree"].content == ""
 
 
@@ -267,7 +265,7 @@ def test_dashboard_clears_when_input_wait_makes_step_time_unavailable() -> (
     update_model_combined_section(panel, payload)
 
     assert panel["win"].text == "CPU clock · Step Time unavailable"
-    assert panel["summary"].content == ""
+    assert panel["tree"].content == ""
 
     # Control twin: canonical Step Time restores the existing card.
     with_wait = _payload(_metrics(overrides={"residual_proxy": 10.0}))
@@ -329,7 +327,7 @@ def test_step_time_dashboard_hero_dead_run_shows_expired() -> None:
     panel = _panel()
     update_model_combined_section(panel, good)
     assert panel["win"].text == "5 steps · CPU clock"
-    assert "110 ms" in panel["summary"].content
+    assert _rows(panel["tree"].content)["Step Time"] == ("110.0 ms", "100%")
 
     # A never-had-data payload (cold start) must NOT clear the panel --
     # there is nothing to clear yet.
@@ -343,7 +341,6 @@ def test_step_time_dashboard_hero_dead_run_shows_expired() -> None:
     update_model_combined_section(panel, expired)
 
     assert panel["win"].text == "window expired"
-    assert panel["summary"].content == ""
     assert panel["tree"].content == ""
 
 
@@ -397,7 +394,7 @@ def test_step_time_dashboard_hero_clears_when_step_time_missing() -> None:
     # previous values standing as if they were current.
     panel = _panel()
     update_model_combined_section(panel, _payload(_metrics()))
-    assert "110 ms" in panel["summary"].content
+    assert _rows(panel["tree"].content)["Step Time"] == ("110.0 ms", "100%")
 
     no_envelope = _payload(
         _metrics(
@@ -414,11 +411,10 @@ def test_step_time_dashboard_hero_clears_when_step_time_missing() -> None:
     update_model_combined_section(panel, no_envelope)
 
     assert panel["win"].text == "CPU clock · Step Time unavailable"
-    assert panel["summary"].content == ""
     assert panel["tree"].content == ""
 
 
-def test_multi_rank_summary_shows_median_and_worst_rank() -> None:
+def test_multi_rank_card_shows_only_the_reference_rank_breakdown() -> None:
     payload = _payload(
         _metrics(worst={"step_time": 210.0}),
         per_rank_timing={0: _timing(), 1: _timing()},
@@ -428,21 +424,21 @@ def test_multi_rank_summary_shows_median_and_worst_rank() -> None:
 
     update_model_combined_section(panel, payload)
 
-    summary = _rows(panel["summary"].content)
-    assert summary["Median"] == ("110 ms", "Across ranks")
-    assert summary["Worst"] == ("210 ms", "Rank 0")
+    rows = _rows(panel["tree"].content)
+    assert "Median" not in rows
+    assert "Worst" not in rows
+    assert rows["Step Time"] == ("110.0 ms", "100%")
     assert panel["win"].text == "5 steps · GPU clock"
-    assert "Phase breakdown · Rank 1" in panel["tree"].content
+    assert "Phase breakdown · Reference rank 1" in panel["tree"].content
 
 
-def test_single_rank_summary_shows_one_step_time() -> None:
+def test_single_rank_breakdown_omits_the_rank_label() -> None:
     panel = _panel()
 
     update_model_combined_section(panel, _payload(_metrics()))
 
-    assert _rows(panel["summary"].content) == {"Step Time": ("110 ms", "")}
+    assert _rows(panel["tree"].content)["Step Time"] == ("110.0 ms", "100%")
     assert "Phase breakdown<" in panel["tree"].content
-    assert "Rank" not in panel["tree"].content
 
 
 def test_tree_reads_reference_rank_averages_and_shares() -> None:
@@ -482,7 +478,7 @@ def test_tree_reads_reference_rank_averages_and_shares() -> None:
     update_model_combined_section(panel, payload)
 
     # Rank 1 is the diagnostic reference and has a 100 ms mean Step Time.
-    assert "Phase breakdown · Rank 1" in panel["tree"].content
+    assert "Phase breakdown · Reference rank 1" in panel["tree"].content
     assert _rows(panel["tree"].content) == {
         "Step Time": ("100.0 ms", "100%"),
         "Input wait": ("0.0 ms", "0%"),
@@ -509,10 +505,9 @@ def test_non_positive_step_time_shows_no_shares(step_ms: float) -> None:
     assert _rows(tree)["Step Time"] == (f"{step_ms:.1f} ms", "")
     assert "%" not in tree
     assert "No phase shares without a positive Step Time" in tree
-    assert "110 ms" in panel["summary"].content
 
 
-def test_disjoint_rank_populations_keep_the_summary() -> None:
+def test_disjoint_rank_populations_use_only_reference_rank_phases() -> None:
     payload = _payload(
         _metrics(
             omit=("h2d", "residual_proxy"),
@@ -548,10 +543,9 @@ def test_disjoint_rank_populations_keep_the_summary() -> None:
     tree = _rows(panel["tree"].content)
     assert tree["Forward"] == ("40.0 ms", "36%")
     assert tree["Backward"] == ("n/a", "—")
-    assert _rows(panel["summary"].content)["Median"][0] == "110 ms"
 
 
-def test_missing_reference_rank_keeps_the_summary() -> None:
+def test_missing_reference_rank_shows_unavailable_message() -> None:
     payload = _payload(_metrics(), per_rank_timing={7: _timing()})
     panel = _panel()
 
@@ -559,13 +553,12 @@ def test_missing_reference_rank_keeps_the_summary() -> None:
 
     assert "Phase breakdown unavailable" in panel["tree"].content
     assert _rows(panel["tree"].content) == {}
-    assert _rows(panel["summary"].content)["Step Time"][0] == "110 ms"
 
 
 def test_card_builds_without_ribbon_or_verdict() -> None:
     panel = build_model_combined_section()
 
-    assert set(panel) == {"win", "summary", "tree", "_last_sig"}
+    assert set(panel) == {"win", "tree", "_last_sig"}
     assert panel["win"].text == "waiting for steps"
 
 

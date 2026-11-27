@@ -574,15 +574,19 @@ def test_canonical_surface_values_share_one_step_time_contract(
 
     dashboard = {
         "win": _Element(),
-        "summary": _Element(),
         "tree": _Element(),
         "_last_sig": None,
     }
     model_combined_section.update_model_combined_section(dashboard, live)
-    step_metric = next(
-        metric for metric in window.metrics if metric.metric == "step_time"
+    reference_rank = live.analysis.diagnosis.reference_rank
+    assert reference_rank is not None
+    facts = window.rank(reference_rank)
+    assert facts is not None
+    step_ms = facts.average.step_time_ms
+    assert step_ms is not None
+    assert f"Step Time</td><td class='tml-num'>{step_ms:.1f} ms</td>" in (
+        dashboard["tree"].content
     )
-    assert f"{step_metric.median_total:.0f} ms" in dashboard["summary"].content
     assert f"{window.clock.upper()} clock" in dashboard["win"].text
 
     html = phase_bar({"global": {"average": average}}, schema_version=1.7)
