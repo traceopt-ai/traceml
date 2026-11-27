@@ -298,18 +298,6 @@ def window_from_rank_averages(
             if all(facts.average.value(name) is not None for name in names)
         )
 
-    composition_names = tuple(
-        name
-        for name in (
-            "input_wait",
-            "forward",
-            "backward",
-            "optimizer_step",
-            "residual_proxy",
-        )
-        if any(facts.average.value(name) is not None for facts in rank_facts)
-    )
-    composition = carrying("traced_step_time", *composition_names)
     strategy = str(training_strategy).strip().lower()
     straggler = tuple(
         facts.global_rank
@@ -331,10 +319,6 @@ def window_from_rank_averages(
         0,
         int(inferred_steps if steps_used is None else steps_used),
     )
-    composition_representative = _composition_representative(
-        rank_facts,
-        composition,
-    )
     return StepTimeWindow(
         clock=clock,
         training_strategy=strategy,
@@ -355,7 +339,6 @@ def window_from_rank_averages(
             "optimizer_step",
         ),
         straggler_ranks=straggler,
-        composition_representative_rank=composition_representative,
         input_wait_share=_component_share(rank_facts, "input_wait"),
         h2d_share=_component_share(rank_facts, "h2d"),
         compute_share=_component_share(rank_facts, "compute"),
@@ -648,28 +631,6 @@ def live_result_from_window(
                 policy=LIVE_STEP_TIME_POLICY,
             ),
         ),
-    )
-
-
-def _composition_representative(
-    rank_facts: Sequence[StepTimeRankFacts],
-    cohort: Sequence[int],
-) -> Optional[int]:
-    ranks = set(cohort)
-    anchors = {
-        facts.global_rank: facts.average.traced_step_time_ms
-        for facts in rank_facts
-        if facts.global_rank in ranks
-    }
-    clean = {
-        rank: value for rank, value in anchors.items() if value is not None
-    }
-    if not clean:
-        return None
-    middle = float(statistics.median(clean.values()))
-    return min(
-        clean,
-        key=lambda rank: (abs(float(clean[rank]) - middle), rank),
     )
 
 

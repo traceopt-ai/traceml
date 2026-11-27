@@ -66,13 +66,6 @@ STATISTIC_METRICS: tuple[str, ...] = (
 
 _REQUIRED_GPU_METRICS: tuple[str, ...] = _AGGREGATE_METRICS
 OCCURRENCE_METRICS: frozenset[str] = frozenset(("optimizer_step", "h2d"))
-_COMPOSITION_KEYS: tuple[str, ...] = (
-    INPUT_WAIT_KEY,
-    "forward",
-    "backward",
-    "optimizer_step",
-    "residual_proxy",
-)
 
 _RowIndex = Mapping[tuple[int, int], StepTimeSourceRow]
 
@@ -80,7 +73,6 @@ _RowIndex = Mapping[tuple[int, int], StepTimeSourceRow]
 class _Cohorts(NamedTuple):
     step: tuple[int, ...]
     compute: tuple[int, ...]
-    composition: tuple[int, ...]
     straggler: tuple[int, ...]
 
 
@@ -203,12 +195,6 @@ class StepTimeAnalyzer:
             step_ranks=cohorts.step,
             compute_ranks=cohorts.compute,
             straggler_ranks=cohorts.straggler,
-            composition_representative_rank=(
-                _composition_representative_rank(
-                    rank_facts,
-                    cohorts.composition,
-                )
-            ),
             input_wait_share=_component_share(rank_facts, INPUT_WAIT_KEY),
             h2d_share=_component_share(rank_facts, "h2d"),
             compute_share=_component_share(rank_facts, "compute"),
@@ -623,17 +609,6 @@ def _build_cohorts(
         "backward",
         "optimizer_step",
     )
-    present_composition = tuple(
-        metric
-        for metric in _COMPOSITION_KEYS
-        if any(facts.average.value(metric) is not None for facts in rank_facts)
-    )
-    # The dashboard phase tree shows the traced envelope and can still show
-    # its measured phases when input wait is unavailable. Diagnosis shares
-    # remain anchored to outer Step Time above; this presentation cohort must
-    # not manufacture that unavailable denominator.
-    composition = carrying(TRACED_STEP_TIME_KEY, *present_composition)
-
     fsdp = str(training_strategy).strip().lower() == "fsdp"
     straggler = tuple(
         facts.global_rank
@@ -643,35 +618,7 @@ def _build_cohorts(
         and (facts.average.backward_ms or 0.0) > 0.0
         and (not fsdp or (facts.average.forward_ms or 0.0) > 0.0)
     )
-    return _Cohorts(
-        step=step,
-        compute=compute,
-        composition=composition,
-        straggler=straggler,
-    )
-
-
-def _composition_representative_rank(
-    rank_facts: Sequence[StepTimeRankFacts],
-    cohort: Sequence[int],
-) -> Optional[int]:
-    cohort_set = set(int(rank) for rank in cohort)
-    anchors = {
-        facts.global_rank: facts.average.traced_step_time_ms
-        for facts in rank_facts
-        if facts.global_rank in cohort_set
-    }
-    clean = {
-        rank: value for rank, value in anchors.items() if value is not None
-    }
-    if not clean:
-        return None
-    median = float(np.median(np.asarray(tuple(clean.values()))))
-    # Preserve the existing dashboard tie-break: nearest, then lowest rank.
-    return min(
-        clean,
-        key=lambda rank: (abs(float(clean[rank]) - median), rank),
-    )
+    return _Cohorts(step=step, compute=compute, straggler=straggler)
 
 
 def _component_share(

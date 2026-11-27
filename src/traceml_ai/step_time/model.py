@@ -230,7 +230,6 @@ class StepTimeWindow:
     step_ranks: tuple[int, ...] = ()
     compute_ranks: tuple[int, ...] = ()
     straggler_ranks: tuple[int, ...] = ()
-    composition_representative_rank: Optional[int] = None
     input_wait_share: Optional[float] = None
     h2d_share: Optional[float] = None
     compute_share: Optional[float] = None
