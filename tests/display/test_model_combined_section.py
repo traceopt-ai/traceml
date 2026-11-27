@@ -432,7 +432,7 @@ def test_multi_rank_summary_shows_median_and_worst_rank() -> None:
     assert summary["Median"] == ("110 ms", "Across ranks")
     assert summary["Worst"] == ("210 ms", "Rank 0")
     assert panel["win"].text == "5 steps · GPU clock"
-    assert "Phase breakdown · Rank 0" in panel["tree"].content
+    assert "Phase breakdown · Rank 1" in panel["tree"].content
 
 
 def test_single_rank_summary_shows_one_step_time() -> None:
@@ -445,7 +445,7 @@ def test_single_rank_summary_shows_one_step_time() -> None:
     assert "Rank" not in panel["tree"].content
 
 
-def test_tree_reads_one_rank_and_uses_its_step_time_for_shares() -> None:
+def test_tree_reads_reference_rank_averages_and_shares() -> None:
     metrics = _metrics(
         omit=("h2d",),
         overrides={
@@ -459,7 +459,7 @@ def test_tree_reads_one_rank_and_uses_its_step_time_for_shares() -> None:
     payload = _payload(
         metrics,
         per_rank_timing={
-            0: _timing(
+            1: _timing(
                 omit=("h2d",),
                 input_wait=0.0,
                 forward=10.0,
@@ -467,7 +467,7 @@ def test_tree_reads_one_rank_and_uses_its_step_time_for_shares() -> None:
                 optimizer_step=10.0,
                 residual_proxy=60.0,
             ),
-            1: _timing(
+            0: _timing(
                 omit=("h2d",),
                 input_wait=100.0,
                 forward=80.0,
@@ -481,8 +481,8 @@ def test_tree_reads_one_rank_and_uses_its_step_time_for_shares() -> None:
 
     update_model_combined_section(panel, payload)
 
-    # Rank 0's own 100 ms Step Time, not the across-rank 110 ms median.
-    assert "Phase breakdown · Rank 0" in panel["tree"].content
+    # Rank 1 is the diagnostic reference and has a 100 ms mean Step Time.
+    assert "Phase breakdown · Rank 1" in panel["tree"].content
     assert _rows(panel["tree"].content) == {
         "Step Time": ("100.0 ms", "100%"),
         "Input wait": ("0.0 ms", "0%"),
@@ -545,9 +545,21 @@ def test_disjoint_rank_populations_keep_the_summary() -> None:
 
     update_model_combined_section(panel, payload)
 
-    assert "no coherent phase cohort" in panel["tree"].content
-    assert _rows(panel["tree"].content) == {}
+    tree = _rows(panel["tree"].content)
+    assert tree["Forward"] == ("40.0 ms", "36%")
+    assert tree["Backward"] == ("n/a", "—")
     assert _rows(panel["summary"].content)["Median"][0] == "110 ms"
+
+
+def test_missing_reference_rank_keeps_the_summary() -> None:
+    payload = _payload(_metrics(), per_rank_timing={7: _timing()})
+    panel = _panel()
+
+    update_model_combined_section(panel, payload)
+
+    assert "Phase breakdown unavailable" in panel["tree"].content
+    assert _rows(panel["tree"].content) == {}
+    assert _rows(panel["summary"].content)["Step Time"][0] == "110 ms"
 
 
 def test_card_builds_without_ribbon_or_verdict() -> None:

@@ -3,11 +3,8 @@
 A compact timing summary (median and worst rank Step Time, or one Step Time
 on a single-rank run) followed by a numeric phase tree for one rank.
 
-Everything is read from the canonical window in ``LiveStepTimeResult``; the
-card computes no statistics of its own. The tree reads every value, Compute
-and Residual included, from the averages of the window's composition rank,
-and every share uses that rank's Step Time as its denominator. The step-time
-verdict lives in the Diagnostics rail only.
+The tree reads the diagnostic reference rank's averages from the analysis
+window. Each phase share uses that rank's Step Time as its denominator.
 """
 
 from __future__ import annotations
@@ -158,7 +155,7 @@ def _note(text: str) -> str:
 def _partial_names(
     window: StepTimeWindow, values: StepTimeValues
 ) -> List[str]:
-    """Signals missing on the composition rank or on only some ranks."""
+    """Signals missing on the reference rank or on only some ranks."""
     universe_size = len(window.rank_universe)
     return [
         label
@@ -173,7 +170,8 @@ def update_model_combined_section(
 ) -> None:
     if payload is None or payload.freshness == "cold":
         return
-    window = payload.analysis.window
+    analysis = payload.analysis
+    window = analysis.window
     if payload.freshness == "expired" or not window.metrics:
         # A stale complete view left on screen is read as current.
         _show(panel, "window expired", "", "")
@@ -186,22 +184,22 @@ def update_model_combined_section(
 
     win = f"{int(window.coverage.steps_used)} steps · {clock}"
     summary = _summary_html(window, step)
-    representative = window.composition_representative_rank
-    facts = window.rank(representative) if representative is not None else None
+    reference_rank = analysis.diagnosis.reference_rank
+    facts = window.rank(reference_rank) if reference_rank is not None else None
     if facts is None:
         # The summary stays valid without a rank to break down.
         _show(
             panel,
             win,
             summary,
-            _note("Phase breakdown unavailable: no coherent phase cohort."),
+            _note("Phase breakdown unavailable for the reference rank."),
         )
         return
 
     values = facts.average
     title = "Phase breakdown"
     if len(window.rank_universe) > 1:
-        title += f" · Rank {representative}"
+        title += f" · Rank {reference_rank}"
     tree = _tree_html(title, values)
     if values.step_time_ms is None or values.step_time_ms <= 0.0:
         tree += _note("No phase shares without a positive Step Time.")
