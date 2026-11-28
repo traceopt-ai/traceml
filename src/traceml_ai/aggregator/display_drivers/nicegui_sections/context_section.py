@@ -173,13 +173,12 @@ def detail_rows(
 
     ``GPUs detected`` is hardware seen on the machines, which can be zero,
     one or several regardless of the process count; it is not the number of
-    GPUs the training uses. Before any sample has arrived it is unknown.
+    GPUs the training uses. It is unknown until a system sample has reported
+    a GPU count: ``gpu_count`` falls back to zero, so process samples that
+    arrive first must not read as "no GPUs". An observed zero stays zero.
     """
-    have_data = ctx.get("last_data_ts") is not None
     gpus = ctx.get("gpus_observed")
-    if gpus is None:
-        gpus = ctx.get("gpu_count")
-    gpus_text = str(int(gpus or 0)) if have_data else "unknown"
+    gpus_text = str(int(gpus)) if gpus is not None else "unknown"
     first = ctx.get("first_data_ts")
     last = ctx.get("last_data_ts")
     if first is not None and last is not None and last >= first:

@@ -58,6 +58,7 @@ def test_details_read_observed_over_configured() -> None:
         "world_size": 4,
         "ranks_reporting": 3,
         "gpu_count": 4,
+        "gpus_observed": 4,
         "node_count": 1,
         "first_data_ts": 1000.0,
         "last_data_ts": 1146.0,
@@ -95,21 +96,38 @@ def test_details_report_zero_one_or_many_gpus_independently_of_processes() -> (
 ):
     seen = {"last_data_ts": 10.0}
     assert (
-        dict(detail_rows({}, {**seen, "gpu_count": 0}, 0))["GPUs detected"]
+        dict(detail_rows({}, {**seen, "gpus_observed": 0}, 0))["GPUs detected"]
         == "0"
     )
     assert (
-        dict(detail_rows({}, {**seen, "world_size": 4, "gpu_count": 1}, 0))[
-            "GPUs detected"
-        ]
+        dict(
+            detail_rows({}, {**seen, "world_size": 4, "gpus_observed": 1}, 0)
+        )["GPUs detected"]
         == "1"
     )
     assert (
-        dict(detail_rows({}, {**seen, "world_size": 1, "gpu_count": 8}, 0))[
-            "GPUs detected"
-        ]
+        dict(
+            detail_rows({}, {**seen, "world_size": 1, "gpus_observed": 8}, 0)
+        )["GPUs detected"]
         == "8"
     )
+
+
+def test_gpus_detected_stay_unknown_until_a_gpu_count_is_observed() -> None:
+    # Process samples arrived first: the context has data and its zero
+    # fallback for gpu_count, but no system sample has reported GPUs yet.
+    process_only = {
+        "world_size": 2,
+        "ranks_reporting": 2,
+        "gpu_count": 0,
+        "gpus_observed": None,
+        "first_data_ts": 5.0,
+        "last_data_ts": 10.0,
+    }
+    assert dict(detail_rows({}, process_only, 0))["GPUs detected"] == "unknown"
+    # Once a system sample reports zero GPUs, zero is a real answer.
+    observed_zero = {**process_only, "gpus_observed": 0}
+    assert dict(detail_rows({}, observed_zero, 0))["GPUs detected"] == "0"
 
 
 @pytest.mark.parametrize(
