@@ -9,13 +9,24 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
 import threading
+import types
 from pathlib import Path
 
 import pytest
 
-from traceml_ai.aggregator.export import ExportWorker, JsonExporter
+from traceml_ai.aggregator.export import (
+    EXPORTER_NAMES,
+    ExporterStartupError,
+    ExportWorker,
+    JsonExporter,
+)
+from traceml_ai.aggregator.export.wandb_exporter import WandbExporter
 from traceml_ai.aggregator.trace_aggregator import (
+    _EXPORT_FINISH_TIMEOUT_TELEMETRY_SEC,
+    _EXPORT_STARTUP_TIMEOUT_SEC,
     TraceMLAggregator,
     _resolve_exporter,
 )
@@ -192,6 +203,43 @@ def test_start_starts_the_export_worker_after_sqlite(tmp_path):
     assert calls == ["tcp", "sqlite", "export", "display", "loop"]
 
 
+def test_telemetry_opens_the_exporter_before_accepting_workers(tmp_path):
+    calls = []
+
+    class _Part:
+        def __init__(self, name):
+            self._name = name
+
+        def start(self):
+            calls.append(self._name)
+
+    class _RequiredExport(_Part):
+        def wait_until_ready(self, timeout_sec):
+            calls.append("export_ready")
+
+    agg = TraceMLAggregator(
+        logger=_Logger(),
+        stop_event=threading.Event(),
+        settings=_settings(tmp_path, "jsonl", mode="telemetry"),
+    )
+    agg._tcp_server = _Part("tcp")
+    agg._sqlite_writer = _Part("sqlite")
+    agg._export_worker = _RequiredExport("export")
+    agg._display_driver = _Part("display")
+    agg._thread = _Part("loop")
+
+    agg.start()
+
+    assert calls == [
+        "export",
+        "export_ready",
+        "tcp",
+        "sqlite",
+        "display",
+        "loop",
+    ]
+
+
 def test_jsonl_exporter_writes_admitted_step_time(tmp_path):
     agg = TraceMLAggregator(
         logger=_Logger(),
@@ -222,6 +270,77 @@ def test_jsonl_exporter_writes_admitted_step_time(tmp_path):
     assert not (
         tmp_path / "logs" / "run" / "aggregator" / "finalization_warning.json"
     ).exists()
+
+
+def test_telemetry_exports_without_sqlite_or_local_analysis(
+    monkeypatch, tmp_path
+):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("local analysis must not run in telemetry mode")
+
+    monkeypatch.setattr("sqlite3.connect", forbidden)
+    monkeypatch.setattr(
+        "traceml_ai.aggregator.trace_aggregator.FinalSummaryService", forbidden
+    )
+    monkeypatch.setattr(
+        "traceml_ai.aggregator.trace_aggregator.generate_summary", forbidden
+    )
+    settings = _settings(
+        tmp_path, "jsonl", mode="telemetry", history_enabled=True
+    )
+    agg = TraceMLAggregator(_Logger(), threading.Event(), settings)
+    agg._tcp_server = _TCP([[_step_time_payload(), _rank_finished()]])
+    monkeypatch.setattr(agg._sqlite_writer._thread, "start", forbidden)
+    monkeypatch.setattr(agg, "_sqlite_finalize_budget", forbidden)
+
+    agg._sqlite_writer.start()
+    agg._export_worker.start()
+    try:
+        agg._drain_tcp()
+        agg._tick()
+    finally:
+        agg.stop(timeout_sec=5.0)
+
+    assert settings.history_enabled is False
+    assert agg._sqlite_writer.stats()["enqueued"] == 0
+    assert agg._finished_ranks_snapshot() == [0]
+    session = tmp_path / "logs" / "run"
+    records = [
+        json.loads(line)
+        for line in (session / "aggregator" / "export" / "step_time.jsonl")
+        .read_text()
+        .splitlines()
+    ]
+    assert records[0]["step"] == 1
+    assert records[-1]["closing"] is True
+    assert records[-1]["written_records"] == 1
+    assert not list(session.glob("final_summary.*"))
+    assert not list((session / "aggregator").glob("finalization_*.json"))
+    assert not any(
+        Path(settings.db_path + suffix).exists()
+        for suffix in ("", "-wal", "-shm")
+    )
+
+
+@pytest.mark.parametrize(
+    ("exporter", "html_report", "error"),
+    [
+        ("", False, "requires a configured exporter"),
+        ("jsonl", True, "HTML reports"),
+    ],
+)
+def test_telemetry_rejects_invalid_aggregator_options(
+    tmp_path, exporter, html_report, error
+):
+    with pytest.raises(ValueError, match=error):
+        TraceMLAggregator(
+            _Logger(),
+            threading.Event(),
+            _settings(
+                tmp_path, exporter, mode="telemetry", html_report=html_report
+            ),
+        )
+    assert not (tmp_path / "logs").exists()
 
 
 def test_jsonl_exporter_keeps_the_hostname_when_asked(tmp_path):
@@ -257,3 +376,139 @@ def test_no_exporter_leaves_no_export_directory(tmp_path):
     agg.stop(timeout_sec=5.0)
 
     assert not (tmp_path / "logs" / "run" / "aggregator" / "export").exists()
+
+
+def test_wandb_is_a_built_in_exporter_name_without_a_re_export():
+    import traceml_ai.aggregator.export as export
+
+    assert EXPORTER_NAMES == ("jsonl", "wandb")
+    assert not hasattr(export, "WandbExporter")
+
+
+@pytest.mark.parametrize(
+    ("mode", "startup", "finish"),
+    [
+        (
+            "telemetry",
+            _EXPORT_STARTUP_TIMEOUT_SEC,
+            _EXPORT_FINISH_TIMEOUT_TELEMETRY_SEC,
+        ),
+        ("summary", None, 1.25),
+    ],
+)
+def test_resolve_exporter_builds_wandb_with_the_run_and_budgets(
+    tmp_path, mode, startup, finish
+):
+    settings = _settings(tmp_path, "wandb", mode=mode)
+
+    sink, streams = _resolve_exporter(
+        settings, tmp_path / "my-run", expected_world_size=4
+    )
+
+    assert isinstance(sink, WandbExporter)
+    assert streams == ("step_time",)
+    assert sink._directory == tmp_path / "my-run" / "aggregator" / "export"
+    assert sink._run_name == "my-run"
+    assert sink._expected_world_size == 4
+    assert sink._startup_timeout_sec == startup
+    assert sink._finish_timeout_sec == finish
+
+
+def test_aggregator_passes_the_expected_world_size_to_wandb(tmp_path):
+    agg = TraceMLAggregator(
+        logger=_Logger(),
+        stop_event=threading.Event(),
+        settings=_settings(tmp_path, "wandb", expected_world_size=3),
+    )
+
+    assert agg._export_worker._exporter._expected_world_size == 3
+
+
+def test_aggregator_rejects_other_streams_for_wandb_at_construction(
+    tmp_path,
+):
+    with pytest.raises(ValueError, match="step_time stream only"):
+        TraceMLAggregator(
+            logger=_Logger(),
+            stop_event=threading.Event(),
+            settings=_settings(
+                tmp_path, "wandb", export_streams="step_time,system"
+            ),
+        )
+
+
+class _StartTCP(_TCP):
+    started = False
+
+    def start(self):
+        self.started = True
+
+
+def _failing_wandb():
+    fake = types.ModuleType("wandb")
+    fake.Settings = lambda **kwargs: types.SimpleNamespace(**kwargs)
+    fake.sdk = types.SimpleNamespace(
+        wandb_setup=types.SimpleNamespace(_singleton=None)
+    )
+    fake.setup = lambda settings=None: types.SimpleNamespace(
+        settings=types.SimpleNamespace(mode="online")
+    )
+    fake.login = lambda prompt=True, verify=True: True
+
+    def init(**kwargs):
+        raise RuntimeError("Failed to get resume status")
+
+    fake.init = init
+    return fake
+
+
+def test_telemetry_wandb_startup_failure_fails_before_tcp_start(
+    tmp_path, monkeypatch
+):
+    for name in list(os.environ):
+        if name.startswith("WANDB_"):
+            monkeypatch.delenv(name)
+    monkeypatch.setenv("WANDB_ENTITY", "team")
+    monkeypatch.setenv("WANDB_PROJECT", "proj")
+    # The exporter sets this in the aggregator process; restore it after.
+    monkeypatch.setenv("WANDB_ERROR_REPORTING", "false")
+    monkeypatch.setitem(sys.modules, "wandb", _failing_wandb())
+    agg = TraceMLAggregator(
+        logger=_Logger(),
+        stop_event=threading.Event(),
+        settings=_settings(tmp_path, "wandb", mode="telemetry"),
+    )
+    tcp = _StartTCP([])
+    agg._tcp_server = tcp
+
+    try:
+        with pytest.raises(ExporterStartupError, match="team/proj"):
+            agg.start()
+    finally:
+        agg._export_worker.stop(timeout_sec=1.0)
+
+    assert tcp.started is False
+    assert agg._started is False
+
+
+@pytest.mark.parametrize(
+    ("exporter", "mode", "finish"),
+    [
+        ("jsonl", "telemetry", None),
+        ("wandb", "telemetry", _EXPORT_FINISH_TIMEOUT_TELEMETRY_SEC),
+        ("wandb", "summary", 1.25),
+        (f"{__name__}:_no_such_factory", "telemetry", None),
+    ],
+)
+def test_aggregator_records_the_finish_timeout_it_gave_the_exporter(
+    tmp_path, exporter, mode, finish
+):
+    agg = TraceMLAggregator(
+        logger=_Logger(),
+        stop_event=threading.Event(),
+        settings=_settings(tmp_path, exporter, mode=mode),
+    )
+
+    assert agg._export_finish_timeout_sec == finish
+    if finish is not None:
+        assert agg._export_worker._exporter._finish_timeout_sec == finish

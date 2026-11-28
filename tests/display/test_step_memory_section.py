@@ -137,3 +137,63 @@ def test_the_preferred_metric_wins_over_list_order() -> None:
 
     assert panel["chart"].options["series"][0]["data"] == [2.0, 2.5, 3.0]
     assert panel["kpis"]["peak"].content.startswith("3.00")
+
+
+_NO_GPU = "No GPU detected. Step memory uses torch-based GPU memory telemetry."
+
+
+def _panel_in_cell() -> dict:
+    """The card inside its dashboard cell, as the page hands it over."""
+    from nicegui import ui
+
+    with ui.element("div"):
+        cell = ui.element("div")
+        with cell:
+            panel = build_step_memory_section()
+    panel["container"] = cell
+    return panel
+
+
+def test_a_cpu_only_run_hides_the_card_cell() -> None:
+    """With no GPU the card has nothing to show, so its cell leaves the row."""
+    panel = _panel_in_cell()
+    update_step_memory_section(
+        panel, StepMemoryCombinedResult(metrics=[], status_message=_NO_GPU)
+    )
+
+    assert panel["container"].visible is False
+
+
+def test_the_card_stays_while_it_waits_for_a_first_sample() -> None:
+    """No GPU verdict yet, so the card keeps its place."""
+    panel = _panel_in_cell()
+    update_step_memory_section(
+        panel,
+        StepMemoryCombinedResult(
+            metrics=[], status_message="No complete memory metrics available"
+        ),
+    )
+
+    assert panel["container"].visible is True
+
+
+def test_a_drawn_chart_keeps_the_card_after_a_no_gpu_status() -> None:
+    """A chart already on screen is not taken away."""
+    panel = _panel_in_cell()
+    update_step_memory_section(panel, _result(_metric()))
+    update_step_memory_section(
+        panel, StepMemoryCombinedResult(metrics=[], status_message=_NO_GPU)
+    )
+
+    assert panel["container"].visible is True
+
+
+def test_memory_data_brings_a_hidden_card_back() -> None:
+    panel = _panel_in_cell()
+    update_step_memory_section(
+        panel, StepMemoryCombinedResult(metrics=[], status_message=_NO_GPU)
+    )
+    update_step_memory_section(panel, _result(_metric()))
+
+    assert panel["container"].visible is True
+    assert panel["win"].text == "3 aligned steps"

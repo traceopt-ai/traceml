@@ -324,3 +324,85 @@ class TestDatabaseWriter:
             assert len(records) == 6
             assert records[0]["i"] == 0
             assert records[-1]["i"] == 7
+
+    def test_fast_table_written_before_eviction(self, tmp_path):
+        """A table filling between throttled writes is written before rows drop."""
+        db = Database(sampler_name="test", max_rows=10)
+
+        with patch("traceml_ai.database.database_writer.config") as mock_cfg:
+            mock_cfg.enable_logging = True
+
+            writer = db.writer
+            writer.logs_dir = tmp_path / "data" / "test"
+
+            # 4 rows per tick, far fewer ticks than flush_every (100)
+            step = 0
+            for _ in range(10):
+                for _ in range(4):
+                    db.add_record("t1", {"step": step})
+                    step += 1
+                writer.flush()
+            writer.flush(force=True)
+
+            records = _read_framed_records(writer.logs_dir / "t1.msgpack")
+            assert [r["step"] for r in records] == list(range(step))
+
+
+def test_runtime_stop_writes_raw_logs_under_run_session(monkeypatch, tmp_path):
+    """Stop forces the final write into the run's own session folder."""
+    from traceml_ai.runtime import runtime as runtime_module
+    from traceml_ai.runtime.config import config
+    from traceml_ai.runtime.settings import TraceMLSettings
+    from traceml_ai.runtime.state import configure_trace_recording
+
+    # The runtime writes these globals; monkeypatch restores them.
+    for key in ("enable_logging", "logs_dir", "session_id"):
+        monkeypatch.setattr(config, key, getattr(config, key))
+    for key in ("RANK", "LOCAL_RANK", "WORLD_SIZE", "GROUP_RANK"):
+        monkeypatch.delenv(key, raising=False)
+
+    class _Sampler:
+        sampler_name, sender, ticks = "SamplerA", None, 0
+
+        def __init__(self):
+            # Built by the runtime, after it sets the run's config.
+            self.db = Database(sampler_name=self.sampler_name)
+
+        def sample(self):
+            self.ticks += 1
+            self.db.add_record("t1", {"tick": self.ticks})
+
+    samplers = []
+
+    def _build_samplers(**_kwargs):
+        # Built here so the writer sees the config the runtime just set.
+        samplers.append(_Sampler())
+        return samplers
+
+    monkeypatch.setattr(runtime_module, "build_samplers", _build_samplers)
+    monkeypatch.setattr(runtime_module, "TCPClient", lambda _cfg: None)
+    monkeypatch.setattr(
+        runtime_module, "TelemetryExporter", lambda **_kw: MagicMock()
+    )
+    configure_trace_recording()
+    try:
+        runtime = runtime_module.TraceMLRuntime(
+            TraceMLSettings(
+                sampler_interval_sec=60.0,
+                logs_dir=str(tmp_path),
+                enable_logging=True,
+                session_id="session_run_580",
+            )
+        )
+        runtime.start()
+        runtime.stop()
+    finally:
+        configure_trace_recording()
+
+    assert [p.name for p in tmp_path.iterdir()] == ["session_run_580"]
+    (path,) = tmp_path.rglob("t1.msgpack")
+    # Fewer ticks than the throttle, yet every record reaches disk.
+    (sampler,) = samplers
+    assert 0 < sampler.ticks < sampler.db.writer.flush_every
+    records = _read_framed_records(path)
+    assert [r["tick"] for r in records] == list(range(1, sampler.ticks + 1))

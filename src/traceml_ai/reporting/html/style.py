@@ -9,7 +9,9 @@
 # Severity tokens follow the real diagnosis vocabulary crit | warn | info
 # (diagnostics/common.py); the info tier is split by kind into a green
 # "healthy" and a neutral "no data" presentation in the renderer.
-STYLESHEET = """
+# PALETTE is the colour tokens alone (light plus dark override), shared
+# with the compact tracker card so its colours match this report.
+PALETTE = """
   :root {
     --bg:#f6f7f9; --card:#fff; --ink:#1c2430; --muted:#5d6b7e;
     --line:#e3e7ed; --chip:#eef1f5;
@@ -28,7 +30,9 @@ STYLESHEET = """
       --neutral:#8d99a8; --neutral-bg:#232932;
     }
   }
-  * { box-sizing: border-box; }
+  """
+
+STYLESHEET = PALETTE + """* { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:var(--ink);
     font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,
     Helvetica,Arial,sans-serif; }
@@ -46,6 +50,7 @@ STYLESHEET = """
   .banner.crit { border-left:6px solid var(--crit); background:var(--crit-bg);}
   .banner.warn { border-left:6px solid var(--warn); background:var(--warn-bg);}
   .banner.good { border-left:6px solid var(--good); background:var(--good-bg);}
+  .banner.info { border-left:6px solid var(--info); background:var(--info-bg);}
   .banner.neutral { border-left:6px solid var(--neutral);
     background:var(--neutral-bg); }
   .banner .kind { display:inline-block; font-size:12px; font-weight:700;
@@ -54,6 +59,7 @@ STYLESHEET = """
   .banner.crit .kind { background:var(--crit);}
   .banner.warn .kind { background:var(--warn);}
   .banner.good .kind { background:var(--good);}
+  .banner.info .kind { background:var(--info); color:var(--bg);}
   .banner.neutral .kind { background:var(--neutral);}
   .banner h2 { display:inline; font-size:17px; margin:0; font-weight:650; }
   .banner p { margin:8px 0 0; }
@@ -113,4 +119,4 @@ STYLESHEET = """
     margin-top:30px; }
 """
 
-__all__ = ["STYLESHEET"]
+__all__ = ["PALETTE", "STYLESHEET"]

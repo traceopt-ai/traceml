@@ -66,7 +66,10 @@ traceml run train.py \
 
 Keep the launch settings identical except for `--node-rank`. Node 0 creates
 the shared run folder and starts the TraceML aggregator; the other nodes join
-that run. Multi-node runs use summary mode.
+that run. Multi-node runs default to summary mode and also accept telemetry
+mode. For telemetry, include `--mode=telemetry --exporter <exporter>` on every
+node. Only node 0 constructs the exporter; TraceML removes exporter
+configuration before starting training workers.
 
 ## Read the result
 

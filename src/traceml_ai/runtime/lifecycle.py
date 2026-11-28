@@ -23,6 +23,11 @@ from traceml_ai.runtime.settings import (
     AggregatorEndpoint,
     TraceMLSettings,
 )
+from traceml_ai.telemetry.control import HelloAck, parse_hello_ack
+from traceml_ai.transport.tcp_transport import (
+    NoReplyError,
+    request_one_frame,
+)
 
 if TYPE_CHECKING:
     from traceml_ai.aggregator.trace_aggregator import TraceMLAggregator
@@ -67,23 +72,86 @@ def wait_for_aggregator(
 ) -> bool:
     """Return True once ``(host, port)`` accepts a TCP connection.
 
-    Retries for a bounded period. Used by ``traceml.init()`` as a best-effort
-    reachability probe before starting the runtime.
+    Retries for a bounded period. This is a bare TCP accept, so any listener
+    on the port passes. ``traceml.init()`` uses ``probe_aggregator``, which
+    also asks the listener whether it is a TraceML aggregator for this run.
+    """
+    sock = _connect_within(host, port, timeout_sec, poll_interval_sec)
+    if sock is None:
+        return False
+    sock.close()
+    return True
 
-    Limitation: this is a bare TCP accept, not a TraceML protocol/session
-    handshake, so any listener on the port (a foreign process, a stale
-    aggregator, or one serving a different session) passes the check. A real
-    handshake is a wire-format change tracked as a follow-up; on a genuine
-    mismatch the runtime simply produces no telemetry for this session.
+
+PROBE_ADMITTED = "admitted"
+PROBE_REFUSED = "refused"
+PROBE_NOT_TRACEML = "not_traceml"
+PROBE_NO_REPLY = "no_reply"
+PROBE_UNREACHABLE = "unreachable"
+
+
+@dataclass(frozen=True)
+class AggregatorProbe:
+    """What the ``traceml.init()`` preflight learned about the port.
+
+    ``status`` is one of the ``PROBE_*`` values. ``ack`` is the aggregator's
+    answer when ``status`` is ``PROBE_ADMITTED`` or ``PROBE_REFUSED``.
+    """
+
+    status: str
+    ack: Optional[HelloAck] = None
+
+
+def probe_aggregator(
+    host: str,
+    port: int,
+    hello: dict[str, Any],
+    *,
+    timeout_sec: float = 10.0,
+    poll_interval_sec: float = 0.25,
+    reply_timeout_sec: float = 1.0,
+) -> AggregatorProbe:
+    """Connect to ``(host, port)``, send ``hello`` and read the answer.
+
+    Connecting retries for up to ``timeout_sec``. The answer is awaited
+    for ``reply_timeout_sec`` once. An aggregator from a release before the
+    hello reads it and hangs up without a word, which shows as
+    ``PROBE_NO_REPLY``, the same as a listener that hangs up or stays
+    silent. Anything sent back that is not an ack is ``PROBE_NOT_TRACEML``.
+    """
+    sock = _connect_within(host, port, timeout_sec, poll_interval_sec)
+    if sock is None:
+        return AggregatorProbe(PROBE_UNREACHABLE)
+    with sock:
+        try:
+            reply = request_one_frame(
+                sock, hello, timeout_sec=reply_timeout_sec
+            )
+        except NoReplyError:
+            return AggregatorProbe(PROBE_NO_REPLY)
+        except (ValueError, OSError):
+            return AggregatorProbe(PROBE_NOT_TRACEML)
+    ack = parse_hello_ack(reply)
+    if ack is None:
+        return AggregatorProbe(PROBE_NOT_TRACEML)
+    status = PROBE_ADMITTED if ack.admitted else PROBE_REFUSED
+    return AggregatorProbe(status, ack)
+
+
+def _connect_within(
+    host: str, port: int, timeout_sec: float, poll_interval_sec: float
+) -> Optional[socket.socket]:
+    """Connect to ``(host, port)``, retrying for up to ``timeout_sec``.
+
+    Returns the connected socket, or None when the time runs out.
     """
     deadline = time.monotonic() + float(timeout_sec)
     while True:
         try:
-            with socket.create_connection((host, int(port)), timeout=0.5):
-                return True
+            return socket.create_connection((host, int(port)), timeout=0.5)
         except OSError:
             if time.monotonic() >= deadline:
-                return False
+                return None
             time.sleep(float(poll_interval_sec))
 
 
@@ -108,7 +176,7 @@ class AggregatorHandle:
         )
 
     def stop(self, timeout_sec: float = DEFAULT_FINALIZE_TIMEOUT_SEC) -> None:
-        """Stop the aggregator once, flushing history and final summary."""
+        """Stop once, finalizing enabled export, history, and reports."""
         if self._stopped:
             return
         self._stopped = True
@@ -122,6 +190,26 @@ class RuntimeHandle:
 
     runtime: TraceMLRuntime | NoOpRuntime
     _stopped: bool = False
+
+    @property
+    def is_live(self) -> bool:
+        """True while a real runtime runs here and has not been stopped.
+
+        The CLI executor stops the runtime directly rather than through this
+        handle, so the runtime's own state decides. A no-op runtime is never
+        live.
+        """
+        return not self._stopped and not getattr(self.runtime, "stopped", True)
+
+    def flush_pending_telemetry(self, timeout_sec: float) -> bool:
+        """Ask a live runtime to publish its pending telemetry now.
+
+        Returns False without waiting when the runtime is not live. See
+        ``TraceMLRuntime.flush_pending_telemetry``.
+        """
+        if not self.is_live:
+            return False
+        return bool(self.runtime.flush_pending_telemetry(float(timeout_sec)))
 
     def stop(self) -> None:
         if self._stopped:
@@ -198,6 +286,7 @@ def start_aggregator(
 ) -> AggregatorHandle:
     """Start a TraceML aggregator in the current process."""
     session_id = str(settings.session_id or "default")
+    _check_session_id(settings.logs_dir, session_id)
     normalized = replace(settings, session_id=session_id)
     _apply_settings_env(normalized)
 
@@ -249,6 +338,17 @@ def start_aggregator(
     )
 
 
+def _check_session_id(logs_dir: Any, session_id: str) -> None:
+    """Refuse a session id whose run folder is not inside ``logs_dir``."""
+    root = Path(str(logs_dir)).resolve()
+    run_dir = (root / session_id).resolve()
+    if root not in run_dir.parents:
+        raise ValueError(
+            f"TraceML session_id {session_id!r} must name a folder inside "
+            f"logs_dir ({root})."
+        )
+
+
 def start_runtime(
     settings: TraceMLSettings,
     *,
@@ -269,6 +369,7 @@ def start_runtime(
         return handle
 
     try:
+        _check_session_id(normalized.logs_dir, normalized.session_id)
         runtime = TraceMLRuntime(settings=normalized)
         runtime.start()
         handle = RuntimeHandle(runtime)
@@ -299,9 +400,16 @@ def start_runtime(
 
 __all__ = [
     "AggregatorHandle",
+    "AggregatorProbe",
     "NoOpRuntime",
+    "PROBE_ADMITTED",
+    "PROBE_NOT_TRACEML",
+    "PROBE_NO_REPLY",
+    "PROBE_REFUSED",
+    "PROBE_UNREACHABLE",
     "RuntimeHandle",
     "get_active_runtime_handle",
+    "probe_aggregator",
     "start_aggregator",
     "start_runtime",
     "wait_for_aggregator",

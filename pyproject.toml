@@ -103,6 +103,21 @@ deepspeed = [
     "deepspeed>=0.10.0",
 ]
 
+wandb = [
+    # The diagnosis helper needs only run.log, run.summary and wandb.Html.
+    # The floor is for the live wandb exporter: from 0.28.2 init_timeout
+    # also bounds the backend's retries during run initialization, while
+    # on 0.27.0 wandb.init never returns against an unreachable server.
+    "wandb>=0.28.2",
+]
+
+mlflow = [
+    # The full mlflow package pins mlflow-skinny to its own version from
+    # 2.15 on, so either install satisfies this. Skinny alone has no SQLite
+    # store and needs a remote tracking URI.
+    "mlflow-skinny>=2.15",
+]
+
 docs = [
     "mkdocs>=1.6",
     "mkdocs-material>=9.5",

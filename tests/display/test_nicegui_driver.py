@@ -166,6 +166,93 @@ def test_define_pages_registers_without_error() -> None:
     define_pages(_driver())
 
 
+def _render_main_page(monkeypatch: pytest.MonkeyPatch, profile: str):
+    """Build the dashboard page for ``profile`` and record, per section, the
+    row it landed in, in build order, plus each layout subscription."""
+    from nicegui import ui
+
+    from traceml_ai.aggregator.display_drivers.nicegui_sections import pages
+
+    page_funcs = []
+    monkeypatch.setattr(
+        pages.ui, "page", lambda _path: lambda f: page_funcs.append(f) or f
+    )
+    monkeypatch.setattr(pages.ui, "add_head_html", lambda _html: None)
+
+    placed: list[tuple[str, int]] = []
+
+    def recording(name, build):
+        def wrapper(*args, **kwargs):
+            cell = ui.context.slot.parent
+            placed.append((name, id(cell.parent_slot.parent)))
+            return build(*args, **kwargs)
+
+        return wrapper
+
+    for name in (
+        "context",
+        "model_diagnostics",
+        "model_combined",
+        "system",
+        "process",
+        "step_memory",
+    ):
+        attr = f"build_{name}_section"
+        monkeypatch.setattr(pages, attr, recording(name, getattr(pages, attr)))
+
+    driver = _driver(profile=profile)
+    subscribed: dict = {}
+    monkeypatch.setattr(
+        driver,
+        "subscribe_layout",
+        lambda layout, cards, update: subscribed.setdefault(
+            layout, (cards, update)
+        ),
+    )
+    monkeypatch.setattr(driver, "ensure_ui_timer", lambda _s: None)
+    pages.define_pages(driver)
+    with ui.column():
+        page_funcs[-1]()
+    return placed, subscribed
+
+
+@pytest.mark.parametrize("profile", ("run", "deep"))
+def test_diagnostics_shares_the_top_row_with_run_information(
+    monkeypatch: pytest.MonkeyPatch, profile: str
+) -> None:
+    from traceml_ai.aggregator.display_drivers.nicegui_sections import pages
+
+    placed, subscribed = _render_main_page(monkeypatch, profile)
+    names = [name for name, _row in placed]
+    rows = dict(placed)
+
+    # Run information, then Diagnostics, in one row: left and right on a
+    # wide page, stacked in that order on a narrow one. Diagnostics is built
+    # once, and no longer beside Step Memory.
+    assert names[:2] == ["context", "model_diagnostics"]
+    assert names.count("model_diagnostics") == 1
+    assert rows["context"] == rows["model_diagnostics"]
+    assert rows["step_memory"] != rows["model_diagnostics"]
+    assert sum(row == rows["step_memory"] for _n, row in placed) == 1
+    assert names[2:] == ["model_combined", "system", "process", "step_memory"]
+
+    # The diagnostic payload still updates the card, through one subscriber.
+    _cards, update = subscribed[MODEL_DIAGNOSTICS_LAYOUT]
+    assert update is pages.update_model_diagnostics_section
+
+
+def test_watch_keeps_run_information_alone_in_the_top_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    placed, subscribed = _render_main_page(monkeypatch, "watch")
+    names = [name for name, _row in placed]
+    rows = dict(placed)
+
+    assert "model_diagnostics" not in names
+    assert MODEL_DIAGNOSTICS_LAYOUT not in subscribed
+    assert sum(row == rows["context"] for _n, row in placed) == 1
+
+
 def test_dashboard_sections_build_without_error() -> None:
     from traceml_ai.aggregator.display_drivers.nicegui_sections.model_combined_section import (
         build_model_combined_section,

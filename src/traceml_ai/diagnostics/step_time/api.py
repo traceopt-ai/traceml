@@ -147,7 +147,7 @@ def build_step_warmup_diagnosis(
         action="Use a longer run for a stable timing diagnosis.",
         steps_used=low,
     )
-    return DiagnosticResult(primary=primary)
+    return DiagnosticResult(primary=primary, reference_rank=0)
 
 
 def _merge_note(base: Optional[str], extra: Optional[str]) -> Optional[str]:
@@ -233,7 +233,7 @@ def diagnose_step_time_window(
             action="Check upstream aggregation.",
             steps_used=0,
         )
-        return DiagnosticResult(primary=primary)
+        return DiagnosticResult(primary=primary, reference_rank=0)
 
     by_key = {metric.metric: metric for metric in metrics}
     step_metric = by_key.get("step_time")
@@ -256,6 +256,7 @@ def diagnose_step_time_window(
             )
             return DiagnosticResult(
                 primary=primary,
+                reference_rank=context.reference_rank,
                 issues=(
                     DiagnosticIssue(
                         kind=primary.kind,
@@ -277,7 +278,7 @@ def diagnose_step_time_window(
             action="Wait for the first complete window.",
             steps_used=0,
         )
-        return DiagnosticResult(primary=primary)
+        return DiagnosticResult(primary=primary, reference_rank=0)
 
     coverage = window.coverage
     single_rank = (coverage.world_size <= 1) or (coverage.ranks_present <= 1)
@@ -294,7 +295,7 @@ def diagnose_step_time_window(
             steps_used=steps_used,
             worst_rank=overall_worst_rank,
         )
-        return DiagnosticResult(primary=primary)
+        return DiagnosticResult(primary=primary, reference_rank=0)
 
     if steps_used < thresholds.min_steps_for_warning_diag:
         result = build_step_warmup_diagnosis(
@@ -302,7 +303,8 @@ def diagnose_step_time_window(
             required_steps=thresholds.min_steps_for_warning_diag,
         )
         return DiagnosticResult(
-            primary=replace(result.primary, worst_rank=overall_worst_rank)
+            primary=replace(result.primary, worst_rank=overall_worst_rank),
+            reference_rank=result.reference_rank,
         )
 
     context = build_step_time_context(
@@ -459,6 +461,7 @@ def diagnose_step_time_window(
     return DiagnosticResult(
         primary=primary,
         issues=tuple(issues),
+        reference_rank=context.reference_rank,
     )
 
 

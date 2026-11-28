@@ -23,6 +23,7 @@ The record uses the same projection code as the SQLite row, so their projected f
 
 Every record class carries `STREAM`, `SCHEMA_VERSION` (currently `1`) and `COLUMNS`, its field names in order.
 `to_dict()` returns `stream`, `schema_version` and then every field.
+The JSON Lines exporter writes `to_dict()` for every stream except `step_time`, which it writes in its own public shape (see below).
 The JSON Lines exporter omits `hostname` unless `exporter_hostname` is on.
 When enabled, records that have a `hostname` field keep it, with `null` when the rank sent no hostname.
 An unavailable value remains `None`; a measured zero remains `0`.
@@ -145,6 +146,27 @@ Each value is `None` when the rank did not send it.
 `cpu_ms` is CPU wall time and `gpu_ms` is CUDA event time, each summed over the step's calls.
 `gpu_ms` is `None` unless every call of that phase in the step measured the GPU clock; a measured zero stays `0.0`.
 `duration_ms` is the legacy effective duration, and `is_gpu` says whether GPU time backs it.
+This is the record's internal shape, which SQLite, the other exporters and `to_dict()` keep.
+
+#### `step_time.jsonl` (schema version 2)
+
+The JSON Lines exporter writes a public shape of `StepTimeRecord`, with `schema_version` `2` on its data and closing lines.
+`json_exporter.public_step_events` builds it; the record itself is not changed.
+The fields other than `events` are the record's, in the same order.
+
+`events[name]` is one object: `device` (str), then `cpu_ms`, `gpu_ms` (float, milliseconds), `is_gpu` (bool) and `n_calls` (int).
+They are copied from the record without recalculation, so `None` stays `null` and a measured zero stays `0`.
+`duration_ms` is not exported.
+An event with no device entry exports `device` and every measurement as `null`.
+
+Built-in names lose the internal `_traceml_internal:` prefix and get the reserved `traceml:` prefix instead; custom names are kept.
+Two events that map to the same exported name raise `ValueError("Duplicate exported event name: <name>")`, so the batch writes no line.
+
+Version 2 assumes one device per event name, rank and step.
+When the record holds several devices for one event, only the first is exported.
+The stored `events_json` is serialised with sorted keys, so the first device is the first in label order.
+
+Version 1 lines wrote `events[name][device]` as in the internal shape above, with `_traceml_internal:` names and `duration_ms`.
 
 ### StepMemoryRecord
 
@@ -291,6 +313,7 @@ Its only fields are `observed_timestamp_unix_ns`, `rank`, `timestamp_unix_ns` an
 ## Custom exporters
 
 A custom exporter receives the same records as the built-in `jsonl` exporter, those of the selected streams.
+The built-in `wandb` exporter in `traceml_ai.aggregator.export.wandb_exporter` is a worked example of a remote sink on the same interface.
 It implements the `Exporter` interface from `traceml_ai.aggregator.export`: `open()`, `write(records)`, `flush()` and `close(*, dropped_batches=0)`.
 The export worker calls all four from its own background thread, and the calls never overlap.
 It calls `open` once, then `write` and `flush` zero or more times, then `close` once.
@@ -301,7 +324,11 @@ An exporter that treats streams differently dispatches on `record.STREAM` or `ty
 It is one count for the whole worker, not one per stream, so the `jsonl` exporter writes the same value in every closing line.
 A closing line's `written_records`, by contrast, counts only the lines of its own file.
 A method may raise.
-The worker then logs the failure, stops using the exporter, and records the loss in `finalization_warning.json`.
+In telemetry mode, an `open` failure prevents the aggregator from accepting
+workers, so training does not start under the default launcher policy. In
+other modes, and for `write`, `flush`, or `close` failures after startup, the
+worker logs the failure, stops using the exporter, and records the loss in
+`finalization_warning.json`.
 
 Set the `exporter` setting to `module:factory` to use one.
 The value works in each place `jsonl` does.
@@ -325,15 +352,17 @@ Install the module, or put its directory on `PYTHONPATH`.
 - `include_hostname` tells the exporter whether to keep a record's `hostname` field, if present. It is set by `exporter_hostname`.
 - `streams` is the selected `STREAM` names, in the order of the record table above. A factory can use it to prepare one sink per stream.
 
-A factory failure never fails the run.
 The failures are an import error, a missing attribute, an exception or `SystemExit` from the module or the factory, and a factory that returns `None`.
 Each one is treated like an exporter whose `open` raised.
 The worker logs it once with the `[TraceML]` prefix, naming the value and the failure.
-The run continues, and `final_summary.json` is unchanged.
-`finalization_warning.json` records the loss.
-Its `export` block has `exporter_failed` set to `true`, and `failed_records` equals the records admitted.
+In telemetry mode this is a startup failure. In other modes the run continues,
+`final_summary.json` is unchanged, and `finalization_warning.json` records the
+loss. Its `export` block has `exporter_failed` set to `true`, and
+`failed_records` equals the records admitted.
 TraceML does not check the returned object up front.
-If it lacks one of the four methods, export fails when the worker first calls that method, and the loss is recorded the same way.
+If it lacks `open`, telemetry mode fails during startup. If it lacks another
+method, export fails when the worker first calls that method, and the loss is
+recorded the same way.
 
 This factory returns an exporter that writes every record as one JSON line to one file.
 Each line keeps the `stream` field from `to_dict()`, so a reader can tell the selected streams apart.

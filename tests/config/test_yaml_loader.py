@@ -416,6 +416,27 @@ def test_resolve_config_history_disabled_via_cli() -> None:
     assert result["history_enabled"] is False
 
 
+@pytest.mark.parametrize(
+    ("cli", "env", "yaml"),
+    [
+        ({"logs_dir": "~/traceml-logs"}, {}, {}),
+        ({}, {"TRACEML_LOGS_DIR": "~/traceml-logs"}, {}),
+        ({}, {}, {"logs_dir": "~/traceml-logs"}),
+    ],
+)
+def test_resolve_config_expands_home_in_logs_dir(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    cli: dict,
+    env: dict,
+    yaml: dict,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    result = resolve_config({**_no_cli(), **cli}, env, yaml, _defaults())
+    assert Path(result["logs_dir"]) == tmp_path / "traceml-logs"
+
+
 def test_load_yaml_config_exporter_keys(tmp_path: Path) -> None:
     p = _write(tmp_path, "exporter: jsonl\nexporter_hostname: true\n")
     yaml = load_yaml_config(p)

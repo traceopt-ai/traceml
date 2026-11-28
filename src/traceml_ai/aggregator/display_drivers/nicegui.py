@@ -51,6 +51,7 @@ Aggregator contract (required by trace_aggregator)
 from __future__ import annotations
 
 import importlib
+import os
 import sys
 import threading
 import time
@@ -95,6 +96,26 @@ _SERVER_STARTUP_TIMEOUT_SEC = 10.0
 # before logging an ERROR with diagnostics (a server that never binds is
 # otherwise indistinguishable from a slow one, and stays silent).
 _SERVER_STARTUP_GRACE_SEC = 60.0
+
+
+_WILDCARD_HOSTS = frozenset({"0.0.0.0", "::", ""})
+
+
+def _configured_host() -> Optional[str]:
+    """Bind address from TRACEML_DASHBOARD_HOST, or None for NiceGUI's default."""
+    return os.environ.get("TRACEML_DASHBOARD_HOST") or None
+
+
+def _probe_host() -> str:
+    """Address to probe for readiness: the configured host, or loopback.
+
+    A wildcard bind (0.0.0.0, ::) accepts loopback connections, so probe
+    127.0.0.1 for those and for the unset default.
+    """
+    host = _configured_host()
+    if host is None or host in _WILDCARD_HOSTS:
+        return "127.0.0.1"
+    return host
 
 
 def _stack_versions() -> str:
@@ -284,7 +305,7 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
         # Deterministic pre-check: if the port is already held, our bind is
         # doomed -- report it clearly instead of starting a server that will
         # die, and avoid mistaking the foreign listener for our own.
-        if socket_is_listening("127.0.0.1", self._port):
+        if socket_is_listening(_probe_host(), self._port):
             self._log_startup_result(ServerReadiness.FAILED, port_in_use=True)
             return
 
@@ -295,7 +316,9 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
         self._server_thread.start()
 
         result = wait_for_server_ready(
-            is_listening=lambda: socket_is_listening("127.0.0.1", self._port),
+            is_listening=lambda: socket_is_listening(
+                _probe_host(), self._port
+            ),
             is_alive=self._server_thread.is_alive,
             lifespan_started=self._lifespan_started.is_set,
             timeout=self._startup_timeout_sec,
@@ -345,7 +368,7 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
             started = time.monotonic()
             outcome = watch_server_startup(
                 is_listening=lambda: socket_is_listening(
-                    "127.0.0.1", self._port
+                    _probe_host(), self._port
                 ),
                 is_alive=thread.is_alive if thread else (lambda: False),
                 lifespan_started=self._lifespan_started.is_set,
@@ -437,7 +460,10 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
             # Reclaim a client's subscribers + timer when its browser leaves,
             # so reconnects don't leak (TRA-68).
             app.on_disconnect(self._handle_disconnect)
+            # Unset keeps NiceGUI's default bind. Containers set
+            # TRACEML_DASHBOARD_HOST=0.0.0.0 so a published port reaches it.
             ui.run(
+                host=_configured_host(),
                 port=self._port,
                 reload=False,
                 show=self._show,

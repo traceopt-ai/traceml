@@ -133,13 +133,14 @@ sys.exit(0 if listening and status == 200 else 1)
 """
 
 # Every section card titles itself with a ``ctitle`` label; the default
-# ``run`` profile shows all five, in page order.
+# ``run`` profile shows all five, in page order. Diagnostics sits beside run
+# information at the top, which has no ``ctitle`` of its own.
 _SECTION_TITLES = [
+    "Diagnostics",
     "Step Time",
     "System",
     "Trainer process",
     "Step memory",
-    "Diagnostics",
 ]
 
 

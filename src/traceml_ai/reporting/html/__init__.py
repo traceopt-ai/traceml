@@ -7,10 +7,12 @@
 """Self-contained HTML run report rendered from final_summary.json."""
 
 from .document import render_html_report
+from .training_report import render_training_report
 from .writer import render_html_report_from_file, write_html_report
 
 __all__ = [
     "render_html_report",
     "render_html_report_from_file",
+    "render_training_report",
     "write_html_report",
 ]

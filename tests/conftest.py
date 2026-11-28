@@ -8,6 +8,7 @@ install first.
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from pathlib import Path
@@ -45,3 +46,27 @@ def _contain_traceml_disabled_env():
         os.environ.pop("TRACEML_DISABLED", None)
     else:
         os.environ["TRACEML_DISABLED"] = original
+
+
+@pytest.fixture(autouse=True)
+def _contain_traceml_logger_state():
+    """Restore the ``traceml_ai`` logger after the test that reconfigured it.
+
+    `setup_error_logger()` (reached through `launch_process`) sets the logger
+    to ERROR with ``propagate = False`` and attaches a file handler. Without
+    this, the first test that reaches it leaves the logger that way, so later
+    tests that assert on warnings through `caplog` see nothing.
+    """
+    logger = logging.getLogger("traceml_ai")
+    level = logger.level
+    propagate = logger.propagate
+    handlers = list(logger.handlers)
+    yield
+    try:
+        for handler in list(logger.handlers):
+            if handler not in handlers:
+                logger.removeHandler(handler)
+                handler.close()
+    finally:
+        logger.setLevel(level)
+        logger.propagate = propagate

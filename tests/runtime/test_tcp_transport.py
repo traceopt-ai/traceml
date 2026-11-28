@@ -1,5 +1,6 @@
 import errno
 import socket
+import struct
 import time
 
 import pytest
@@ -10,6 +11,7 @@ from traceml_ai.transport.tcp_transport import (
     TCPServer,
     bind_exclusive_listener,
 )
+from traceml_ai.utils.msgpack_codec import encode as encode_msgpack
 
 
 class _FakeSocket:
@@ -237,4 +239,43 @@ def test_open_connections_tracks_peers_until_they_close() -> None:
         for sock in (first, second):
             if sock is not None:
                 sock.close()
+        server.stop()
+
+
+def _frame(payload) -> bytes:
+    data = encode_msgpack(payload)
+    return struct.pack("!I", len(data)) + data
+
+
+def test_first_frame_reply_is_sent_back_instead_of_queued() -> None:
+    def reply(message):
+        return {"pong": 1} if message == {"ping": 1} else None
+
+    server = TCPServer(
+        TCPConfig(host="127.0.0.1", port=0), first_frame_reply=reply
+    )
+    server.start()
+    address = ("127.0.0.1", server.port)
+    try:
+        with socket.create_connection(address) as sock:
+            sock.settimeout(2.0)
+            sock.sendall(_frame({"ping": 1}))
+            with sock.makefile("rb") as stream:
+                assert stream.read(len(_frame({"pong": 1}))) == _frame(
+                    {"pong": 1}
+                )
+            # Only the first frame of a connection is offered for a reply.
+            sock.sendall(_frame({"ping": 1}))
+            assert server.wait_for_data(timeout=2.0)
+            assert list(server.poll()) == [{"ping": 1}]
+
+        # A first frame without a reply is queued, and nothing is sent.
+        with socket.create_connection(address) as sock:
+            sock.sendall(_frame([{"row": 1}]))
+            assert server.wait_for_data(timeout=2.0)
+            assert list(server.poll()) == [[{"row": 1}]]
+            sock.settimeout(0.3)
+            with pytest.raises(socket.timeout):
+                sock.recv(1)
+    finally:
         server.stop()

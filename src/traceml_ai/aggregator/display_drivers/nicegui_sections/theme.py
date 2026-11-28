@@ -10,8 +10,8 @@ TraceOpt design-system theme for the NiceGUI dashboard (PR2 revamp).
 Adopts the shared brand contract (traceopt_website/DESIGN.md,
 traceopt-design-system-2026-06-05): light, warm-white, glass surfaces, orange
 accent, Geist + Geist Mono. Single source of truth for the dashboard's chrome.
-Functional data-viz colors (phase + severity) are kept as-is (they encode
-meaning) and pulled from the canonical phase keys, not re-hued.
+Functional severity colors are kept as-is (they encode meaning), not
+re-hued.
 
 This module owns styling tokens, font registration, and shared dashboard
 markup. Chart construction lives in ``charting``; value formatting lives in
@@ -21,7 +21,7 @@ markup. Chart construction lives in ``charting``; value formatting lives in
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 # --- Brand chrome tokens (DESIGN.md) -------------------------------------
 BG = "#fffdfa"
@@ -32,31 +32,6 @@ ORANGE_STRONG = "#D2691E"
 ORANGE_TOP = "#FFAF38"
 BORDER = "rgba(17,24,39,0.10)"
 
-# --- Functional data-viz palette (do NOT re-hue) -------------------------
-# Canonical phase keys + colors, aligned with the TraceOpt viewer's functional
-# palette (traceopt-viewer/frontend/src/index.css) so phase colors match across
-# the live dashboard and the viewer. H2D = #ff9800 (the viewer's value), which
-# reconciles the prior dashboard-only divergence (it used teal #00897b).
-PHASES: List[Tuple[str, str, str]] = [
-    ("IW", "input_wait", "#d32f2f"),
-    ("H2D", "h2d", "#ff9800"),
-    ("FWD", "forward", "#1976d2"),
-    ("BWD", "backward", "#512da8"),
-    ("OPT", "optimizer_step", "#2e7d32"),
-    ("RESIDUAL", "residual_proxy", "#f9a825"),
-]
-
-# Readable names for the legend. The ribbon keeps the compact abbreviations
-# above so an inline segment label never overflows a narrow slice; the
-# legend spells them out (esp. "IW", which is not self-evident).
-PHASE_LEGEND_LABELS: Dict[str, str] = {
-    "input_wait": "Input wait",
-    "h2d": "H2D",
-    "forward": "Forward",
-    "backward": "Backward",
-    "optimizer_step": "Optimizer",
-    "residual_proxy": "Residual",
-}
 SEV = {
     "crit": "#c62828",
     "warn": "#ef6c00",
@@ -130,14 +105,14 @@ body{{
 .d1{{animation-delay:.07s;}} .d2{{animation-delay:.13s;}} .d3{{animation-delay:.19s;}} .d4{{animation-delay:.25s;}}
 .ctitle{{font-family:var(--sans); font-weight:600; font-size:17px; color:var(--ink);}}
 .cmeta{{font-family:var(--mono); font-size:11px; color:var(--muted);}}
-/* phase ribbon (the hero signature) */
-.ribbon{{display:flex; width:100%; height:34px; border-radius:13px; overflow:hidden; border:1px solid rgba(17,24,39,0.08);
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.5), inset 0 -1px 0 rgba(17,24,39,.10), 0 3px 10px rgba(17,24,39,.10);}}
-.pseg{{height:100%; transition:width .65s cubic-bezier(.4,0,.2,1); display:flex; align-items:center; justify-content:center; min-width:0; overflow:hidden; box-shadow:inset 0 1px 0 rgba(255,255,255,.32);}}
-.seglab{{font-family:var(--mono); font-size:10px; font-weight:600; color:rgba(255,255,255,.96); white-space:nowrap; text-shadow:0 1px 1px rgba(0,0,0,.18);}}
-.legchip{{font-family:var(--mono); font-size:10.5px; color:var(--muted); display:flex; align-items:center; gap:5px;}}
-.legdot{{width:9px;height:9px;border-radius:3px;}}
-.verdict{{font-family:var(--sans); font-size:21px; font-weight:500; color:var(--ink); letter-spacing:-.01em;}}
+/* Step Time card: summary and numeric phase tree */
+.tml-tree{{width:100%; border-collapse:collapse; font-family:var(--mono); font-size:12px; color:var(--ink); font-variant-numeric:tabular-nums;}}
+.tml-tree th{{font-size:9.5px; font-weight:500; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); padding:2px 0 4px; white-space:nowrap;}}
+.tml-tree td{{padding:2px 0; white-space:pre;}}
+/* Fixed numeric columns line up the summary and the tree. */
+.tml-tree .tml-num{{text-align:right; padding-left:10px; width:7.5em;}}
+.tml-tree-title{{font-family:var(--mono); font-size:11px; color:var(--muted); margin:16px 0 6px;}}
+.tml-tree-note{{font-family:var(--mono); font-size:11px; color:var(--muted); margin-top:8px;}}
 .sevpill{{font-family:var(--mono); font-size:10.5px; font-weight:600; padding:3px 9px; border-radius:999px; text-transform:uppercase; letter-spacing:.06em;}}
 /* KPI tiles */
 /* Tile row: a grid, not a wrapping flex row. Four equal columns that
@@ -170,6 +145,7 @@ body{{
 .tml-gpus tr.tml-stale td{{color:var(--muted); opacity:.72;}}
 .tml-exp .q-item{{padding:4px 2px; min-height:0;}}
 .tml-exp .q-expansion-item__content{{padding:0 0 4px;}}
+.tml-exp-flush .nicegui-expansion-content{{padding-left:0; padding-right:0;}}
 </style>
 """
 

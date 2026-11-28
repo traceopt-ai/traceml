@@ -26,6 +26,7 @@ from traceml_ai.loggers.error_log import (
 )
 from traceml_ai.runtime.lifecycle import RuntimeHandle, start_aggregator
 from traceml_ai.runtime.lifecycle import start_runtime as start_runtime_handle
+from traceml_ai.runtime.modes import validate_aggregator_options
 from traceml_ai.runtime.settings import (
     DEFAULT_INTERVAL_SEC,
     AggregatorEndpoint,
@@ -48,7 +49,9 @@ class TraceMLRayConfig:
     ----------
     mode:
         TraceML display/reporting mode. ``"summary"`` is the default for Ray
-        because distributed worker logs are often noisy.
+        because distributed worker logs are often noisy. ``"telemetry"``
+        exports measurements without local history or analysis and requires
+        an exporter.
     profile:
         TraceML sampler profile. Public Ray integration uses the normal
         ``"run"`` profile.
@@ -134,6 +137,7 @@ def _new_session_id() -> str:
 def _normalize_config(config: Optional[TraceMLRayConfig]) -> TraceMLRayConfig:
     """Return a Ray config with a concrete session id."""
     current = config or TraceMLRayConfig()
+    validate_aggregator_options(current.mode, current.exporter, False)
     session_id = str(current.session_id or "").strip()
     if session_id:
         return current
@@ -373,7 +377,12 @@ class TraceMLTorchTrainer:
             wrapped_loop = _TraceMLWorkerLoop(
                 train_loop_per_worker=self._train_loop_per_worker,
                 endpoint=endpoint,
-                config=config,
+                config=replace(
+                    config,
+                    exporter="",
+                    export_streams="step_time",
+                    exporter_hostname=False,
+                ),
             )
             trainer = TorchTrainer(
                 wrapped_loop,

@@ -15,6 +15,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Type
 
+from traceml_ai import __version__
 from traceml_ai.aggregator.display_drivers.base import BaseDisplayDriver
 from traceml_ai.aggregator.display_drivers.cli import CLIDisplayDriver
 from traceml_ai.aggregator.display_drivers.summary import SummaryDisplayDriver
@@ -22,11 +23,16 @@ from traceml_ai.aggregator.export import (
     EXPORTER_NAMES,
     Exporter,
     ExporterContext,
+    ExporterStartupError,
     ExportStats,
     ExportWorker,
     JsonExporter,
     parse_export_streams,
     parse_exporter_factory,
+)
+from traceml_ai.aggregator.export.wandb_exporter import (
+    _FINISH_JOIN_GRACE_SEC,
+    WandbExporter,
 )
 from traceml_ai.aggregator.sqlite_writer import (
     SQLiteWriterConfig,
@@ -34,6 +40,7 @@ from traceml_ai.aggregator.sqlite_writer import (
 )
 from traceml_ai.aggregator.summary_service import FinalSummaryService
 from traceml_ai.reporting.final import generate_summary
+from traceml_ai.runtime.modes import validate_aggregator_options
 from traceml_ai.runtime.settings import AggregatorEndpoint, TraceMLSettings
 from traceml_ai.sdk.protocol import (
     get_final_summary_json_path,
@@ -42,6 +49,8 @@ from traceml_ai.sdk.protocol import (
 )
 from traceml_ai.telemetry.control import (
     RankFinishedControl,
+    build_hello_ack_payload,
+    is_hello,
     parse_rank_finished,
 )
 from traceml_ai.transport.tcp_transport import TCPConfig, TCPServer
@@ -63,6 +72,26 @@ _EXPORT_QUEUE_BUFFERED_ROUNDS = 10
 _EXPORT_STOP_BUDGET_FRACTION = 0.1
 _EXPORT_STOP_BUDGET_MIN_SEC = 0.5
 _EXPORT_STOP_BUDGET_MAX_SEC = 2.0
+_EXPORT_STARTUP_TIMEOUT_SEC = 10.0
+# Each W&B run's finish() bound: the export stop cap less a short drain and
+# the exporter's own join grace, so the exporter stops waiting, and a finish
+# timeout lands, inside the worker's join and is counted.
+_WANDB_FINISH_TIMEOUT_SEC = (
+    _EXPORT_STOP_BUDGET_MAX_SEC - 0.25 - _FINISH_JOIN_GRACE_SEC
+)
+# Telemetry mode's bound on a remote exporter's close (W&B finish), sized
+# from measured W&B finishes of about 2 s per run. The launcher's finalize
+# timeout plus 5 s stays the outer bound.
+_EXPORT_FINISH_TIMEOUT_TELEMETRY_SEC = 30.0
+# Added to that bound for the final drain and the exporter's own join grace.
+_EXPORT_TELEMETRY_DRAIN_MARGIN_SEC = 1.0
+# Time telemetry mode keeps for the end-of-run settle before export takes
+# its share: the settle's quiet window is 0.5 s and the ranks' finish
+# markers arrive within a sampler interval.
+_TELEMETRY_SETTLE_FLOOR_SEC = 2.0
+# Written under aggregator/ when a telemetry exporter fails to open; twin of
+# EXPORTER_STARTUP_FAILED_NAME in launcher/manifest.py, which reads it.
+_EXPORTER_STARTUP_FAILED_NAME = "exporter_startup_failed.json"
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -81,12 +110,13 @@ def _safe(logger: Any, label: str, fn: Callable[[], Any]) -> Any:
 
 
 class TraceMLFinalizationError(RuntimeError):
-    """Raised when summary-mode end-of-run finalization cannot complete."""
+    """Raised when headless end-of-run finalization cannot complete."""
 
 
 _DISPLAY_DRIVERS: Dict[str, Type[BaseDisplayDriver]] = {
     "cli": CLIDisplayDriver,
     "summary": SummaryDisplayDriver,
+    "telemetry": SummaryDisplayDriver,
 }
 
 
@@ -170,8 +200,26 @@ def _load_exporter_factory(value: str, context: ExporterContext) -> Exporter:
     return exporter
 
 
+def _exporter_finish_timeout(settings: TraceMLSettings) -> Optional[float]:
+    """
+    The finish timeout ``_resolve_exporter`` hands the named exporter, or
+    None when it hands none (``jsonl`` and a ``module:factory`` exporter).
+
+    The aggregator reads the same value to decide whether telemetry mode's
+    stop reserves a remote close budget.
+    """
+    if str(settings.exporter or "").strip() != "wandb":
+        return None
+    if settings.mode == "telemetry":
+        return _EXPORT_FINISH_TIMEOUT_TELEMETRY_SEC
+    return _WANDB_FINISH_TIMEOUT_SEC
+
+
 def _resolve_exporter(
-    settings: TraceMLSettings, session_root: Path
+    settings: TraceMLSettings,
+    session_root: Path,
+    *,
+    expected_world_size: int = 1,
 ) -> Optional[Tuple[Exporter, Tuple[str, ...]]]:
     """
     Return the export sink ``settings.exporter`` names and the record
@@ -180,7 +228,9 @@ def _resolve_exporter(
     A value with a colon names a factory, imported here in the aggregator
     process and called with an ``ExporterContext``; a factory that fails
     gives an exporter whose ``open`` raises. An unknown plain name or an
-    unknown stream name raises.
+    unknown stream name raises, and so does a stream selection the named
+    built-in exporter cannot export. ``expected_world_size`` is the number
+    of ranks the ``wandb`` exporter creates runs for up front.
     """
     name = str(settings.exporter or "").strip()
     if not name:
@@ -199,6 +249,22 @@ def _resolve_exporter(
             context.export_dir,
             include_hostname=context.include_hostname,
             streams=streams,
+        )
+        return sink, streams
+    if name == "wandb":
+        # Outside telemetry mode nothing waits on open(), so wandb keeps its
+        # own init timeout instead of the startup budget. Telemetry mode
+        # also gives finish() the longer budget its stop() reserves.
+        telemetry = settings.mode == "telemetry"
+        sink = WandbExporter(
+            context.export_dir,
+            run_name=context.session_root.name,
+            expected_world_size=expected_world_size,
+            streams=streams,
+            startup_timeout_sec=(
+                _EXPORT_STARTUP_TIMEOUT_SEC if telemetry else None
+            ),
+            finish_timeout_sec=_exporter_finish_timeout(settings),
         )
         return sink, streams
     raise ValueError(
@@ -224,6 +290,9 @@ class TraceMLAggregator:
         stop_event: threading.Event,
         settings: TraceMLSettings,
     ) -> None:
+        validate_aggregator_options(
+            settings.mode, settings.exporter, settings.html_report
+        )
         self._logger = logger
         self._stop_event = stop_event
         self._settings = settings
@@ -236,13 +305,16 @@ class TraceMLAggregator:
         self._drain_lock = threading.Lock()
         # Orders this class's end-of-run generation with the request path.
         self._summary_lock = threading.Lock()
+        # Set once stop() has written the end-of-run summary.
+        self._final_summary_written = False
 
         # TCP server: aggregator listens for rank-local agents.
         self._tcp_server = TCPServer(
             TCPConfig(
                 host=str(settings.aggregator.bind_host),
                 port=int(settings.aggregator.port),
-            )
+            ),
+            first_frame_reply=self._reply_to_hello,
         )
 
         db_path = getattr(settings, "db_path", None)
@@ -272,8 +344,25 @@ class TraceMLAggregator:
         # logs it once and the warning artifact records the loss; the run
         # continues.
         self._export_worker: Optional[ExportWorker] = None
-        resolved_export = _resolve_exporter(settings, session_root)
+        try:
+            resolved_export = _resolve_exporter(
+                settings,
+                session_root,
+                expected_world_size=self._expected_world_size,
+            )
+        except Exception as exc:
+            # An exporter that cannot be built stops the aggregator before
+            # it listens, like one that fails to open, so it leaves the same
+            # marker and the launcher names the cause.
+            self._write_exporter_startup_marker(exc)
+            raise
+        # The close bound the exporter was built with; None when it has none,
+        # and then telemetry mode's stop keeps the ordinary export slice.
+        self._export_finish_timeout_sec: Optional[float] = None
         if resolved_export is not None:
+            self._export_finish_timeout_sec = _exporter_finish_timeout(
+                settings
+            )
             export_sink, export_streams = resolved_export
             self._export_worker = ExportWorker(
                 export_sink,
@@ -283,17 +372,20 @@ class TraceMLAggregator:
                 streams=export_streams,
             )
 
-        self._summary_service = FinalSummaryService(
-            logger=self._logger,
-            session_root=session_root,
-            db_path=str(db_path),
-            flush_history=self._sqlite_writer.force_flush,
-            settle_telemetry=self._settle_telemetry,
-            write_html=bool(settings.html_report),
-            profile=str(settings.profile),
-            history_retention_s=float(settings.history_retention_s),
-            summary_lock=self._summary_lock,
-        )
+        self._summary_service: Optional[FinalSummaryService] = None
+        if settings.history_enabled:
+            self._summary_service = FinalSummaryService(
+                logger=self._logger,
+                session_root=session_root,
+                db_path=str(db_path),
+                flush_history=self._sqlite_writer.force_flush,
+                settle_telemetry=self._settle_telemetry,
+                write_html=bool(settings.html_report),
+                profile=str(settings.profile),
+                history_retention_s=float(settings.history_retention_s),
+                summary_lock=self._summary_lock,
+                summary_finalized=self._summary_finalized,
+            )
 
         # Display driver owns renderer selection and layout mapping.
         driver_cls = _resolve_display_driver(settings.mode)
@@ -313,18 +405,38 @@ class TraceMLAggregator:
         """
         Start the aggregator server, persistence layer, UI driver, and loop.
 
-        Start order matters:
-        1. TCP server must start first so workers can connect.
-        2. SQLite writer and export worker start before ingestion begins.
-        3. Display driver starts before periodic ticks.
-        4. Aggregator loop thread starts last.
+        In telemetry mode the required exporter opens before the TCP listener,
+        so the launcher cannot start training against an unusable sink. Other
+        modes retain the existing fail-open exporter behavior. SQLite and the
+        display driver start before ingestion, and the aggregator loop starts
+        last.
 
         Startup failures should propagate so the launcher can fail fast rather
-        than running in a partially initialized state.
+        than running in a partially initialized state. A telemetry exporter
+        that fails to open first leaves
+        ``aggregator/exporter_startup_failed.json`` so the launcher can name
+        the cause.
         """
+        require_exporter = self._settings.mode == "telemetry"
+        if require_exporter:
+            # Validation guarantees telemetry has an export worker. Keep this
+            # guard defensive for programmatic construction.
+            if self._export_worker is None:
+                raise ExporterStartupError(
+                    "[TraceML] telemetry mode has no export worker."
+                )
+            self._export_worker.start()
+            try:
+                self._export_worker.wait_until_ready(
+                    _EXPORT_STARTUP_TIMEOUT_SEC
+                )
+            except ExporterStartupError as exc:
+                self._write_exporter_startup_marker(exc)
+                raise
+
         self._tcp_server.start()
         self._sqlite_writer.start()
-        if self._export_worker is not None:
+        if self._export_worker is not None and not require_exporter:
             self._export_worker.start()
         self._display_driver.start()
 
@@ -350,10 +462,13 @@ class TraceMLAggregator:
         multi-node telemetry can arrive, closes SQLite before summary generation,
         and treats a missing summary as an error in summary mode. The export
         worker, when configured, gets its own slice of the timeout after the
-        TCP server stops and before SQLite closes; export losses are reported
-        as a warning and never fail the run. The export counts are read again
-        after SQLite finalize, so an exporter call that was still running at
-        the export deadline is counted when it has finished by then.
+        TCP server stops and before SQLite closes. After startup, export losses
+        are reported as a warning and never fail training. The export counts
+        are read again after SQLite finalize, so an exporter call that was
+        still running at the export deadline is counted when it has finished
+        by then. In telemetry mode export gets the exporter's close bound
+        plus a drain margin, and that second read first waits, within this
+        call's deadline, for the worker thread to finish closing.
         """
         deadline = time.monotonic() + max(0.0, float(timeout_sec))
         session_root = Path(str(self._settings.logs_dir)).resolve() / str(
@@ -392,17 +507,39 @@ class TraceMLAggregator:
         )
 
         try:
-            sqlite_finalize_budget = self._sqlite_finalize_budget(remaining())
-            export_budget = (
-                self._export_stop_budget(remaining())
-                if export_worker is not None
+            sqlite_finalize_budget = (
+                self._sqlite_finalize_budget(remaining())
+                if self._settings.history_enabled
                 else 0.0
             )
+            telemetry = self._settings.mode == "telemetry"
+            if export_worker is None:
+                export_budget = 0.0
+            elif telemetry and self._export_finish_timeout_sec is not None:
+                # The exporter is the run's only output here, so a remote
+                # close gets the whole bound it was built with, less a floor
+                # kept for the settle when the deadline is short, and never
+                # more than the time left.
+                export_budget = min(
+                    self._export_finish_timeout_sec
+                    + _EXPORT_TELEMETRY_DRAIN_MARGIN_SEC,
+                    max(
+                        _EXPORT_STOP_BUDGET_MIN_SEC,
+                        remaining() - _TELEMETRY_SETTLE_FLOOR_SEC,
+                    ),
+                    remaining(),
+                )
+            else:
+                export_budget = self._export_stop_budget(remaining())
             settle_budget = max(
                 0.0, remaining() - sqlite_finalize_budget - export_budget
             )
             try:
-                if self._settings.history_enabled or export_worker is not None:
+                # A run whose start() failed never took training telemetry,
+                # so there are no ranks to settle and nothing to warn about.
+                if self._started and (
+                    self._settings.history_enabled or export_worker is not None
+                ):
                     warning_payload = self._settle_end_of_run_telemetry(
                         settle_budget
                     )
@@ -414,6 +551,7 @@ class TraceMLAggregator:
             finally:
                 # Close the export files even when the final drain raised.
                 if export_worker is not None:
+                    export_stop_started = time.monotonic()
                     export_stats = _safe(
                         self._logger,
                         "ExportWorker.stop failed",
@@ -434,10 +572,27 @@ class TraceMLAggregator:
                 warning_payload,
                 finalize_payload,
             )
+            close_timeout_sec: Optional[float] = None
+            if export_worker is not None:
+                # In telemetry mode a close that outlasted the join (a
+                # finish using its full timeout) is waited for, so its
+                # outcome reaches the warning artifact. Other modes keep
+                # the export slice as their whole bound. A close still
+                # running at the end of the wait is recorded as such.
+                closed = _safe(
+                    self._logger,
+                    "ExportWorker.wait_closed failed",
+                    lambda: export_worker.wait_closed(
+                        remaining() if telemetry else 0.0
+                    ),
+                )
+                if closed is False:
+                    close_timeout_sec = time.monotonic() - export_stop_started
             export_stats = latest_export_stats()
             warning_payload = self._add_export_warning(
                 warning_payload,
                 export_stats,
+                close_timeout_sec=close_timeout_sec,
             )
 
             if (
@@ -486,6 +641,7 @@ class TraceMLAggregator:
                     if summary_error is not None:
                         raise refresh_error from summary_error
                     raise refresh_error
+                self._final_summary_written = True
 
                 if summary_error is not None:
                     # A refreshed artifact makes this error nonfatal, so this
@@ -513,7 +669,7 @@ class TraceMLAggregator:
                     "Summary mode finished without final_summary.json."
                 )
 
-            if warning_payload is not None:
+            if self._started and warning_payload is not None:
                 self._write_finalization_artifact(
                     session_root,
                     "finalization_warning.json",
@@ -538,7 +694,7 @@ class TraceMLAggregator:
                     ),
                 },
             )
-            if self._settings.mode == "summary":
+            if self._settings.mode in ("summary", "telemetry"):
                 raise
             self._logger.exception("[TraceML] Finalization failed")
 
@@ -617,14 +773,23 @@ class TraceMLAggregator:
     def _add_export_warning(
         warning_payload: Optional[dict[str, Any]],
         export_stats: Optional[ExportStats],
+        *,
+        close_timeout_sec: Optional[float] = None,
     ) -> Optional[dict[str, Any]]:
-        """Attach export losses to the warning artifact."""
-        if export_stats is None or not (
+        """
+        Attach export losses to the warning artifact.
+
+        ``close_timeout_sec`` is set when the exporter's close was still
+        running after that many seconds; the export block then says so even
+        when no record was lost and ``close`` has not raised.
+        """
+        lost = export_stats is not None and bool(
             export_stats.dropped_batches
             or export_stats.failed_records
             or export_stats.skipped_items
             or export_stats.exporter_failed
-        ):
+        )
+        if not lost and close_timeout_sec is None:
             return warning_payload
 
         if warning_payload is None:
@@ -634,9 +799,18 @@ class TraceMLAggregator:
                 "reason": "export_incomplete",
                 "message": (
                     "Telemetry export did not write every admitted record."
+                    if lost
+                    else "Telemetry export did not finish closing."
                 ),
             }
-        warning_payload["export"] = export_stats.to_dict()
+        export = export_stats.to_dict() if export_stats is not None else {}
+        if close_timeout_sec is not None:
+            export["close_finished"] = False
+            export["close_error"] = (
+                "exporter close did not finish within "
+                f"{close_timeout_sec:.1f} s"
+            )
+        warning_payload["export"] = export
         return warning_payload
 
     @staticmethod
@@ -696,6 +870,10 @@ class TraceMLAggregator:
             return None
         return generated_at
 
+    def _summary_finalized(self) -> bool:
+        """Return True once stop() has written the end-of-run summary."""
+        return self._final_summary_written
+
     def _finished_ranks_snapshot(self) -> List[int]:
         """Return a sorted snapshot of finished global ranks (lock-safe).
 
@@ -752,6 +930,25 @@ class TraceMLAggregator:
         meta = payload.get("meta")
         stamp = meta if isinstance(meta, Mapping) else payload
 
+        if self._stamp_mismatch(stamp) is None:
+            return True
+        sender: _ForeignSender = tuple(  # type: ignore[assignment]
+            None if stamp.get(field) is None else str(stamp[field])
+            for field in ("hostname", "pid", "session_id")
+        )
+        self._foreign_senders[sender] = (
+            self._foreign_senders.get(sender, 0) + 1
+        )
+        return False
+
+    def _stamp_mismatch(self, stamp: Mapping) -> Optional[str]:
+        """
+        Return the first stamp key that names another run, or None.
+
+        The admission rule shared by ``_admit`` and the ``init()`` hello, so
+        a hello is refused exactly when that sender's telemetry would be
+        dropped. Reads only settings, so any thread may call it.
+        """
         settings = self._settings
         enforce_session = settings.enforce_session_id and not (
             settings.admit_generated_session_id
@@ -767,15 +964,25 @@ class TraceMLAggregator:
         for key, want in expected:
             got = stamp.get(key)
             if want and got not in (None, "") and str(got) != want:
-                sender: _ForeignSender = tuple(  # type: ignore[assignment]
-                    None if stamp.get(field) is None else str(stamp[field])
-                    for field in ("hostname", "pid", "session_id")
-                )
-                self._foreign_senders[sender] = (
-                    self._foreign_senders.get(sender, 0) + 1
-                )
-                return False
-        return True
+                return key
+        return None
+
+    def _reply_to_hello(self, message: Any) -> Optional[Dict[str, Any]]:
+        """
+        Answer a ``traceml.init()`` hello, or return None for anything else.
+
+        Called by the TCP server for the first message of each connection.
+        The ack says whether this aggregator would admit the sender's
+        telemetry. A hello is never queued, so it reaches neither SQLite
+        nor export, and a refused one is not counted as a foreign sender.
+        """
+        if not is_hello(message):
+            return None
+        return build_hello_ack_payload(
+            session_id=str(self._settings.session_id or ""),
+            traceml_version=__version__,
+            mismatch=self._stamp_mismatch(message),
+        )
 
     def _warn_foreign_senders(self) -> None:
         """Print one stderr warning naming every sender that was dropped."""
@@ -905,6 +1112,26 @@ class TraceMLAggregator:
                 exc,
             )
 
+    def _write_exporter_startup_marker(self, exc: BaseException) -> None:
+        """
+        Record an exporter that could not be built, or that failed to open
+        in telemetry mode (best effort).
+        """
+        session_root = Path(str(self._settings.logs_dir)).resolve() / str(
+            self._settings.session_id or "default"
+        )
+        self._write_finalization_artifact(
+            session_root,
+            _EXPORTER_STARTUP_FAILED_NAME,
+            {
+                "status": "error",
+                "failed_at": utc_now_iso(),
+                "reason": "exporter_startup_failed",
+                "exporter": str(self._settings.exporter or "").strip(),
+                "error": str(exc),
+            },
+        )
+
     def _settle_telemetry(self, timeout_sec: float) -> bool:
         """
         Best-effort drain of in-flight telemetry before first final summary.
@@ -950,25 +1177,21 @@ class TraceMLAggregator:
             # Rate-limit the UI tick to interval_sec cadence.
             now = time.monotonic()
             if now - last_tick_ts >= interval_sec:
-                _safe(
-                    self._logger,
-                    "Final summary service poll failed",
-                    self._summary_service.poll,
-                )
-                _safe(
-                    self._logger,
-                    "Display driver tick failed",
-                    self._display_driver.tick,
-                )
+                self._tick()
                 last_tick_ts = now
 
         # Final drain and final display tick on shutdown.
         self._drain_tcp()
-        _safe(
-            self._logger,
-            "Final summary service poll failed",
-            self._summary_service.poll,
-        )
+        self._tick()
+
+    def _tick(self) -> None:
+        """Update configured local analysis and display components."""
+        if self._summary_service is not None:
+            _safe(
+                self._logger,
+                "Final summary service poll failed",
+                self._summary_service.poll,
+            )
         _safe(
             self._logger,
             "Display driver tick failed",

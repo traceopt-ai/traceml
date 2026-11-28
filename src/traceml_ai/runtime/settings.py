@@ -19,6 +19,7 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 
+from traceml_ai.runtime.modes import resolve_history_enabled
 from traceml_ai.telemetry.retention import DEFAULT_HISTORY_RETENTION_S
 
 DEFAULT_FINALIZE_TIMEOUT_SEC = 300.0
@@ -29,6 +30,9 @@ DEFAULT_INTERVAL_SEC = 2.0
 # dashboard rendering remain explicit opt-ins.
 DEFAULT_UI_MODE = "summary"
 MISSING_AGGREGATOR_POLICIES = ("raise", "warn")
+# Set by the `traceml run` launcher on the aggregator it spawns, so that
+# aggregator treats EOF on stdin as "launcher gone" and shuts down.
+LAUNCHER_STDIN_WATCH_ENV = "TRACEML_LAUNCHER_STDIN_WATCH"
 
 
 def resolve_on_missing_aggregator(
@@ -89,7 +93,8 @@ class TraceMLSettings:
     - `sampler_interval_sec` controls worker sampling cadence (all ranks).
     - `render_interval_sec` controls aggregator UI cadence only; TCP telemetry
       is drained as soon as data arrives.
-    - `mode` selects the display backend ("cli" | "summary" | "dashboard").
+    - `mode` selects execution behavior ("cli", "summary", "dashboard", or
+      "telemetry"). Telemetry mode disables local history and analysis.
     - `summary` mode disables live rendering and prints only the final
       end-of-run summary.
     - Aggregator transport is used for telemetry, including rank0 -> rank0
@@ -135,3 +140,10 @@ class TraceMLSettings:
     exporter: str = ""
     export_streams: str = "step_time"
     exporter_hostname: bool = False
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "history_enabled",
+            resolve_history_enabled(self.mode, self.history_enabled),
+        )

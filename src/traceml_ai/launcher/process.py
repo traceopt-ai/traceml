@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, BinaryIO, Callable, Iterable, Optional
 
 from traceml_ai.launcher.manifest import update_run_manifest
+from traceml_ai.runtime.settings import LAUNCHER_STDIN_WATCH_ENV
 from traceml_ai.transport.tcp_transport import bind_exclusive_listener
 
 _IS_WINDOWS = sys.platform == "win32"
@@ -530,7 +531,14 @@ def install_shutdown_handlers(
 def start_aggregator_process(
     env: dict[str, str], cwd: str
 ) -> subprocess.Popen:
-    """Start the TraceML aggregator in a separate process group."""
+    """Start the TraceML aggregator in a separate process group.
+
+    The aggregator's stdin is a pipe whose write end this process holds
+    until it exits and never writes to. The OS closes it however this
+    process ends, SIGKILL included, and the aggregator stops on the EOF.
+    The caller must keep the returned ``Popen`` alive for as long as the
+    aggregator should run.
+    """
     traceml_root = Path(__file__).resolve().parents[1]
     aggregator_path = traceml_root / "aggregator" / "aggregator_main.py"
     if not aggregator_path.exists():
@@ -542,8 +550,9 @@ def start_aggregator_process(
     print("[TraceML] Launching TraceML aggregator:", " ".join(cmd))
     return subprocess.Popen(
         cmd,
-        env=env,
+        env={**env, LAUNCHER_STDIN_WATCH_ENV: "1"},
         cwd=cwd,
+        stdin=subprocess.PIPE,
         stderr=subprocess.PIPE,
         **process_group_kwargs(),
     )
@@ -562,9 +571,17 @@ def start_training_process(
     if capture_output:
         popen_kwargs["stdout"] = subprocess.PIPE
         popen_kwargs["stderr"] = subprocess.PIPE
+    # Export destinations belong to the aggregator, never its training workers.
+    worker_env = env.copy()
+    for key in (
+        "TRACEML_EXPORTER",
+        "TRACEML_EXPORT_STREAMS",
+        "TRACEML_EXPORTER_HOSTNAME",
+    ):
+        worker_env.pop(key, None)
     return subprocess.Popen(
         train_cmd,
-        env=env,
+        env=worker_env,
         cwd=cwd,
         **process_group_kwargs(),
         **popen_kwargs,

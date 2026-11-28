@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from traceml_ai.runtime.identity import resolve_runtime_identity
+from traceml_ai.runtime.modes import resolve_history_enabled
 from traceml_ai.runtime.settings import DEFAULT_UI_MODE
 
 
@@ -76,6 +77,9 @@ class FinalSummaryResponse:
     summary_json_path: Optional[str] = None
     summary_txt_path: Optional[str] = None
     error: Optional[str] = None
+    # Set on an OK response that returns an earlier summary after a failed
+    # refresh; older clients ignore it.
+    warning: Optional[str] = None
 
 
 def utc_now_iso() -> str:
@@ -117,8 +121,8 @@ def resolve_session_context_from_env() -> TraceMLSessionContext:
         os.environ.get("TRACEML_UI_MODE", "").strip()
         or os.environ.get("TRACEML_MODE", DEFAULT_UI_MODE).strip()
     )
-    history_enabled = (
-        os.environ.get("TRACEML_HISTORY_ENABLED", "1").strip() == "1"
+    history_enabled = resolve_history_enabled(
+        mode, os.environ.get("TRACEML_HISTORY_ENABLED", "1").strip() == "1"
     )
 
     if not session_id or not logs_dir:

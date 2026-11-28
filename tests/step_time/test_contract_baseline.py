@@ -14,22 +14,26 @@ and dictionary ordering intentionally remain outside the golden surface.
 
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-import subprocess
 from typing import Any, Mapping
 
 import pytest
 from rich.console import Console
 
+from tests.step_time.factories import (
+    rank_average,
+    summary_step_events,
+    window_from_events,
+)
 from tests.step_time.scenarios import (
     SCENARIOS,
     StepTimeScenario,
     create_step_time_database,
 )
-from tests.step_time.factories import rank_average
-from traceml_ai.diagnostics.step_time.policy import LIVE_STEP_TIME_POLICY
 from traceml_ai.diagnostics.step_time.api import diagnose_step_time_window
+from traceml_ai.diagnostics.step_time.policy import LIVE_STEP_TIME_POLICY
 from traceml_ai.renderers.model_diagnostics.renderer import (
     ModelDiagnosticsRenderer,
 )
@@ -67,6 +71,7 @@ class DiagnosisGolden:
     status: str
     severity: str
     worst_rank: int | None
+    reference_rank: int
     issues: tuple[str, ...]
     score: float | None = None
     evidence: Mapping[str, Any] = field(default_factory=dict)
@@ -107,6 +112,7 @@ EXPECTED_DIAGNOSIS: dict[str, DiagnosisGolden] = {
         status="BALANCED",
         severity="info",
         worst_rank=0,
+        reference_rank=1,
         issues=("BALANCED",),
     ),
     "sparse_missing_forward": DiagnosisGolden(
@@ -114,6 +120,7 @@ EXPECTED_DIAGNOSIS: dict[str, DiagnosisGolden] = {
         status="BALANCED",
         severity="info",
         worst_rank=0,
+        reference_rank=1,
         issues=("BALANCED",),
     ),
     "measured_zero_forward": DiagnosisGolden(
@@ -121,6 +128,7 @@ EXPECTED_DIAGNOSIS: dict[str, DiagnosisGolden] = {
         status="RESIDUAL-HEAVY",
         severity="warn",
         worst_rank=0,
+        reference_rank=1,
         issues=("RESIDUAL_HEAVY",),
         score=0.2,
     ),
@@ -129,6 +137,7 @@ EXPECTED_DIAGNOSIS: dict[str, DiagnosisGolden] = {
         status="BALANCED",
         severity="info",
         worst_rank=None,
+        reference_rank=0,
         issues=("BALANCED",),
     ),
     "ddp_rank_straggler": DiagnosisGolden(
@@ -136,6 +145,7 @@ EXPECTED_DIAGNOSIS: dict[str, DiagnosisGolden] = {
         status="INPUT STRAGGLER",
         severity="crit",
         worst_rank=0,
+        reference_rank=1,
         issues=("INPUT_STRAGGLER", "INPUT_BOUND"),
         score=5.0 / 7.0,
         evidence={
@@ -149,6 +159,7 @@ EXPECTED_DIAGNOSIS: dict[str, DiagnosisGolden] = {
         status="INPUT STRAGGLER",
         severity="warn",
         worst_rank=0,
+        reference_rank=1,
         issues=("INPUT_STRAGGLER", "INPUT_BOUND"),
         score=0.75,
         evidence={
@@ -367,12 +378,39 @@ def test_canonical_window_matches_golden(
     assert diagnosis.primary.kind == expected.kind
     assert diagnosis.primary.status == expected.status
     assert diagnosis.primary.severity == expected.severity
+    assert result.analysis.diagnosis.reference_rank == expected.reference_rank
     assert diagnosis.primary.worst_rank == expected.worst_rank
     assert diagnosis.primary.steps_used == len(scenario.steps)
     assert tuple(issue.kind for issue in diagnosis.issues) == expected.issues
     _assert_optional_float(diagnosis.issues[0].score, expected.score)
     for key, value in expected.evidence.items():
         assert diagnosis.issues[0].evidence[key] == value
+
+
+@pytest.mark.parametrize(
+    ("expected_ranks", "observed_ranks", "steps"),
+    [
+        ((0, 1), (), 0),  # Empty window
+        ((7,), (7,), 1),  # Measured single rank during warmup
+        ((7,), (7,), 3),  # A single observed rank never forms a pair
+        ((0, 1), (0, 1), 1),  # Distributed warmup skips pair selection
+        ((0, 1), (0,), 3),  # Only one distributed rank reported
+    ],
+)
+def test_reference_rank_defaults_to_zero_without_a_comparison(
+    expected_ranks: tuple[int, ...],
+    observed_ranks: tuple[int, ...],
+    steps: int,
+) -> None:
+    events = summary_step_events(input_wait_gpu=5.0, steps=steps)
+    window = window_from_events(
+        {rank: events for rank in observed_ranks},
+        max_rows=max(1, steps),
+        expected_ranks=expected_ranks,
+    )
+
+    result = diagnose_step_time_window(window, policy=LIVE_STEP_TIME_POLICY)
+    assert result.reference_rank == 0
 
 
 def test_cli_dashboard_summary_diagnosis_parity(
@@ -522,7 +560,6 @@ def test_canonical_surface_values_share_one_step_time_contract(
     assert "STEP=traced" not in cli_text
 
     pytest.importorskip("nicegui")
-    from traceml_ai.aggregator.display_drivers.nicegui_sections import theme
     from traceml_ai.aggregator.display_drivers.nicegui_sections import (
         model_combined_section,
     )
@@ -536,25 +573,17 @@ def test_canonical_surface_values_share_one_step_time_contract(
             return self
 
     dashboard = {
-        "seg_divs": [_Element() for _ in theme.PHASES],
-        "seg_labs": [_Element() for _ in theme.PHASES],
         "win": _Element(),
-        "verdict": _Element(),
-        "kpis": {
-            key: _Element()
-            for key in ("median", "worst", "gap", "residual", "rank")
-        },
+        "summary": _Element(),
+        "tree": _Element(),
         "_last_sig": None,
     }
     model_combined_section.update_model_combined_section(dashboard, live)
     step_metric = next(
         metric for metric in window.metrics if metric.metric == "step_time"
     )
-    assert (
-        f"{step_metric.median_total:.0f}"
-        in dashboard["kpis"]["median"].content
-    )
-    assert f"{window.clock.upper()} selected" in dashboard["win"].text
+    assert f"{step_metric.median_total:.0f} ms" in dashboard["summary"].content
+    assert f"{window.clock.upper()} clock" in dashboard["win"].text
 
     html = phase_bar({"global": {"average": average}}, schema_version=1.7)
     if average["step_time_ms"] in (None, 0.0):
