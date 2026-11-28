@@ -9,6 +9,16 @@ which carry the full historical notes for versions predating this file.
 
 ## [0.5.2] - Unreleased
 
+- The dashboard's run header is compact and labelled: `Run:` (or `Session:`
+  for a watch session, `Unnamed run` for a generated id), `Data:` Waiting,
+  Updating or Delayed, and an `Execution:` line such as
+  `DDP · 4 processes · 1 node` that names a strategy only when one was
+  recorded. The script, profile, detected GPUs, observed duration, telemetry
+  coverage and last sample move into a collapsed Details section, and a
+  missing fact reads `unknown` instead of `0`. The summary path sits in a
+  read-only one-line field that starts at the file name, with a Copy button
+  that copies the complete path.
+
 - Fixed home-directory expansion in `logs_dir` values supplied through YAML,
   environment variables, CLI flags, or `traceml.init()`.
 

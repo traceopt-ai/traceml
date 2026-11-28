@@ -5,12 +5,14 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-Context strip: which run this is, and how much of it is reporting.
+Context strip: which run this is, how it executes, and whether data flows.
 
-The strip sits above every metric pane and carries identity (run name,
-script, profile, strategy), a liveness word derived from data age, and a
-coverage line in which every count is observed, never configured:
-``ranks 3/4 reporting`` when a rank stops, not ``world_size 4``.
+The strip sits above every metric pane and stays compact: three labelled
+rows (the run or session name with the ``Data:`` status, the ``Execution:``
+line, and the summary path with a Copy button) and a collapsed Details
+section for the script, profile, detected GPUs, observed duration, telemetry
+coverage and last sample. Every count is observed, never configured, and a
+fact that is missing reads ``unknown`` rather than ``0``.
 
 Build/update pair like every other section: ``build_context_section`` lays
 out the strip from identity that is known at page build (settings + the
@@ -116,47 +118,89 @@ def strategy_token(value: Any) -> str:
     return text.upper()
 
 
-def format_coverage(ctx: Dict[str, Any]) -> str:
-    """``ranks 3/4 reporting · 4 GPUs observed · 1 node · 2m 26s``.
+def data_status(
+    age_s: Optional[float], threshold_s: Optional[float] = None
+) -> Tuple[str, str]:
+    """(``Waiting`` / ``Updating`` / ``Delayed``, detail) for ``Data:``.
 
-    A part is omitted when its fact is absent; nothing is invented. The
-    denominator is the configured world size, the numerator is observed.
+    The same freshness rule as :func:`format_liveness`, worded as the state of
+    the telemetry, not of the training: fresh samples say nothing about
+    whether the run is succeeding or progressing.
+    """
+    word, detail = format_liveness(age_s, threshold_s)
+    if word == "no data":
+        return "Waiting", ""
+    if word == "live":
+        return "Updating", ""
+    return "Delayed", detail
+
+
+def format_execution(ctx: Dict[str, Any]) -> str:
+    """``DDP · 4 processes · 1 node`` from the recorded facts.
+
+    The strategy appears only when it was recorded: a process or GPU count
+    does not establish one. Missing counts are left out, and with nothing
+    known at all the line reads ``unknown``.
     """
     parts = []
-    expected = int(ctx.get("world_size") or 0)
-    reporting = ctx.get("ranks_reporting")
-    if reporting is not None and expected:
-        parts.append(f"ranks {int(reporting)}/{expected} reporting")
-    elif reporting is not None:
-        parts.append(f"ranks {int(reporting)} reporting")
-    gpus = ctx.get("gpus_observed")
-    if gpus is None:
-        gpus = ctx.get("gpu_count")
-    gpus = int(gpus or 0)
-    if gpus:
-        parts.append(f"{gpus} GPU{'s' if gpus != 1 else ''} observed")
+    strategy = strategy_token(ctx.get("training_strategy"))
+    if strategy:
+        parts.append(strategy)
+    processes = int(ctx.get("world_size") or 0)
+    if processes == 1:
+        parts.append("Single process")
+    elif processes > 1:
+        parts.append(f"{processes} processes")
     nodes = ctx.get("node_count")
     if nodes:
         parts.append(f"{int(nodes)} node{'s' if int(nodes) != 1 else ''}")
+    return " · ".join(parts) or "unknown"
+
+
+def format_last_sample(age_s: Optional[float]) -> str:
+    """``1s ago`` from the data age, ``unknown`` before the first sample."""
+    if age_s is None:
+        return "unknown"
+    return f"{format_elapsed(max(0.0, float(age_s)))} ago"
+
+
+def detail_rows(
+    identity: Dict[str, str],
+    ctx: Dict[str, Any],
+    age_s: Optional[float],
+) -> Tuple[Tuple[str, str], ...]:
+    """Label/value pairs for the collapsed Details section.
+
+    ``GPUs detected`` is hardware seen on the machines, which can be zero,
+    one or several regardless of the process count; it is not the number of
+    GPUs the training uses. It is unknown until a system sample has reported
+    a GPU count: ``gpu_count`` falls back to zero, so process samples that
+    arrive first must not read as "no GPUs". An observed zero stays zero.
+    """
+    gpus = ctx.get("gpus_observed")
+    gpus_text = str(int(gpus)) if gpus is not None else "unknown"
     first = ctx.get("first_data_ts")
     last = ctx.get("last_data_ts")
     if first is not None and last is not None and last >= first:
-        parts.append(format_elapsed(float(last) - float(first)))
-    return " · ".join(parts)
-
-
-def abbreviate_path(path: str, keep: int = 3) -> str:
-    """Last ``keep`` components of a long path, prefixed with an ellipsis.
-
-    The full path stays available (tooltip + click-to-copy in the strip);
-    the label only has to identify the file at a glance.
-    """
-    if not path:
-        return ""
-    parts = [part for part in Path(path).parts if part not in ("/", "")]
-    if len(parts) <= keep:
-        return path
-    return "…/" + "/".join(parts[-keep:])
+        duration = format_elapsed(float(last) - float(first))
+    else:
+        duration = "unknown"
+    reporting = ctx.get("ranks_reporting")
+    expected = int(ctx.get("world_size") or 0)
+    if reporting is not None and expected:
+        coverage = f"{int(reporting)} / {expected} ranks"
+    elif reporting is not None:
+        coverage = f"{int(reporting)} ranks"
+    else:
+        coverage = "unknown"
+    return (
+        ("Script", identity.get("script_name") or "unknown"),
+        ("Profile", identity.get("profile") or "run"),
+        ("GPUs detected", gpus_text),
+        ("Observed duration", duration),
+        ("Telemetry coverage", coverage),
+        ("Last sample", format_last_sample(age_s)),
+    )
 
 
 def _session_root(
@@ -249,14 +293,19 @@ def resolve_run_identity(settings: Any) -> Dict[str, str]:
 
 def run_name_label(identity: Dict[str, str]) -> Tuple[str, bool]:
     """(text, muted). A launcher-generated id is not a name the user chose,
-    so the strip says so instead of showing the id as if it were one; the
-    id itself stays visible on the artifact-path line."""
+    so the strip says ``Unnamed run`` instead of showing the id as if it were
+    one; the id itself stays visible in the summary path."""
     if identity.get("run_name_source") == "generated":
-        return "no run name", True
+        return "Unnamed run", True
     name = identity.get("run_name") or ""
     if not name:
-        return "no run name", True
+        return "Unnamed run", True
     return name, False
+
+
+def identity_word(profile: str) -> str:
+    """``Session`` for a watch session, which has no training run, else ``Run``."""
+    return "Session" if str(profile or "run") == "watch" else "Run"
 
 
 class StaleProxy:
@@ -277,10 +326,32 @@ class StaleProxy:
 
 _MONO = "font-family:var(--mono);"
 
+# One line, clipped with an ellipsis; the full value stays reachable in a
+# tooltip. The strip shares its row with Diagnostics, so nothing may widen it.
+_CLIP = (
+    "white-space:nowrap; overflow:hidden; text-overflow:ellipsis; "
+    "min-width:0; max-width:100%;"
+)
+_FIELD_LABEL = (
+    f"{_MONO} font-size:11px; color:var(--muted); white-space:nowrap;"
+)
 
-# The strip shares its row with Diagnostics, so a long run name, script name
-# or path breaks inside the card instead of widening it past the page.
-_WRAP = "overflow-wrap:anywhere; min-width:0;"
+# Scrolls each summary-path field to its end once, so a long path first shows
+# its file name. It runs once after the page is built, before the user can
+# select anything, and the path never changes, so refreshes never move it.
+_SCROLL_PATH_TO_END = (
+    "document.querySelectorAll('.tml-path input').forEach("
+    "(el) => { el.scrollLeft = el.scrollWidth; });"
+)
+
+
+def _copy_to_clipboard(path: str) -> None:
+    """Copy the complete original path and confirm it briefly."""
+    try:
+        ui.run_javascript(f"navigator.clipboard.writeText({json.dumps(path)})")
+        ui.notify("Copied", type="positive", timeout=1500)
+    except Exception:
+        pass  # copy is a convenience; never break the page
 
 
 def build_context_section(
@@ -292,77 +363,156 @@ def build_context_section(
 ) -> Dict[str, Any]:
     """Lay out the strip; returns the widgets ``update_context_section`` fills."""
     cards: Dict[str, Any] = {
-        "live_threshold_s": live_threshold_s(sampler_interval_s)
+        "live_threshold_s": live_threshold_s(sampler_interval_s),
+        "identity": dict(identity),
+        "details_open": False,
     }
     with (
         ui.element("div")
         .classes("glass reveal w-full")
-        .style("padding:14px 22px;")
+        .style("padding:14px 22px; min-width:0;")
     ):
+        # Row 1: brand, the labelled run or session name, and Data status.
         with (
             ui.row()
             .classes("w-full items-center")
-            .style("gap:14px; flex-wrap:wrap;")
+            .style("gap:10px 14px; flex-wrap:wrap; min-width:0;")
         ):
             with ui.row().style("gap:0; align-items:baseline;"):
                 ui.label("Trace").classes("wm-trace")
                 ui.label("ML").classes("wm-ml")
-            ui.label(identity.get("profile") or "run").classes("eyebrow")
-            name, muted = run_name_label(identity)
-            cards["run_name"] = ui.label(name).style(
-                f"{_MONO} font-size:13px; {_WRAP}"
-                + (
-                    "font-style:italic; color:var(--muted);"
-                    if muted
-                    else "font-weight:600; color:var(--ink);"
+            with (
+                ui.row()
+                .classes("items-baseline no-wrap")
+                .style("gap:6px; min-width:0; flex:1 1 160px;")
+            ):
+                cards["identity_label"] = ui.label(
+                    f"{identity_word(identity.get('profile') or 'run')}:"
+                ).style(_FIELD_LABEL)
+                name, muted = run_name_label(identity)
+                cards["run_name"] = ui.label(name).style(
+                    f"{_MONO} font-size:13px; {_CLIP}"
+                    + (
+                        "font-style:italic; color:var(--muted);"
+                        if muted
+                        else "font-weight:600; color:var(--ink);"
+                    )
                 )
-            )
-            cards["strategy"] = (
-                ui.label("").classes("eyebrow").style("display:none;")
-            )
-            if show_layers:
-                ui.link("layers", "/layers").style(
-                    f"{_MONO} font-size:12px; color:var(--orange-strong); "
-                    "text-decoration:none;"
-                )
-            ui.element("div").style("flex:1;")
+                if not muted:
+                    cards["run_name"].tooltip(name)
+                if show_layers:
+                    ui.link("layers", "/layers").style(
+                        f"{_MONO} font-size:12px; color:var(--orange-strong); "
+                        "text-decoration:none; white-space:nowrap;"
+                    )
             stale = ui.label("").classes("staleband").style("display:none;")
             register_staleness(StaleProxy(stale))
-            with ui.row().classes("items-center").style("gap:7px;"):
-                cards["dot"] = ui.element("div").classes("livedot")
-                cards["liveness"] = ui.label("waiting for data").style(
-                    f"{_MONO} font-size:11px; color:var(--muted); "
-                    "font-weight:500;"
+            with ui.row().classes("items-center no-wrap").style("gap:7px;"):
+                ui.label("Data:").style(_FIELD_LABEL)
+                cards["dot"] = (
+                    ui.element("div")
+                    .classes("livedot")
+                    .style("background:var(--muted); animation:none;")
                 )
-        cards["coverage"] = ui.label("").style(
-            f"{_MONO} font-size:11px; color:var(--muted); margin-top:6px;"
-        )
-        script = identity.get("script_name") or ""
-        cards["script"] = ui.label(script).style(
-            f"{_MONO} font-size:11px; color:var(--ink); margin-top:2px; {_WRAP}"
-            f"display:{'block' if script else 'none'};"
-        )
+                cards["status"] = ui.label("Waiting").style(
+                    f"{_MONO} font-size:11px; color:var(--muted); "
+                    "font-weight:500; white-space:nowrap;"
+                )
+
+        # Row 2: execution facts and the Details toggle.
+        with (
+            ui.row()
+            .classes("w-full items-center no-wrap")
+            .style("gap:8px; margin-top:6px; min-width:0;")
+        ):
+            ui.label("Execution:").style(_FIELD_LABEL)
+            # Short and worth reading whole: it wraps on a narrow screen
+            # instead of being clipped.
+            cards["execution"] = ui.label("unknown").style(
+                f"{_MONO} font-size:11px; color:var(--ink); "
+                "flex:1; min-width:0; overflow-wrap:anywhere;"
+            )
+            cards["details_toggle"] = (
+                ui.button(
+                    "Details ▾",
+                    on_click=lambda: set_details_open(
+                        cards, not cards["details_open"]
+                    ),
+                )
+                .props("flat dense no-caps color=grey-8 aria-expanded=false")
+                .style(
+                    f"{_MONO} font-size:11px; color:var(--muted); "
+                    "white-space:nowrap; flex:none;"
+                )
+            )
+
+        # Row 3: the summary destination, read-only, one line, with Copy.
+        # The field holds the complete path; only its view is clipped.
         artifact = identity.get("artifact_path") or ""
-        cards["artifact"] = ui.label(abbreviate_path(artifact)).style(
-            f"{_MONO} font-size:10px; color:var(--muted); margin-top:2px; {_WRAP}"
-            f"cursor:{'copy' if artifact else 'default'}; "
-            f"display:{'block' if artifact else 'none'};"
+        cards["artifact_row"] = (
+            ui.row()
+            .classes("w-full items-center no-wrap")
+            .style(
+                "gap:8px; margin-top:6px; min-width:0; "
+                f"display:{'flex' if artifact else 'none'};"
+            )
         )
+        with cards["artifact_row"]:
+            ui.label("Summary JSON").style(_FIELD_LABEL)
+            cards["artifact"] = (
+                ui.input(value=artifact)
+                .props("readonly dense outlined spellcheck=false")
+                .classes("tml-path")
+                .style(f"flex:1; min-width:0; {_MONO} font-size:11px;")
+            )
+            cards["copy"] = (
+                ui.button(
+                    "Copy", on_click=lambda: _copy_to_clipboard(artifact)
+                )
+                .props("outline dense no-caps color=grey-8")
+                .style(f"{_MONO} font-size:11px;")
+            )
         if artifact:
-            cards["artifact"].tooltip(f"{artifact}  (click to copy)")
+            ui.timer(
+                0.3, lambda: ui.run_javascript(_SCROLL_PATH_TO_END), once=True
+            )
 
-            def _copy_path(_event=None, _path=artifact) -> None:
-                try:
-                    ui.run_javascript(
-                        "navigator.clipboard.writeText("
-                        f"{json.dumps(_path)})"
-                    )
-                    ui.notify("path copied", type="positive", timeout=1500)
-                except Exception:
-                    pass  # copy is a convenience; never break the page
-
-            cards["artifact"].on("click", _copy_path)
+        # Details: secondary facts, collapsed by default.
+        cards["details"] = (
+            ui.element("div")
+            .classes("w-full")
+            .style(
+                "display:none; margin-top:8px; grid-template-columns:auto 1fr; "
+                "gap:3px 16px; min-width:0;"
+            )
+        )
+        cards["detail_values"] = {}
+        with cards["details"]:
+            for label, value in detail_rows(identity, {}, None):
+                ui.label(label).style(_FIELD_LABEL)
+                cards["detail_values"][label] = ui.label(value).style(
+                    f"{_MONO} font-size:11px; color:var(--ink); {_CLIP}"
+                )
     return cards
+
+
+def set_details_open(cards: Dict[str, Any], is_open: bool) -> None:
+    """Show or hide the Details section and keep its toggle in step."""
+    cards["details_open"] = bool(is_open)
+    cards["details"].style(f"display:{'grid' if is_open else 'none'};")
+    cards["details_toggle"].text = "Details ▴" if is_open else "Details ▾"
+    cards["details_toggle"].props(
+        f"aria-expanded={'true' if is_open else 'false'}"
+    )
+
+
+# Data status colours: muted while waiting, green while samples are fresh,
+# red once they are delayed.
+_STATUS_COLOR = {
+    "Waiting": "var(--muted)",
+    "Updating": "#16a34a",
+    "Delayed": "#dc2626",
+}
 
 
 def update_context_section(
@@ -371,31 +521,29 @@ def update_context_section(
     *,
     now: Optional[float] = None,
 ) -> None:
-    """Fill strategy, coverage, and liveness from the CONTEXT payload."""
+    """Fill execution, Data status and Details from the CONTEXT payload."""
     ctx = payload if isinstance(payload, dict) else None
     if not ctx or not (set(ctx) & _CONTEXT_KEYS):
         # Not a context payload (a LayoutError, an empty dict, or another
         # layout's shape): leave the strip as it is rather than blank it.
         return
 
-    strategy = strategy_token(ctx.get("training_strategy"))
-    cards["strategy"].text = strategy
-    cards["strategy"].style(
-        f"display:{'inline-block' if strategy else 'none'};"
-    )
-
-    cards["coverage"].text = format_coverage(ctx)
+    cards["execution"].text = format_execution(ctx)
 
     last = ctx.get("last_data_ts")
     age = None
     if last is not None:
         age = (now if now is not None else time.time()) - float(last)
-    word, detail = format_liveness(age, cards.get("live_threshold_s"))
-    live = word == "live"
-    color = "#16a34a" if live else "#dc2626"
-    cards["liveness"].text = f"{word} · {detail}" if detail else word
-    cards["liveness"].style(f"color:{color};")
+    word, detail = data_status(age, cards.get("live_threshold_s"))
+    color = _STATUS_COLOR[word]
+    cards["status"].text = f"{word} · {detail}" if detail else word
+    cards["status"].style(f"color:{color};")
     cards["dot"].style(
         f"background:{color}; "
-        f"animation:{'tml-pulse 2.4s infinite' if live else 'none'};"
+        f"animation:{'tml-pulse 2.4s infinite' if word == 'Updating' else 'none'};"
     )
+
+    for label, value in detail_rows(cards.get("identity") or {}, ctx, age):
+        widget = cards.get("detail_values", {}).get(label)
+        if widget is not None and widget.text != value:
+            widget.text = value

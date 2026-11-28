@@ -4,7 +4,7 @@
 # you may not use this file except in compliance with the License.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Context strip: identity, liveness, coverage, and profile gating."""
+"""Context strip: identity, Data status, execution, Details and profile gating."""
 
 from __future__ import annotations
 
@@ -19,9 +19,12 @@ pytest.importorskip("nicegui")
 from traceml_ai.aggregator.display_drivers.nicegui_sections.context_section import (  # noqa: E402,E501
     RUN_SECTIONS,
     STEP_SECTIONS,
-    abbreviate_path,
-    format_coverage,
+    data_status,
+    detail_rows,
+    format_execution,
+    format_last_sample,
     format_liveness,
+    identity_word,
     live_threshold_s,
     resolve_run_identity,
     run_name_label,
@@ -50,32 +53,141 @@ def test_liveness_is_derived_from_data_age() -> None:
     assert format_liveness(47.0) == ("stale", "47s since last data")
 
 
-def test_coverage_line_reads_observed_over_configured() -> None:
+def test_details_read_observed_over_configured() -> None:
     ctx = {
         "world_size": 4,
         "ranks_reporting": 3,
         "gpu_count": 4,
+        "gpus_observed": 4,
         "node_count": 1,
         "first_data_ts": 1000.0,
         "last_data_ts": 1146.0,
     }
-    assert (
-        format_coverage(ctx)
-        == "ranks 3/4 reporting · 4 GPUs observed · 1 node · 2m 26s"
+    rows = dict(
+        detail_rows({"script_name": "train.py", "profile": "run"}, ctx, 1.0)
     )
+    assert rows == {
+        "Script": "train.py",
+        "Profile": "run",
+        "GPUs detected": "4",
+        "Observed duration": "2m 26s",
+        "Telemetry coverage": "3 / 4 ranks",
+        "Last sample": "1s ago",
+    }
 
 
-def test_coverage_never_invents_a_missing_fact() -> None:
-    # No process data at all: the funnel part is omitted rather than
-    # printing world_size as if it were observed.
-    assert format_coverage({"world_size": 4, "gpu_count": 1}) == (
-        "1 GPU observed"
-    )
+def test_details_never_invent_a_missing_fact() -> None:
+    # Before the first sample nothing is known, not zero.
+    rows = dict(detail_rows({}, {"world_size": 4, "gpu_count": 0}, None))
+    assert rows["GPUs detected"] == "unknown"
+    assert rows["Observed duration"] == "unknown"
+    assert rows["Telemetry coverage"] == "unknown"
+    assert rows["Last sample"] == "unknown"
+    assert rows["Script"] == "unknown"
     # Observed ranks but no configured world size: numerator only.
-    assert format_coverage({"ranks_reporting": 2, "node_count": 2}) == (
-        "ranks 2 reporting · 2 nodes"
+    rows = dict(
+        detail_rows({}, {"ranks_reporting": 2, "last_data_ts": 5.0}, 0)
     )
-    assert format_coverage({}) == ""
+    assert rows["Telemetry coverage"] == "2 ranks"
+
+
+def test_details_report_zero_one_or_many_gpus_independently_of_processes() -> (
+    None
+):
+    seen = {"last_data_ts": 10.0}
+    assert (
+        dict(detail_rows({}, {**seen, "gpus_observed": 0}, 0))["GPUs detected"]
+        == "0"
+    )
+    assert (
+        dict(
+            detail_rows({}, {**seen, "world_size": 4, "gpus_observed": 1}, 0)
+        )["GPUs detected"]
+        == "1"
+    )
+    assert (
+        dict(
+            detail_rows({}, {**seen, "world_size": 1, "gpus_observed": 8}, 0)
+        )["GPUs detected"]
+        == "8"
+    )
+
+
+def test_gpus_detected_stay_unknown_until_a_gpu_count_is_observed() -> None:
+    # Process samples arrived first: the context has data and its zero
+    # fallback for gpu_count, but no system sample has reported GPUs yet.
+    process_only = {
+        "world_size": 2,
+        "ranks_reporting": 2,
+        "gpu_count": 0,
+        "gpus_observed": None,
+        "first_data_ts": 5.0,
+        "last_data_ts": 10.0,
+    }
+    assert dict(detail_rows({}, process_only, 0))["GPUs detected"] == "unknown"
+    # Once a system sample reports zero GPUs, zero is a real answer.
+    observed_zero = {**process_only, "gpus_observed": 0}
+    assert dict(detail_rows({}, observed_zero, 0))["GPUs detected"] == "0"
+
+
+@pytest.mark.parametrize(
+    ("ctx", "expected"),
+    [
+        ({"world_size": 1, "node_count": 1}, "Single process · 1 node"),
+        (
+            {
+                "world_size": 1,
+                "node_count": 1,
+                "training_strategy": "single_process",
+            },
+            "Single process · 1 node",
+        ),
+        ({"world_size": 4, "node_count": 1}, "4 processes · 1 node"),
+        (
+            {
+                "world_size": 4,
+                "node_count": 1,
+                "training_strategy": "distributed_unknown",
+            },
+            "4 processes · 1 node",
+        ),
+        (
+            {"world_size": 4, "node_count": 1, "training_strategy": "ddp"},
+            "DDP · 4 processes · 1 node",
+        ),
+        (
+            {"world_size": 8, "node_count": 2, "training_strategy": "fsdp"},
+            "FSDP · 8 processes · 2 nodes",
+        ),
+        ({"world_size": 4}, "4 processes"),
+        ({}, "unknown"),
+    ],
+)
+def test_execution_line_uses_only_recorded_facts(ctx, expected) -> None:
+    assert format_execution(ctx) == expected
+
+
+def test_data_status_words_follow_the_freshness_rule() -> None:
+    assert data_status(None) == ("Waiting", "")
+    assert data_status(1.2) == ("Updating", "")
+    assert data_status(4.9) == ("Updating", "")
+    assert data_status(47.0) == ("Delayed", "47s since last data")
+    # The same threshold the strip already used.
+    assert data_status(20.0, threshold_s=30.0) == ("Updating", "")
+
+
+def test_last_sample_age() -> None:
+    assert format_last_sample(None) == "unknown"
+    assert format_last_sample(1.4) == "1s ago"
+    assert format_last_sample(-2.0) == "0s ago"
+    assert format_last_sample(146.0) == "2m 26s ago"
+
+
+def test_watch_is_a_session_and_everything_else_a_run() -> None:
+    assert identity_word("watch") == "Session"
+    assert identity_word("run") == "Run"
+    assert identity_word("deep") == "Run"
+    assert identity_word("") == "Run"
 
 
 def test_watch_profile_shows_no_step_sections() -> None:
@@ -219,7 +331,7 @@ def test_generated_session_id_reads_no_run_name(tmp_path: Path) -> None:
     )
     identity = resolve_run_identity(settings)
     assert identity["run_name_source"] == "generated"
-    assert run_name_label(identity) == ("no run name", True)
+    assert run_name_label(identity) == ("Unnamed run", True)
     # The id is still on the artifact-path line, so nothing is hidden.
     assert root.name in identity["artifact_path"]
     # A chosen name is shown as is.
@@ -240,21 +352,7 @@ def test_generated_id_shape_is_recognised_without_the_flag() -> None:
     )
     identity = resolve_run_identity(settings)
     assert identity["run_name_source"] == "generated"
-    assert run_name_label(identity) == ("no run name", True)
-
-
-def test_artifact_path_is_abbreviated_for_display() -> None:
-    long = (
-        "/private/tmp/very/deep/tree/logs/strip_demo_watch/final_summary.json"
-    )
-    assert (
-        abbreviate_path(long) == "…/logs/strip_demo_watch/final_summary.json"
-    )
-    assert abbreviate_path("logs/M1/final_summary.json") == (
-        "logs/M1/final_summary.json"
-    )
-    assert abbreviate_path("final_summary.json") == "final_summary.json"
-    assert abbreviate_path("") == ""
+    assert run_name_label(identity) == ("Unnamed run", True)
 
 
 def test_strip_threshold_is_the_shared_policy_at_configured_cadence() -> None:
@@ -292,15 +390,13 @@ def test_strip_threshold_is_the_shared_policy_at_configured_cadence() -> None:
     )
 
 
-def test_coverage_prefers_gpus_observed_across_nodes() -> None:
+def test_gpus_detected_prefers_gpus_observed_across_nodes() -> None:
     ctx = {
         "world_size": 2,
         "ranks_reporting": 2,
         "gpu_count": 1,
         "gpus_observed": 2,
         "node_count": 2,
+        "last_data_ts": 10.0,
     }
-    assert (
-        format_coverage(ctx)
-        == "ranks 2/2 reporting · 2 GPUs observed · 2 nodes"
-    )
+    assert dict(detail_rows({}, ctx, 0))["GPUs detected"] == "2"
